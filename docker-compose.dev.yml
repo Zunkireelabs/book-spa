@@ -1,0 +1,19 @@
+services:
+  nuad-thai-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nuad-thai-dev
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nuad-thai-dev.rule=Host(`dev-nuad.zunkireelabs.com`)"
+      - "traefik.http.routers.nuad-thai-dev.entrypoints=websecure"
+      - "traefik.http.routers.nuad-thai-dev.tls.certresolver=letsencrypt"
+      - "traefik.http.services.nuad-thai-dev.loadbalancer.server.port=80"
+    networks:
+      - hosting
+
+networks:
+  hosting:
+    external: true

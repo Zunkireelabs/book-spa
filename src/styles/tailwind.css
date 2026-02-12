@@ -1,0 +1,130 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Primary Colors */
+    --color-primary: #2D5A27; /* deep forest green */
+    --color-primary-foreground: #FFFFFF; /* white */
+    
+    /* Secondary Colors */
+    --color-secondary: #8B4513; /* warm earth brown */
+    --color-secondary-foreground: #FFFFFF; /* white */
+    
+    /* Accent Colors */
+    --color-accent: #DAA520; /* refined gold */
+    --color-accent-foreground: #1A1A1A; /* near-black */
+    
+    /* Background Colors */
+    --color-background: #FAFAF9; /* soft off-white */
+    --color-surface: #FFFFFF; /* pure white */
+    
+    /* Text Colors */
+    --color-text-primary: #1A1A1A; /* near-black */
+    --color-text-secondary: #6B7280; /* medium gray */
+    
+    /* Status Colors */
+    --color-success: #059669; /* natural green */
+    --color-success-foreground: #FFFFFF; /* white */
+    
+    --color-warning: #D97706; /* warm amber */
+    --color-warning-foreground: #FFFFFF; /* white */
+    
+    --color-error: #DC2626; /* clear red */
+    --color-error-foreground: #FFFFFF; /* white */
+    
+    /* Border Colors */
+    --color-border: #E5E7EB; /* light gray */
+    --color-border-muted: rgba(229, 231, 235, 0.5); /* light gray with opacity */
+    
+    /* Shadow Colors */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
+    --shadow-xl: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
+    
+    /* Animation Timing */
+    --timing-fast: 150ms;
+    --timing-normal: 200ms;
+    --timing-slow: 300ms;
+    --easing-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    --easing-out: ease-out;
+  }
+  
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-text-primary font-body;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+  
+  .font-heading {
+    font-family: 'Inter', sans-serif;
+  }
+  
+  .font-body {
+    font-family: 'Source Sans Pro', sans-serif;
+  }
+  
+  .font-caption {
+    font-family: 'Nunito Sans', sans-serif;
+  }
+  
+  .font-data {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .spa-shadow-resting {
+    box-shadow: var(--shadow-md);
+  }
+  
+  .spa-shadow-elevated {
+    box-shadow: var(--shadow-lg);
+  }
+  
+  .spa-shadow-modal {
+    box-shadow: var(--shadow-xl);
+  }
+  
+  .spa-transition-fast {
+    transition-duration: var(--timing-fast);
+    transition-timing-function: var(--easing-out);
+  }
+  
+  .spa-transition-normal {
+    transition-duration: var(--timing-normal);
+    transition-timing-function: var(--easing-smooth);
+  }
+  
+  .spa-transition-slow {
+    transition-duration: var(--timing-slow);
+    transition-timing-function: var(--easing-smooth);
+  }
+  
+  .spa-border-radius {
+    border-radius: 8px;
+  }
+  
+  .spa-border-radius-lg {
+    border-radius: 12px;
+  }
+  
+  .spa-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
