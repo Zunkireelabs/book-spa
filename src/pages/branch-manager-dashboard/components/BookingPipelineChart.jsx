@@ -1,24 +1,70 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import Icon from '../../../components/AppIcon';
+import { fetchBookings } from '../../../services/api';
+import { transformBookings } from '../../../services/bookingTransformers';
 
-const BookingPipelineChart = () => {
-  const pipelineData = [
-    { time: '09:00', inquiries: 15, bookings: 12, conversions: 80 },
-    { time: '10:00', inquiries: 22, bookings: 18, conversions: 82 },
-    { time: '11:00', inquiries: 28, bookings: 24, conversions: 86 },
-    { time: '12:00', inquiries: 35, bookings: 28, conversions: 80 },
-    { time: '13:00', inquiries: 42, bookings: 32, conversions: 76 },
-    { time: '14:00', inquiries: 38, bookings: 30, conversions: 79 },
-    { time: '15:00', inquiries: 45, bookings: 38, conversions: 84 },
-    { time: '16:00', inquiries: 52, bookings: 42, conversions: 81 }
-  ];
+const BookingPipelineChart = ({ branchId }) => {
+  const [pipelineData, setPipelineData] = useState([]);
+  const [stats, setStats] = useState({ total: 0, completed: 0, completionRate: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const conversionStats = [
-    { label: 'Conversion Rate', value: '81.2%', change: '+2.4%', positive: true },
-    { label: 'Avg. Response Time', value: '3.2 min', change: '-0.8 min', positive: true },
-    { label: 'Abandonment Rate', value: '18.8%', change: '-1.2%', positive: true }
-  ];
+  const loadData = useCallback(async () => {
+    if (!branchId) return;
+    setLoading(true);
+    setError(null);
+
+    const today = new Date().toISOString().split('T')[0];
+    const result = await fetchBookings(branchId, { date: today });
+
+    if (result.error) {
+      setError(result.error.message || 'Failed to load booking data.');
+      setLoading(false);
+      return;
+    }
+
+    const bookings = transformBookings(result.data || []);
+    const totalCount = bookings.length;
+    const completedCount = bookings.filter(b => b.status === 'completed').length;
+    const rate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100 * 10) / 10 : 0;
+
+    setStats({ total: totalCount, completed: completedCount, completionRate: rate });
+
+    // Group bookings by hour
+    const hourlyMap = {};
+    for (const b of bookings) {
+      if (!b.time) continue;
+      const hour = b.time.slice(0, 2);
+      const hourLabel = `${hour}:00`;
+      if (!hourlyMap[hourLabel]) {
+        hourlyMap[hourLabel] = { total: 0, completed: 0 };
+      }
+      hourlyMap[hourLabel].total += 1;
+      if (b.status === 'completed') {
+        hourlyMap[hourLabel].completed += 1;
+      }
+    }
+
+    // Build cumulative data sorted by hour
+    const hours = Object.keys(hourlyMap).sort();
+    let cumulativeTotal = 0;
+    let cumulativeCompleted = 0;
+    const chartData = hours.map(time => {
+      cumulativeTotal += hourlyMap[time].total;
+      cumulativeCompleted += hourlyMap[time].completed;
+      return {
+        time,
+        bookings: cumulativeTotal,
+        completed: cumulativeCompleted,
+      };
+    });
+
+    setPipelineData(chartData);
+    setLoading(false);
+  }, [branchId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -28,7 +74,6 @@ const BookingPipelineChart = () => {
           {payload.map((entry, index) => (
             <p key={index} className="font-body font-body-normal text-sm" style={{ color: entry.color }}>
               {entry.name}: {entry.value}
-              {entry.dataKey === 'conversions' && '%'}
             </p>
           ))}
         </div>
@@ -36,6 +81,53 @@ const BookingPipelineChart = () => {
     }
     return null;
   };
+
+  if (loading) {
+    return (
+      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+        <div className="flex items-center space-x-3 mb-6">
+          <div className="w-10 h-10 bg-secondary/10 rounded-lg flex items-center justify-center">
+            <Icon name="TrendingUp" size={20} className="text-secondary" />
+          </div>
+          <div>
+            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+              Booking Pipeline
+            </h3>
+            <p className="font-body font-body-normal text-sm text-text-secondary">
+              Loading...
+            </p>
+          </div>
+        </div>
+        <div className="h-48 flex items-center justify-center">
+          <div className="animate-pulse space-y-3 w-full">
+            <div className="h-4 bg-background rounded w-full" />
+            <div className="h-4 bg-background rounded w-3/4" />
+            <div className="h-4 bg-background rounded w-1/2" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+        <div className="flex items-center space-x-3 mb-4">
+          <Icon name="AlertCircle" size={18} className="text-error" />
+          <p className="font-body text-sm text-error">{error}</p>
+        </div>
+        <button onClick={loadData} className="font-body font-body-medium text-sm text-error underline">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const conversionStats = [
+    { label: 'Total Bookings', value: String(stats.total), icon: 'Calendar' },
+    { label: 'Completed', value: String(stats.completed), icon: 'CheckCircle' },
+    { label: 'Completion Rate', value: `${stats.completionRate}%`, icon: 'TrendingUp' },
+  ];
 
   return (
     <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
@@ -49,7 +141,7 @@ const BookingPipelineChart = () => {
               Booking Pipeline
             </h3>
             <p className="font-body font-body-normal text-sm text-text-secondary">
-              Conversion analytics for today
+              Cumulative bookings for today
             </p>
           </div>
         </div>
@@ -57,53 +149,56 @@ const BookingPipelineChart = () => {
           <button className="px-3 py-1 bg-primary/10 text-primary rounded text-xs font-body font-body-medium">
             Today
           </button>
-          <button className="px-3 py-1 text-text-secondary rounded text-xs font-body font-body-medium hover:bg-background">
-            Week
-          </button>
         </div>
       </div>
 
-      <div className="h-48 w-full mb-6">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={pipelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="inquiriesGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0}/>
-              </linearGradient>
-              <linearGradient id="bookingsGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--color-success)" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="var(--color-success)" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis 
-              dataKey="time" 
-              tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-            />
-            <YAxis 
-              tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Area
-              type="monotone"
-              dataKey="inquiries"
-              stroke="var(--color-primary)"
-              fillOpacity={1}
-              fill="url(#inquiriesGradient)"
-              name="Inquiries"
-            />
-            <Area
-              type="monotone"
-              dataKey="bookings"
-              stroke="var(--color-success)"
-              fillOpacity={1}
-              fill="url(#bookingsGradient)"
-              name="Bookings"
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {pipelineData.length === 0 ? (
+        <div className="h-48 flex items-center justify-center mb-6">
+          <p className="font-body text-sm text-text-tertiary">No bookings yet today</p>
+        </div>
+      ) : (
+        <div className="h-48 w-full mb-6">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={pipelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="bookingsTotalGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="bookingsCompletedGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--color-success)" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="var(--color-success)" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis
+                dataKey="time"
+                tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+              />
+              <YAxis
+                tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Area
+                type="monotone"
+                dataKey="bookings"
+                stroke="var(--color-primary)"
+                fillOpacity={1}
+                fill="url(#bookingsTotalGradient)"
+                name="Total Bookings"
+              />
+              <Area
+                type="monotone"
+                dataKey="completed"
+                stroke="var(--color-success)"
+                fillOpacity={1}
+                fill="url(#bookingsCompletedGradient)"
+                name="Completed"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         {conversionStats.map((stat, index) => (
@@ -113,12 +208,6 @@ const BookingPipelineChart = () => {
             </div>
             <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">
               {stat.label}
-            </div>
-            <div className={`flex items-center justify-center space-x-1 ${
-              stat.positive ? 'text-success' : 'text-error'
-            }`}>
-              <Icon name={stat.positive ? 'ArrowUp' : 'ArrowDown'} size={12} />
-              <span className="font-caption font-caption-normal text-xs">{stat.change}</span>
             </div>
           </div>
         ))}

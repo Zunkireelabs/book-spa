@@ -34,6 +34,7 @@ import AttendancePanel from './components/Operations/AttendancePanel';
 import TherapistPerformancePanel from './components/Performance/TherapistPerformancePanel';
 import TopPerformersCard from './components/Performance/TopPerformersCard';
 import StatusLegend from '../../components/ui/StatusLegend';
+import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 
 const BranchManagerDashboard = () => {
   const { profile } = useAuth();
@@ -161,6 +162,9 @@ const BranchManagerDashboard = () => {
       {/* Risk Indicators */}
       <RiskIndicatorsPanel branchId={branchId} />
 
+      {/* Pending Discount Approvals */}
+      <PendingDiscountsPanel branchId={branchId} />
+
       {/* Key Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {loading ? (
@@ -190,8 +194,8 @@ const BranchManagerDashboard = () => {
 
       {/* Main Dashboard Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TherapistUtilizationChart />
-        <BookingPipelineChart />
+        <TherapistUtilizationChart branchId={branchId} />
+        <BookingPipelineChart branchId={branchId} />
         <TopPerformersCard branchId={branchId} />
         <RealtimeBookingFeed
           bookings={bookings}
@@ -206,7 +210,7 @@ const BranchManagerDashboard = () => {
           onExport={handleExport}
         />
         <div className="lg:col-span-2">
-          <RevenueAnalyticsChart />
+          <RevenueAnalyticsChart branchId={branchId} />
         </div>
       </div>
 

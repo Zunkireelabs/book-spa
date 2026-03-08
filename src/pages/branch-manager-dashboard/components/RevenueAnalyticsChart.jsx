@@ -1,55 +1,96 @@
-import React, { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
+import React, { useState, useEffect, useCallback } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import Icon from '../../../components/AppIcon';
+import { fetchBookings } from '../../../services/api';
+import { transformBookings } from '../../../services/bookingTransformers';
 
-const RevenueAnalyticsChart = () => {
+const SERVICE_COLORS = ['#2D5A27', '#8B4513', '#DAA520', '#059669', '#D97706'];
+
+const RevenueAnalyticsChart = ({ branchId }) => {
   const [activeTab, setActiveTab] = useState('revenue');
+  const [revenueData, setRevenueData] = useState([]);
+  const [serviceData, setServiceData] = useState([]);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [avgPerBooking, setAvgPerBooking] = useState(0);
+  const [paidCount, setPaidCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const revenueData = [
-    { time: '09:00', revenue: 2400, bookings: 3 },
-    { time: '10:00', revenue: 4200, bookings: 5 },
-    { time: '11:00', revenue: 6800, bookings: 8 },
-    { time: '12:00', revenue: 9200, bookings: 11 },
-    { time: '13:00', revenue: 12600, bookings: 15 },
-    { time: '14:00', revenue: 15800, bookings: 19 },
-    { time: '15:00', revenue: 19400, bookings: 23 },
-    { time: '16:00', revenue: 22800, bookings: 27 }
-  ];
+  const loadData = useCallback(async () => {
+    if (!branchId) return;
+    setLoading(true);
+    setError(null);
 
-  const servicePopularityData = [
-    { name: 'Deep Tissue Massage', value: 35, revenue: 63000, color: '#2D5A27' },
-    { name: 'Hot Stone Therapy', value: 25, revenue: 55000, color: '#8B4513' },
-    { name: 'Aromatherapy', value: 20, revenue: 40000, color: '#DAA520' },
-    { name: 'Swedish Massage', value: 15, revenue: 24000, color: '#059669' },
-    { name: 'Reflexology', value: 5, revenue: 7000, color: '#D97706' }
-  ];
+    const today = new Date().toISOString().split('T')[0];
+    const result = await fetchBookings(branchId, { date: today });
 
-  const peakHoursData = [
-    { hour: '09:00', bookings: 3, efficiency: 60 },
-    { hour: '10:00', bookings: 5, efficiency: 75 },
-    { hour: '11:00', bookings: 8, efficiency: 85 },
-    { hour: '12:00', bookings: 11, efficiency: 90 },
-    { hour: '13:00', bookings: 15, efficiency: 95 },
-    { hour: '14:00', bookings: 19, efficiency: 100 },
-    { hour: '15:00', bookings: 23, efficiency: 95 },
-    { hour: '16:00', bookings: 27, efficiency: 90 },
-    { hour: '17:00', bookings: 22, efficiency: 85 }
-  ];
+    if (result.error) {
+      setError(result.error.message || 'Failed to load revenue data.');
+      setLoading(false);
+      return;
+    }
 
-  const customerRetentionData = [
-    { month: 'Jan', newCustomers: 45, returningCustomers: 78, retention: 63 },
-    { month: 'Feb', newCustomers: 52, returningCustomers: 89, retention: 68 },
-    { month: 'Mar', newCustomers: 48, returningCustomers: 95, retention: 72 },
-    { month: 'Apr', newCustomers: 61, returningCustomers: 102, retention: 75 },
-    { month: 'May', newCustomers: 55, returningCustomers: 118, retention: 78 },
-    { month: 'Jun', newCustomers: 67, returningCustomers: 134, retention: 82 }
-  ];
+    const bookings = transformBookings(result.data || []);
+
+    // --- Revenue Trend: group paid bookings by hour, show cumulative revenue ---
+    const paidBookings = bookings.filter(b => b.paymentStatus === 'paid');
+    setPaidCount(paidBookings.length);
+
+    const hourlyRevMap = {};
+    for (const b of paidBookings) {
+      if (!b.time) continue;
+      const hour = b.time.slice(0, 2);
+      const hourLabel = `${hour}:00`;
+      if (!hourlyRevMap[hourLabel]) {
+        hourlyRevMap[hourLabel] = 0;
+      }
+      hourlyRevMap[hourLabel] += b.finalAmount;
+    }
+
+    const hours = Object.keys(hourlyRevMap).sort();
+    let cumRevenue = 0;
+    const revChart = hours.map(time => {
+      cumRevenue += hourlyRevMap[time];
+      return { time, revenue: cumRevenue };
+    });
+    setRevenueData(revChart);
+
+    const total = paidBookings.reduce((sum, b) => sum + b.finalAmount, 0);
+    setTotalRevenue(total);
+    setAvgPerBooking(paidBookings.length > 0 ? Math.round(total / paidBookings.length) : 0);
+
+    // --- Service Popularity: count all bookings per service, top 5 ---
+    const serviceMap = {};
+    for (const b of bookings) {
+      const svc = b.service || 'Unknown';
+      if (!serviceMap[svc]) {
+        serviceMap[svc] = { count: 0, revenue: 0 };
+      }
+      serviceMap[svc].count += 1;
+      serviceMap[svc].revenue += b.finalAmount;
+    }
+
+    const totalBookings = bookings.length;
+    const svcArr = Object.entries(serviceMap)
+      .map(([name, { count, revenue }]) => ({
+        name,
+        value: totalBookings > 0 ? Math.round((count / totalBookings) * 100) : 0,
+        revenue,
+        count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+      .map((item, idx) => ({ ...item, color: SERVICE_COLORS[idx % SERVICE_COLORS.length] }));
+
+    setServiceData(svcArr);
+    setLoading(false);
+  }, [branchId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const tabs = [
     { id: 'revenue', label: 'Revenue Trend', icon: 'TrendingUp' },
     { id: 'services', label: 'Service Popularity', icon: 'PieChart' },
-    { id: 'peak', label: 'Peak Hours', icon: 'Clock' },
-    { id: 'retention', label: 'Customer Retention', icon: 'Users' }
   ];
 
   const CustomTooltip = ({ active, payload, label }) => {
@@ -59,8 +100,7 @@ const RevenueAnalyticsChart = () => {
           <p className="font-body font-body-medium text-sm text-text-primary mb-2">{label}</p>
           {payload.map((entry, index) => (
             <p key={index} className="font-body font-body-normal text-sm" style={{ color: entry.color }}>
-              {entry.name}: {entry.name.includes('revenue') || entry.name.includes('Revenue') ? 'NPR ' : ''}{entry.value}
-              {entry.name.includes('retention') || entry.name.includes('efficiency') ? '%' : ''}
+              {entry.name}: {entry.name.includes('Revenue') ? 'NPR ' : ''}{entry.value.toLocaleString('en-IN')}
             </p>
           ))}
         </div>
@@ -70,44 +110,78 @@ const RevenueAnalyticsChart = () => {
   };
 
   const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="h-64 flex items-center justify-center">
+          <div className="animate-pulse space-y-3 w-full">
+            <div className="h-4 bg-background rounded w-full" />
+            <div className="h-4 bg-background rounded w-3/4" />
+            <div className="h-4 bg-background rounded w-1/2" />
+          </div>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="flex items-center space-x-3 p-4">
+          <Icon name="AlertCircle" size={18} className="text-error" />
+          <p className="font-body text-sm text-error">{error}</p>
+          <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
+            Retry
+          </button>
+        </div>
+      );
+    }
+
     switch (activeTab) {
       case 'revenue':
         return (
           <div className="space-y-4">
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={revenueData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis 
-                    dataKey="time" 
-                    tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Line 
-                    type="monotone" 
-                    dataKey="revenue" 
-                    stroke="var(--color-primary)" 
-                    strokeWidth={3}
-                    dot={{ fill: 'var(--color-primary)', strokeWidth: 2, r: 4 }}
-                    name="Revenue (NPR)"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            {revenueData.length === 0 ? (
+              <div className="h-64 flex items-center justify-center">
+                <p className="font-body text-sm text-text-tertiary">No paid bookings yet today</p>
+              </div>
+            ) : (
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={revenueData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis
+                      dataKey="time"
+                      tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Line
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="var(--color-primary)"
+                      strokeWidth={3}
+                      dot={{ fill: 'var(--color-primary)', strokeWidth: 2, r: 4 }}
+                      name="Revenue (NPR)"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">NPR 22,800</div>
+                <div className="font-heading font-heading-semibold text-lg text-text-primary">
+                  NPR {totalRevenue.toLocaleString('en-IN')}
+                </div>
                 <div className="font-caption font-caption-normal text-xs text-text-secondary">Current Revenue</div>
               </div>
               <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-success">+12.5%</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">vs Yesterday</div>
+                <div className="font-heading font-heading-semibold text-lg text-text-primary">{paidCount}</div>
+                <div className="font-caption font-caption-normal text-xs text-text-secondary">Paid Bookings</div>
               </div>
               <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">NPR 844</div>
+                <div className="font-heading font-heading-semibold text-lg text-text-primary">
+                  NPR {avgPerBooking.toLocaleString('en-IN')}
+                </div>
                 <div className="font-caption font-caption-normal text-xs text-text-secondary">Avg per Booking</div>
               </div>
             </div>
@@ -117,146 +191,57 @@ const RevenueAnalyticsChart = () => {
       case 'services':
         return (
           <div className="space-y-4">
-            <div className="h-64 w-full flex items-center justify-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={servicePopularityData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {servicePopularityData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="space-y-2">
-              {servicePopularityData.map((service, index) => (
-                <div key={index} className="flex items-center justify-between p-2 bg-background rounded-spa">
-                  <div className="flex items-center space-x-3">
-                    <div 
-                      className="w-3 h-3 rounded-full" 
-                      style={{ backgroundColor: service.color }}
-                    ></div>
-                    <span className="font-body font-body-medium text-sm text-text-primary">
-                      {service.name}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-body font-body-medium text-sm text-text-primary">
-                      {service.value}%
-                    </div>
-                    <div className="font-caption font-caption-normal text-xs text-text-secondary">
-                      NPR {service.revenue.toLocaleString()}
-                    </div>
-                  </div>
+            {serviceData.length === 0 ? (
+              <div className="h-64 flex items-center justify-center">
+                <p className="font-body text-sm text-text-tertiary">No bookings yet today</p>
+              </div>
+            ) : (
+              <>
+                <div className="h-64 w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={serviceData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {serviceData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
-          </div>
-        );
-
-      case 'peak':
-        return (
-          <div className="space-y-4">
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={peakHoursData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis 
-                    dataKey="hour" 
-                    tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar 
-                    dataKey="bookings" 
-                    fill="var(--color-primary)" 
-                    radius={[4, 4, 0, 0]}
-                    name="Bookings"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">2:00 PM</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Peak Hour</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">27</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Max Bookings</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">92%</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Avg Efficiency</div>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'retention':
-        return (
-          <div className="space-y-4">
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={customerRetentionData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis 
-                    dataKey="month" 
-                    tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Line 
-                    type="monotone" 
-                    dataKey="newCustomers" 
-                    stroke="var(--color-primary)" 
-                    strokeWidth={2}
-                    name="New Customers"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="returningCustomers" 
-                    stroke="var(--color-success)" 
-                    strokeWidth={2}
-                    name="Returning Customers"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="retention" 
-                    stroke="var(--color-accent)" 
-                    strokeWidth={2}
-                    name="Retention Rate (%)"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">82%</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Retention Rate</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-success">+7%</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">vs Last Month</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">134</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Returning This Month</div>
-              </div>
-            </div>
+                <div className="space-y-2">
+                  {serviceData.map((service, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 bg-background rounded-spa">
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: service.color }}
+                        ></div>
+                        <span className="font-body font-body-medium text-sm text-text-primary">
+                          {service.name}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-body font-body-medium text-sm text-text-primary">
+                          {service.value}% ({service.count})
+                        </div>
+                        <div className="font-caption font-caption-normal text-xs text-text-secondary">
+                          NPR {service.revenue.toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         );
 
@@ -277,7 +262,7 @@ const RevenueAnalyticsChart = () => {
               Revenue Analytics
             </h3>
             <p className="font-body font-body-normal text-sm text-text-secondary">
-              Comprehensive business insights
+              Today's business insights
             </p>
           </div>
         </div>

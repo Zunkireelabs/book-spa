@@ -69,7 +69,7 @@ const RescheduleModal = ({ isOpen, onClose, booking, onConfirm }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="reschedule-modal-title">
       <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-2xl max-h-[90vh] overflow-hidden animate-fade-in">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
@@ -78,7 +78,7 @@ const RescheduleModal = ({ isOpen, onClose, booking, onConfirm }) => {
               <Icon name="Calendar" size={20} className="text-primary" />
             </div>
             <div>
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+              <h2 id="reschedule-modal-title" className="font-heading font-heading-semibold text-lg text-text-primary">
                 Reschedule Booking
               </h2>
               <p className="font-caption font-caption-normal text-sm text-text-secondary">

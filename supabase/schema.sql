@@ -126,6 +126,17 @@ CREATE TABLE bookings (
   -- Discount workflow
   discount_status discount_status_enum NOT NULL DEFAULT 'none',
   discount_approved_by uuid REFERENCES users(id),
+  discount_reason text,
+
+  -- CRM link (nullable for walk-ins)
+  customer_id uuid REFERENCES customers(id),
+
+  -- Denormalized snapshots (populated by trigger at booking time)
+  service_name_snapshot text,
+  service_duration_snapshot integer,
+  service_price_snapshot decimal(10,2),
+  therapist_name_snapshot text,
+  room_name_snapshot text,
 
   -- Lock (set by daily close)
   is_locked boolean NOT NULL DEFAULT false,
@@ -368,6 +379,67 @@ CREATE TRIGGER trg_enforce_booking_immutability
   EXECUTE FUNCTION enforce_booking_immutability();
 
 -- ============================================================
+-- CUSTOMERS TABLE (CRM)
+-- ============================================================
+
+CREATE TABLE customers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id uuid NOT NULL REFERENCES branches(id),
+  full_name text NOT NULL,
+  phone text,
+  email text,
+  notes text,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX idx_customers_branch ON customers(branch_id);
+CREATE INDEX idx_customers_phone ON customers(phone);
+
+-- ============================================================
+-- THERAPIST ATTENDANCE
+-- ============================================================
+
+CREATE TYPE attendance_status AS ENUM ('Present', 'Absent', 'Leave', 'Half-Day');
+
+CREATE TABLE therapist_attendance (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id uuid NOT NULL REFERENCES branches(id),
+  therapist_id uuid NOT NULL REFERENCES therapists(id),
+  date date NOT NULL,
+  status attendance_status NOT NULL DEFAULT 'Present',
+  check_in_time timestamptz,
+  check_out_time timestamptz,
+  notes text,
+  marked_by uuid REFERENCES users(id),
+  created_at timestamptz DEFAULT now(),
+
+  CONSTRAINT uq_therapist_attendance UNIQUE (therapist_id, date)
+);
+
+CREATE INDEX idx_therapist_attendance_branch_date ON therapist_attendance(branch_id, date);
+
+-- ============================================================
+-- AUDIT LOGS (Governance)
+-- ============================================================
+
+CREATE TABLE audit_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id uuid REFERENCES branches(id),
+  table_name text NOT NULL,
+  record_id uuid,
+  action_type text NOT NULL,
+  old_data jsonb,
+  new_data jsonb,
+  changed_by uuid REFERENCES users(id),
+  changed_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX idx_audit_logs_branch ON audit_logs(branch_id);
+CREATE INDEX idx_audit_logs_changed_at ON audit_logs(changed_at);
+
+-- ============================================================
 -- SCHEMA COMPLETE
 -- Next: Run rls.sql, then seed.sql
+-- For existing databases: Run migration-002-missing-tables.sql
 -- ============================================================

@@ -407,32 +407,28 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       return { data: null, error: { code: 'INVALID_DISCOUNT_VALUE', message: 'Discount cannot be negative or exceed base amount.' } };
     }
 
-    // 6. Role-based limit check
+    // 6. Role-based limit check (exceeding sends to pending approval)
     const maxPercent = DISCOUNT_LIMITS[profile.role];
-    if (effectivePercent > maxPercent) {
-      const limitDisplay = maxPercent === Infinity ? 'unlimited' : `${Math.round(maxPercent * 100)}%`;
-      return {
-        data: null,
-        error: {
-          code: 'DISCOUNT_LIMIT_EXCEEDED',
-          message: `Discount exceeds allowed limit for your role (max ${limitDisplay}).`,
-        },
-      };
-    }
 
     // 7. Discount reason required
     if (!discountReason || !discountReason.trim()) {
       return { data: null, error: { code: 'DISCOUNT_REASON_REQUIRED', message: 'A reason is required when applying a discount.' } };
     }
 
-    // 8. Update booking — trigger recomputes final_amount
+    // 8. If staff exceeds limit, set to pending instead of blocking
+    const isWithinLimit = effectivePercent <= maxPercent;
+
+    const updatePayload = {
+      discount_amount: discountAmount,
+      discount_reason: discountReason.trim(),
+      discount_status: isWithinLimit ? 'approved' : 'pending',
+      discount_approved_by: isWithinLimit ? user.id : null,
+    };
+
+    // 9. Update booking — trigger recomputes final_amount
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
-      .update({
-        discount_amount: discountAmount,
-        discount_status: 'approved',
-        discount_approved_by: user.id,
-      })
+      .update(updatePayload)
       .eq('id', bookingId)
       .select('id, discount_amount, final_amount, discount_status')
       .single();
@@ -445,11 +441,135 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
         bookingId,
         discountAmount: Number(updated.discount_amount),
         finalAmount: Number(updated.final_amount),
+        discountStatus: updated.discount_status,
+        isPending: updated.discount_status === 'pending',
       },
       error: null,
     };
   } catch (error) {
     console.error('[API] applyDiscount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch bookings with pending discount requests (manager view).
+ */
+export async function fetchPendingDiscounts(branchId) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        id, booking_number, customer_name, date, start_time,
+        base_amount, discount_amount, final_amount, discount_reason,
+        status, service_id, services:service_id(name)
+      `)
+      .eq('branch_id', resolvedBranchId)
+      .eq('discount_status', 'pending')
+      .eq('is_locked', false)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return {
+      data: (data || []).map(b => ({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        startTime: b.start_time,
+        baseAmount: Number(b.base_amount),
+        discountAmount: Number(b.discount_amount),
+        finalAmount: Number(b.final_amount),
+        discountReason: b.discount_reason,
+        discountPercent: Number(b.base_amount) > 0
+          ? Math.round((Number(b.discount_amount) / Number(b.base_amount)) * 100)
+          : 0,
+        status: b.status,
+        serviceName: b.services?.name || '—',
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchPendingDiscounts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Approve a pending discount (manager/admin only).
+ */
+export async function approveDiscount(bookingId) {
+  try {
+    const { user, profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role === 'staff') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers can approve discounts.' } };
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        discount_status: 'approved',
+        discount_approved_by: user.id,
+      })
+      .eq('id', bookingId)
+      .eq('discount_status', 'pending')
+      .select('id, discount_amount, final_amount, discount_status')
+      .single();
+
+    if (updateError) {
+      if (updateError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Booking not found or discount is not pending.' } };
+      }
+      throw updateError;
+    }
+
+    return { data: { success: true, bookingId, discountStatus: 'approved' }, error: null };
+  } catch (error) {
+    console.error('[API] approveDiscount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Reject a pending discount — resets discount to zero (manager/admin only).
+ */
+export async function rejectDiscount(bookingId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role === 'staff') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers can reject discounts.' } };
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        discount_amount: 0,
+        discount_status: 'none',
+        discount_approved_by: null,
+        discount_reason: null,
+      })
+      .eq('id', bookingId)
+      .eq('discount_status', 'pending')
+      .select('id, discount_amount, final_amount, discount_status')
+      .single();
+
+    if (updateError) {
+      if (updateError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Booking not found or discount is not pending.' } };
+      }
+      throw updateError;
+    }
+
+    return { data: { success: true, bookingId, discountStatus: 'none' }, error: null };
+  } catch (error) {
+    console.error('[API] rejectDiscount error:', error.message);
     return { data: null, error };
   }
 }

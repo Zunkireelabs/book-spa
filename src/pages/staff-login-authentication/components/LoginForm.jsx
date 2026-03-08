@@ -136,7 +136,7 @@ const LoginForm = () => {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6" aria-label="Staff login form">
         {/* Email Input */}
         <Input
           label="Work Email Address"

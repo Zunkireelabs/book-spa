@@ -116,8 +116,12 @@ const BookingActionModal = ({
       });
       if (result?.error) {
         setDiscountError(result.error.message || 'Failed to apply discount.');
+      } else if (result?.data?.isPending) {
+        setDiscountSuccess('pending');
+        setDiscountValue('');
+        setDiscountReason('');
       } else {
-        setDiscountSuccess(true);
+        setDiscountSuccess('approved');
         setDiscountValue('');
         setDiscountReason('');
       }
@@ -153,7 +157,7 @@ const BookingActionModal = ({
 
   return (
     <>
-      <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
         <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-2xl max-h-[90vh] overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-border">
@@ -162,7 +166,7 @@ const BookingActionModal = ({
                 <Icon name="Calendar" size={20} className="text-primary" />
               </div>
               <div>
-                <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+                <h2 id="booking-modal-title" className="font-heading font-heading-semibold text-lg text-text-primary">
                   Booking Management
                 </h2>
                 <p className="font-caption font-caption-normal text-sm text-text-secondary">
@@ -507,10 +511,16 @@ const BookingActionModal = ({
                         <span className="font-body font-body-normal text-xs text-error">{discountError}</span>
                       </div>
                     )}
-                    {discountSuccess && (
+                    {discountSuccess === 'approved' && (
                       <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-success/10 border border-success/20">
                         <Icon name="CheckCircle" size={14} className="text-success" />
                         <span className="font-body font-body-normal text-xs text-success">Discount applied successfully.</span>
+                      </div>
+                    )}
+                    {discountSuccess === 'pending' && (
+                      <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-amber-50 border border-amber-200">
+                        <Icon name="Clock" size={14} className="text-amber-600" />
+                        <span className="font-body font-body-normal text-xs text-amber-700">Discount exceeds your limit — sent for manager approval.</span>
                       </div>
                     )}
 

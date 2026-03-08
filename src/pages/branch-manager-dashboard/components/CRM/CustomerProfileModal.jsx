@@ -63,13 +63,14 @@ const CustomerProfileModal = ({ customerId, onClose }) => {
       <div
         className="fixed inset-0 bg-black/40 z-modal"
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Modal */}
-      <div className="fixed inset-y-0 right-0 w-full max-w-lg bg-surface border-l border-border z-modal-overlay shadow-xl overflow-y-auto">
+      <div className="fixed inset-y-0 right-0 w-full max-w-lg bg-surface border-l border-border z-modal-overlay shadow-xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="customer-profile-title">
         {/* Header */}
         <div className="sticky top-0 bg-surface border-b border-border px-6 py-4 flex items-center justify-between z-header">
-          <h2 className="font-heading font-heading-semibold text-lg text-text-primary">Customer Profile</h2>
+          <h2 id="customer-profile-title" className="font-heading font-heading-semibold text-lg text-text-primary">Customer Profile</h2>
           <button
             onClick={onClose}
             className="p-2 rounded-spa hover:bg-background spa-transition-fast"

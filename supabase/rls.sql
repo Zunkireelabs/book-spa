@@ -247,6 +247,93 @@ CREATE POLICY "Manager can close day"
 -- NO DELETE policy — daily reports cannot be removed
 
 -- ============================================================
+-- CUSTOMERS: Branch-scoped CRUD
+-- ============================================================
+
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Staff can read branch customers"
+  ON customers FOR SELECT
+  TO authenticated
+  USING (
+    branch_id = get_user_branch_id()
+    OR get_user_role() = 'admin'
+  );
+
+CREATE POLICY "Staff can create customers"
+  ON customers FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    branch_id = get_user_branch_id()
+    OR get_user_role() = 'admin'
+  );
+
+CREATE POLICY "Staff can update branch customers"
+  ON customers FOR UPDATE
+  TO authenticated
+  USING (
+    branch_id = get_user_branch_id()
+    OR get_user_role() = 'admin'
+  )
+  WITH CHECK (
+    branch_id = get_user_branch_id()
+    OR get_user_role() = 'admin'
+  );
+
+-- ============================================================
+-- THERAPIST_ATTENDANCE: Manager/Admin manage, Staff read
+-- ============================================================
+
+ALTER TABLE therapist_attendance ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Staff can read branch therapist attendance"
+  ON therapist_attendance FOR SELECT
+  TO authenticated
+  USING (
+    branch_id = get_user_branch_id()
+    OR get_user_role() = 'admin'
+  );
+
+CREATE POLICY "Manager can manage therapist attendance"
+  ON therapist_attendance FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    get_user_role() IN ('manager', 'admin')
+    AND (branch_id = get_user_branch_id() OR get_user_role() = 'admin')
+  );
+
+CREATE POLICY "Manager can update therapist attendance"
+  ON therapist_attendance FOR UPDATE
+  TO authenticated
+  USING (
+    get_user_role() IN ('manager', 'admin')
+    AND (branch_id = get_user_branch_id() OR get_user_role() = 'admin')
+  )
+  WITH CHECK (
+    get_user_role() IN ('manager', 'admin')
+    AND (branch_id = get_user_branch_id() OR get_user_role() = 'admin')
+  );
+
+-- ============================================================
+-- AUDIT_LOGS: Manager/Admin read only (writes via SECURITY DEFINER triggers)
+-- ============================================================
+
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Manager can read branch audit logs"
+  ON audit_logs FOR SELECT
+  TO authenticated
+  USING (
+    get_user_role() IN ('manager', 'admin')
+    AND (branch_id = get_user_branch_id() OR get_user_role() = 'admin')
+  );
+
+CREATE POLICY "System can write audit logs"
+  ON audit_logs FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+-- ============================================================
 -- RLS COMPLETE
 -- Next: Run seed.sql
 -- ============================================================
