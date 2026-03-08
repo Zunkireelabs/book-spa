@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import { useAuth } from '../../../contexts/AuthContext';
 
-const StaffHeader = ({ userName: propName, branchName: propBranch }) => {
+const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'dashboard', onViewChange }) => {
   const { profile, signOut } = useAuth();
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef(null);
@@ -87,20 +87,28 @@ const StaffHeader = ({ userName: propName, branchName: propBranch }) => {
 
           {/* Navigation Links */}
           <nav className="hidden lg:flex items-center space-x-6">
-            <Link 
-              to="/branch-staff-dashboard"
-              className="flex items-center space-x-2 px-3 py-2 rounded-spa text-primary bg-primary/5 spa-transition-fast"
+            <button
+              onClick={() => onViewChange?.('dashboard')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-spa spa-transition-fast ${
+                viewMode === 'dashboard'
+                  ? 'text-primary bg-primary/5'
+                  : 'text-text-secondary hover:text-primary hover:bg-background'
+              }`}
             >
               <Icon name="LayoutDashboard" size={16} />
               <span className="font-body font-body-medium text-sm">Dashboard</span>
-            </Link>
-            <Link 
-              to="/booking-management-portal"
-              className="flex items-center space-x-2 px-3 py-2 rounded-spa text-text-secondary hover:text-primary hover:bg-background spa-transition-fast"
+            </button>
+            <button
+              onClick={() => onViewChange?.('bookings')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-spa spa-transition-fast ${
+                viewMode === 'bookings'
+                  ? 'text-primary bg-primary/5'
+                  : 'text-text-secondary hover:text-primary hover:bg-background'
+              }`}
             >
               <Icon name="Calendar" size={16} />
               <span className="font-body font-body-medium text-sm">Bookings</span>
-            </Link>
+            </button>
             <Link
               to="/customer-booking-flow"
               className="flex items-center space-x-2 px-3 py-2 rounded-spa text-text-secondary hover:text-primary hover:bg-background spa-transition-fast"
@@ -195,20 +203,28 @@ const StaffHeader = ({ userName: propName, branchName: propBranch }) => {
       {/* Mobile Navigation */}
       <div className="lg:hidden border-t border-border bg-surface">
         <nav className="flex items-center justify-around py-3">
-          <Link 
-            to="/branch-staff-dashboard"
-            className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-primary bg-primary/5 spa-transition-fast"
+          <button
+            onClick={() => onViewChange?.('dashboard')}
+            className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
+              viewMode === 'dashboard'
+                ? 'text-primary bg-primary/5'
+                : 'text-text-secondary hover:text-primary'
+            }`}
           >
             <Icon name="LayoutDashboard" size={20} />
             <span className="font-caption font-caption-normal text-xs">Dashboard</span>
-          </Link>
-          <Link 
-            to="/booking-management-portal"
-            className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
+          </button>
+          <button
+            onClick={() => onViewChange?.('bookings')}
+            className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
+              viewMode === 'bookings'
+                ? 'text-primary bg-primary/5'
+                : 'text-text-secondary hover:text-primary'
+            }`}
           >
             <Icon name="Calendar" size={20} />
             <span className="font-caption font-caption-normal text-xs">Bookings</span>
-          </Link>
+          </button>
           <Link
             to="/customer-booking-flow"
             className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"

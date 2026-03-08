@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import StaffHeader from './components/StaffHeader';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
+import BookingLookupPanel from './components/BookingLookupPanel';
 import TherapistAvailability from './components/TherapistAvailability';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
@@ -12,6 +13,8 @@ import { supabase } from '../../lib/supabase';
 const BranchStaffDashboard = () => {
   const { profile } = useAuth();
   const { branchId } = useBranch();
+
+  const [viewMode, setViewMode] = useState('dashboard');
 
   const [filters, setFilters] = useState({
     dateRange: 'today',
@@ -254,7 +257,7 @@ const BranchStaffDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <StaffHeader />
+      <StaffHeader viewMode={viewMode} onViewChange={setViewMode} />
 
       {/* Toast notifications */}
       {actionError && (
@@ -270,43 +273,55 @@ const BranchStaffDashboard = () => {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-3">
-            <QuickFilters
-              onFiltersChange={handleFiltersChange}
-              bookingCounts={bookingCounts}
-            />
-          </div>
-
-          <div className="lg:col-span-6">
-            {loading ? (
-              <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
-                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-                <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
-              </div>
-            ) : (
-              <BookingsList
-                bookings={filteredBookings}
-                therapists={therapists}
-                onStatusUpdate={handleStatusUpdate}
-                onAssignTherapist={handleAssignTherapist}
-                onRecordPayment={handleRecordPayment}
-                onApplyDiscount={handleApplyDiscount}
-                userRole={profile?.role || 'staff'}
-                onRefresh={loadData}
-                dateRange={filters.dateRange}
+        {viewMode === 'dashboard' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-3">
+              <QuickFilters
+                onFiltersChange={handleFiltersChange}
+                bookingCounts={bookingCounts}
               />
-            )}
-          </div>
+            </div>
 
-          <div className="lg:col-span-3">
-            <TherapistAvailability
-              therapists={therapists}
-              pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
-              onAssignTherapist={handleAssignTherapist}
-            />
+            <div className="lg:col-span-6">
+              {loading ? (
+                <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
+                  <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+                  <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+                </div>
+              ) : (
+                <BookingsList
+                  bookings={filteredBookings}
+                  therapists={therapists}
+                  onStatusUpdate={handleStatusUpdate}
+                  onAssignTherapist={handleAssignTherapist}
+                  onRecordPayment={handleRecordPayment}
+                  onApplyDiscount={handleApplyDiscount}
+                  userRole={profile?.role || 'staff'}
+                  onRefresh={loadData}
+                  dateRange={filters.dateRange}
+                />
+              )}
+            </div>
+
+            <div className="lg:col-span-3">
+              <TherapistAvailability
+                therapists={therapists}
+                pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
+                onAssignTherapist={handleAssignTherapist}
+              />
+            </div>
           </div>
-        </div>
+        ) : (
+          <BookingLookupPanel
+            therapists={therapists}
+            onStatusUpdate={handleStatusUpdate}
+            onAssignTherapist={handleAssignTherapist}
+            onRecordPayment={handleRecordPayment}
+            onApplyDiscount={handleApplyDiscount}
+            userRole={profile?.role || 'staff'}
+            onRefresh={loadData}
+          />
+        )}
       </div>
     </div>
   );
