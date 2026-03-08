@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
+import { createBooking } from '../../../services/api';
 
 const BookingConfirmation = ({ 
   selectedBranch, 
@@ -13,6 +14,7 @@ const BookingConfirmation = ({
   onEditBooking 
 }) => {
   const [isConfirming, setIsConfirming] = useState(false);
+  const [bookingError, setBookingError] = useState(null);
   const [showQRCode, setShowQRCode] = useState(false);
 
   const formatDateTime = () => {
@@ -46,18 +48,36 @@ const BookingConfirmation = ({
     }).format(price);
   };
 
-  const generateBookingId = () => {
-    return `BK-${new Date().getFullYear()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-  };
-
   const handleConfirmBooking = async () => {
     setIsConfirming(true);
+    setBookingError(null);
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
-      const bookingId = generateBookingId();
-      onConfirmBooking({ bookingId });
-    } catch (error) {
-      console.error('Booking confirmation failed:', error);
+      const { data, error } = await createBooking({
+        branchId: selectedBranch?.id,
+        serviceId: selectedService?.id,
+        date: selectedDateTime?.date,
+        startTime: selectedDateTime?.time,
+        customerName: `${customerInfo.firstName} ${customerInfo.lastName}`.trim(),
+        customerEmail: customerInfo.email || null,
+        customerPhone: customerInfo.phone ? `+977${customerInfo.phone}` : null,
+        customerGender: customerInfo.gender || null,
+        specialRequests: customerInfo.specialRequests || null,
+      });
+
+      if (error) {
+        if (error.code === 'ROOMS_FULL') {
+          setBookingError(error.message);
+        } else {
+          setBookingError('Something went wrong. Please try again.');
+          console.error('Booking creation failed:', error);
+        }
+        return;
+      }
+
+      onConfirmBooking({ bookingId: data.booking_number });
+    } catch (err) {
+      setBookingError('Something went wrong. Please try again.');
+      console.error('Booking confirmation failed:', err);
     } finally {
       setIsConfirming(false);
     }
@@ -294,6 +314,21 @@ const BookingConfirmation = ({
           <p className="font-caption font-caption-normal text-sm text-text-secondary">
             Scan this QR code to quickly access your booking details
           </p>
+        </div>
+      )}
+
+      {/* Booking Error */}
+      {bookingError && (
+        <div className="bg-error/10 border border-error/20 rounded-spa p-4">
+          <div className="flex items-start space-x-3">
+            <Icon name="AlertCircle" size={16} className="text-error mt-0.5" />
+            <div className="flex-1">
+              <p className="font-body font-body-medium text-sm text-error">{bookingError}</p>
+            </div>
+            <button onClick={() => setBookingError(null)} className="text-error hover:text-error/70">
+              <Icon name="X" size={14} />
+            </button>
+          </div>
         </div>
       )}
 

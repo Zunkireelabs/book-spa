@@ -78,9 +78,15 @@ module.exports = {
           'touch': '44px',
         },
         zIndex: {
+          'header': '100',
           'customer-header': '100',
+          'sidebar': '200',
           'staff-sidebar': '200',
+          'dropdown': '300',
+          'toast': '900',
           'modal': '1000',
+          'modal-overlay': '1100',
+          'notification': '1200',
         },
         animation: {
           'pulse-gentle': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',

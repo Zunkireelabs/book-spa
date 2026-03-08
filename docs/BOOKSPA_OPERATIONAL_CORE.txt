@@ -1,0 +1,442 @@
+📘 BookSpa – Operational Core Specification v1.0
+
+📘 BookSpa – Operational Core Specification (Excel Replacement First)
+
+Version: 1.0
+Status: Production Blueprint
+Owner: Zunkiree Labs
+Scope: Branch Operations ERP (Customer Booking Included)
+
+1️⃣ System Vision
+
+BookSpa is:
+
+A Branch-Level Operational ERP that replaces daily Excel-based booking, revenue, and reconciliation workflows — while supporting public booking and multi-branch scalability from Day One.
+
+Primary Objective (Phase 1):
+	•	Replace daily Excel sales report within 30 days.
+	•	Provide operational dashboard approved by client.
+	•	Enable manager-level daily reconciliation.
+	•	Prevent revenue leakage.
+
+Secondary Objective:
+	•	Support public booking engine integrated with branch operations.
+
+⸻
+
+2️⃣ Core System Philosophy
+	1.	Booking is the source of truth.
+	2.	No revenue exists outside bookings.
+	3.	Final price cannot be manually overridden.
+	4.	All discounts must be structured and auditable.
+	5.	Daily closing must be system-calculated.
+	6.	All actions must be role-based and traceable.
+	7.	Future multi-branch support must be built into schema from day one.
+
+⸻
+
+3️⃣ Operational Core Modules
+
+Module A – Booking Engine
+
+Module B – Pricing & Discount Engine
+
+Module C – Room & Resource Allocation
+
+Module D – Therapist Assignment Engine
+
+Module E – Payment & Collection Engine
+
+Module F – Daily Closing & Reconciliation
+
+Module G – Reporting & Analytics
+
+Module H – Role & Permission Control
+
+Module I – Audit & Compliance Layer
+
+⸻
+
+4️⃣ Booking Engine Specification
+
+Booking States
+Pending
+Confirmed
+In Progress
+Completed
+Cancelled
+No Show
+
+State Rules
+	•	Pending → Confirmed (manual confirm or auto-confirm rule)
+	•	Confirmed → In Progress (at service start)
+	•	In Progress → Completed (service ends)
+	•	Confirmed → Cancelled (before start time)
+	•	Confirmed → No Show (if not arrived within grace period)
+
+Once Completed:
+	•	Booking becomes financially locked.
+	•	Price & discount become immutable.
+
+⸻
+
+Booking Data Model (Core Fields)
+id (uuid)
+booking_number (BK-YYYY-XXX)
+branch_id
+customer_name
+customer_phone
+customer_email
+service_id
+therapist_id (nullable initially)
+room_id
+date
+start_time
+end_time
+status
+base_amount
+discount_type
+discount_value
+discount_reason
+discount_applied_by
+final_amount
+payment_status
+payment_mode
+collected_by
+collected_at
+created_by
+created_at
+updated_at
+
+Derived by DB triggers:
+	•	end_time
+	•	final_amount
+	•	booking_number
+	•	start_datetime
+	•	end_datetime
+
+
+5️⃣ Pricing & Discount Engine
+
+Service Pricing Model
+
+Service master defines:
+price_npr
+duration_minutes
+is_active
+
+When booking is created:
+	•	Base price is snapshotted.
+	•	Future price changes do not affect existing bookings.
+
+⸻
+
+Discount Rules
+
+Allowed Types:
+	•	Percentage
+	•	Fixed Amount
+
+Booking Pricing Formula:
+calculated_discount =
+    if percentage → base_amount * %
+    if fixed → fixed_value
+
+final_amount = base_amount - calculated_discount
+calculated_discount =
+    if percentage → base_amount * %
+    if fixed → fixed_value
+
+final_amount = base_amount - calculated_discount
+
+Restrictions
+	•	Final amount field is NOT editable.
+	•	Discount requires reason.
+	•	Discount must log:
+discount_reason
+discount_applied_by
+timestamp
+
+Role-Based Discount Limits
+Role          Max Discount
+Staff          5%
+Manager     30%
+Admin      Unlimited
+
+If discount exceeds role limit:
+→ System blocks with error.
+
+
+6️⃣ Room Allocation Engine
+
+Logic:
+	1.	Service duration known.
+	2.	Start time chosen.
+	3.	Compute end time.
+	4.	Fetch all active rooms.
+	5.	Check overlapping bookings.
+	6.	Assign first available room.
+
+Hard protection:
+	•	Postgres GIST exclusion constraint prevents overlap.
+	•	If no rooms available:
+Return: ROOMS_FULL error.
+
+
+7️⃣ Therapist Assignment Engine
+
+Rule 1:
+
+Room is assigned at booking creation.
+
+Rule 2:
+
+Therapist can be assigned later by staff.
+
+Therapist Status:
+	•	Available
+	•	Busy
+	•	On Break
+
+Therapist becomes Busy when:
+Booking status = In Progress.
+
+⸻
+
+8️⃣ Payment & Collection Engine
+
+Payment Modes
+cash
+card
+fonepay
+online
+
+Payment Status
+unpaid
+paid
+(Partial payments can be Phase 2)
+
+Payment Logic
+	•	Booking can exist without payment.
+	•	Payment recorded at counter.
+	•	Collected_by must be recorded.
+	•	Completed booking must have payment recorded before daily close.
+
+
+9️⃣ Daily Closing & Reconciliation (Excel Replacement Core)
+
+This replaces client’s Excel.
+
+Manager clicks:
+
+“Close Day”
+
+System calculates:
+
+Gross Revenue
+
+Sum(base_amount of completed bookings)
+
+Total Discounts
+
+Sum(base_amount - final_amount)
+
+Net Revenue
+
+Sum(final_amount)
+
+Payment Breakdown
+	•	Cash collected
+	•	Card collected
+	•	Fonepay collected
+	•	Online collected
+
+Pending Payments
+
+Bookings completed but unpaid
+
+Booking Breakdown
+	•	Confirmed
+	•	Completed
+	•	Cancelled
+	•	No Show
+
+Staff Discount Summary
+
+Discounts grouped by:
+	•	Staff
+	•	Reason
+
+Daily report snapshot stored in:
+daily_reports
+
+Once day closed:
+	•	Bookings become locked from edits.
+
+
+🔟 Reporting & Analytics
+
+Minimum Phase 1 Reports:
+	•	Daily revenue
+	•	Revenue by service
+	•	Revenue by therapist
+	•	Discount report
+	•	Payment mode breakdown
+	•	Booking volume per hour
+	•	Cancellation rate
+
+Future:
+	•	Retention
+	•	Cohort
+	•	LTV
+	•	Multi-branch comparison
+
+
+1️⃣1️⃣ Role & Permission Control
+
+Roles
+	•	Staff
+	•	Manager
+	•	Admin
+
+⸻
+
+Staff Permissions
+	•	Create booking
+	•	Assign therapist
+	•	Record payment
+	•	Apply limited discount
+	•	Cannot close day
+	•	Cannot edit after completion
+
+⸻
+
+Manager Permissions
+	•	Everything staff can
+	•	Apply higher discount
+	•	Close day
+	•	Export reports
+
+⸻
+
+Admin Permissions
+	•	Multi-branch view
+	•	Service price change
+	•	Unlimited discount
+	•	View audit logs
+	•	Override system locks
+
+⸻
+
+1️⃣2️⃣ Audit & Compliance Layer
+
+All critical changes logged:
+booking_id
+action_type
+old_value
+new_value
+changed_by
+changed_at
+
+Critical audit events:
+	•	Discount applied
+	•	Booking cancelled
+	•	Payment recorded
+	•	Day closed
+	•	Price changed
+
+
+
+1️⃣3️⃣ Multi-Branch Scalability
+
+All major tables include:
+branch_id
+
+Future capability:
+	•	Consolidated reports
+	•	Branch comparison
+	•	Central admin dashboard
+
+
+1️⃣4️⃣ Excel Replacement Mapping
+
+Client Excel Contains:
+	•	Booking count
+	•	Service
+	•	Revenue
+	•	Discount
+	•	Payment mode
+	•	Staff performance
+
+System Replaces With:
+	•	Daily Closing module
+	•	Export to CSV / Excel
+	•	Auto-calculated revenue
+	•	Auto discount audit
+	•	Payment reconciliation
+
+⸻
+
+1️⃣5️⃣ Non-Negotiable Production Rules
+	1.	No direct price editing.
+	2.	No deletion of completed bookings.
+	3.	All discounts must be logged.
+	4.	Room conflicts impossible.
+	5.	Daily close locks previous day.
+	6.	Revenue derived only from booking table.
+
+⸻
+
+1️⃣6️⃣ Current Status Mapping
+
+Already Built:
+	•	Auth system
+	•	Service read integration
+	•	Booking creation with room auto-assign
+	•	Dashboard UI
+	•	Staff dashboard UI
+	•	Manager dashboard UI
+	•	Booking detail modal
+
+Still Needed:
+	•	Discount engine implementation
+	•	Payment recording UI
+	•	Daily close logic
+	•	Reconciliation report
+	•	Permission enforcement
+	•	Audit table
+	•	Booking status lifecycle UI
+	•	Therapist status auto-sync
+	•	Lock after completion
+
+⸻
+
+1️⃣7️⃣ System Architecture Philosophy
+
+Frontend:
+React (existing UI retained)
+
+Backend:
+Supabase (Postgres)
+RLS enabled
+Triggers enforce rules
+
+No business logic duplication in frontend.
+All financial logic must live in DB or API layer.
+
+⸻
+
+1️⃣8️⃣ Phase Roadmap
+
+Phase 4 → Discount + Payment Engine
+Phase 5 → Daily Closing & Reconciliation
+Phase 6 → Permission Enforcement
+Phase 7 → Audit & Lock System
+Phase 8 → Multi-branch consolidation
+
+
+
+
+
+
+

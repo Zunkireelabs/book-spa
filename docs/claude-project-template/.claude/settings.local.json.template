@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      // Add permissions as needed. Examples:
+      // "Bash(npm run *)",
+      // "Bash(git *)",
+      // "Bash(docker *)"
+    ]
+  },
+
+  // Enable specific MCP servers from .mcp.json
+  "enabledMcpjsonServers": [
+    // "supabase",
+    // "github",
+    // "filesystem"
+  ],
+
+  // Or enable all MCP servers defined in .mcp.json
+  "enableAllProjectMcpServers": true
+}

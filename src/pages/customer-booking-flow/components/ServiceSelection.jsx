@@ -1,100 +1,36 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
+import { fetchServices } from '../../../services/api';
+import { enrichServices } from '../../../services/serviceEnrichment';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
-  const services = [
-    {
-      id: 'deep-tissue-massage',
-      name: 'Deep Tissue Massage',
-      description: 'Therapeutic massage targeting deep muscle layers to relieve chronic tension and pain. Perfect for athletes and those with muscle knots.',
-      duration: '60 minutes',
-      price: 2500,
-      image: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=400&h=300&fit=crop',
-      benefits: ['Relieves muscle tension', 'Improves circulation', 'Reduces stress'],
-      therapistPreference: ['male', 'female'],
-      category: 'Therapeutic',
-      popularity: 'Most Popular'
-    },
-    {
-      id: 'swedish-massage',
-      name: 'Swedish Massage',
-      description: 'Classic relaxation massage using long, flowing strokes to promote overall wellness and stress relief.',
-      duration: '60 minutes',
-      price: 2000,
-      image: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop',
-      benefits: ['Full body relaxation', 'Stress relief', 'Improved sleep'],
-      therapistPreference: ['male', 'female'],
-      category: 'Relaxation'
-    },
-    {
-      id: 'hot-stone-therapy',
-      name: 'Hot Stone Therapy',
-      description: 'Heated volcanic stones placed on key points of the body to melt away tension and promote deep relaxation.',
-      duration: '90 minutes',
-      price: 3500,
-      image: 'https://images.unsplash.com/photo-1596178065887-1198b6148b2b?w=400&h=300&fit=crop',
-      benefits: ['Deep muscle relaxation', 'Improved circulation', 'Pain relief'],
-      therapistPreference: ['female'],
-      category: 'Specialty'
-    },
-    {
-      id: 'aromatherapy-massage',
-      name: 'Aromatherapy Massage',
-      description: 'Gentle massage combined with essential oils to enhance relaxation and promote emotional well-being.',
-      duration: '75 minutes',
-      price: 2800,
-      image: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop',
-      benefits: ['Emotional balance', 'Stress reduction', 'Enhanced mood'],
-      therapistPreference: ['female'],
-      category: 'Wellness'
-    },
-    {
-      id: 'traditional-thai-massage',
-      name: 'Traditional Thai Massage',
-      description: 'Ancient healing practice combining acupressure, stretching, and yoga-like movements for complete body rejuvenation.',
-      duration: '90 minutes',
-      price: 3000,
-      image: 'https://images.pexels.com/photos/3757942/pexels-photo-3757942.jpeg?w=400&h=300&fit=crop',
-      benefits: ['Increased flexibility', 'Energy boost', 'Pain relief'],
-      therapistPreference: ['male', 'female'],
-      category: 'Traditional',
-      specialty: 'Signature Service'
-    },
-    {
-      id: 'couples-massage',
-      name: 'Couples Massage',
-      description: 'Romantic spa experience for two people in a private room with synchronized massage treatments.',
-      duration: '60 minutes',
-      price: 4500,
-      image: 'https://images.pixabay.com/photo/2016/11/08/05/26/woman-1807533_1280.jpg?w=400&h=300&fit=crop',
-      benefits: ['Shared relaxation', 'Bonding experience', 'Stress relief'],
-      therapistPreference: ['male', 'female'],
-      category: 'Couples'
-    },
-    {
-      id: 'prenatal-massage',
-      name: 'Prenatal Massage',
-      description: 'Specialized massage for expecting mothers to reduce pregnancy discomfort and promote relaxation.',
-      duration: '60 minutes',
-      price: 2800,
-      image: 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=400&h=300&fit=crop',
-      benefits: ['Reduces swelling', 'Relieves back pain', 'Improves sleep'],
-      therapistPreference: ['female'],
-      category: 'Specialty'
-    },
-    {
-      id: 'reflexology',
-      name: 'Foot Reflexology',
-      description: 'Therapeutic foot massage focusing on pressure points that correspond to different organs and systems.',
-      duration: '45 minutes',
-      price: 1800,
-      image: 'https://images.pexels.com/photos/6663515/pexels-photo-6663515.jpeg?w=400&h=300&fit=crop',
-      benefits: ['Improved circulation', 'Stress relief', 'Better sleep'],
-      therapistPreference: ['male', 'female'],
-      category: 'Therapeutic'
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadServices() {
+      setLoading(true);
+      setError(null);
+      const { data, error: fetchError } = await fetchServices();
+      if (cancelled) return;
+
+      if (fetchError) {
+        setError('Failed to load services. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      setServices(enrichServices(data || []));
+      setLoading(false);
     }
-  ];
+
+    loadServices();
+    return () => { cancelled = true; };
+  }, []);
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat('ne-NP', {
@@ -126,6 +62,28 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
         </p>
       </div>
 
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Icon name="Loader2" size={24} className="text-primary animate-spin" />
+          <span className="ml-3 font-body font-body-normal text-text-secondary">Loading services...</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="text-center py-12">
+          <Icon name="AlertCircle" size={32} className="text-error mx-auto mb-3" />
+          <p className="font-body font-body-normal text-text-secondary">{error}</p>
+        </div>
+      )}
+
+      {!loading && !error && services.length === 0 && (
+        <div className="text-center py-12">
+          <Icon name="Calendar" size={32} className="text-text-secondary mx-auto mb-3" />
+          <p className="font-body font-body-normal text-text-secondary">No services available at this time.</p>
+        </div>
+      )}
+
+      {!loading && !error && services.length > 0 && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {services.map((service) => {
           const availability = getTherapistAvailability(service);
@@ -256,6 +214,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
           );
         })}
       </div>
+      )}
     </div>
   );
 };

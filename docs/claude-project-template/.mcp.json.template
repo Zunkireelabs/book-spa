@@ -1,0 +1,100 @@
+{
+  "mcpServers": {
+
+    // ─────────────────────────────────────────────────────────────
+    // SUPABASE - PostgreSQL Database Access
+    // Uncomment if using Supabase
+    // ─────────────────────────────────────────────────────────────
+    // "supabase": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": ["-y", "@modelcontextprotocol/server-supabase"],
+    //   "env": {
+    //     "SUPABASE_CONNECTION_STRING": "postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-1-<REGION>.pooler.supabase.com:5432/postgres"
+    //   }
+    // },
+
+    // ─────────────────────────────────────────────────────────────
+    // GITHUB - Repository, PR, Issue Management
+    // Uncomment for GitHub integration
+    // ─────────────────────────────────────────────────────────────
+    // "github": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": ["-y", "@modelcontextprotocol/server-github"],
+    //   "env": {
+    //     "GITHUB_TOKEN": "ghp_your_token_here"
+    //   }
+    // },
+
+    // ─────────────────────────────────────────────────────────────
+    // FILESYSTEM - Extended File Operations
+    // Uncomment for large codebases needing bulk file ops
+    // ─────────────────────────────────────────────────────────────
+    // "filesystem": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
+    // },
+
+    // ─────────────────────────────────────────────────────────────
+    // POSTGRES - Direct PostgreSQL Access (non-Supabase)
+    // Uncomment for direct PostgreSQL connections
+    // ─────────────────────────────────────────────────────────────
+    // "postgres": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": ["-y", "@modelcontextprotocol/server-postgres"],
+    //   "env": {
+    //     "DATABASE_URL": "postgresql://user:password@host:5432/database"
+    //   }
+    // },
+
+    // ─────────────────────────────────────────────────────────────
+    // SLACK - Slack Integration
+    // Uncomment for Slack workspace access
+    // ─────────────────────────────────────────────────────────────
+    // "slack": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": ["-y", "@modelcontextprotocol/server-slack"],
+    //   "env": {
+    //     "SLACK_TOKEN": "xoxb-your-token-here"
+    //   }
+    // },
+
+    // ─────────────────────────────────────────────────────────────
+    // MEMORY - Persistent Memory/Knowledge Base
+    // Uncomment for cross-session memory
+    // ─────────────────────────────────────────────────────────────
+    // "memory": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": ["-y", "@modelcontextprotocol/server-memory"]
+    // }
+
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HOW TO USE THIS FILE
+// ═══════════════════════════════════════════════════════════════════
+//
+// 1. Copy this file to your project root as `.mcp.json`
+// 2. Remove the comments (JSON doesn't support comments)
+// 3. Uncomment only the servers you need
+// 4. Fill in your credentials
+// 5. Add `.mcp.json` to your `.gitignore` (contains secrets!)
+//
+// GETTING CREDENTIALS:
+//
+// Supabase:
+//   Dashboard → Project → Settings → Database → Connection String (URI)
+//
+// GitHub:
+//   Settings → Developer Settings → Personal Access Tokens → Generate
+//
+// Slack:
+//   api.slack.com → Create App → OAuth & Permissions → Bot Token
+//
+// ═══════════════════════════════════════════════════════════════════

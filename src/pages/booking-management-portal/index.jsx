@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import CustomerHeader from '../../components/ui/CustomerHeader';
 import BookingSearch from './components/BookingSearch';
@@ -8,8 +8,12 @@ import RescheduleModal from './components/RescheduleModal';
 import CancellationModal from './components/CancellationModal';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
+import { searchBookings, updateBookingStatus } from '../../services/api';
+import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
+import { useBranch } from '../../contexts/BranchContext';
 
 const BookingManagementPortal = () => {
+  const { branchId } = useBranch();
   const [currentBooking, setCurrentBooking] = useState(null);
   const [bookingHistory, setBookingHistory] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -19,78 +23,23 @@ const BookingManagementPortal = () => {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [notification, setNotification] = useState(null);
 
-  // Mock current booking data
-  const mockCurrentBooking = {
-    id: 'BK-2024-001',
-    service: 'Deep Tissue Massage',
-    duration: '90 minutes',
-    date: '15/01/2024',
-    time: '2:00 PM',
-    status: 'confirmed',
-    branch: 'Main Branch - Downtown',
-    price: '3,200',
-    therapist: 'Emma Wilson',
-    genderPreference: 'female',
-    bookingDate: '10/01/2024',
-    specialRequests: 'Please use light pressure due to sensitive skin. Prefer aromatherapy oils.'
-  };
-
-  // Mock booking history data
-  const mockBookingHistory = [
-    {
-      id: 'BK-2023-089',
-      service: 'Swedish Massage',
-      duration: '60 minutes',
-      date: '28/12/2023',
-      time: '3:00 PM',
-      status: 'completed',
-      branch: 'Main Branch - Downtown',
-      price: '2,800',
-      therapist: 'Lisa Rodriguez',
-      bookingDate: '25/12/2023',
-      rating: 5
-    },
-    {
-      id: 'BK-2023-067',
-      service: 'Hot Stone Therapy',
-      duration: '75 minutes',
-      date: '15/11/2023',
-      time: '1:00 PM',
-      status: 'completed',
-      branch: 'North Branch - Uptown',
-      price: '3,500',
-      therapist: 'Michael Chen',
-      bookingDate: '12/11/2023',
-      rating: 4
-    },
-    {
-      id: 'BK-2023-045',
-      service: 'Aromatherapy Massage',
-      duration: '60 minutes',
-      date: '20/10/2023',
-      time: '4:00 PM',
-      status: 'cancelled',
-      branch: 'Main Branch - Downtown',
-      price: '2,900',
-      therapist: 'Emma Wilson',
-      bookingDate: '18/10/2023',
-      refundAmount: '1,450'
-    }
-  ];
-
   const handleSearch = async (query, searchType) => {
     setIsSearching(true);
     setSearchPerformed(true);
-    
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      if (query) {
-        // Mock search logic - in real app this would be API call
-        setCurrentBooking(mockCurrentBooking);
-        setBookingHistory(mockBookingHistory);
-        showNotification('Booking found successfully!', 'success');
+      const result = await searchBookings(branchId, query);
+
+      if (result.error) {
+        showNotification('Failed to search bookings. Please try again.', 'error');
+        setCurrentBooking(null);
+        setBookingHistory([]);
+      } else if (result.data && result.data.length > 0) {
+        const transformed = transformBookings(result.data);
+        // First result = most relevant/recent, rest = history
+        setCurrentBooking(transformed[0]);
+        setBookingHistory(transformed.slice(1));
+        showNotification(`Found ${transformed.length} booking(s)`, 'success');
       } else {
         setCurrentBooking(null);
         setBookingHistory([]);
@@ -107,19 +56,28 @@ const BookingManagementPortal = () => {
     setShowRescheduleModal(true);
   };
 
-  const handleCancel = (booking) => {
-    setSelectedBooking(booking);
-    setShowCancellationModal(true);
+  const handleCancel = async (booking) => {
+    // Use real API to cancel
+    const dbStatus = toDbStatus('cancelled');
+    const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus });
+
+    if (result.error) {
+      showNotification(result.error.message || 'Failed to cancel booking.', 'error');
+    } else {
+      showNotification('Booking cancelled successfully.', 'success');
+      // Refresh by re-searching
+      setCurrentBooking(prev => prev ? { ...prev, status: 'cancelled' } : null);
+    }
   };
 
   const handleRescheduleConfirm = (updatedBooking) => {
     setCurrentBooking(updatedBooking);
-    showNotification('Booking rescheduled successfully! Confirmation sent via email and SMS.', 'success');
+    showNotification('Booking rescheduled successfully!', 'success');
   };
 
   const handleCancellationConfirm = (cancelledBooking) => {
     setCurrentBooking({ ...cancelledBooking, status: 'cancelled' });
-    showNotification(`Booking cancelled successfully! Refund of NPR ${cancelledBooking.refundAmount} will be processed within 3-5 business days.`, 'success');
+    showNotification('Booking cancelled successfully.', 'success');
   };
 
   const showNotification = (message, type) => {
@@ -129,27 +87,19 @@ const BookingManagementPortal = () => {
 
   const getNotificationIcon = (type) => {
     switch (type) {
-      case 'success':
-        return 'CheckCircle';
-      case 'error':
-        return 'XCircle';
-      case 'warning':
-        return 'AlertTriangle';
-      default:
-        return 'Info';
+      case 'success': return 'CheckCircle';
+      case 'error': return 'XCircle';
+      case 'warning': return 'AlertTriangle';
+      default: return 'Info';
     }
   };
 
   const getNotificationColor = (type) => {
     switch (type) {
-      case 'success':
-        return 'bg-success/10 border-success/20 text-success';
-      case 'error':
-        return 'bg-error/10 border-error/20 text-error';
-      case 'warning':
-        return 'bg-warning/10 border-warning/20 text-warning';
-      default:
-        return 'bg-primary/10 border-primary/20 text-primary';
+      case 'success': return 'bg-success/10 border-success/20 text-success';
+      case 'error': return 'bg-error/10 border-error/20 text-error';
+      case 'warning': return 'bg-warning/10 border-warning/20 text-warning';
+      default: return 'bg-primary/10 border-primary/20 text-primary';
     }
   };
 
@@ -162,7 +112,7 @@ const BookingManagementPortal = () => {
 
       <div className="min-h-screen bg-background">
         <CustomerHeader />
-        
+
         {/* Notification */}
         {notification && (
           <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-notification">
@@ -171,7 +121,7 @@ const BookingManagementPortal = () => {
               <span className="font-body font-body-normal text-sm">
                 {notification.message}
               </span>
-              <button 
+              <button
                 onClick={() => setNotification(null)}
                 className="p-1 rounded hover:bg-black/10 spa-transition-fast"
               >
@@ -192,7 +142,7 @@ const BookingManagementPortal = () => {
                 Manage Your Booking
               </h1>
               <p className="font-body font-body-normal text-lg text-text-secondary max-w-2xl mx-auto">
-                Reschedule, cancel, or view your booking history with ease. Your wellness journey, your control.
+                Search by booking number, customer name, or phone number.
               </p>
             </div>
 
@@ -210,7 +160,7 @@ const BookingManagementPortal = () => {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <h2 className="font-heading font-heading-semibold text-xl text-text-primary">
-                          Current Booking
+                          Booking Found
                         </h2>
                         <div className="flex items-center space-x-2 text-sm text-text-secondary">
                           <Icon name="Clock" size={16} />
@@ -226,7 +176,7 @@ const BookingManagementPortal = () => {
                       />
                     </div>
 
-                    {/* Booking History */}
+                    {/* More Results */}
                     {bookingHistory.length > 0 && (
                       <div className="border-t border-border pt-8">
                         <BookingHistory bookings={bookingHistory} />
@@ -311,15 +261,15 @@ const BookingManagementPortal = () => {
             <div className="text-center">
               <div className="flex items-center justify-center space-x-2 mb-4">
                 <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <svg 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
                     className="text-primary-foreground"
                   >
-                    <path 
-                      d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" 
+                    <path
+                      d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
                       fill="currentColor"
                     />
                     <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
@@ -332,19 +282,8 @@ const BookingManagementPortal = () => {
               <p className="font-caption font-caption-normal text-sm text-text-secondary mb-4">
                 Your wellness journey, simplified and secure.
               </p>
-              <div className="flex items-center justify-center space-x-6 text-sm text-text-secondary">
-                <a href="/privacy" className="font-caption font-caption-normal hover:text-primary spa-transition-fast">
-                  Privacy Policy
-                </a>
-                <a href="/terms" className="font-caption font-caption-normal hover:text-primary spa-transition-fast">
-                  Terms of Service
-                </a>
-                <a href="/contact" className="font-caption font-caption-normal hover:text-primary spa-transition-fast">
-                  Contact
-                </a>
-              </div>
               <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4">
-                © {new Date().getFullYear()} BookSpa Nepal. All rights reserved.
+                &copy; {new Date().getFullYear()} BookSpa Nepal. All rights reserved.
               </p>
             </div>
           </div>

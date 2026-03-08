@@ -1,0 +1,201 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import QuickFilters from '../../branch-staff-dashboard/components/QuickFilters';
+import BookingsList from '../../branch-staff-dashboard/components/BookingsList';
+import TherapistAvailability from '../../branch-staff-dashboard/components/TherapistAvailability';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment } from '../../../services/api';
+import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
+
+const BookingsViewPanel = ({ branchId }) => {
+  const [filters, setFilters] = useState({
+    dateRange: 'today',
+    serviceType: 'all',
+    status: 'all',
+    search: ''
+  });
+
+  const [bookings, setBookings] = useState([]);
+  const [filteredBookings, setFilteredBookings] = useState([]);
+  const [therapists, setTherapists] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionToast, setActionToast] = useState(null);
+  const [bookingCounts, setBookingCounts] = useState({
+    confirmed: 0, pending: 0, inProgress: 0, completed: 0
+  });
+
+  const getDateFilter = useCallback((dateRange) => {
+    const today = new Date();
+    const fmt = (d) => d.toISOString().split('T')[0];
+    switch (dateRange) {
+      case 'today': return { date: fmt(today) };
+      case 'tomorrow': {
+        const t = new Date(today);
+        t.setDate(t.getDate() + 1);
+        return { date: fmt(t) };
+      }
+      case 'week':
+      case 'month':
+        return {};
+      default:
+        return { date: fmt(today) };
+    }
+  }, []);
+
+  const loadData = useCallback(async (dateRange) => {
+    if (!branchId) return;
+    setLoading(true);
+
+    const dateFilter = getDateFilter(dateRange || filters.dateRange);
+    const [bookingsResult, therapistsResult] = await Promise.all([
+      fetchBookings(branchId, dateFilter),
+      fetchTherapists(branchId),
+    ]);
+
+    if (bookingsResult.data) {
+      const transformed = transformBookings(bookingsResult.data);
+      setBookings(transformed);
+      calculateCounts(transformed);
+    }
+
+    if (therapistsResult.data) {
+      setTherapists(therapistsResult.data.map(t => ({
+        id: t.id,
+        name: t.name,
+        gender: t.gender,
+        specialties: t.specialties || [],
+        room: null,
+        status: 'available',
+        currentBooking: null,
+      })));
+    }
+
+    setLoading(false);
+  }, [branchId, filters.dateRange, getDateFilter]);
+
+  useEffect(() => { loadData(filters.dateRange); }, [branchId, filters.dateRange]);
+
+  useEffect(() => {
+    let filtered = [...bookings];
+
+    if (filters.search) {
+      const term = filters.search.toLowerCase();
+      filtered = filtered.filter(b =>
+        b.id.toLowerCase().includes(term) ||
+        b.customerName.toLowerCase().includes(term) ||
+        (b.customerPhone && b.customerPhone.includes(term)) ||
+        (b.customerEmail && b.customerEmail.toLowerCase().includes(term))
+      );
+    }
+
+    if (filters.serviceType !== 'all') {
+      const serviceMap = {
+        massage: ['Deep Tissue Massage', 'Swedish Massage', 'Sports Massage'],
+        facial: ['Facial Treatment', 'Anti-Aging Facial'],
+        body: ['Body Wrap', 'Body Scrub'],
+        aromatherapy: ['Aromatherapy Massage', 'Aromatherapy'],
+        reflexology: ['Reflexology', 'Foot Reflexology']
+      };
+      if (serviceMap[filters.serviceType]) {
+        filtered = filtered.filter(b =>
+          serviceMap[filters.serviceType].some(s => b.service.includes(s))
+        );
+      }
+    }
+
+    if (filters.status !== 'all') {
+      filtered = filtered.filter(b => b.status === filters.status);
+    }
+
+    filtered.sort((a, b) => a.time.localeCompare(b.time));
+    setFilteredBookings(filtered);
+  }, [bookings, filters]);
+
+  const calculateCounts = (list) => {
+    const counts = { confirmed: 0, pending: 0, inProgress: 0, completed: 0 };
+    list.forEach(b => {
+      if (b.status === 'confirmed') counts.confirmed++;
+      else if (b.status === 'pending') counts.pending++;
+      else if (b.status === 'in-progress') counts.inProgress++;
+      else if (b.status === 'completed') counts.completed++;
+    });
+    setBookingCounts(counts);
+  };
+
+  const showToast = (msg, type = 'success') => {
+    setActionToast({ msg, type });
+    setTimeout(() => setActionToast(null), 3000);
+  };
+
+  const handleStatusUpdate = async (bookingId, newStatus) => {
+    const dbStatus = toDbStatus(newStatus);
+    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus });
+    if (result.error) { showToast(result.error.message || 'Failed to update status.', 'error'); return; }
+    showToast(`Status updated to ${newStatus}`);
+    await loadData();
+  };
+
+  const handleAssignTherapist = async (bookingId, therapistId) => {
+    const result = await assignTherapist({ bookingId, therapistId });
+    if (result.error) { showToast(result.error.message || 'Failed to assign therapist.', 'error'); return; }
+    showToast('Therapist assigned successfully');
+    await loadData();
+  };
+
+  const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
+    const result = await recordPayment({ bookingId, paymentMode, notes });
+    if (result.error) return { error: result.error };
+    showToast('Payment recorded successfully');
+    await loadData();
+    return { error: null };
+  };
+
+  return (
+    <div className="relative">
+      {/* Toast */}
+      {actionToast && (
+        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
+          actionToast.type === 'error' ? 'bg-error text-white' : 'bg-success text-white'
+        }`}>
+          <span className="font-body font-body-medium text-sm">{actionToast.msg}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-3">
+          <QuickFilters
+            onFiltersChange={setFilters}
+            bookingCounts={bookingCounts}
+          />
+        </div>
+
+        <div className="lg:col-span-6">
+          {loading ? (
+            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
+              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+              <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+            </div>
+          ) : (
+            <BookingsList
+              bookings={filteredBookings}
+              therapists={therapists}
+              onStatusUpdate={handleStatusUpdate}
+              onAssignTherapist={handleAssignTherapist}
+              onRecordPayment={handleRecordPayment}
+              onRefresh={loadData}
+              dateRange={filters.dateRange}
+            />
+          )}
+        </div>
+
+        <div className="lg:col-span-3">
+          <TherapistAvailability
+            therapists={therapists}
+            pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
+            onAssignTherapist={handleAssignTherapist}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default BookingsViewPanel;

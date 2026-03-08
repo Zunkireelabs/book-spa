@@ -1,0 +1,186 @@
+Step 1: Create Supabase Project        
+                                                                                                                                     
+  1. Go to https://supabase.com and sign in (or create account)                                                                      
+  2. Click "New Project"
+  3. Fill in:
+    - Name: bookspa
+    - Database Password: (save this securely, you'll need it)
+    - Region: Pick closest to Nepal (e.g., Southeast Asia (Singapore))
+  4. Wait for project to provision (~2 minutes)
+  5. Go to Settings → API and copy:
+    - Project URL (e.g., https://abcdefg.supabase.co)
+    - anon public key (starts with eyJ...)
+  6. Update your .env file:
+  VITE_SUPABASE_URL=https://your-project-id.supabase.co
+  VITE_SUPABASE_ANON_KEY=your-anon-key-here
+  7. Go to Authentication → Providers → ensure Email is enabled
+  8. Go to Authentication → Settings → toggle OFF "Enable email confirmations" (for demo convenience)
+
+  ---
+  Step 2: Run schema.sql
+
+  1. Go to SQL Editor in Supabase dashboard (left sidebar)
+  2. Click "New query"
+  3. Open supabase/schema.sql from your project, copy entire contents
+  4. Paste into the SQL editor
+  5. Click "Run" (or Ctrl+Enter)
+  6. You should see: Success. No rows returned — this means all tables, enums, constraints, triggers, and indexes were created
+
+  ---
+  Step 3: Run rls.sql
+
+  1. Click "New query" again in SQL Editor
+  2. Open supabase/rls.sql, copy entire contents
+  3. Paste and click "Run"
+  4. You should see: Success. No rows returned
+
+  ---
+  Step 4: Run seed.sql (Part 1 — everything except users)
+
+  1. Click "New query"
+  2. Open supabase/seed.sql, copy entire contents
+  3. Paste and click "Run"
+  4. This seeds: 1 branch, 9 rooms, 8 services, 6 therapists
+  5. The user INSERT statements are commented out — that's intentional
+
+  Now create auth users:
+
+  6. Go to Authentication → Users in the dashboard
+  7. Click "Add user" → "Create new user" for each:
+
+  | Email                  | Password           | Auto Confirm |
+  |------------------------|--------------------|--------------|
+  | staff@bookspa.com.np   | BookSpa@Staff123   |     Yes      |
+  | manager@bookspa.com.np | BookSpa@Manager123 |     Yes      |
+  | admin@bookspa.com.np   | BookSpa@Admin123   |     Yes      |
+
+  8. After creating each user, copy their UUID from the user list
+  9. Go back to SQL Editor, create a new query, and run (replacing UUIDs):
+
+  INSERT INTO users (id, email, full_name, role, branch_id) VALUES
+    ('<STAFF_UUID_HERE>',
+     'staff@bookspa.com.np',
+     'Ramesh Thapa',
+     'staff',
+     'b0000000-0000-0000-0000-000000000001');
+
+  INSERT INTO users (id, email, full_name, role, branch_id) VALUES
+    ('<MANAGER_UUID_HERE>',
+     'manager@bookspa.com.np',
+     'Rajesh Shrestha',
+     'manager',
+     'b0000000-0000-0000-0000-000000000001');
+
+  INSERT INTO users (id, email, full_name, role, branch_id) VALUES
+    ('<ADMIN_UUID_HERE>',
+     'admin@bookspa.com.np',
+     'Sunil Maharjan',
+     'admin',
+     'b0000000-0000-0000-0000-000000000001');
+
+  ---
+  Step 5: Verification Checklist
+
+  Run each of these in the SQL Editor to verify the schema is working correctly. Copy each block, run it, and check the expected
+  result.
+
+  5a. Tables created:
+  SELECT table_name FROM information_schema.tables
+  WHERE table_schema = 'public'
+  ORDER BY table_name;
+  Expected: attendance, bookings, branches, payments, rooms, services, therapists, users
+
+  5b. Enums created:
+  SELECT typname, enumlabel FROM pg_enum
+  JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+  ORDER BY typname, enumsortorder;
+  Expected: All enum values for booking_status, discount_status_enum, payment_mode, payment_status_enum, user_role
+
+  5c. Seed data present:
+  SELECT 'branches' as tbl, count(*) FROM branches
+  UNION ALL SELECT 'rooms', count(*) FROM rooms
+  UNION ALL SELECT 'services', count(*) FROM services
+  UNION ALL SELECT 'therapists', count(*) FROM therapists
+  UNION ALL SELECT 'users', count(*) FROM users;
+  Expected: branches=1, rooms=9, services=8, therapists=6, users=3
+
+  5d. GIST exclusion — room overlap test:
+  -- Insert a test booking
+  INSERT INTO bookings (branch_id, room_id, service_id, customer_name, date, start_time,
+    base_amount, discount_amount, final_amount)
+  VALUES (
+    'b0000000-0000-0000-0000-000000000001',
+    'r0000000-0000-0000-0000-000000000001',
+    's0000000-0000-0000-0000-000000000001',
+    'Test Customer',
+    CURRENT_DATE,
+    '09:00',
+    2500, 0, 2500
+  );
+
+  -- Try overlapping booking in SAME room (should FAIL)
+  INSERT INTO bookings (branch_id, room_id, service_id, customer_name, date, start_time,
+    base_amount, discount_amount, final_amount)
+  VALUES (
+    'b0000000-0000-0000-0000-000000000001',
+    'r0000000-0000-0000-0000-000000000001',
+    's0000000-0000-0000-0000-000000000001',
+    'Overlap Customer',
+    CURRENT_DATE,
+    '09:30',
+    2500, 0, 2500
+  );
+  -- Expected: ERROR conflicting key value violates exclusion constraint "excl_room_overlap"
+
+  5e. Different room at same time (should SUCCEED):
+  INSERT INTO bookings (branch_id, room_id, service_id, customer_name, date, start_time,
+    base_amount, discount_amount, final_amount)
+  VALUES (
+    'b0000000-0000-0000-0000-000000000001',
+    'r0000000-0000-0000-0000-000000000002',
+    's0000000-0000-0000-0000-000000000001',
+    'Different Room Customer',
+    CURRENT_DATE,
+    '09:30',
+    2500, 0, 2500
+  );
+  -- Expected: Success
+
+  5f. Booking number auto-generated:
+  SELECT booking_number, customer_name, start_time, end_time
+  FROM bookings ORDER BY created_at;
+  Expected: Booking numbers like BK-20260212-0001, BK-20260212-0002
+
+  5g. Datetime fields auto-computed:
+  SELECT date, start_time, end_time, start_datetime, end_datetime
+  FROM bookings LIMIT 1;
+  Expected: end_time = start_time + 60 minutes (for Deep Tissue). start_datetime and end_datetime are full timestamps in UTC.
+
+  5h. Discount CHECK constraint:
+  -- Try approving discount without approver (should FAIL)
+  UPDATE bookings
+  SET discount_status = 'approved', discount_amount = 500
+  WHERE booking_number = (SELECT booking_number FROM bookings LIMIT 1);
+  -- Expected: ERROR new row violates check constraint "chk_discount_approval"
+
+  5i. Payment immutability test:
+  -- First, insert a valid payment (use a real user ID from your users table)
+  -- INSERT INTO payments (booking_id, amount, payment_mode, recorded_by)
+  -- VALUES ('<booking_id>', 2500, 'Cash', '<user_id>');
+
+  -- Then try to update it:
+  -- UPDATE payments SET amount = 1000 WHERE id = '<payment_id>';
+  -- Expected: No RLS policy allows this — blocked by RLS
+
+  5j. Indexes exist:
+  SELECT indexname FROM pg_indexes
+  WHERE schemaname = 'public'
+  ORDER BY indexname;
+  Expected: idx_bookings_branch_date, idx_bookings_date, idx_bookings_status, idx_payments_created_at, idx_attendance_date (plus
+  auto-created indexes)
+
+  5k. Cleanup test data:
+  DELETE FROM bookings WHERE customer_name IN ('Test Customer', 'Overlap Customer', 'Different Room Customer');
+
+  ---
+  Once all checks pass, reply with confirmation and I'll proceed to Phase 2 (Supabase client + Auth context).

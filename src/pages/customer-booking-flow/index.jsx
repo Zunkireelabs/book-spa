@@ -160,35 +160,21 @@ const CustomerBookingFlow = () => {
     setCustomerInfo(info);
   };
 
-  const handleConfirmBooking = async (confirmationData) => {
-    setIsLoading(true);
-    
-    try {
-      // Simulate booking API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const finalBookingData = {
-        ...confirmationData,
-        selectedBranch,
-        selectedService,
-        selectedDateTime,
-        genderPreference,
-        customerInfo,
-        bookingDate: new Date().toISOString(),
-        status: 'confirmed'
-      };
-      
-      setBookingData(finalBookingData);
-      setCurrentStep(6);
-      
-      // Clear saved state after successful booking
-      localStorage.removeItem('bookingFlow');
-      
-    } catch (error) {
-      console.error('Booking confirmation failed:', error);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleConfirmBooking = (confirmationData) => {
+    const finalBookingData = {
+      ...confirmationData,
+      selectedBranch,
+      selectedService,
+      selectedDateTime,
+      genderPreference,
+      customerInfo,
+      bookingDate: new Date().toISOString(),
+      status: 'confirmed'
+    };
+
+    setBookingData(finalBookingData);
+    setCurrentStep(6);
+    localStorage.removeItem('bookingFlow');
   };
 
   const handleEditBooking = (step) => {

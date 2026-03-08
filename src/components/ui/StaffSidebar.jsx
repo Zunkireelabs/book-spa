@@ -1,15 +1,21 @@
 import React, { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import Icon from '../AppIcon';
+import { useAuth } from '../../contexts/AuthContext';
+import { useBranch } from '../../contexts/BranchContext';
 
-const StaffSidebar = ({ userRole = 'staff', userName = 'Staff Member', branchName = 'Main Branch' }) => {
+const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch }) => {
   const location = useLocation();
-  const navigate = useNavigate();
+  const { profile, signOut } = useAuth();
+  const { branchName: contextBranchName } = useBranch();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const handleLogout = () => {
-    // Handle logout logic
-    navigate('/staff-login-authentication');
+  const userRole = profile?.role || propRole || 'staff';
+  const userName = profile?.full_name || propName || 'Staff Member';
+  const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
+
+  const handleLogout = async () => {
+    await signOut();
   };
 
   const navigationItems = [
@@ -17,22 +23,71 @@ const StaffSidebar = ({ userRole = 'staff', userName = 'Staff Member', branchNam
       id: 'dashboard',
       label: 'Dashboard',
       icon: 'LayoutDashboard',
-      path: userRole === 'manager' ? '/branch-manager-dashboard' : '/branch-staff-dashboard',
-      roles: ['staff', 'manager']
+      path: ['manager', 'admin'].includes(userRole) ? '/branch-manager-dashboard' : '/branch-staff-dashboard',
+      roles: ['staff', 'manager', 'admin']
     },
     {
       id: 'bookings',
-      label: 'Booking Management',
-      icon: 'Calendar',
-      path: '/booking-management-portal',
-      roles: ['staff', 'manager']
+      label: 'Bookings',
+      icon: 'ClipboardList',
+      path: ['manager', 'admin'].includes(userRole) ? '/branch-manager-dashboard?view=bookings' : '/branch-staff-dashboard',
+      roles: ['staff', 'manager', 'admin']
     },
     {
-      id: 'assignments',
-      label: 'Assignments',
-      icon: 'UserCheck',
-      path: '/booking-details-assignment-modal',
-      roles: ['staff', 'manager']
+      id: 'calendar',
+      label: 'Calendar',
+      icon: 'Calendar',
+      path: '/branch-manager-dashboard?view=calendar',
+      roles: ['manager', 'admin']
+    },
+    {
+      id: 'reports',
+      label: 'Reports',
+      icon: 'FileText',
+      path: '/branch-manager-dashboard?view=reports',
+      roles: ['manager', 'admin']
+    },
+    {
+      id: 'customers',
+      label: 'Customers',
+      icon: 'Users',
+      path: '/branch-manager-dashboard?view=customers',
+      roles: ['manager', 'admin']
+    },
+    {
+      id: 'new-booking',
+      label: 'New Booking',
+      icon: 'Plus',
+      path: '/customer-booking-flow',
+      roles: ['staff', 'manager', 'admin']
+    },
+    {
+      id: 'attendance',
+      label: 'Attendance',
+      icon: 'ClipboardCheck',
+      path: '/branch-manager-dashboard?view=attendance',
+      roles: ['manager', 'admin']
+    },
+    {
+      id: 'performance',
+      label: 'Performance',
+      icon: 'Award',
+      path: '/branch-manager-dashboard?view=performance',
+      roles: ['manager', 'admin']
+    },
+    {
+      id: 'infrastructure',
+      label: 'Infrastructure',
+      icon: 'Settings2',
+      path: '/branch-manager-dashboard?view=infrastructure',
+      roles: ['manager', 'admin']
+    },
+    {
+      id: 'audit',
+      label: 'Audit Log',
+      icon: 'Shield',
+      path: '/branch-manager-dashboard?view=audit',
+      roles: ['manager', 'admin']
     }
   ];
 
@@ -40,7 +95,12 @@ const StaffSidebar = ({ userRole = 'staff', userName = 'Staff Member', branchNam
     item.roles.includes(userRole)
   );
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => {
+    if (path.includes('?')) {
+      return `${location.pathname}${location.search}` === path;
+    }
+    return location.pathname === path && !location.search;
+  };
 
   return (
     <>
@@ -104,16 +164,20 @@ const StaffSidebar = ({ userRole = 'staff', userName = 'Staff Member', branchNam
                   <p className="font-caption font-caption-normal text-xs text-text-secondary truncate">
                     {branchName}
                   </p>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent capitalize">
-                    {userRole}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize ${
+                    userRole === 'admin'
+                      ? 'bg-pink-100 text-pink-700'
+                      : 'bg-accent/10 text-accent'
+                  }`}>
+                    {userRole === 'admin' ? 'Platform Admin' : userRole}
                   </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2">
+          {/* Navigation — scrollable when items overflow */}
+          <nav className="flex-1 overflow-y-auto sidebar-scroll p-4 space-y-1">
             {filteredNavItems.map((item) => (
               <Link
                 key={item.id}

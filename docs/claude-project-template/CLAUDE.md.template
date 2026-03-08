@@ -1,0 +1,97 @@
+# CLAUDE.md - Project Intelligence
+
+## Project Overview
+
+**Project**: {{PROJECT_NAME}}
+**Type**: {{PROJECT_TYPE}}
+**Tech Stack**: {{TECH_STACK}}
+
+---
+
+## Automatic Skill Routing
+
+**IMPORTANT: This project uses orchestrated development.**
+
+### Default: Route Development Tasks to PM
+
+When the user gives ANY development request, **automatically invoke `/project-pm`**.
+
+#### Trigger Patterns (auto-invoke PM):
+
+- "Build/Create/Implement/Add X"
+- "Fix/Update/Change/Refactor X"
+- Feature requests or bug fixes
+
+#### Exceptions (do NOT auto-invoke):
+
+- Questions: "How does X work?"
+- Reading: "Show me X"
+- Documentation tasks
+- Direct skill invocation (`/skill-name`)
+
+---
+
+## Available Skills
+
+| Skill | Domain | When to Use |
+|-------|--------|-------------|
+| `/project-pm` | **Orchestrator** | All development tasks (routes to specialists) |
+| `/skill-architect` | **Meta** | Create/optimize skills, analyze coverage |
+
+<!-- Add skills as they're created by skill-architect -->
+
+---
+
+## Commands
+
+```bash
+# Development
+{{DEV_COMMAND}}
+
+# Build
+{{BUILD_COMMAND}}
+
+# Test
+{{TEST_COMMAND}}
+
+# Deploy
+{{DEPLOY_COMMAND}}
+```
+
+---
+
+## Project Structure
+
+```
+{{PROJECT_NAME}}/
+├── {{STRUCTURE}}
+└── CLAUDE.md
+```
+
+---
+
+## Quality Standards
+
+```
+1. {{QUALITY_STANDARD_1}}
+2. {{QUALITY_STANDARD_2}}
+3. {{QUALITY_STANDARD_3}}
+```
+
+---
+
+## Constraints
+
+<!-- Add project-specific constraints -->
+
+```
+- {{CONSTRAINT_1}}
+- {{CONSTRAINT_2}}
+```
+
+---
+
+## Documentation
+
+- `README.md` - Project overview
+- `docs/` - Additional documentation

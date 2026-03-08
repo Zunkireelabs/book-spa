@@ -2,8 +2,18 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
+import StatusLegend from '../../../components/ui/StatusLegend';
 
-const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
+const DATE_RANGE_LABELS = {
+  today: "Today's Appointments",
+  tomorrow: "Tomorrow's Appointments",
+  week: "This Week's Appointments",
+  month: "This Month's Appointments",
+};
+
+const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
+
+const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onRefresh, dateRange = 'today' }) => {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
 
@@ -34,8 +44,9 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
     setShowActionModal(true);
   };
 
-  const handleQuickStatusUpdate = (bookingId, newStatus) => {
-    onStatusUpdate(bookingId, newStatus);
+  // Use booking.bookingId (real UUID) for all API calls
+  const handleQuickStatusUpdate = (booking, newStatus) => {
+    onStatusUpdate(booking.bookingId, newStatus);
   };
 
   const formatTime = (timeString) => {
@@ -50,20 +61,21 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
     <>
       <div className="bg-surface rounded-spa-lg spa-shadow-resting">
         {/* Header */}
-        <div className="p-6 border-b border-border">
+        <div className="p-6 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
-              Today's Appointments
+              {DATE_RANGE_LABELS[dateRange] || "Appointments"}
             </h2>
             <div className="flex items-center space-x-2">
               <span className="font-caption font-caption-normal text-sm text-text-secondary">
                 {bookings.length} bookings
               </span>
-              <Button variant="outline" size="sm" iconName="RefreshCw" iconPosition="left">
+              <Button variant="outline" size="sm" iconName="RefreshCw" iconPosition="left" onClick={onRefresh}>
                 Refresh
               </Button>
             </div>
           </div>
+          <StatusLegend compact />
         </div>
 
         {/* Bookings List */}
@@ -80,7 +92,7 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
             </div>
           ) : (
             bookings.map((booking) => (
-              <div key={booking.id} className="p-4 hover:bg-background spa-transition-fast">
+              <div key={booking.bookingId} className="p-4 hover:bg-background spa-transition-fast">
                 <div className="flex items-center justify-between">
                   {/* Booking Info */}
                   <div className="flex items-center space-x-4 flex-1">
@@ -104,16 +116,29 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
                           <Icon name={getStatusIcon(booking.status)} size={12} className="mr-1" />
                           {booking.status.replace('-', ' ')}
                         </span>
+                        {booking.paymentStatus === 'paid' && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success">
+                            Paid
+                          </span>
+                        )}
+                        {booking.isLocked && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-amber-100 text-amber-700" title="Day Closed — Locked">
+                            <Icon name="Lock" size={10} className="mr-1" />
+                            Locked
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center space-x-4 text-xs text-text-secondary">
                         <span className="flex items-center space-x-1">
                           <Icon name="Scissors" size={12} />
                           <span>{booking.service}</span>
                         </span>
-                        <span className="flex items-center space-x-1">
-                          <Icon name="Phone" size={12} />
-                          <span>{booking.customerPhone}</span>
-                        </span>
+                        {booking.customerPhone && (
+                          <span className="flex items-center space-x-1">
+                            <Icon name="Phone" size={12} />
+                            <span>{booking.customerPhone}</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -125,7 +150,7 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
                             {booking.therapist.name}
                           </div>
                           <div className="font-caption font-caption-normal text-xs text-text-secondary">
-                            {booking.therapist.gender} • Room {booking.therapist.room}
+                            {booking.therapist.gender}{booking.therapist.room ? ` \u00B7 Room ${booking.therapist.room}` : ''}
                           </div>
                         </div>
                       ) : (
@@ -143,36 +168,38 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
 
                   {/* Actions */}
                   <div className="flex items-center space-x-2 ml-4">
-                    {/* Quick Status Actions */}
-                    {booking.status === 'pending' && (
-                      <Button
-                        variant="success"
-                        size="xs"
-                        onClick={() => handleQuickStatusUpdate(booking.id, 'confirmed')}
-                      >
-                        Confirm
-                      </Button>
-                    )}
-                    {booking.status === 'confirmed' && (
-                      <Button
-                        variant="default"
-                        size="xs"
-                        onClick={() => handleQuickStatusUpdate(booking.id, 'in-progress')}
-                      >
-                        Start
-                      </Button>
-                    )}
-                    {booking.status === 'in-progress' && (
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        onClick={() => handleQuickStatusUpdate(booking.id, 'completed')}
-                      >
-                        Complete
-                      </Button>
+                    {!TERMINAL_STATUSES.includes(booking.status) && !booking.isLocked && (
+                      <>
+                        {booking.status === 'pending' && (
+                          <Button
+                            variant="success"
+                            size="xs"
+                            onClick={() => handleQuickStatusUpdate(booking, 'confirmed')}
+                          >
+                            Confirm
+                          </Button>
+                        )}
+                        {booking.status === 'confirmed' && (
+                          <Button
+                            variant="default"
+                            size="xs"
+                            onClick={() => handleQuickStatusUpdate(booking, 'in-progress')}
+                          >
+                            Start
+                          </Button>
+                        )}
+                        {booking.status === 'in-progress' && (
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            onClick={() => handleQuickStatusUpdate(booking, 'completed')}
+                          >
+                            Complete
+                          </Button>
+                        )}
+                      </>
                     )}
 
-                    {/* More Actions */}
                     <Button
                       variant="ghost"
                       size="xs"
@@ -204,8 +231,10 @@ const BookingsList = ({ bookings, onStatusUpdate, onAssignTherapist }) => {
         isOpen={showActionModal}
         onClose={() => setShowActionModal(false)}
         booking={selectedBooking}
+        therapists={therapists}
         onAssignTherapist={onAssignTherapist}
         onUpdateStatus={onStatusUpdate}
+        onRecordPayment={onRecordPayment}
       />
     </>
   );

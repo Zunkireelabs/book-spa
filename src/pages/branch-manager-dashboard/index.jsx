@@ -1,71 +1,110 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
+import { useAuth } from '../../contexts/AuthContext';
+import { useBranch } from '../../contexts/BranchContext';
+import BranchSwitcher from '../../components/ui/BranchSwitcher';
+import { fetchBookings, fetchTherapists, updateBookingStatus } from '../../services/api';
+import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 
 // Import all components
 import MetricsCard from './components/MetricsCard';
 import TherapistUtilizationChart from './components/TherapistUtilizationChart';
 import BookingPipelineChart from './components/BookingPipelineChart';
-import StaffPerformanceCard from './components/StaffPerformanceCard';
 import RealtimeBookingFeed from './components/RealtimeBookingFeed';
 import DateRangePicker from './components/DateRangePicker';
 import RevenueAnalyticsChart from './components/RevenueAnalyticsChart';
 import AlertsNotificationPanel from './components/AlertsNotificationPanel';
+import DailyOperationalReportPanel from './components/DailyOperationalReportPanel';
+import OperationalCalendar from './components/OperationalCalendar';
+import RoomManagementPanel from './components/MasterData/RoomManagementPanel';
+import TherapistManagementPanel from './components/MasterData/TherapistManagementPanel';
+import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
+import AuditPanel from './components/Governance/AuditPanel';
+import CustomersPanel from './components/CRM/CustomersPanel';
+import BookingsViewPanel from './components/BookingsViewPanel';
+import RevenueCards from './components/RevenueCards';
+import UtilizationPanel from './components/UtilizationPanel';
+import RiskIndicatorsPanel from './components/RiskIndicatorsPanel';
+import AttendancePanel from './components/Operations/AttendancePanel';
+import TherapistPerformancePanel from './components/Performance/TherapistPerformancePanel';
+import TopPerformersCard from './components/Performance/TopPerformersCard';
+import StatusLegend from '../../components/ui/StatusLegend';
 
 const BranchManagerDashboard = () => {
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [selectedBranch, setSelectedBranch] = useState('main');
-  const [viewMode, setViewMode] = useState('dashboard'); // dashboard, calendar, reports
+  const { profile } = useAuth();
+  const { branchId, branchName } = useBranch();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  // Mock manager data
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const viewMode = searchParams.get('view') || 'dashboard';
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+
   const managerData = {
-    name: 'Rajesh Thapa',
-    role: 'Branch Manager',
-    branch: 'Main Branch - Downtown',
+    name: profile?.full_name || 'Manager',
+    role: profile?.role === 'admin' ? 'Admin' : 'Branch Manager',
+    branch: branchName || profile?.branches?.name || 'Main Branch',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150'
   };
 
-  // Mock branch data
-  const branches = [
-    { id: 'main', name: 'Main Branch - Downtown', status: 'active' },
-    { id: 'north', name: 'North Branch - Uptown', status: 'active' },
-    { id: 'south', name: 'South Branch - Riverside', status: 'active' }
-  ];
+  // Load live data
+  const loadData = useCallback(async () => {
+    if (!branchId) return;
+    setLoading(true);
+    const today = new Date().toISOString().split('T')[0];
+    const result = await fetchBookings(branchId, { date: today });
+    if (result.data) {
+      setBookings(transformBookings(result.data));
+    }
+    setLoading(false);
+  }, [branchId]);
 
-  // Key metrics data
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Compute live metrics from real bookings
+  const totalBookings = bookings.length;
+  const paidBookings = bookings.filter(b => b.paymentStatus === 'paid');
+  const dailyRevenue = paidBookings.reduce((sum, b) => sum + b.finalAmount, 0);
+  const cancelledCount = bookings.filter(b => b.status === 'cancelled').length;
+  const cancellationRate = totalBookings > 0 ? ((cancelledCount / totalBookings) * 100).toFixed(1) : '0.0';
+  const unpaidCount = bookings.filter(b => b.paymentStatus === 'unpaid' && ['confirmed', 'completed'].includes(b.status)).length;
+
   const metricsData = [
     {
-      title: 'Today\'s Bookings',
-      value: '47',
-      change: '+12%',
-      changeType: 'positive',
+      title: "Today's Bookings",
+      value: String(totalBookings),
+      change: '',
+      changeType: 'neutral',
       icon: 'Calendar',
       currency: false
     },
     {
       title: 'Daily Revenue',
-      value: '56,400',
-      change: '+8.5%',
-      changeType: 'positive',
+      value: dailyRevenue.toLocaleString('en-IN'),
+      change: '',
+      changeType: 'neutral',
       icon: 'IndianRupee',
       currency: true
     },
     {
       title: 'Cancellation Rate',
-      value: '4.2%',
-      change: '-1.8%',
-      changeType: 'positive',
+      value: `${cancellationRate}%`,
+      change: '',
+      changeType: 'neutral',
       icon: 'XCircle',
       currency: false
     },
     {
-      title: 'Customer Satisfaction',
-      value: '4.8',
-      change: '+0.2',
-      changeType: 'positive',
-      icon: 'Star',
+      title: 'Unpaid Bookings',
+      value: String(unpaidCount),
+      change: '',
+      changeType: unpaidCount > 0 ? 'negative' : 'positive',
+      icon: 'AlertCircle',
       currency: false
     }
   ];
@@ -73,110 +112,107 @@ const BranchManagerDashboard = () => {
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
-    }, 60000); // Update every minute
-
+    }, 60000);
     return () => clearInterval(timer);
   }, []);
 
   const handleDateRangeChange = (dateRange) => {
     console.log('Date range changed:', dateRange);
-    // Handle date range change logic
   };
 
   const handleExport = (format) => {
     console.log('Exporting data in format:', format);
-    // Handle export logic
   };
 
-  const handleAssignTherapist = (bookingId, therapistId, notes) => {
-    console.log('Assigning therapist:', { bookingId, therapistId, notes });
-    // Handle therapist assignment logic
-  };
-
-  const handleUpdateStatus = (bookingId, status) => {
-    console.log('Updating booking status:', { bookingId, status });
-    // Handle status update logic
+  const handleQuickStatusUpdate = async (bookingId, newStatus) => {
+    const dbStatus = toDbStatus(newStatus);
+    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus });
+    if (!result.error) {
+      await loadData();
+    }
   };
 
   const renderDashboardView = () => (
     <div className="space-y-6">
+      {/* Revenue Intelligence Cards */}
+      <RevenueCards branchId={branchId} />
+
+      {/* Utilization & Capacity Intelligence */}
+      <UtilizationPanel branchId={branchId} />
+
+      {/* Risk Indicators */}
+      <RiskIndicatorsPanel branchId={branchId} />
+
       {/* Key Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {metricsData.map((metric, index) => (
-          <MetricsCard
-            key={index}
-            title={metric.title}
-            value={metric.value}
-            change={metric.change}
-            changeType={metric.changeType}
-            icon={metric.icon}
-            currency={metric.currency}
-          />
-        ))}
+        {loading ? (
+          <div className="col-span-4 text-center py-8">
+            <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+            <p className="font-body font-body-normal text-text-secondary">Loading metrics...</p>
+          </div>
+        ) : (
+          metricsData.map((metric, index) => (
+            <MetricsCard
+              key={index}
+              title={metric.title}
+              value={metric.value}
+              change={metric.change}
+              changeType={metric.changeType}
+              icon={metric.icon}
+              currency={metric.currency}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Status Legend */}
+      <div className="bg-surface border border-border rounded-spa px-4 py-2.5">
+        <StatusLegend showPayment />
       </div>
 
       {/* Main Dashboard Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Left: Therapist Utilization */}
         <TherapistUtilizationChart />
-
-        {/* Top Right: Booking Pipeline */}
         <BookingPipelineChart />
-
-        {/* Bottom Left: Staff Performance */}
-        <StaffPerformanceCard />
-
-        {/* Bottom Right: Real-time Feed */}
-        <RealtimeBookingFeed 
-          onAssignTherapist={handleAssignTherapist}
-          onUpdateStatus={handleUpdateStatus}
+        <TopPerformersCard branchId={branchId} />
+        <RealtimeBookingFeed
+          bookings={bookings}
+          onQuickStatusUpdate={handleQuickStatusUpdate}
         />
       </div>
 
       {/* Analytics and Controls Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Date Range Picker */}
-        <DateRangePicker 
+        <DateRangePicker
           onDateRangeChange={handleDateRangeChange}
           onExport={handleExport}
         />
-
-        {/* Revenue Analytics */}
         <div className="lg:col-span-2">
           <RevenueAnalyticsChart />
         </div>
       </div>
 
-      {/* Alerts Panel */}
       <AlertsNotificationPanel />
     </div>
   );
 
   const renderCalendarView = () => (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
-      <div className="text-center py-12">
-        <Icon name="Calendar" size={64} className="text-text-secondary mx-auto mb-4" />
-        <h3 className="font-heading font-heading-semibold text-xl text-text-primary mb-2">
-          Calendar View
-        </h3>
-        <p className="font-body font-body-normal text-text-secondary">
-          Calendar functionality will be implemented here
-        </p>
-      </div>
-    </div>
+    <OperationalCalendar branchId={branchId} />
   );
 
   const renderReportsView = () => (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
-      <div className="text-center py-12">
-        <Icon name="FileText" size={64} className="text-text-secondary mx-auto mb-4" />
-        <h3 className="font-heading font-heading-semibold text-xl text-text-primary mb-2">
-          Reports & Analytics
-        </h3>
-        <p className="font-body font-body-normal text-text-secondary">
-          Detailed reports functionality will be implemented here
-        </p>
+    <DailyOperationalReportPanel branchId={branchId} />
+  );
+
+  const renderInfrastructureView = () => (
+    <div className="space-y-8">
+      <div>
+        <h2 className="font-heading font-heading-semibold text-xl text-text-primary mb-1">Infrastructure Management</h2>
+        <p className="font-body text-sm text-text-secondary">Manage rooms, therapists, and services for your branch.</p>
       </div>
+      <RoomManagementPanel branchId={branchId} />
+      <TherapistManagementPanel branchId={branchId} />
+      {profile?.role === 'admin' && <ServiceManagementPanel />}
     </div>
   );
 
@@ -188,104 +224,109 @@ const BranchManagerDashboard = () => {
       </Helmet>
 
       <div className="min-h-screen bg-background">
-        {/* Staff Sidebar */}
-        <StaffSidebar 
-          userRole="manager" 
+        <StaffSidebar
+          userRole="manager"
           userName={managerData.name}
           branchName={managerData.branch}
         />
 
-        {/* Main Content */}
         <div className="lg:ml-64 lg:pb-0 pb-16">
           {/* Header */}
           <header className="bg-surface border-b border-border sticky top-0 z-10">
-            <div className="px-4 sm:px-6 lg:px-8 py-4">
+            <div className="px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-full overflow-hidden bg-primary/10">
-                      <img 
-                        src={managerData.avatar} 
-                        alt={managerData.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          e.target.src = '/assets/images/no_image.png';
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <h1 className="font-heading font-heading-semibold text-xl text-text-primary">
-                        Welcome back, {managerData.name.split(' ')[0]}
-                      </h1>
-                      <p className="font-body font-body-normal text-sm text-text-secondary">
-                        {currentTime.toLocaleDateString('en-GB', { 
-                          weekday: 'long', 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric' 
-                        })} • {currentTime.toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
-                      </p>
-                    </div>
+                {/* Left: Avatar + name + date */}
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className="w-10 h-10 rounded-full overflow-hidden bg-primary/10 flex-shrink-0">
+                    <img
+                      src={managerData.avatar}
+                      alt={managerData.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.src = '/assets/images/no_image.png';
+                      }}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="font-heading font-heading-semibold text-base text-text-primary truncate">
+                      {managerData.name}
+                    </h1>
+                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                      {currentTime.toLocaleDateString('en-GB', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short'
+                      })} {'\u00B7'} {currentTime.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-4">
-                  {/* Branch Selector */}
-                  <select
-                    value={selectedBranch}
-                    onChange={(e) => setSelectedBranch(e.target.value)}
-                    className="px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
-                  >
-                    {branches.map((branch) => (
-                      <option key={branch.id} value={branch.id}>
-                        {branch.name}
-                      </option>
-                    ))}
-                  </select>
+                {/* Right: Role badge + Branch switcher + New Booking */}
+                <div className="flex items-center space-x-3 flex-shrink-0">
+                  <span className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize ${
+                    profile?.role === 'admin'
+                      ? 'bg-pink-100 text-pink-700'
+                      : 'bg-accent/10 text-accent'
+                  }`}>
+                    {profile?.role === 'admin' ? 'Admin' : managerData.role}
+                  </span>
 
-                  {/* View Mode Toggle */}
-                  <div className="flex space-x-1 bg-background rounded-spa p-1">
-                    {[
-                      { key: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },
-                      { key: 'calendar', label: 'Calendar', icon: 'Calendar' },
-                      { key: 'reports', label: 'Reports', icon: 'FileText' }
-                    ].map((mode) => (
-                      <button
-                        key={mode.key}
-                        onClick={() => setViewMode(mode.key)}
-                        className={`flex items-center space-x-2 px-3 py-2 rounded text-sm font-body font-body-medium spa-transition-fast ${
-                          viewMode === mode.key
-                            ? 'bg-surface text-text-primary spa-shadow-resting'
-                            : 'text-text-secondary hover:text-text-primary'
-                        }`}
-                      >
-                        <Icon name={mode.icon} size={16} />
-                        <span className="hidden sm:inline">{mode.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <BranchSwitcher />
 
-                  {/* Quick Actions */}
                   <Button
                     variant="primary"
+                    size="sm"
                     iconName="Plus"
-                    onClick={() => {/* Handle quick booking */}}
+                    onClick={() => navigate('/customer-booking-flow')}
                   >
-                    Quick Booking
+                    <span className="hidden sm:inline">New Booking</span>
                   </Button>
                 </div>
               </div>
             </div>
           </header>
 
+          {/* Admin Mode Banner */}
+          {profile?.role === 'admin' && (
+            <div className="bg-pink-50 border-b border-pink-200 px-4 sm:px-6 lg:px-8 py-2">
+              <div className="flex items-center space-x-2 text-pink-700">
+                <Icon name="Shield" size={16} />
+                <span className="font-body font-body-medium text-sm">
+                  Platform Admin Mode
+                </span>
+                <span className="font-body font-body-normal text-xs text-pink-500">
+                  — Viewing: {branchName || 'All Branches'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Closed Day Banner */}
+          {viewMode === 'dashboard' && !loading && bookings.length > 0 && bookings.some(b => b.isLocked) && (
+            <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2">
+              <div className="flex items-center space-x-2 text-amber-700">
+                <Icon name="Lock" size={16} />
+                <span className="font-body font-body-medium text-sm">
+                  This day is closed. Financial records are locked.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Main Content Area */}
           <main className="px-4 sm:px-6 lg:px-8 py-6">
             {viewMode === 'dashboard' && renderDashboardView()}
+            {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
             {viewMode === 'calendar' && renderCalendarView()}
             {viewMode === 'reports' && renderReportsView()}
+            {viewMode === 'customers' && <CustomersPanel branchId={branchId} />}
+            {viewMode === 'attendance' && <AttendancePanel branchId={branchId} />}
+            {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
+            {viewMode === 'infrastructure' && renderInfrastructureView()}
+            {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
           </main>
         </div>
       </div>

@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
+import { useAuth } from '../../../contexts/AuthContext';
 
-
-const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) => {
-  const navigate = useNavigate();
+const StaffHeader = ({ userName: propName, branchName: propBranch }) => {
+  const { profile, signOut } = useAuth();
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 
-  const handleLogout = () => {
-    navigate('/staff-login-authentication');
+  const userName = profile?.full_name || propName || 'Staff Member';
+  const branchName = profile?.branches?.name || propBranch || 'Main Branch';
+  const userRole = profile?.role || 'staff';
+
+  const handleLogout = async () => {
+    await signOut();
   };
 
   const currentTime = new Date().toLocaleTimeString('en-US', {
@@ -25,7 +29,7 @@ const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) 
   });
 
   return (
-    <header className="bg-surface border-b border-border sticky top-0 z-50">
+    <header className="bg-surface border-b border-border sticky top-0 z-header">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo & Branch Info */}
@@ -84,12 +88,12 @@ const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) 
               <Icon name="Calendar" size={16} />
               <span className="font-body font-body-medium text-sm">Bookings</span>
             </Link>
-            <Link 
-              to="/booking-details-assignment-modal"
+            <Link
+              to="/customer-booking-flow"
               className="flex items-center space-x-2 px-3 py-2 rounded-spa text-text-secondary hover:text-primary hover:bg-background spa-transition-fast"
             >
-              <Icon name="UserCheck" size={16} />
-              <span className="font-body font-body-medium text-sm">Assignments</span>
+              <Icon name="Plus" size={16} />
+              <span className="font-body font-body-medium text-sm">New Booking</span>
             </Link>
           </nav>
 
@@ -106,9 +110,6 @@ const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) 
             {/* Notifications */}
             <button className="relative p-2 rounded-spa hover:bg-background spa-transition-fast">
               <Icon name="Bell" size={20} className="text-text-secondary" />
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-error text-primary-foreground rounded-full flex items-center justify-center text-xs font-caption font-caption-normal">
-                3
-              </span>
             </button>
 
             {/* Profile Dropdown */}
@@ -124,8 +125,8 @@ const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) 
                   <span className="font-body font-body-medium text-sm text-text-primary">
                     {userName}
                   </span>
-                  <span className="font-caption font-caption-normal text-xs text-text-secondary">
-                    Branch Staff
+                  <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize">
+                    {userRole}
                   </span>
                 </div>
                 <Icon name="ChevronDown" size={16} className="text-text-secondary" />
@@ -133,7 +134,7 @@ const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) 
 
               {/* Dropdown Menu */}
               {showProfileDropdown && (
-                <div className="absolute right-0 mt-2 w-48 bg-surface rounded-spa spa-shadow-elevated border border-border z-50">
+                <div className="absolute right-0 mt-2 w-48 bg-surface rounded-spa spa-shadow-elevated border border-border z-dropdown">
                   <div className="p-3 border-b border-border">
                     <div className="font-body font-body-medium text-sm text-text-primary">
                       {userName}
@@ -195,12 +196,12 @@ const StaffHeader = ({ userName = 'Staff Member', branchName = 'Main Branch' }) 
             <Icon name="Calendar" size={20} />
             <span className="font-caption font-caption-normal text-xs">Bookings</span>
           </Link>
-          <Link 
-            to="/booking-details-assignment-modal"
+          <Link
+            to="/customer-booking-flow"
             className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
           >
-            <Icon name="UserCheck" size={20} />
-            <span className="font-caption font-caption-normal text-xs">Assignments</span>
+            <Icon name="Plus" size={20} />
+            <span className="font-caption font-caption-normal text-xs">New Booking</span>
           </Link>
         </nav>
       </div>

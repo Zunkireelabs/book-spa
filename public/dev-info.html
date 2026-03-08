@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BookSpa - Dev Reference</title>
+    <meta name="robots" content="noindex, nofollow">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f4; color: #1a1a1a; padding: 24px; max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 24px; margin-bottom: 4px; color: #2D5A27; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 32px; }
+        .section { background: #fff; border-radius: 10px; padding: 24px; margin-bottom: 20px; border: 1px solid #e5e7eb; }
+        .section h2 { font-size: 16px; color: #2D5A27; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #2D5A27; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; padding: 10px 12px; background: #f9fafb; color: #6b7280; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        td { padding: 10px 12px; border-top: 1px solid #f3f4f6; }
+        a { color: #2D5A27; text-decoration: none; font-weight: 500; }
+        a:hover { text-decoration: underline; }
+        code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'JetBrains Mono', monospace; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+        .badge-customer { background: #dbeafe; color: #1d4ed8; }
+        .badge-staff { background: #fef3c7; color: #92400e; }
+        .badge-manager { background: #ede9fe; color: #5b21b6; }
+        .badge-admin { background: #fce7f3; color: #9d174d; }
+        .copy-btn { cursor: pointer; background: none; border: 1px solid #d1d5db; border-radius: 4px; padding: 2px 8px; font-size: 11px; color: #6b7280; margin-left: 4px; }
+        .copy-btn:hover { background: #f3f4f6; }
+        .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #92400e; margin-top: 16px; }
+        @media (max-width: 600px) { body { padding: 12px; } .section { padding: 16px; } table { font-size: 13px; } th, td { padding: 8px; } }
+    </style>
+</head>
+<body>
+    <h1>BookSpa Dev Reference</h1>
+    <p class="subtitle">dev-nuad.zunkireelabs.com &mdash; Quick access to all pages and credentials</p>
+
+    <div class="section">
+        <h2>Public Pages</h2>
+        <table>
+            <thead><tr><th>Page</th><th>URL</th><th>Auth</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Booking Wizard (Home)</td>
+                    <td><a href="/" target="_blank">/</a></td>
+                    <td>None</td>
+                </tr>
+                <tr>
+                    <td>Staff Login</td>
+                    <td><a href="/staff-login-authentication" target="_blank">/staff-login-authentication</a></td>
+                    <td>None</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Protected Pages (login required)</h2>
+        <table>
+            <thead><tr><th>Page</th><th>URL</th><th>Allowed Roles</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Staff Dashboard</td>
+                    <td><a href="/branch-staff-dashboard" target="_blank">/branch-staff-dashboard</a></td>
+                    <td><span class="badge badge-staff">Staff</span> <span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+                <tr>
+                    <td>Booking Management</td>
+                    <td><a href="/booking-management-portal" target="_blank">/booking-management-portal</a></td>
+                    <td><span class="badge badge-staff">Staff</span> <span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+                <tr>
+                    <td>Booking Details &amp; Assignment</td>
+                    <td><a href="/booking-details-assignment-modal" target="_blank">/booking-details-assignment-modal</a></td>
+                    <td><span class="badge badge-staff">Staff</span> <span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+                <tr>
+                    <td>Manager Dashboard</td>
+                    <td><a href="/branch-manager-dashboard" target="_blank">/branch-manager-dashboard</a></td>
+                    <td><span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+                <tr>
+                    <td>Operational Calendar</td>
+                    <td><a href="/branch-manager-dashboard?view=calendar" target="_blank">/branch-manager-dashboard?view=calendar</a></td>
+                    <td><span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+                <tr>
+                    <td>Daily Reports</td>
+                    <td><a href="/branch-manager-dashboard?view=reports" target="_blank">/branch-manager-dashboard?view=reports</a></td>
+                    <td><span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+                <tr>
+                    <td>Infrastructure (Rooms/Therapists/Services)</td>
+                    <td><a href="/branch-manager-dashboard?view=infrastructure" target="_blank">/branch-manager-dashboard?view=infrastructure</a></td>
+                    <td><span class="badge badge-manager">Manager</span> <span class="badge badge-admin">Admin</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Admin-Only Features</h2>
+        <table>
+            <thead><tr><th>Feature</th><th>Location</th><th>Description</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Branch Switcher</td>
+                    <td>Manager Dashboard header</td>
+                    <td>Dropdown to switch between branches. Admin sees all branches; managers see a static label.</td>
+                </tr>
+                <tr>
+                    <td>Platform Admin Badge</td>
+                    <td>Sidebar + Dashboard header</td>
+                    <td>Pink "Platform Admin" badge and banner visible only for admin users.</td>
+                </tr>
+                <tr>
+                    <td>Service Management</td>
+                    <td>Infrastructure tab</td>
+                    <td>Global service pricing editor. Only visible to admin role.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Login Credentials (Supabase Auth)</h2>
+        <table>
+            <thead><tr><th>Role</th><th>Name</th><th>Email</th><th>Password</th><th>Redirects To</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td><span class="badge badge-staff">Staff</span></td>
+                    <td>Ramesh Thapa</td>
+                    <td><code>staff@bookspa.com.np</code> <button class="copy-btn" onclick="copy('staff@bookspa.com.np')">copy</button></td>
+                    <td><code>BookSpa@Staff123</code> <button class="copy-btn" onclick="copy('BookSpa@Staff123')">copy</button></td>
+                    <td>Staff Dashboard</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-manager">Manager</span></td>
+                    <td>Rajesh Shrestha</td>
+                    <td><code>manager@bookspa.com.np</code> <button class="copy-btn" onclick="copy('manager@bookspa.com.np')">copy</button></td>
+                    <td><code>BookSpa@Manager123</code> <button class="copy-btn" onclick="copy('BookSpa@Manager123')">copy</button></td>
+                    <td>Manager Dashboard</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-admin">Admin</span></td>
+                    <td>Sunil Maharjan</td>
+                    <td><code>admin@bookspa.com.np</code> <button class="copy-btn" onclick="copy('admin@bookspa.com.np')">copy</button></td>
+                    <td><code>BookSpa@Admin123</code> <button class="copy-btn" onclick="copy('BookSpa@Admin123')">copy</button></td>
+                    <td>Manager Dashboard (with Platform Admin badge + Branch Switcher)</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="note">These are real Supabase Auth credentials. Protected pages redirect to login if not authenticated. All users belong to the Lazimpat branch.</div>
+    </div>
+
+    <div class="section">
+        <h2>Deployment</h2>
+        <table>
+            <thead><tr><th>Command</th><th>What It Does</th></tr></thead>
+            <tbody>
+                <tr><td><code>./deploy.sh</code></td><td>Deploy to dev (dev-nuad.zunkireelabs.com)</td></tr>
+                <tr><td><code>./deploy.sh prod</code></td><td>Deploy to production (URL TBD)</td></tr>
+                <tr><td><code>npm start</code></td><td>Local dev server on port 4028</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function copy(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                btn.textContent = 'copied';
+                setTimeout(() => btn.textContent = 'copy', 1500);
+            });
+        }
+    </script>
+</body>
+</html>

@@ -2,7 +2,7 @@ import React from "react";
 import { BrowserRouter, Routes as RouterRoutes, Route } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
-// Add your imports here
+import ProtectedRoute from "components/ProtectedRoute";
 import CustomerBookingFlow from "pages/customer-booking-flow";
 import StaffLoginAuthentication from "pages/staff-login-authentication";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
@@ -17,14 +17,40 @@ const Routes = () => {
       <ErrorBoundary>
       <ScrollToTop />
       <RouterRoutes>
-        {/* Define your routes here */}
+        {/* Public routes */}
         <Route path="/" element={<CustomerBookingFlow />} />
         <Route path="/customer-booking-flow" element={<CustomerBookingFlow />} />
         <Route path="/staff-login-authentication" element={<StaffLoginAuthentication />} />
-        <Route path="/branch-staff-dashboard" element={<BranchStaffDashboard />} />
-        <Route path="/booking-management-portal" element={<BookingManagementPortal />} />
-        <Route path="/booking-details-assignment-modal" element={<BookingDetailsAssignmentModal />} />
-        <Route path="/branch-manager-dashboard" element={<BranchManagerDashboard />} />
+
+        {/* Protected routes - staff, manager, admin */}
+        <Route path="/branch-staff-dashboard" element={
+          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+            <BranchStaffDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/booking-management-portal" element={
+          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+            <BookingManagementPortal />
+          </ProtectedRoute>
+        } />
+        <Route path="/booking-details-assignment-modal" element={
+          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+            <BookingDetailsAssignmentModal />
+          </ProtectedRoute>
+        } />
+        <Route path="/booking-details/:bookingId" element={
+          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+            <BookingDetailsAssignmentModal />
+          </ProtectedRoute>
+        } />
+
+        {/* Protected routes - manager and admin only */}
+        <Route path="/branch-manager-dashboard" element={
+          <ProtectedRoute allowedRoles={['manager', 'admin']}>
+            <BranchManagerDashboard />
+          </ProtectedRoute>
+        } />
+
         <Route path="*" element={<NotFound />} />
       </RouterRoutes>
       </ErrorBoundary>
