@@ -77,7 +77,7 @@ const BookingDetailsAssignmentModal = () => {
     { id: 'communication', label: 'Communication', icon: 'MessageCircle' }
   ];
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     const from = location.state?.from;
     if (from) {
       navigate(from);
@@ -88,7 +88,7 @@ const BookingDetailsAssignmentModal = () => {
         : '/branch-staff-dashboard';
       navigate(fallback);
     }
-  };
+  }, [location.state?.from, navigate, userRole]);
 
   const showActionError = (msg) => {
     setActionError(msg);
@@ -128,7 +128,6 @@ const BookingDetailsAssignmentModal = () => {
 
   const handleSendMessage = async (messageData) => {
     // Communication not implemented yet
-    console.log('Message sent:', messageData);
   };
 
   const handleRecordPayment = async ({ paymentMode, notes }) => {
@@ -155,7 +154,7 @@ const BookingDetailsAssignmentModal = () => {
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, []);
+  }, [handleClose]);
 
   // Build assignment data for the panel
   const currentAssignment = booking?.therapist ? {

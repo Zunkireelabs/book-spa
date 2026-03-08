@@ -117,11 +117,11 @@ const BranchManagerDashboard = () => {
   }, []);
 
   const handleDateRangeChange = (dateRange) => {
-    console.log('Date range changed:', dateRange);
+    // Date range filter — handled by individual panels
   };
 
   const handleExport = (format) => {
-    console.log('Exporting data in format:', format);
+    // Export handled by DailyOperationalReportPanel
   };
 
   const handleQuickStatusUpdate = async (bookingId, newStatus) => {
@@ -232,7 +232,7 @@ const BranchManagerDashboard = () => {
 
         <div className="lg:ml-64 lg:pb-0 pb-16">
           {/* Header */}
-          <header className="bg-surface border-b border-border sticky top-0 z-10">
+          <header className="bg-surface border-b border-border sticky top-0 z-header">
             <div className="px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex items-center justify-between">
                 {/* Left: Avatar + name + date */}

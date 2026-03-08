@@ -11,7 +11,7 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
   ];
 
   return (
-    <div className="w-full bg-surface border-b border-border sticky top-16 z-10">
+    <div className="w-full bg-surface border-b border-border sticky top-16 z-header">
       <div className="max-w-4xl mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {steps.map((step, index) => (

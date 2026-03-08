@@ -91,7 +91,7 @@ const BranchStaffDashboard = () => {
   // Fetch data on mount and when dateRange filter changes
   useEffect(() => {
     loadData(filters.dateRange);
-  }, [branchId, filters.dateRange]);
+  }, [loadData, filters.dateRange]);
 
   // Filter bookings based on current filters
   useEffect(() => {

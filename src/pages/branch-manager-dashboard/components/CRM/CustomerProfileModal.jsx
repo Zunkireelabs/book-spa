@@ -68,7 +68,7 @@ const CustomerProfileModal = ({ customerId, onClose }) => {
       {/* Modal */}
       <div className="fixed inset-y-0 right-0 w-full max-w-lg bg-surface border-l border-border z-modal-overlay shadow-xl overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-surface border-b border-border px-6 py-4 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-surface border-b border-border px-6 py-4 flex items-center justify-between z-header">
           <h2 className="font-heading font-heading-semibold text-lg text-text-primary">Customer Profile</h2>
           <button
             onClick={onClose}

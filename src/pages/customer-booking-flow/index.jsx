@@ -81,9 +81,6 @@ const CustomerBookingFlow = () => {
     setIsLoading(true);
     
     try {
-      // Simulate API validation
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
       if (currentStep < totalSteps) {
         setCurrentStep(currentStep + 1);
       }
@@ -129,13 +126,11 @@ const CustomerBookingFlow = () => {
   };
 
   const isCustomerInfoValid = () => {
-    return customerInfo.firstName.trim() &&
-           customerInfo.lastName.trim() &&
-           customerInfo.email.trim() &&
-           /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email) &&
-           customerInfo.phone.trim() &&
-           /^[0-9]{10}$/.test(customerInfo.phone.replace(/\s+/g, '')) &&
-           customerInfo.gender;
+    // Only customer name is required per US-CUS-003; email, phone, gender are optional
+    if (!customerInfo.firstName.trim()) return false;
+    if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
+    if (customerInfo.phone.trim() && !/^[0-9]{10}$/.test(customerInfo.phone.replace(/\s+/g, ''))) return false;
+    return true;
   };
 
   const handleBranchSelect = (branch) => {

@@ -146,19 +146,19 @@ CREATE TABLE bookings (
   ),
 
   -- GIST EXCLUSION: Room overlap prevention
-  -- Prevents any two non-cancelled bookings from occupying the same room
-  -- during overlapping time ranges
+  -- Prevents any two active bookings from occupying the same room
+  -- during overlapping time ranges (Cancelled and No Show free the resource)
   CONSTRAINT excl_room_overlap EXCLUDE USING GIST (
     room_id WITH =,
     tstzrange(start_datetime, end_datetime) WITH &&
-  ) WHERE (status != 'Cancelled'),
+  ) WHERE (status NOT IN ('Cancelled', 'No Show')),
 
   -- GIST EXCLUSION: Therapist overlap prevention
   -- Prevents therapist double-booking across overlapping time ranges
   CONSTRAINT excl_therapist_overlap EXCLUDE USING GIST (
     therapist_id WITH =,
     tstzrange(start_datetime, end_datetime) WITH &&
-  ) WHERE (therapist_id IS NOT NULL AND status != 'Cancelled')
+  ) WHERE (therapist_id IS NOT NULL AND status NOT IN ('Cancelled', 'No Show'))
 );
 
 -- Payments (immutable after insert)

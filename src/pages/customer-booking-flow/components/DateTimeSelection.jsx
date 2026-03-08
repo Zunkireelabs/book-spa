@@ -1,25 +1,95 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
+import { supabase } from '../../../lib/supabase';
 
 const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService, genderPreference, onGenderPreferenceChange }) => {
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
+  const [bookedSlots, setBookedSlots] = useState([]);
+  const [therapistCounts, setTherapistCounts] = useState({ male: 0, female: 0 });
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  // Nepal timezone helper
+  const getNepalNow = () => {
+    const now = new Date();
+    // Get current time string in Nepal timezone
+    const nepalTime = now.toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' });
+    return new Date(nepalTime);
+  };
+
+  const getNepalToday = () => {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
+  };
+
+  // Fetch therapist counts for the selected branch (once)
+  useEffect(() => {
+    async function fetchTherapistCounts() {
+      const { data } = await supabase
+        .from('therapists')
+        .select('gender')
+        .eq('is_active', true);
+      if (data) {
+        const male = data.filter(t => t.gender === 'male').length;
+        const female = data.filter(t => t.gender === 'female').length;
+        setTherapistCounts({ male, female });
+      }
+    }
+    fetchTherapistCounts();
+  }, []);
+
+  // Fetch booked therapists for selected date
+  useEffect(() => {
+    if (!selectedDate) return;
+
+    async function fetchBookedSlots() {
+      setLoadingSlots(true);
+      const { data } = await supabase
+        .from('bookings')
+        .select('start_time, therapist:therapists(gender), service:services(duration_minutes)')
+        .eq('date', selectedDate)
+        .not('status', 'in', '("Cancelled","No Show")')
+        .not('therapist_id', 'is', null);
+
+      if (data) {
+        // Build a map of time -> { maleBooked, femaleBooked }
+        const slotMap = {};
+        for (const b of data) {
+          const startH = parseInt(b.start_time?.split(':')[0], 10);
+          const startM = parseInt(b.start_time?.split(':')[1], 10);
+          const duration = b.service?.duration_minutes || 60;
+          const gender = b.therapist?.gender;
+          if (!gender) continue;
+
+          // Mark all 30-min slots this booking occupies
+          for (let offset = 0; offset < duration; offset += 30) {
+            const totalMin = startH * 60 + startM + offset;
+            const slotKey = `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+            if (!slotMap[slotKey]) slotMap[slotKey] = { male: 0, female: 0 };
+            slotMap[slotKey][gender]++;
+          }
+        }
+        setBookedSlots(slotMap);
+      }
+      setLoadingSlots(false);
+    }
+    fetchBookedSlots();
+  }, [selectedDate]);
 
   // Generate next 30 days
-  const generateDates = () => {
-    const dates = [];
+  const dates = useMemo(() => {
+    const result = [];
     const today = new Date();
-    
+
     for (let i = 0; i < 30; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() + i);
-      
+
       const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
       const dayNumber = date.getDate();
       const monthName = date.toLocaleDateString('en-US', { month: 'short' });
       const fullDate = date.toISOString().split('T')[0];
-      
-      dates.push({
+
+      result.push({
         dayName,
         dayNumber,
         monthName,
@@ -28,48 +98,59 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
         isWeekend: date.getDay() === 0 || date.getDay() === 6
       });
     }
-    
-    return dates;
-  };
 
-  // Generate time slots
-  const generateTimeSlots = () => {
+    return result;
+  }, []);
+
+  // Generate time slots with real availability
+  const timeSlots = useMemo(() => {
     const slots = [];
-    const startHour = 9; // 9 AM
-    const endHour = 21; // 9 PM
-    
+    const startHour = 9;
+    const endHour = 21;
+    const nepalNow = getNepalNow();
+    const todayStr = getNepalToday();
+    const isToday = selectedDate === todayStr;
+    const currentHour = nepalNow.getHours();
+    const currentMinute = nepalNow.getMinutes();
+
     for (let hour = startHour; hour < endHour; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
         const time24 = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
         const timeObj = new Date();
         timeObj.setHours(hour, minute);
-        const time12 = timeObj.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit', 
-          hour12: true 
+        const time12 = timeObj.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
         });
-        
-        // Mock availability based on time and gender preference
-        const maleAvailable = Math.random() > 0.3;
-        const femaleAvailable = Math.random() > 0.2;
-        
+
+        // Disable past time slots for today
+        const isPast = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
+
+        // Real availability: total therapists minus booked ones
+        const booked = bookedSlots[time24] || { male: 0, female: 0 };
+        const maleAvailable = therapistCounts.male - booked.male > 0;
+        const femaleAvailable = therapistCounts.female - booked.female > 0;
+
+        const isAvailable = !isPast && (
+          (genderPreference === 'male' && maleAvailable) ||
+          (genderPreference === 'female' && femaleAvailable) ||
+          (genderPreference === 'no-preference' && (maleAvailable || femaleAvailable))
+        );
+
         slots.push({
           time24,
           time12,
           maleAvailable,
           femaleAvailable,
-          isAvailable: (genderPreference === 'male' && maleAvailable) || 
-                      (genderPreference === 'female' && femaleAvailable) ||
-                      (genderPreference === 'no-preference' && (maleAvailable || femaleAvailable))
+          isPast,
+          isAvailable
         });
       }
     }
-    
-    return slots;
-  };
 
-  const dates = generateDates();
-  const timeSlots = generateTimeSlots();
+    return slots;
+  }, [selectedDate, bookedSlots, therapistCounts, genderPreference]);
 
   const handleDateSelect = (date) => {
     setSelectedDate(date);
@@ -140,13 +221,13 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                 option.color === 'pink' ? 'bg-pink-100' :
                 option.color === 'blue' ? 'bg-blue-100' : 'bg-primary/10'
               }`}>
-                <Icon 
-                  name={option.icon} 
-                  size={16} 
+                <Icon
+                  name={option.icon}
+                  size={16}
                   className={
                     option.color === 'pink' ? 'text-pink-600' :
                     option.color === 'blue' ? 'text-blue-600' : 'text-primary'
-                  } 
+                  }
                 />
               </div>
               <span className="font-body font-body-medium text-sm text-text-primary">
@@ -197,33 +278,43 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
           <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
             Available Time Slots
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {timeSlots.map((slot) => (
-              <button
-                key={slot.time24}
-                onClick={() => slot.isAvailable && handleTimeSelect(slot.time24)}
-                disabled={!slot.isAvailable}
-                className={`flex flex-col items-center p-3 rounded-spa spa-transition-fast spa-touch-target ${
-                  !slot.isAvailable
-                    ? 'opacity-50 cursor-not-allowed bg-background text-text-secondary'
-                    : selectedTime === slot.time24
-                      ? 'bg-primary text-primary-foreground'
-                      : 'hover:bg-background text-text-secondary hover:text-text-primary border border-border hover:border-primary/50'
-                }`}
-              >
-                <span className="font-body font-body-medium text-sm mb-1">
-                  {slot.time12}
-                </span>
-                {slot.isAvailable && (
-                  <div className="flex items-center space-x-1">
-                    {getTherapistIcon(slot)}
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-          
-          {timeSlots.filter(slot => slot.isAvailable).length === 0 && (
+          {loadingSlots ? (
+            <div className="text-center py-8">
+              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
+              <p className="font-body font-body-normal text-text-secondary">Checking availability...</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {timeSlots.map((slot) => (
+                <button
+                  key={slot.time24}
+                  onClick={() => slot.isAvailable && handleTimeSelect(slot.time24)}
+                  disabled={!slot.isAvailable}
+                  className={`flex flex-col items-center p-3 rounded-spa spa-transition-fast spa-touch-target ${
+                    !slot.isAvailable
+                      ? 'opacity-50 cursor-not-allowed bg-background text-text-secondary'
+                      : selectedTime === slot.time24
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-background text-text-secondary hover:text-text-primary border border-border hover:border-primary/50'
+                  }`}
+                >
+                  <span className="font-body font-body-medium text-sm mb-1">
+                    {slot.time12}
+                  </span>
+                  {slot.isAvailable && (
+                    <div className="flex items-center space-x-1">
+                      {getTherapistIcon(slot)}
+                    </div>
+                  )}
+                  {slot.isPast && (
+                    <span className="font-caption text-xs text-text-secondary">Past</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!loadingSlots && timeSlots.filter(slot => slot.isAvailable).length === 0 && (
             <div className="text-center py-8">
               <Icon name="Calendar" size={48} className="text-text-secondary mx-auto mb-4" />
               <p className="font-body font-body-normal text-text-secondary">

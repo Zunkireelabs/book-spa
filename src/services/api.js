@@ -11,7 +11,7 @@ function resolveBranchId(branchId) {
 function addMinutesToTime(timeStr, minutes) {
   const [h, m] = timeStr.split(':').map(Number);
   const total = h * 60 + m + minutes;
-  const newH = Math.floor(total / 60);
+  const newH = Math.floor(total / 60) % 24; // Handle midnight overflow
   const newM = total % 60;
   return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
 }
@@ -21,7 +21,7 @@ function addMinutesToTime(timeStr, minutes) {
 // ============================================================
 
 const VALID_TRANSITIONS = {
-  'Pending':      ['Confirmed'],
+  'Pending':      ['Confirmed', 'Cancelled'],
   'Confirmed':    ['In-Progress', 'Cancelled', 'No Show'],
   'In-Progress':  ['Completed'],
   'Completed':    [],
@@ -200,9 +200,9 @@ export async function recordPayment({ bookingId, paymentMode, notes }) {
       return { data: null, error: { code: 'ALREADY_PAID', message: 'Payment has already been recorded for this booking.' } };
     }
 
-    // 4. Status check — payment allowed for Confirmed + Completed
-    if (!['Confirmed', 'Completed'].includes(booking.status)) {
-      return { data: null, error: { code: 'INVALID_PAYMENT_STATE', message: 'Payment can only be recorded for Confirmed or Completed bookings.' } };
+    // 4. Status check — payment allowed for Confirmed, In-Progress, Completed
+    if (!['Confirmed', 'In-Progress', 'Completed'].includes(booking.status)) {
+      return { data: null, error: { code: 'INVALID_PAYMENT_STATE', message: 'Payment can only be recorded for Confirmed, In-Progress, or Completed bookings.' } };
     }
 
     // 5. Auth
@@ -1239,8 +1239,10 @@ export async function searchBookings(branchId, query) {
       .limit(20);
 
     // Search across booking_number, customer_name, customer_phone
+    // Sanitize to prevent PostgREST filter injection
+    const sanitized = searchTerm.replace(/[,.()"\\]/g, '');
     dbQuery = dbQuery.or(
-      `booking_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,customer_phone.ilike.%${searchTerm}%`
+      `booking_number.ilike.%${sanitized}%,customer_name.ilike.%${sanitized}%,customer_phone.ilike.%${sanitized}%`
     );
 
     const { data, error } = await dbQuery;

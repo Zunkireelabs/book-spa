@@ -244,24 +244,26 @@ const LoginForm = () => {
         </div>
       </form>
 
-      {/* Demo Credentials Info */}
-      <div className="mt-8 p-4 bg-accent/5 border border-accent/20 rounded-spa">
-        <h4 className="font-heading font-heading-medium text-sm text-text-primary mb-3 flex items-center space-x-2">
-          <Icon name="Info" size={16} className="text-accent" />
-          <span>Demo Credentials</span>
-        </h4>
-        <div className="space-y-2 text-xs">
-          <div className="font-data font-data-normal text-text-secondary">
-            <strong>Staff:</strong> staff@bookspa.com.np / BookSpa@Staff123
-          </div>
-          <div className="font-data font-data-normal text-text-secondary">
-            <strong>Manager:</strong> manager@bookspa.com.np / BookSpa@Manager123
-          </div>
-          <div className="font-data font-data-normal text-text-secondary">
-            <strong>Admin:</strong> admin@bookspa.com.np / BookSpa@Admin123
+      {/* Demo Credentials Info — only in development */}
+      {import.meta.env.DEV && (
+        <div className="mt-8 p-4 bg-accent/5 border border-accent/20 rounded-spa">
+          <h4 className="font-heading font-heading-medium text-sm text-text-primary mb-3 flex items-center space-x-2">
+            <Icon name="Info" size={16} className="text-accent" />
+            <span>Demo Credentials (Dev Only)</span>
+          </h4>
+          <div className="space-y-2 text-xs">
+            <div className="font-data font-data-normal text-text-secondary">
+              <strong>Staff:</strong> staff@bookspa.com.np / BookSpa@Staff123
+            </div>
+            <div className="font-data font-data-normal text-text-secondary">
+              <strong>Manager:</strong> manager@bookspa.com.np / BookSpa@Manager123
+            </div>
+            <div className="font-data font-data-normal text-text-secondary">
+              <strong>Admin:</strong> admin@bookspa.com.np / BookSpa@Admin123
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
