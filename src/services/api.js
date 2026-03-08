@@ -139,7 +139,7 @@ export async function fetchTherapists(branchId) {
   }
 }
 
-export async function fetchBookings(branchId, { date, status } = {}) {
+export async function fetchBookings(branchId, { date, dateFrom, dateTo, status } = {}) {
   try {
     let query = supabase
       .from('bookings')
@@ -154,6 +154,8 @@ export async function fetchBookings(branchId, { date, status } = {}) {
 
     if (date) {
       query = query.eq('date', date);
+    } else if (dateFrom && dateTo) {
+      query = query.gte('date', dateFrom).lte('date', dateTo);
     }
 
     if (status) {
@@ -448,6 +450,97 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     };
   } catch (error) {
     console.error('[API] applyDiscount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Reschedule a booking to a new date/time.
+ * Validates lifecycle, checks room availability, and updates the booking.
+ */
+export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
+  try {
+    // 1. Fetch booking with service duration and room
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, status, is_locked, payment_status, room_id, service:services(duration_minutes)')
+      .eq('id', bookingId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+
+    // 2. Lifecycle checks (not terminal, not locked)
+    const mutationError = validateBookingMutation(booking);
+    if (mutationError) return { data: null, error: mutationError };
+
+    // 3. Cannot reschedule paid bookings
+    if (booking.payment_status === 'paid') {
+      return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot reschedule a paid booking.' } };
+    }
+
+    // 4. Auth check
+    const { user, profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    // 5. Compute end_time from service duration
+    const durationMinutes = booking.service?.duration_minutes;
+    if (!durationMinutes) {
+      return { data: null, error: { code: 'SERVICE_NOT_FOUND', message: 'Could not determine service duration for this booking.' } };
+    }
+    const newEndTime = addMinutesToTime(newStartTime, durationMinutes);
+
+    // 6. Check room availability — overlapping bookings in same room (exclude cancelled/no-show)
+    if (booking.room_id) {
+      const { data: conflicts, error: conflictError } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('room_id', booking.room_id)
+        .eq('booking_date', newDate)
+        .not('status', 'in', '("Cancelled","No Show")')
+        .neq('id', bookingId)
+        .lt('start_time', newEndTime)
+        .gt('end_time', newStartTime);
+
+      if (conflictError) throw conflictError;
+
+      if (conflicts && conflicts.length > 0) {
+        return {
+          data: null,
+          error: { code: 'ROOM_CONFLICT', message: 'The room is not available at the requested date/time.' },
+        };
+      }
+    }
+
+    // 7. Update the booking
+    const { data: updated, error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        booking_date: newDate,
+        start_time: newStartTime,
+      })
+      .eq('id', bookingId)
+      .select('id, booking_date, start_time, end_time')
+      .single();
+
+    if (updateError) throw updateError;
+
+    return {
+      data: {
+        success: true,
+        bookingId,
+        bookingDate: updated.booking_date,
+        startTime: updated.start_time,
+        endTime: updated.end_time,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] rescheduleBooking error:', error.message);
     return { data: null, error };
   }
 }

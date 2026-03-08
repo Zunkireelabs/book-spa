@@ -13,7 +13,7 @@ const DATE_RANGE_LABELS = {
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
 
-const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onRefresh, dateRange = 'today' }) => {
+const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onApplyDiscount, userRole = 'staff', onRefresh, dateRange = 'today' }) => {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
 
@@ -235,6 +235,8 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         onAssignTherapist={onAssignTherapist}
         onUpdateStatus={onStatusUpdate}
         onRecordPayment={onRecordPayment}
+        onApplyDiscount={onApplyDiscount}
+        userRole={userRole}
       />
     </>
   );

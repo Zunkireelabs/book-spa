@@ -5,8 +5,9 @@ import BookingsList from './components/BookingsList';
 import TherapistAvailability from './components/TherapistAvailability';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment } from '../../services/api';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
+import { supabase } from '../../lib/supabase';
 
 const BranchStaffDashboard = () => {
   const { profile } = useAuth();
@@ -45,11 +46,18 @@ const BranchStaffDashboard = () => {
         tomorrow.setDate(tomorrow.getDate() + 1);
         return { date: fmt(tomorrow) };
       }
-      case 'week':
-      case 'month':
-        // Fetch all bookings (no date filter) — client-side filtering not needed
-        // since we want to show everything in the range
-        return {};
+      case 'week': {
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - today.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        return { dateFrom: fmt(weekStart), dateTo: fmt(weekEnd) };
+      }
+      case 'month': {
+        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+        const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        return { dateFrom: fmt(monthStart), dateTo: fmt(monthEnd) };
+      }
       default:
         return { date: fmt(today) };
     }
@@ -66,22 +74,33 @@ const BranchStaffDashboard = () => {
       fetchTherapists(branchId),
     ]);
 
+    const transformed = bookingsResult.data ? transformBookings(bookingsResult.data) : [];
     if (bookingsResult.data) {
-      const transformed = transformBookings(bookingsResult.data);
       setBookings(transformed);
       calculateBookingCounts(transformed);
     }
 
     if (therapistsResult.data) {
-      const mapped = therapistsResult.data.map(t => ({
-        id: t.id,
-        name: t.name,
-        gender: t.gender,
-        specialties: t.specialties || [],
-        room: null,
-        status: 'available',
-        currentBooking: null,
-      }));
+      const mapped = therapistsResult.data.map(t => {
+        // Check if therapist has an in-progress booking right now
+        const activeBooking = transformed.find(b =>
+          b.therapistId === t.id &&
+          b.status === 'in-progress'
+        );
+        const upcomingBooking = transformed.find(b =>
+          b.therapistId === t.id &&
+          ['confirmed', 'pending'].includes(b.status)
+        );
+        return {
+          id: t.id,
+          name: t.name,
+          gender: t.gender,
+          specialties: t.specialties || [],
+          room: null,
+          status: activeBooking ? 'busy' : upcomingBooking ? 'upcoming' : 'available',
+          currentBooking: activeBooking ? activeBooking.service : null,
+        };
+      });
       setTherapists(mapped);
     }
 
@@ -92,6 +111,23 @@ const BranchStaffDashboard = () => {
   useEffect(() => {
     loadData(filters.dateRange);
   }, [loadData, filters.dateRange]);
+
+  // Real-time subscription for booking changes
+  useEffect(() => {
+    if (!branchId) return;
+    const channel = supabase
+      .channel(`bookings-staff-${branchId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `branch_id=eq.${branchId}`
+      }, () => {
+        loadData();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [branchId, loadData]);
 
   // Filter bookings based on current filters
   useEffect(() => {
@@ -204,6 +240,18 @@ const BranchStaffDashboard = () => {
     return { error: null };
   };
 
+  // Wire to real API: applyDiscount
+  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason }) => {
+    setActionError(null);
+    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason });
+    if (result.error) {
+      return { error: result.error };
+    }
+    showSuccess('Discount applied successfully');
+    await loadData();
+    return { error: null };
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <StaffHeader />
@@ -243,6 +291,8 @@ const BranchStaffDashboard = () => {
                 onStatusUpdate={handleStatusUpdate}
                 onAssignTherapist={handleAssignTherapist}
                 onRecordPayment={handleRecordPayment}
+                onApplyDiscount={handleApplyDiscount}
+                userRole={profile?.role || 'staff'}
                 onRefresh={loadData}
                 dateRange={filters.dateRange}
               />

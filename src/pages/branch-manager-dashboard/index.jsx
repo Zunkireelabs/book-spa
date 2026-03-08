@@ -9,6 +9,7 @@ import { useBranch } from '../../contexts/BranchContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
 import { fetchBookings, fetchTherapists, updateBookingStatus } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
+import { supabase } from '../../lib/supabase';
 
 // Import all components
 import MetricsCard from './components/MetricsCard';
@@ -65,6 +66,23 @@ const BranchManagerDashboard = () => {
   }, [branchId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Real-time subscription for booking changes
+  useEffect(() => {
+    if (!branchId) return;
+    const channel = supabase
+      .channel(`bookings-manager-${branchId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `branch_id=eq.${branchId}`
+      }, () => {
+        loadData();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [branchId, loadData]);
 
   // Compute live metrics from real bookings
   const totalBookings = bookings.length;

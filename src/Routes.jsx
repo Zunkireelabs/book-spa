@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes as RouterRoutes, Route } from "react-router-dom";
+import { BrowserRouter, Routes as RouterRoutes, Route, useLocation } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
@@ -11,10 +11,10 @@ import BookingDetailsAssignmentModal from "pages/booking-details-assignment-moda
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import NotFound from "pages/NotFound";
 
-const Routes = () => {
+const AppRoutes = () => {
+  const location = useLocation();
   return (
-    <BrowserRouter>
-      <ErrorBoundary>
+      <ErrorBoundary key={location.pathname}>
       <ScrollToTop />
       <RouterRoutes>
         {/* Public routes */}
@@ -54,8 +54,13 @@ const Routes = () => {
         <Route path="*" element={<NotFound />} />
       </RouterRoutes>
       </ErrorBoundary>
-    </BrowserRouter>
   );
 };
+
+const Routes = () => (
+  <BrowserRouter>
+    <AppRoutes />
+  </BrowserRouter>
+);
 
 export default Routes;

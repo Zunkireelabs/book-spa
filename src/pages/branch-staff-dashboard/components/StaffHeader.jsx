@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -6,6 +6,19 @@ import { useAuth } from '../../../contexts/AuthContext';
 const StaffHeader = ({ userName: propName, branchName: propBranch }) => {
   const { profile, signOut } = useAuth();
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowProfileDropdown(false);
+      }
+    };
+    if (showProfileDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showProfileDropdown]);
 
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = profile?.branches?.name || propBranch || 'Main Branch';
@@ -113,7 +126,7 @@ const StaffHeader = ({ userName: propName, branchName: propBranch }) => {
             </button>
 
             {/* Profile Dropdown */}
-            <div className="relative">
+            <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setShowProfileDropdown(!showProfileDropdown)}
                 className="flex items-center space-x-3 px-3 py-2 rounded-spa hover:bg-background spa-transition-fast"

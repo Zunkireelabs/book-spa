@@ -10,7 +10,9 @@ const BookingActionModal = ({
   therapists = [],
   onAssignTherapist,
   onUpdateStatus,
-  onRecordPayment
+  onRecordPayment,
+  onApplyDiscount,
+  userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
   const [selectedTherapist, setSelectedTherapist] = useState('');
@@ -19,16 +21,24 @@ const BookingActionModal = ({
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
 
+  // Discount state
+  const [discountType, setDiscountType] = useState('percentage');
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountReason, setDiscountReason] = useState('');
+  const [discountError, setDiscountError] = useState(null);
+  const [discountSuccess, setDiscountSuccess] = useState(false);
+
   const tabs = [
     { id: 'details', label: 'Booking Details', icon: 'FileText' },
     { id: 'assign', label: 'Assign Therapist', icon: 'UserCheck' },
+    { id: 'discount', label: 'Discount', icon: 'Percent' },
     { id: 'payment', label: 'Payment', icon: 'CreditCard' }
   ];
 
   // Valid next-status transitions (lowercase UI values)
   const getNextStatuses = (currentStatus) => {
     const transitions = {
-      'pending': ['confirmed'],
+      'pending': ['confirmed', 'cancelled'],
       'confirmed': ['in-progress', 'cancelled', 'no show'],
       'in-progress': ['completed'],
     };
@@ -83,6 +93,41 @@ const BookingActionModal = ({
     }
   };
 
+  const handleApplyDiscount = async () => {
+    if (!booking || !onApplyDiscount) return;
+    setDiscountError(null);
+    setDiscountSuccess(false);
+
+    if (!discountValue || Number(discountValue) <= 0) {
+      setDiscountError('Please enter a valid discount value.');
+      return;
+    }
+    if (!discountReason.trim()) {
+      setDiscountError('A reason is required for the discount.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await onApplyDiscount(booking.bookingId, {
+        discountType,
+        discountValue: Number(discountValue),
+        discountReason: discountReason.trim()
+      });
+      if (result?.error) {
+        setDiscountError(result.error.message || 'Failed to apply discount.');
+      } else {
+        setDiscountSuccess(true);
+        setDiscountValue('');
+        setDiscountReason('');
+      }
+    } catch (error) {
+      setDiscountError('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (!isOpen || !booking) return null;
 
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
@@ -102,7 +147,9 @@ const BookingActionModal = ({
   };
 
   const nextStatuses = getNextStatuses(booking.status);
-  const canPay = ['confirmed', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isMutationBlocked;
+  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isMutationBlocked;
+  const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
+  const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
 
   return (
     <>
@@ -351,6 +398,134 @@ const BookingActionModal = ({
                     className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                   />
                 </div>
+              </div>
+            )}
+
+            {/* Discount Tab */}
+            {activeTab === 'discount' && (
+              <div className="space-y-6">
+                <h3 className="font-heading font-heading-medium text-base text-text-primary">
+                  Apply Discount
+                </h3>
+
+                {!canDiscount ? (
+                  <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-gray-50 border border-gray-200">
+                    <Icon name="Lock" size={16} className="text-gray-500" />
+                    <span className="font-body font-body-medium text-xs text-gray-600">
+                      {booking.paymentStatus === 'paid'
+                        ? 'Cannot modify discount on a paid booking.'
+                        : 'Discount changes are not allowed for this booking state.'}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    {/* Current pricing */}
+                    <div className="bg-background rounded-spa p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-body font-body-normal text-sm text-text-secondary">Base Amount</span>
+                        <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
+                      </div>
+                      {booking.discountAmount > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span className="font-body font-body-normal text-sm text-text-secondary">Current Discount</span>
+                          <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between border-t border-border pt-2">
+                        <span className="font-body font-body-medium text-sm text-text-primary">Final Amount</span>
+                        <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
+                      </div>
+                    </div>
+
+                    {/* Role limit info */}
+                    <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-accent/5 border border-accent/20">
+                      <Icon name="Info" size={14} className="text-accent" />
+                      <span className="font-caption font-caption-normal text-xs text-accent">
+                        Your role ({userRole}) allows up to {discountLimitLabel} discount.
+                      </span>
+                    </div>
+
+                    {/* Discount type */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {['percentage', 'fixed'].map(type => (
+                        <label
+                          key={type}
+                          className={`flex items-center space-x-2 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                            discountType === type ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="discountType"
+                            value={type}
+                            checked={discountType === type}
+                            onChange={() => setDiscountType(type)}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="font-body font-body-medium text-sm text-text-primary capitalize">
+                            {type === 'percentage' ? 'Percentage (%)' : 'Fixed (NPR)'}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+
+                    {/* Discount value */}
+                    <div className="space-y-2">
+                      <label className="font-body font-body-medium text-sm text-text-primary">
+                        {discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount (NPR)'}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={discountType === 'percentage' ? 100 : booking.baseAmount}
+                        step={discountType === 'percentage' ? 1 : 10}
+                        value={discountValue}
+                        onChange={(e) => setDiscountValue(e.target.value)}
+                        placeholder={discountType === 'percentage' ? 'e.g. 5' : 'e.g. 200'}
+                        className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                      />
+                    </div>
+
+                    {/* Reason */}
+                    <div className="space-y-2">
+                      <label className="font-body font-body-medium text-sm text-text-primary">
+                        Reason <span className="text-error">*</span>
+                      </label>
+                      <textarea
+                        value={discountReason}
+                        onChange={(e) => setDiscountReason(e.target.value)}
+                        placeholder="Why is this discount being applied? (required)"
+                        rows={2}
+                        className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
+                      />
+                    </div>
+
+                    {/* Error / Success */}
+                    {discountError && (
+                      <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
+                        <Icon name="AlertTriangle" size={14} className="text-error" />
+                        <span className="font-body font-body-normal text-xs text-error">{discountError}</span>
+                      </div>
+                    )}
+                    {discountSuccess && (
+                      <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-success/10 border border-success/20">
+                        <Icon name="CheckCircle" size={14} className="text-success" />
+                        <span className="font-body font-body-normal text-xs text-success">Discount applied successfully.</span>
+                      </div>
+                    )}
+
+                    <Button
+                      variant="primary"
+                      onClick={handleApplyDiscount}
+                      loading={isLoading}
+                      disabled={!discountValue || !discountReason.trim()}
+                      iconName="Percent"
+                      iconPosition="left"
+                    >
+                      Apply Discount
+                    </Button>
+                  </>
+                )}
               </div>
             )}
 

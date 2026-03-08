@@ -8,7 +8,7 @@ import RescheduleModal from './components/RescheduleModal';
 import CancellationModal from './components/CancellationModal';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
-import { searchBookings, updateBookingStatus } from '../../services/api';
+import { searchBookings, updateBookingStatus, rescheduleBooking } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 
@@ -70,9 +70,22 @@ const BookingManagementPortal = () => {
     }
   };
 
-  const handleRescheduleConfirm = (updatedBooking) => {
-    setCurrentBooking(updatedBooking);
+  const handleRescheduleConfirm = async ({ bookingId, newDate, newStartTime }) => {
+    const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
+
+    if (result.error) {
+      return result; // RescheduleModal displays error
+    }
+
+    // Refresh current booking with updated data
+    if (result.data) {
+      const transformed = transformBookings([result.data]);
+      if (transformed.length > 0) {
+        setCurrentBooking(transformed[0]);
+      }
+    }
     showNotification('Booking rescheduled successfully!', 'success');
+    return result;
   };
 
   const handleCancellationConfirm = (cancelledBooking) => {
