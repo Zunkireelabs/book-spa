@@ -109,13 +109,17 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
               <Icon name="Calendar" size={16} />
               <span className="font-body font-body-medium text-sm">Bookings</span>
             </button>
-            <Link
-              to="/customer-booking-flow"
-              className="flex items-center space-x-2 px-3 py-2 rounded-spa text-text-secondary hover:text-primary hover:bg-background spa-transition-fast"
+            <button
+              onClick={() => onViewChange?.('new-booking')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-spa spa-transition-fast ${
+                viewMode === 'new-booking'
+                  ? 'text-primary bg-primary/5'
+                  : 'text-text-secondary hover:text-primary hover:bg-background'
+              }`}
             >
               <Icon name="Plus" size={16} />
               <span className="font-body font-body-medium text-sm">New Booking</span>
-            </Link>
+            </button>
           </nav>
 
           {/* Right Section */}
@@ -225,13 +229,17 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
             <Icon name="Calendar" size={20} />
             <span className="font-caption font-caption-normal text-xs">Bookings</span>
           </button>
-          <Link
-            to="/customer-booking-flow"
-            className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
+          <button
+            onClick={() => onViewChange?.('new-booking')}
+            className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
+              viewMode === 'new-booking'
+                ? 'text-primary bg-primary/5'
+                : 'text-text-secondary hover:text-primary'
+            }`}
           >
             <Icon name="Plus" size={20} />
             <span className="font-caption font-caption-normal text-xs">New Booking</span>
-          </Link>
+          </button>
         </nav>
       </div>
     </header>

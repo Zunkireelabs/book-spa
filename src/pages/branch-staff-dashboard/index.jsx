@@ -3,6 +3,7 @@ import StaffHeader from './components/StaffHeader';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingLookupPanel from './components/BookingLookupPanel';
+import StaffBookingForm from './components/StaffBookingForm';
 import TherapistAvailability from './components/TherapistAvailability';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
@@ -311,7 +312,7 @@ const BranchStaffDashboard = () => {
               />
             </div>
           </div>
-        ) : (
+        ) : viewMode === 'bookings' ? (
           <BookingLookupPanel
             therapists={therapists}
             onStatusUpdate={handleStatusUpdate}
@@ -321,6 +322,8 @@ const BranchStaffDashboard = () => {
             userRole={profile?.role || 'staff'}
             onRefresh={loadData}
           />
+        ) : (
+          <StaffBookingForm onBookingCreated={loadData} />
         )}
       </div>
     </div>
