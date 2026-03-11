@@ -150,19 +150,7 @@ const BookingConfirmation = ({
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Icon name="CheckCircle" size={32} className="text-primary" />
-        </div>
-        <h2 className="font-heading font-heading-semibold text-2xl text-text-primary mb-2">
-          Confirm Your Booking
-        </h2>
-        <p className="font-body font-body-normal text-text-secondary">
-          Please review your booking details before confirming
-        </p>
-      </div>
-
+    <div className="space-y-4">
       {/* Service Image */}
       <div className="relative overflow-hidden rounded-spa-lg">
         <Image

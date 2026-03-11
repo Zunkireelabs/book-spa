@@ -140,16 +140,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
   };
 
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="font-heading font-heading-semibold text-2xl text-text-primary mb-2">
-          Your Information
-        </h2>
-        <p className="font-body font-body-normal text-text-secondary">
-          Please provide your details to complete the booking
-        </p>
-      </div>
-
+    <div className="space-y-4">
       {/* Booking Summary */}
       <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-6">
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4 flex items-center">

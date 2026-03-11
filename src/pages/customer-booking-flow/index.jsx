@@ -267,7 +267,7 @@ const CustomerBookingFlow = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pt-32">
       <CustomerHeader />
       
       {/* Progress Indicator */}
@@ -279,12 +279,12 @@ const CustomerBookingFlow = () => {
       )}
 
       {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 py-8 lg:py-12">
+      <main className="max-w-4xl mx-auto px-4 py-4 lg:py-6">
         {/* Step Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center space-x-2 mb-4">
-            <Icon name="Sparkles" size={24} className="text-primary" />
-            <h1 className="font-heading font-heading-semibold text-3xl text-text-primary">
+        <div className="text-center mb-4">
+          <div className="flex items-center justify-center space-x-2 mb-2">
+            <Icon name="Sparkles" size={20} className="text-primary" />
+            <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
               {getStepTitle()}
             </h1>
           </div>

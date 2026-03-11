@@ -29,8 +29,8 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
         .select('gender')
         .eq('is_active', true);
       if (data) {
-        const male = data.filter(t => t.gender === 'male').length;
-        const female = data.filter(t => t.gender === 'female').length;
+        const male = data.filter(t => t.gender?.toLowerCase() === 'male').length;
+        const female = data.filter(t => t.gender?.toLowerCase() === 'female').length;
         setTherapistCounts({ male, female });
       }
     }
@@ -57,7 +57,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
           const startH = parseInt(b.start_time?.split(':')[0], 10);
           const startM = parseInt(b.start_time?.split(':')[1], 10);
           const duration = b.service?.duration_minutes || 60;
-          const gender = b.therapist?.gender;
+          const gender = b.therapist?.gender?.toLowerCase();
           if (!gender) continue;
 
           // Mark all 30-min slots this booking occupies
@@ -181,16 +181,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
   };
 
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="font-heading font-heading-semibold text-2xl text-text-primary mb-2">
-          Select Date & Time
-        </h2>
-        <p className="font-body font-body-normal text-text-secondary">
-          Choose your preferred appointment time for {selectedService?.name}
-        </p>
-      </div>
-
+    <div className="space-y-4">
       {/* Gender Preference */}
       <div className="bg-surface rounded-spa-lg border border-border p-6">
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">

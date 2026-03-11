@@ -11,13 +11,13 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
   ];
 
   return (
-    <div className="w-full bg-surface border-b border-border sticky top-16 z-header">
-      <div className="max-w-4xl mx-auto px-4 py-4">
+    <div className="w-full bg-surface border-b border-border fixed top-16 left-0 right-0 z-header">
+      <div className="max-w-4xl mx-auto px-4 py-2">
         <div className="flex items-center justify-between">
           {steps.map((step, index) => (
             <div key={step.id} className="flex items-center flex-1">
               <div className="flex flex-col items-center">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center spa-transition-fast ${
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center spa-transition-fast ${
                   currentStep >= step.id 
                     ? 'bg-primary text-primary-foreground' 
                     : 'bg-background border-2 border-border text-text-secondary'
@@ -27,7 +27,7 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
                     size={16} 
                   />
                 </div>
-                <span className={`font-caption font-caption-normal text-xs mt-2 hidden sm:block ${
+                <span className={`font-caption font-caption-normal text-xs mt-1 hidden sm:block ${
                   currentStep >= step.id ? 'text-primary' : 'text-text-secondary'
                 }`}>
                   {step.label}
@@ -43,7 +43,7 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
         </div>
         
         {/* Mobile step indicator */}
-        <div className="sm:hidden mt-3 text-center">
+        <div className="sm:hidden mt-2 text-center">
           <span className="font-body font-body-medium text-sm text-text-primary">
             Step {currentStep} of {totalSteps}: {steps[currentStep - 1]?.label}
           </span>

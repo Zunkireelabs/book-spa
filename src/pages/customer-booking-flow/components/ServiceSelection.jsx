@@ -40,28 +40,8 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     }).format(price);
   };
 
-  const getTherapistAvailability = (service) => {
-    if (!selectedBranch) return { male: 0, female: 0 };
-    
-    const available = {
-      male: service.therapistPreference.includes('male') ? selectedBranch.availableTherapists.male : 0,
-      female: service.therapistPreference.includes('female') ? selectedBranch.availableTherapists.female : 0
-    };
-    
-    return available;
-  };
-
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="font-heading font-heading-semibold text-2xl text-text-primary mb-2">
-          Select Your Service
-        </h2>
-        <p className="font-body font-body-normal text-text-secondary">
-          Choose from our premium spa treatments at {selectedBranch?.name}
-        </p>
-      </div>
-
+    <div className="space-y-4">
       {loading && (
         <div className="flex items-center justify-center py-12">
           <Icon name="Loader2" size={24} className="text-primary animate-spin" />
@@ -85,20 +65,14 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {!loading && !error && services.length > 0 && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {services.map((service) => {
-          const availability = getTherapistAvailability(service);
-          const isAvailable = availability.male > 0 || availability.female > 0;
-          
-          return (
+        {services.map((service) => (
             <div
               key={service.id}
-              onClick={() => isAvailable && onServiceSelect(service)}
-              className={`bg-surface rounded-spa-lg border-2 spa-transition-fast ${
-                !isAvailable
-                  ? 'opacity-50 cursor-not-allowed border-border'
-                  : selectedService?.id === service.id
-                    ? 'border-primary bg-primary/5 cursor-pointer hover:spa-shadow-elevated'
-                    : 'border-border hover:border-primary/50 cursor-pointer hover:spa-shadow-elevated'
+              onClick={() => onServiceSelect(service)}
+              className={`bg-surface rounded-spa-lg border-2 spa-transition-fast cursor-pointer hover:spa-shadow-elevated ${
+                selectedService?.id === service.id
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-primary/50'
               }`}
             >
               <div className="relative overflow-hidden rounded-t-spa-lg">
@@ -124,13 +98,6 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     {formatPrice(service.price)}
                   </span>
                 </div>
-                {!isAvailable && (
-                  <div className="absolute inset-0 bg-text-primary/50 flex items-center justify-center">
-                    <span className="bg-surface px-3 py-1 rounded-spa font-body font-body-medium text-sm text-text-primary">
-                      Not Available
-                    </span>
-                  </div>
-                )}
               </div>
 
               <div className="p-6">
@@ -162,57 +129,24 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                   {service.description}
                 </p>
 
-                <div className="space-y-3">
-                  <div>
-                    <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
-                      Benefits
-                    </h4>
-                    <div className="flex flex-wrap gap-1">
-                      {service.benefits.map((benefit) => (
-                        <span
-                          key={benefit}
-                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
-                        >
-                          {benefit}
-                        </span>
-                      ))}
-                    </div>
+                <div>
+                  <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
+                    Benefits
+                  </h4>
+                  <div className="flex flex-wrap gap-1">
+                    {service.benefits.map((benefit) => (
+                      <span
+                        key={benefit}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
+                      >
+                        {benefit}
+                      </span>
+                    ))}
                   </div>
-
-                  {isAvailable && (
-                    <div>
-                      <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
-                        Available Therapists
-                      </h4>
-                      <div className="flex items-center space-x-3">
-                        {availability.male > 0 && (
-                          <div className="flex items-center space-x-1">
-                            <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center">
-                              <Icon name="User" size={10} className="text-blue-600" />
-                            </div>
-                            <span className="font-caption font-caption-normal text-xs text-text-secondary">
-                              {availability.male} Male
-                            </span>
-                          </div>
-                        )}
-                        {availability.female > 0 && (
-                          <div className="flex items-center space-x-1">
-                            <div className="w-5 h-5 bg-pink-100 rounded-full flex items-center justify-center">
-                              <Icon name="User" size={10} className="text-pink-600" />
-                            </div>
-                            <span className="font-caption font-caption-normal text-xs text-text-secondary">
-                              {availability.female} Female
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
-          );
-        })}
+        ))}
       </div>
       )}
     </div>
