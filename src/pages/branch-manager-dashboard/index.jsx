@@ -299,7 +299,7 @@ const BranchManagerDashboard = () => {
 
         <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:pb-0 pb-16 spa-transition-slow`}>
           {/* Header */}
-          <header className="bg-surface border-b border-border sticky top-0 z-header">
+          <header className="bg-[#FAFAFA] sticky top-0 z-header">
             <div className="px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex items-center justify-between">
                 {/* Left: Branch name + date/time */}
@@ -381,21 +381,6 @@ const BranchManagerDashboard = () => {
             </div>
           </header>
 
-          {/* Admin Mode Banner */}
-          {profile?.role === 'admin' && (
-            <div className="bg-pink-50 border-b border-pink-200 px-4 sm:px-6 lg:px-8 py-2">
-              <div className="flex items-center space-x-2 text-pink-700">
-                <Icon name="Shield" size={16} />
-                <span className="font-body font-body-medium text-sm">
-                  Platform Admin Mode
-                </span>
-                <span className="font-body font-body-normal text-xs text-pink-500">
-                  — Viewing: {branchName || 'All Branches'}
-                </span>
-              </div>
-            </div>
-          )}
-
           {/* Closed Day Banner */}
           {viewMode === 'dashboard' && !loading && bookings.length > 0 && bookings.some(b => b.isLocked) && (
             <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2">
@@ -443,7 +428,7 @@ const BranchManagerDashboard = () => {
           )}
 
           {/* Main Content Area */}
-          <main className="px-4 sm:px-6 lg:px-8 py-6">
+          <main className="px-4 sm:px-6 lg:px-8 py-6 bg-white rounded-tl-spa-lg border-l border-t border-[rgba(0,0,29,0.075)]">
             {viewMode === 'dashboard' && renderDashboardView()}
             {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
             {viewMode === 'calendar' && renderCalendarView()}

@@ -284,6 +284,7 @@ const RealtimeBookingFeed = ({
                     <Button
                       variant="outline"
                       size="xs"
+                      className="border-primary text-primary hover:bg-primary/10 hover:text-primary"
                       onClick={() => onQuickStatusUpdate(booking.bookingId, 'confirmed')}
                     >
                       Confirm

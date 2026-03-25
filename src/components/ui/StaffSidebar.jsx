@@ -161,12 +161,12 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className={`fixed left-0 top-0 h-full bg-surface border-r border-border z-staff-sidebar spa-transition-slow ${
+      <aside style={{ backgroundColor: '#FAFAFA' }} className={`fixed left-0 top-0 h-full z-staff-sidebar spa-transition-slow ${
         isCollapsed ? 'w-16' : 'w-64'
       } hidden lg:block`}>
         <div className="flex flex-col h-full">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="flex items-center justify-between p-4">
             {!isCollapsed && (
               <Link to="/branch-staff-dashboard" className="flex items-center space-x-2">
                 <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
@@ -210,34 +210,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
             </button>
           </div>
 
-          {/* User Info */}
-          {!isCollapsed && (
-            <div className="p-4 border-b border-border">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                  <Icon name="User" size={20} className="text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-body font-body-medium text-sm text-text-primary truncate">
-                    {userName}
-                  </p>
-                  <p className="font-caption font-caption-normal text-xs text-text-secondary truncate">
-                    {branchName}
-                  </p>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize ${
-                    userRole === 'admin'
-                      ? 'bg-pink-100 text-pink-700'
-                      : 'bg-accent/10 text-accent'
-                  }`}>
-                    {userRole === 'admin' ? 'Platform Admin' : userRole}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Navigation — grouped sections */}
-          <nav className="flex-1 overflow-y-auto sidebar-scroll px-3 py-3">
+          <nav className="flex-1 overflow-y-auto sidebar-scroll px-3 pt-1 pb-3">
             {filteredSections.map((section, sIdx) => (
               <div key={section.id} className={sIdx > 0 ? 'mt-4' : ''}>
                 {/* Section label */}
@@ -258,8 +232,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                       to={item.path}
                       className={`flex items-center space-x-3 px-3 py-2 rounded-spa spa-transition-fast spa-touch-target ${
                         isActive(item.path)
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-text-secondary hover:text-text-primary hover:bg-background'
+                          ? 'bg-[rgba(0,0,23,0.043)] border border-[rgba(0,0,29,0.075)] text-text-primary'
+                          : 'text-text-secondary hover:text-text-primary hover:bg-background border border-transparent'
                       } ${isCollapsed ? 'justify-center' : ''}`}
                     >
                       <Icon name={item.icon} size={20} />
@@ -301,7 +275,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface border-t border-border z-staff-sidebar">
+      <nav style={{ backgroundColor: '#FAFAFA' }} className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border z-staff-sidebar">
         <div className="flex items-center justify-around py-2">
           {mobilePrimaryItems.map((item) => (
             <Link
@@ -309,7 +283,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               to={item.path}
               className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast spa-touch-target ${
                 isActive(item.path)
-                  ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
+                  ? 'text-text-primary bg-[rgba(0,0,23,0.043)] border border-[rgba(0,0,29,0.075)]'
+                  : 'text-text-secondary hover:text-primary border border-transparent'
               }`}
             >
               <Icon name={item.icon} size={20} />
@@ -353,8 +328,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                     onClick={() => setMobileMoreOpen(false)}
                     className={`flex items-center space-x-3 px-3 py-2.5 rounded-spa spa-transition-fast ${
                       isActive(item.path)
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-text-secondary hover:text-text-primary hover:bg-background'
+                        ? 'bg-[rgba(0,0,23,0.043)] border border-[rgba(0,0,29,0.075)] text-text-primary'
+                        : 'text-text-secondary hover:text-text-primary hover:bg-background border border-transparent'
                     }`}
                   >
                     <Icon name={item.icon} size={20} />

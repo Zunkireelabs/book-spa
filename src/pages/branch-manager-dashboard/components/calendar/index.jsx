@@ -55,7 +55,7 @@ function getStepDays(viewMode) {
 
 // ── Component ────────────────────────────────────────────────
 
-const OperationalCalendar = ({ branchId, heightOffset = 140 }) => {
+const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   // View state
   const [currentDate, setCurrentDate] = useState(todayStr());
   const [viewMode, setViewMode] = useState('day'); // day | 4day
@@ -207,7 +207,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 140 }) => {
 
   if (error && !calendarData) {
     return (
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border p-8">
+      <div className="bg-surface rounded-spa-lg border border-border p-8">
         <div className="text-center py-8">
           <Icon name="AlertCircle" size={48} className="text-error mx-auto mb-4" />
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary mb-2">
@@ -230,7 +230,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 140 }) => {
 
   return (
     <>
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border overflow-hidden flex flex-col" style={{ height: `calc(100vh - ${heightOffset}px)` }}>
+      <div className="bg-surface rounded-spa-lg overflow-hidden flex flex-col" style={{ height: `calc(100vh - ${heightOffset}px)` }}>
         {/* Top toolbar */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
           {/* Left: Navigation */}

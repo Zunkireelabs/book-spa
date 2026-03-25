@@ -148,6 +148,16 @@ const BookingsViewPanel = ({ branchId }) => {
     return { error: null };
   };
 
+  const getOverviewTitle = () => {
+    switch (filters.dateRange) {
+      case 'today': return "Today's Overview";
+      case 'tomorrow': return "Tomorrow's Overview";
+      case 'week': return "This Week's Overview";
+      case 'month': return "This Month's Overview";
+      default: return "Overview";
+    }
+  };
+
   return (
     <div className="relative">
       {/* Toast */}
@@ -159,39 +169,63 @@ const BookingsViewPanel = ({ branchId }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-3">
+      <div className="bg-white rounded-spa-lg min-h-[calc(100vh-140px)]">
+        {/* Overview Stats */}
+        <h2 className="font-heading font-heading-semibold text-lg text-text-primary mb-4">{getOverviewTitle()}</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Confirmed</div>
+            <div className="font-heading font-heading-semibold text-2xl text-success">{bookingCounts.confirmed}</div>
+          </div>
+          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Pending</div>
+            <div className="font-heading font-heading-semibold text-2xl text-warning">{bookingCounts.pending}</div>
+          </div>
+          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">In Progress</div>
+            <div className="font-heading font-heading-semibold text-2xl text-primary">{bookingCounts.inProgress}</div>
+          </div>
+          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Completed</div>
+            <div className="font-heading font-heading-semibold text-2xl text-text-secondary">{bookingCounts.completed}</div>
+          </div>
+        </div>
+
+        {/* Inline Filters */}
+        <div className="mb-6">
           <QuickFilters
             onFiltersChange={setFilters}
             bookingCounts={bookingCounts}
           />
         </div>
 
-        <div className="lg:col-span-6">
-          {loading ? (
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
-              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-              <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
-            </div>
-          ) : (
-            <BookingsList
-              bookings={filteredBookings}
-              therapists={therapists}
-              onStatusUpdate={handleStatusUpdate}
-              onAssignTherapist={handleAssignTherapist}
-              onRecordPayment={handleRecordPayment}
-              onRefresh={loadData}
-              dateRange={filters.dateRange}
-            />
-          )}
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-9">
+            {loading ? (
+              <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-12 text-center">
+                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+                <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+              </div>
+            ) : (
+              <BookingsList
+                bookings={filteredBookings}
+                therapists={therapists}
+                onStatusUpdate={handleStatusUpdate}
+                onAssignTherapist={handleAssignTherapist}
+                onRecordPayment={handleRecordPayment}
+                onRefresh={loadData}
+                dateRange={filters.dateRange}
+              />
+            )}
+          </div>
 
-        <div className="lg:col-span-3">
-          <TherapistAvailability
-            therapists={therapists}
-            pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
-            onAssignTherapist={handleAssignTherapist}
-          />
+          <div className="lg:col-span-3">
+            <TherapistAvailability
+              therapists={therapists}
+              pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
+              onAssignTherapist={handleAssignTherapist}
+            />
+          </div>
         </div>
       </div>
     </div>

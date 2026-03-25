@@ -42,9 +42,9 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Therapist Availability */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-4">
+      <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-heading font-heading-semibold text-base text-text-primary">
             Therapist Availability
@@ -119,7 +119,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
 
       {/* Pending Assignments — from real data */}
       {pendingBookings.length > 0 && (
-        <div className="bg-surface rounded-spa-lg spa-shadow-resting p-4">
+        <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-heading font-heading-semibold text-base text-text-primary">
               Pending Assignments
@@ -152,7 +152,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
       )}
 
       {/* Quick Actions */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-4">
+      <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
         <h2 className="font-heading font-heading-semibold text-base text-text-primary mb-3">
           Quick Actions
         </h2>

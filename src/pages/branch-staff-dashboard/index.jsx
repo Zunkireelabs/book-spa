@@ -292,6 +292,16 @@ const BranchStaffDashboard = () => {
     setFilters(newFilters);
   };
 
+  const getOverviewTitle = () => {
+    switch (filters.dateRange) {
+      case 'today': return "Today's Overview";
+      case 'tomorrow': return "Tomorrow's Overview";
+      case 'week': return "This Week's Overview";
+      case 'month': return "This Month's Overview";
+      default: return "Overview";
+    }
+  };
+
   // Handle viewing a booking from the new booking notification
   const handleViewNewBooking = (bookingDate) => {
     const today = new Date();
@@ -388,15 +398,15 @@ const BranchStaffDashboard = () => {
   const userRole = profile?.role || 'staff';
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen" style={{ backgroundColor: '#FAFAFA' }}>
       <StaffSidebar
         onCollapseChange={setSidebarCollapsed}
       />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:pb-0 pb-16 spa-transition-slow`}>
         {/* Compact Top Bar */}
-        <header className="bg-surface border-b border-border sticky top-0 z-header">
-          <div className="px-4 sm:px-6 lg:px-8 py-3">
+        <header style={{ backgroundColor: '#FAFAFA' }} className="sticky top-0 z-header">
+          <div className="px-2 sm:px-3 lg:px-4 py-2">
             <div className="flex items-center justify-between">
               {/* Left: Branch + date/time */}
               <div className="flex items-center space-x-3 min-w-0">
@@ -505,19 +515,42 @@ const BranchStaffDashboard = () => {
           </div>
         )}
 
-        <div className="px-4 sm:px-6 lg:px-8 py-6">
+        <div className="px-2 sm:px-3 lg:px-4 py-2">
           {viewMode === 'dashboard' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6">
-              <div className="md:col-span-1 lg:col-span-3">
+            <div className="bg-white rounded-spa-lg pt-6 pl-[34px] pr-4 pb-4 shadow-sm border border-[rgba(0,0,29,0.102)] min-h-[calc(100vh-100px)]">
+              {/* Overview Stats */}
+              <h2 className="font-heading font-heading-semibold text-lg text-text-primary mb-4">{getOverviewTitle()}</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Confirmed</div>
+                  <div className="font-heading font-heading-semibold text-2xl text-success">{bookingCounts.confirmed}</div>
+                </div>
+                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Pending</div>
+                  <div className="font-heading font-heading-semibold text-2xl text-warning">{bookingCounts.pending}</div>
+                </div>
+                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">In Progress</div>
+                  <div className="font-heading font-heading-semibold text-2xl text-primary">{bookingCounts.inProgress}</div>
+                </div>
+                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
+                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Completed</div>
+                  <div className="font-heading font-heading-semibold text-2xl text-text-secondary">{bookingCounts.completed}</div>
+                </div>
+              </div>
+
+              {/* Inline Filters */}
+              <div className="mb-6">
                 <QuickFilters
                   onFiltersChange={handleFiltersChange}
                   bookingCounts={bookingCounts}
                 />
               </div>
 
-              <div className="md:col-span-1 lg:col-span-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <div className="lg:col-span-9">
                 {loading ? (
-                  <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
+                  <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-12 text-center">
                     <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
                     <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
                   </div>
@@ -536,12 +569,13 @@ const BranchStaffDashboard = () => {
                 )}
               </div>
 
-              <div className="md:col-span-2 lg:col-span-3">
+              <div className="lg:col-span-3">
                 <TherapistAvailability
                   therapists={therapists}
                   pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
                   onAssignTherapist={handleAssignTherapist}
                 />
+              </div>
               </div>
             </div>
           ) : viewMode === 'bookings' ? (

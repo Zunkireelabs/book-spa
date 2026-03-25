@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
-import Select from '../../../components/ui/Select';
-import Input from '../../../components/ui/Input';
 
 const QuickFilters = ({ onFiltersChange, bookingCounts }) => {
   const [filters, setFilters] = useState({
@@ -53,104 +51,66 @@ const QuickFilters = ({ onFiltersChange, bookingCounts }) => {
     onFiltersChange(defaultFilters);
   };
 
-  return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
-          Quick Filters
-        </h2>
-        <button
-          onClick={clearFilters}
-          className="flex items-center space-x-1 px-3 py-1 text-xs text-text-secondary hover:text-primary spa-transition-fast"
-        >
-          <Icon name="RotateCcw" size={14} />
-          <span>Clear</span>
-        </button>
-      </div>
+  const hasActiveFilters = filters.search || filters.dateRange !== 'today' || filters.serviceType !== 'all' || filters.status !== 'all';
 
-      {/* Search */}
-      <div className="space-y-2">
-        <Input
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {/* Search Input */}
+      <div className="relative flex-1 min-w-[200px] max-w-md">
+        <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+        <input
           type="search"
           placeholder="Search by ID, phone, or email..."
           value={filters.search}
           onChange={(e) => handleFilterChange('search', e.target.value)}
-          className="w-full"
+          className="w-full pl-9 pr-3 py-2 text-sm border border-[rgba(0,0,29,0.102)] rounded-spa bg-surface focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
           aria-label="Search bookings by ID, phone, or email"
         />
       </div>
 
       {/* Date Range Filter */}
-      <div className="space-y-2">
-        <Select
-          label="Date Range"
-          options={dateRangeOptions}
-          value={filters.dateRange}
-          onChange={(value) => handleFilterChange('dateRange', value)}
-        />
-      </div>
+      <select
+        value={filters.dateRange}
+        onChange={(e) => handleFilterChange('dateRange', e.target.value)}
+        className="px-3 py-2 text-sm border border-[rgba(0,0,29,0.102)] rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer"
+      >
+        {dateRangeOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
 
       {/* Service Type Filter */}
-      <div className="space-y-2">
-        <Select
-          label="Service Type"
-          options={serviceTypeOptions}
-          value={filters.serviceType}
-          onChange={(value) => handleFilterChange('serviceType', value)}
-        />
-      </div>
+      <select
+        value={filters.serviceType}
+        onChange={(e) => handleFilterChange('serviceType', e.target.value)}
+        className="px-3 py-2 text-sm border border-[rgba(0,0,29,0.102)] rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer"
+      >
+        {serviceTypeOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
 
       {/* Status Filter */}
-      <div className="space-y-2">
-        <Select
-          label="Booking Status"
-          options={statusOptions}
-          value={filters.status}
-          onChange={(value) => handleFilterChange('status', value)}
-        />
-      </div>
+      <select
+        value={filters.status}
+        onChange={(e) => handleFilterChange('status', e.target.value)}
+        className="px-3 py-2 text-sm border border-[rgba(0,0,29,0.102)] rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer"
+      >
+        {statusOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
 
-      {/* Booking Counts */}
-      <div className="space-y-3 pt-4 border-t border-border">
-        <h3 className="font-body font-body-medium text-sm text-text-primary">
-          Today's Overview
-        </h3>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="text-center p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-success">
-              {bookingCounts.confirmed}
-            </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
-              Confirmed
-            </div>
-          </div>
-          <div className="text-center p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-warning">
-              {bookingCounts.pending}
-            </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
-              Pending
-            </div>
-          </div>
-          <div className="text-center p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-primary">
-              {bookingCounts.inProgress}
-            </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
-              In Progress
-            </div>
-          </div>
-          <div className="text-center p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-text-secondary">
-              {bookingCounts.completed}
-            </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
-              Completed
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Clear Filters Button */}
+      {hasActiveFilters && (
+        <button
+          onClick={clearFilters}
+          className="flex items-center space-x-1 px-3 py-2 text-sm text-text-secondary hover:text-primary border border-[rgba(0,0,29,0.102)] rounded-spa bg-surface spa-transition-fast"
+        >
+          <Icon name="X" size={14} />
+          <span>Clear</span>
+        </button>
+      )}
     </div>
   );
 };

@@ -59,9 +59,9 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
 
   return (
     <>
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting">
+      <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)]">
         {/* Header */}
-        <div className="p-6 border-b border-border space-y-3">
+        <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
               {DATE_RANGE_LABELS[dateRange] || "Appointments"}
@@ -79,7 +79,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         </div>
 
         {/* Bookings List */}
-        <div className="divide-y divide-border max-h-96 overflow-y-auto">
+        <div className="divide-y divide-border overflow-y-auto">
           {bookings.length === 0 ? (
             <div className="p-8 text-center">
               <Icon name="Calendar" size={48} className="text-text-secondary mx-auto mb-4" />
@@ -92,7 +92,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
             </div>
           ) : (
             bookings.map((booking) => (
-              <div key={booking.bookingId} className="p-4 hover:bg-background spa-transition-fast">
+              <div key={booking.bookingId} className="p-3 hover:bg-background spa-transition-fast">
                 <div className="flex items-center justify-between">
                   {/* Booking Info */}
                   <div className="flex items-center space-x-4 flex-1">
@@ -172,8 +172,9 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
                       <>
                         {booking.status === 'pending' && (
                           <Button
-                            variant="success"
+                            variant="outline"
                             size="xs"
+                            className="border-primary text-primary hover:bg-primary/10 hover:text-primary"
                             onClick={() => handleQuickStatusUpdate(booking, 'confirmed')}
                           >
                             Confirm
