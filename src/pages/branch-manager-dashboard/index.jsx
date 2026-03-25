@@ -47,6 +47,8 @@ const BranchManagerDashboard = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [newBookingNotification, setNewBookingNotification] = useState(null);
+  const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
 
   const managerData = {
     name: profile?.full_name || 'Manager',
@@ -72,6 +74,39 @@ const BranchManagerDashboard = () => {
   // Real-time subscription for booking changes
   useEffect(() => {
     if (!branchId) return;
+
+    const handleRealtimeUpdate = (payload) => {
+      // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
+      setTimeout(() => {
+        loadData();
+
+        // Show notification for new bookings not for today
+        if (payload.eventType === 'INSERT' && payload.new) {
+          const newBooking = payload.new;
+          const today = new Date().toISOString().split('T')[0];
+          const isToday = newBooking.date === today;
+
+          if (!isToday && newBooking.date) {
+            const bookingDate = new Date(newBooking.date);
+            const formattedDate = bookingDate.toLocaleDateString('en-GB', {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short'
+            });
+            setNewBookingNotification({
+              message: `New booking received for ${formattedDate}`,
+              customerName: newBooking.customer_name,
+              date: newBooking.date,
+              bookingNumber: newBooking.booking_number
+            });
+
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => setNewBookingNotification(null), 8000);
+          }
+        }
+      }, 150);
+    };
+
     const channel = supabase
       .channel(`bookings-manager-${branchId}`)
       .on('postgres_changes', {
@@ -79,10 +114,15 @@ const BranchManagerDashboard = () => {
         schema: 'public',
         table: 'bookings',
         filter: `branch_id=eq.${branchId}`
-      }, () => {
-        loadData();
-      })
-      .subscribe();
+      }, handleRealtimeUpdate)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setRealtimeStatus('connected');
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setRealtimeStatus('disconnected');
+        }
+      });
+
     return () => { supabase.removeChannel(channel); };
   }, [branchId, loadData]);
 
@@ -144,6 +184,12 @@ const BranchManagerDashboard = () => {
     // Export handled by DailyOperationalReportPanel
   };
 
+  // Handle viewing a booking from the new booking notification
+  const handleViewNewBooking = () => {
+    setNewBookingNotification(null);
+    navigate('?view=bookings');
+  };
+
   const handleQuickStatusUpdate = async (bookingId, newStatus) => {
     const dbStatus = toDbStatus(newStatus);
     const result = await updateBookingStatus({ bookingId, newStatus: dbStatus });
@@ -200,6 +246,7 @@ const BranchManagerDashboard = () => {
         <TopPerformersCard branchId={branchId} />
         <RealtimeBookingFeed
           bookings={bookings}
+          branchId={branchId}
           onQuickStatusUpdate={handleQuickStatusUpdate}
         />
       </div>
@@ -271,8 +318,27 @@ const BranchManagerDashboard = () => {
                   </p>
                 </div>
 
-                {/* Right: Role badge + New Booking + Profile */}
+                {/* Right: Real-time status + Role badge + New Booking + Profile */}
                 <div className="flex items-center space-x-3 flex-shrink-0">
+                  {/* Real-time Status Indicator */}
+                  <div
+                    className="hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full bg-background border border-border"
+                    title={`Real-time: ${realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}`}
+                  >
+                    <span className="relative flex h-2 w-2">
+                      {realtimeStatus === 'connected' && (
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+                      )}
+                      <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                        realtimeStatus === 'connected' ? 'bg-success' :
+                        realtimeStatus === 'connecting' ? 'bg-warning' : 'bg-error'
+                      }`}></span>
+                    </span>
+                    <span className="text-xs font-caption font-caption-medium text-text-secondary">
+                      {realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}
+                    </span>
+                  </div>
+
                   <span className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize ${
                     profile?.role === 'admin'
                       ? 'bg-pink-100 text-pink-700'
@@ -338,6 +404,40 @@ const BranchManagerDashboard = () => {
                 <span className="font-body font-body-medium text-sm">
                   This day is closed. Financial records are locked.
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* New Booking Notification Toast */}
+          {newBookingNotification && (
+            <div className="fixed top-20 right-6 z-50 bg-primary text-white px-5 py-3 rounded-lg shadow-lg animate-fade-in max-w-sm">
+              <div className="flex items-start space-x-3">
+                <div className="flex-shrink-0 mt-0.5">
+                  <Icon name="CalendarPlus" size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-body font-body-medium text-sm">{newBookingNotification.message}</p>
+                  {newBookingNotification.customerName && (
+                    <p className="font-caption text-xs text-white/80 mt-0.5 truncate">
+                      {newBookingNotification.customerName}
+                      {newBookingNotification.bookingNumber && ` - ${newBookingNotification.bookingNumber}`}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center space-x-2 flex-shrink-0">
+                  <button
+                    onClick={handleViewNewBooking}
+                    className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-body font-body-medium transition-colors"
+                  >
+                    View
+                  </button>
+                  <button
+                    onClick={() => setNewBookingNotification(null)}
+                    className="hover:opacity-80 text-white/80 hover:text-white"
+                  >
+                    <Icon name="X" size={16} />
+                  </button>
+                </div>
               </div>
             </div>
           )}

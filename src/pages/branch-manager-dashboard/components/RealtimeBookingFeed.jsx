@@ -1,9 +1,80 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import { supabase } from '../../../lib/supabase';
+import { fetchBookings } from '../../../services/api';
+import { transformBookings } from '../../../services/bookingTransformers';
 
-const RealtimeBookingFeed = ({ bookings = [], onQuickStatusUpdate }) => {
+const RealtimeBookingFeed = ({
+  bookings: propBookings,
+  onQuickStatusUpdate,
+  branchId
+}) => {
   const [filter, setFilter] = useState('all');
+  const [internalBookings, setInternalBookings] = useState([]);
+  const [connectionStatus, setConnectionStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
+  const [lastUpdate, setLastUpdate] = useState(null);
+
+  // Use prop bookings if provided, otherwise use internal state
+  const bookings = propBookings || internalBookings;
+
+  // Load bookings data
+  const loadBookings = useCallback(async () => {
+    if (!branchId) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const result = await fetchBookings(branchId, { date: today });
+
+    if (result.data) {
+      setInternalBookings(transformBookings(result.data));
+      setLastUpdate(new Date());
+    }
+  }, [branchId]);
+
+  // Set up real-time subscription when branchId is available
+  useEffect(() => {
+    if (!branchId) return;
+
+    // Initial load
+    loadBookings();
+
+    const handleRealtimeUpdate = () => {
+      setTimeout(() => {
+        loadBookings();
+      }, 150);
+    };
+
+    const channel = supabase
+      .channel(`realtime-feed-${branchId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `branch_id=eq.${branchId}`
+      }, handleRealtimeUpdate)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setConnectionStatus('connected');
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setConnectionStatus('disconnected');
+        } else if (status === 'TIMED_OUT') {
+          setConnectionStatus('disconnected');
+        }
+      });
+
+    // Handle connection state changes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadBookings();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      supabase.removeChannel(channel);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [branchId, loadBookings]);
 
   const getStatusConfig = (status) => {
     switch (status) {
@@ -22,11 +93,54 @@ const RealtimeBookingFeed = ({ bookings = [], onQuickStatusUpdate }) => {
     }
   };
 
+  const getConnectionStatusConfig = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return {
+          color: 'bg-success',
+          pulseColor: 'bg-success',
+          label: 'Live',
+          icon: 'Wifi'
+        };
+      case 'connecting':
+        return {
+          color: 'bg-warning',
+          pulseColor: 'bg-warning',
+          label: 'Connecting',
+          icon: 'Loader'
+        };
+      case 'disconnected':
+        return {
+          color: 'bg-error',
+          pulseColor: 'bg-error',
+          label: 'Offline',
+          icon: 'WifiOff'
+        };
+      default:
+        return {
+          color: 'bg-text-secondary',
+          pulseColor: 'bg-text-secondary',
+          label: 'Unknown',
+          icon: 'HelpCircle'
+        };
+    }
+  };
+
   const formatTime = (timeString) => {
     if (!timeString) return '';
     return new Date(`2024-01-01 ${timeString}`).toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  const formatLastUpdate = () => {
+    if (!lastUpdate) return '';
+    return lastUpdate.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
       hour12: true
     });
   };
@@ -40,6 +154,7 @@ const RealtimeBookingFeed = ({ bookings = [], onQuickStatusUpdate }) => {
 
   const pendingCount = bookings.filter(b => b.status === 'pending').length;
   const unassignedCount = bookings.filter(b => !b.therapist).length;
+  const connectionConfig = getConnectionStatusConfig();
 
   return (
     <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
@@ -56,6 +171,39 @@ const RealtimeBookingFeed = ({ bookings = [], onQuickStatusUpdate }) => {
               {bookings.length} bookings today
             </p>
           </div>
+        </div>
+
+        {/* Real-time Status Indicator */}
+        <div className="flex items-center space-x-2">
+          {lastUpdate && connectionStatus === 'connected' && (
+            <span className="text-xs text-text-secondary hidden sm:inline">
+              Updated {formatLastUpdate()}
+            </span>
+          )}
+          <div
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-background border border-border"
+            title={`Real-time: ${connectionConfig.label}`}
+          >
+            <span className="relative flex h-2 w-2">
+              {connectionStatus === 'connected' && (
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${connectionConfig.pulseColor} opacity-75`}></span>
+              )}
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${connectionConfig.color}`}></span>
+            </span>
+            <span className="text-xs font-caption font-caption-medium text-text-secondary">
+              {connectionConfig.label}
+            </span>
+          </div>
+          {connectionStatus === 'disconnected' && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={loadBookings}
+              title="Refresh"
+            >
+              <Icon name="RefreshCw" size={14} />
+            </Button>
+          )}
         </div>
       </div>
 

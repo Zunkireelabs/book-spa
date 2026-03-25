@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
@@ -30,6 +30,9 @@ const BranchStaffDashboard = () => {
     search: ''
   });
 
+  // Ref to track current dateRange for real-time callbacks (avoids stale closures)
+  const dateRangeRef = useRef(filters.dateRange);
+
   const [bookings, setBookings] = useState([]);
   const [filteredBookings, setFilteredBookings] = useState([]);
   const [therapists, setTherapists] = useState([]);
@@ -42,6 +45,41 @@ const BranchStaffDashboard = () => {
     inProgress: 0,
     completed: 0
   });
+  const [newBookingNotification, setNewBookingNotification] = useState(null);
+  const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
+
+  // Helper to format date as YYYY-MM-DD
+  const formatDate = useCallback((d) => d.toISOString().split('T')[0], []);
+
+  // Check if a booking date falls within the current date filter
+  const isDateInCurrentFilter = useCallback((bookingDate, dateRange) => {
+    const today = new Date();
+    const booking = new Date(bookingDate);
+
+    switch (dateRange) {
+      case 'today':
+        return formatDate(booking) === formatDate(today);
+      case 'tomorrow': {
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return formatDate(booking) === formatDate(tomorrow);
+      }
+      case 'week': {
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - today.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        return booking >= weekStart && booking <= weekEnd;
+      }
+      case 'month': {
+        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+        const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        return booking >= monthStart && booking <= monthEnd;
+      }
+      default:
+        return formatDate(booking) === formatDate(today);
+    }
+  }, [formatDate]);
 
   // Compute date filter from dateRange value
   const getDateFilter = useCallback((dateRange) => {
@@ -122,9 +160,50 @@ const BranchStaffDashboard = () => {
     loadData(filters.dateRange);
   }, [loadData, filters.dateRange]);
 
+  // Keep ref in sync with current dateRange filter
+  useEffect(() => {
+    dateRangeRef.current = filters.dateRange;
+  }, [filters.dateRange]);
+
   // Real-time subscription for booking changes
   useEffect(() => {
     if (!branchId) return;
+
+    console.log('[Realtime] Setting up subscription for branch:', branchId);
+
+    const handleRealtimeUpdate = (payload) => {
+      console.log('[Realtime] Received event:', payload);
+      // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
+      setTimeout(() => {
+        // Use ref to get current dateRange, avoiding stale closure
+        loadData(dateRangeRef.current);
+
+        // Show notification for new bookings outside current date filter
+        if (payload.eventType === 'INSERT' && payload.new) {
+          const newBooking = payload.new;
+          const isInView = isDateInCurrentFilter(newBooking.date, dateRangeRef.current);
+
+          if (!isInView && newBooking.date) {
+            const bookingDate = new Date(newBooking.date);
+            const formattedDate = bookingDate.toLocaleDateString('en-GB', {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short'
+            });
+            setNewBookingNotification({
+              message: `New booking received for ${formattedDate}`,
+              customerName: newBooking.customer_name,
+              date: newBooking.date,
+              bookingNumber: newBooking.booking_number
+            });
+
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => setNewBookingNotification(null), 8000);
+          }
+        }
+      }, 150);
+    };
+
     const channel = supabase
       .channel(`bookings-staff-${branchId}`)
       .on('postgres_changes', {
@@ -132,12 +211,18 @@ const BranchStaffDashboard = () => {
         schema: 'public',
         table: 'bookings',
         filter: `branch_id=eq.${branchId}`
-      }, () => {
-        loadData();
-      })
-      .subscribe();
+      }, handleRealtimeUpdate)
+      .subscribe((status, err) => {
+        console.log('[Realtime] Subscription status:', status, err || '');
+        if (status === 'SUBSCRIBED') {
+          setRealtimeStatus('connected');
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setRealtimeStatus('disconnected');
+        }
+      });
+
     return () => { supabase.removeChannel(channel); };
-  }, [branchId, loadData]);
+  }, [branchId, loadData, isDateInCurrentFilter]);
 
   // Filter bookings based on current filters
   useEffect(() => {
@@ -205,6 +290,37 @@ const BranchStaffDashboard = () => {
 
   const handleFiltersChange = (newFilters) => {
     setFilters(newFilters);
+  };
+
+  // Handle viewing a booking from the new booking notification
+  const handleViewNewBooking = (bookingDate) => {
+    const today = new Date();
+    const booking = new Date(bookingDate);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Determine which filter to set based on booking date
+    let newDateRange = 'today';
+    if (formatDate(booking) === formatDate(today)) {
+      newDateRange = 'today';
+    } else if (formatDate(booking) === formatDate(tomorrow)) {
+      newDateRange = 'tomorrow';
+    } else {
+      // For other dates, use week or month view
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+
+      if (booking >= weekStart && booking <= weekEnd) {
+        newDateRange = 'week';
+      } else {
+        newDateRange = 'month';
+      }
+    }
+
+    setFilters(prev => ({ ...prev, dateRange: newDateRange }));
+    setNewBookingNotification(null);
   };
 
   // Wire to real API: updateBookingStatus
@@ -303,8 +419,26 @@ const BranchStaffDashboard = () => {
                 </p>
               </div>
 
-              {/* Right: Role badge + Profile */}
+              {/* Right: Real-time status + Role badge + Profile */}
               <div className="flex items-center space-x-3 flex-shrink-0">
+                {/* Real-time Status Indicator */}
+                <div
+                  className="hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full bg-background border border-border"
+                  title={`Real-time: ${realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}`}
+                >
+                  <span className="relative flex h-2 w-2">
+                    {realtimeStatus === 'connected' && (
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+                    )}
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                      realtimeStatus === 'connected' ? 'bg-success' :
+                      realtimeStatus === 'connecting' ? 'bg-warning' : 'bg-error'
+                    }`}></span>
+                  </span>
+                  <span className="text-xs font-caption font-caption-medium text-text-secondary">
+                    {realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}
+                  </span>
+                </div>
                 <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize bg-accent/10 text-accent">
                   {userRole}
                 </span>
@@ -336,6 +470,38 @@ const BranchStaffDashboard = () => {
         {actionSuccess && (
           <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-success text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
             <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
+          </div>
+        )}
+        {newBookingNotification && (
+          <div className="fixed top-20 right-6 z-toast bg-primary text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in max-w-sm">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0 mt-0.5">
+                <Icon name="CalendarPlus" size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-body font-body-medium text-sm">{newBookingNotification.message}</p>
+                {newBookingNotification.customerName && (
+                  <p className="font-caption text-xs text-white/80 mt-0.5 truncate">
+                    {newBookingNotification.customerName}
+                    {newBookingNotification.bookingNumber && ` - ${newBookingNotification.bookingNumber}`}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center space-x-2 flex-shrink-0">
+                <button
+                  onClick={() => handleViewNewBooking(newBookingNotification.date)}
+                  className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-body font-body-medium transition-colors"
+                >
+                  View
+                </button>
+                <button
+                  onClick={() => setNewBookingNotification(null)}
+                  className="hover:opacity-80 text-white/80 hover:text-white"
+                >
+                  <Icon name="X" size={16} />
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
