@@ -165,7 +165,8 @@ const LoginForm = () => {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-8 p-1 text-text-secondary hover:text-text-primary spa-transition-fast"
+              className="absolute right-3 bottom-2.5 p-1 text-text-secondary hover:text-text-primary spa-transition-fast"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               <Icon name={showPassword ? 'EyeOff' : 'Eye'} size={16} />
             </button>

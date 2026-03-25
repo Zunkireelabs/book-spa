@@ -620,7 +620,8 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
         .from('bookings')
         .select('id')
         .eq('room_id', booking.room_id)
-        .eq('booking_date', newDate)
+        .eq('branch_id', booking.branch_id)
+        .eq('date', newDate)
         .not('status', 'in', '("Cancelled","No Show")')
         .neq('id', bookingId)
         .lt('start_time', newEndTime)
@@ -640,11 +641,11 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
       .update({
-        booking_date: newDate,
+        date: newDate,
         start_time: newStartTime,
       })
       .eq('id', bookingId)
-      .select('id, booking_date, start_time, end_time')
+      .select('id, date, start_time, end_time')
       .single();
 
     if (updateError) throw updateError;
@@ -653,7 +654,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
       data: {
         success: true,
         bookingId,
-        bookingDate: updated.booking_date,
+        bookingDate: updated.date,
         startTime: updated.start_time,
         endTime: updated.end_time,
       },
@@ -833,7 +834,7 @@ export async function closeDay(branchId, date) {
     }
 
     return {
-      data: { success: true, reportId: report.id },
+      data: { success: true, reportId: report.id, warning: lockError ? 'Bookings could not be locked. They may still be editable.' : null },
       error: null,
     };
   } catch (error) {
@@ -1510,25 +1511,36 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     if (branchError) throw branchError;
 
-    // 2. Fetch therapists for resource list
-    const { data: therapists, error: therapistsError } = await supabase
-      .from('therapists')
-      .select('id, name, gender, specialties')
-      .eq('branch_id', resolvedBranchId)
-      .eq('is_active', true)
-      .order('name');
+    // 2. Fetch therapists and rooms in parallel
+    const [therapistsResult, roomsResult] = await Promise.all([
+      supabase
+        .from('therapists')
+        .select('id, name, gender, specialties')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('rooms')
+        .select('id, name, is_active')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('name'),
+    ]);
 
-    if (therapistsError) throw therapistsError;
+    if (therapistsResult.error) throw therapistsResult.error;
+    if (roomsResult.error) throw roomsResult.error;
 
     // 3. Fetch bookings in date range, excluding Cancelled
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
-        id, booking_number, customer_name, status, payment_status,
+        id, booking_number, customer_name, customer_phone, status, payment_status,
         date, start_time, end_time, start_datetime, end_datetime,
-        therapist_id,
-        service:services(name),
-        therapist:therapists(id, name)
+        therapist_id, room_id,
+        base_amount, discount_amount, final_amount, special_requests,
+        service:services(name, duration_minutes),
+        therapist:therapists(id, name),
+        room:rooms(id, name)
       `)
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
@@ -1545,7 +1557,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           closeTime: branch.close_time || '21:00:00',
           timezone: branch.timezone || 'Asia/Kathmandu',
         },
-        therapists: therapists || [],
+        therapists: therapistsResult.data || [],
+        rooms: roomsResult.data || [],
         bookings: bookings || [],
       },
       error: null,
@@ -1615,7 +1628,62 @@ export async function createBooking({
       return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
     }
 
-    // 6. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
+    // 6. Look up or create customer record for CRM linking
+    let customerId = null;
+    try {
+      const phone = customerPhone?.replace(/\D/g, '') || null;
+      const email = customerEmail?.trim().toLowerCase() || null;
+
+      // Try to find existing customer by phone or email within the branch
+      let existingCustomer = null;
+      if (phone) {
+        const { data } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('branch_id', resolvedBranchId)
+          .eq('phone', phone)
+          .limit(1)
+          .maybeSingle();
+        existingCustomer = data;
+      }
+      if (!existingCustomer && email) {
+        const { data } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('branch_id', resolvedBranchId)
+          .eq('email', email)
+          .limit(1)
+          .maybeSingle();
+        existingCustomer = data;
+      }
+
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+        // Update name if changed
+        await supabase
+          .from('customers')
+          .update({ full_name: customerName, phone: phone || undefined, email: email || undefined })
+          .eq('id', customerId);
+      } else {
+        // Create new customer record
+        const { data: newCustomer } = await supabase
+          .from('customers')
+          .insert({
+            branch_id: resolvedBranchId,
+            full_name: customerName,
+            phone: phone || null,
+            email: email || null,
+          })
+          .select('id')
+          .single();
+        if (newCustomer) customerId = newCustomer.id;
+      }
+    } catch (custErr) {
+      // Non-blocking: booking still proceeds without customer link
+      console.warn('[API] Customer lookup/create failed:', custErr.message);
+    }
+
+    // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
     const { data: booking, error: insertError } = await supabase
       .from('bookings')
       .insert({
@@ -1623,6 +1691,7 @@ export async function createBooking({
         room_id: availableRoom.id,
         service_id: serviceId,
         therapist_id: null,
+        customer_id: customerId,
         customer_name: customerName,
         customer_email: customerEmail || null,
         customer_phone: customerPhone || null,
@@ -2057,6 +2126,50 @@ export async function fetchServicesForManagement() {
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchServicesForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createService({ name, priceNpr, durationMinutes, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can create services.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Service name is required.' } };
+    }
+
+    // Check for duplicate name
+    const { data: existing } = await supabase
+      .from('services')
+      .select('id')
+      .ilike('name', name.trim())
+      .maybeSingle();
+
+    if (existing) {
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A service with this name already exists.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('services')
+      .insert({
+        name: name.trim(),
+        price_npr: priceNpr,
+        duration_minutes: durationMinutes,
+        description: description || null,
+        is_active: true,
+      })
+      .select('id, name, duration_minutes, price_npr, description, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createService error:', error.message);
     return { data: null, error };
   }
 }
@@ -3262,7 +3375,7 @@ export async function fetchAllBranches() {
   try {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, address, is_active')
+      .select('id, name, address, phone, is_active')
       .order('name');
 
     if (error) throw error;

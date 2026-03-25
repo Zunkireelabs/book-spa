@@ -38,9 +38,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to="/staff-login-authentication" replace />;
   }
 
-  // If user exists but profile fetch failed, redirect to login
   if (!profile) {
-    console.warn('User authenticated but profile is null — redirecting to login');
     return <Navigate to="/staff-login-authentication" replace />;
   }
 

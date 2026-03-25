@@ -1,7 +1,62 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;500&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap');
+/* Inter — primary typeface (headings, body, captions) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: fallback;
+  src: url('/fonts/Inter-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: fallback;
+  src: url('/fonts/Inter-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: fallback;
+  src: url('/fonts/Inter-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: fallback;
+  src: url('/fonts/Inter-Bold.ttf') format('truetype');
+}
+
+/* Playfair Display — serif display typeface */
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
+  font-weight: 400;
+  font-display: fallback;
+  src: url('/fonts/PlayfairDisplay-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
+  font-weight: 500;
+  font-display: fallback;
+  src: url('/fonts/PlayfairDisplay-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
+  font-weight: 600;
+  font-display: fallback;
+  src: url('/fonts/PlayfairDisplay-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
+  font-weight: 700;
+  font-display: fallback;
+  src: url('/fonts/PlayfairDisplay-Bold.ttf') format('truetype');
+}
 
 @tailwind base;
 @tailwind components;
@@ -30,7 +85,7 @@
     --color-text-secondary: #6B7280; /* medium gray */
     
     /* Status Colors */
-    --color-success: #059669; /* natural green */
+    --color-success: #10B981; /* emerald green (distinct from primary) */
     --color-success-foreground: #FFFFFF; /* white */
     
     --color-warning: #D97706; /* warm amber */
@@ -40,8 +95,8 @@
     --color-error-foreground: #FFFFFF; /* white */
     
     /* Border Colors */
-    --color-border: #E5E7EB; /* light gray */
-    --color-border-muted: rgba(229, 231, 235, 0.5); /* light gray with opacity */
+    --color-border: #E1E3E5; /* soft gray (Shopify-style) */
+    --color-border-muted: rgba(225, 227, 229, 0.5); /* soft gray with opacity */
     
     /* Shadow Colors */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -73,17 +128,21 @@
   .font-heading {
     font-family: 'Inter', sans-serif;
   }
-  
+
   .font-body {
-    font-family: 'Source Sans Pro', sans-serif;
+    font-family: 'Inter', sans-serif;
   }
-  
+
   .font-caption {
-    font-family: 'Nunito Sans', sans-serif;
+    font-family: 'Inter', sans-serif;
   }
-  
+
+  .font-accent {
+    font-family: 'Playfair Display', serif;
+  }
+
   .font-data {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 }
 
@@ -163,7 +222,7 @@
 
 /* Buttons */
 .bookspa-calendar .fc .fc-button {
-  font-family: 'Source Sans Pro', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 0.8125rem;
   font-weight: 500;
   padding: 0.375rem 0.75rem;
@@ -200,8 +259,8 @@
 }
 
 .bookspa-calendar .fc .fc-col-header-cell-cushion {
-  font-family: 'Nunito Sans', sans-serif;
-  font-size: 0.75rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.8125rem;
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -217,8 +276,8 @@
 }
 
 .bookspa-calendar .fc .fc-resource-area .fc-datagrid-header .fc-datagrid-cell-cushion {
-  font-family: 'Nunito Sans', sans-serif;
-  font-size: 0.75rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.8125rem;
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -227,8 +286,8 @@
 
 /* Slot labels */
 .bookspa-calendar .fc .fc-timeline-slot-label-cushion {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6875rem;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
   color: var(--color-text-secondary);
 }
 
@@ -272,8 +331,8 @@
 
 /* DayGrid month view */
 .bookspa-calendar .fc .fc-daygrid-day-number {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
   color: var(--color-text-secondary);
   padding: 0.25rem 0.5rem;
 }

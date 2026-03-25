@@ -21,16 +21,12 @@ const AppRoutes = () => {
         <Route path="/" element={<CustomerBookingFlow />} />
         <Route path="/customer-booking-flow" element={<CustomerBookingFlow />} />
         <Route path="/staff-login-authentication" element={<StaffLoginAuthentication />} />
+        <Route path="/booking-management-portal" element={<BookingManagementPortal />} />
 
         {/* Protected routes - staff, manager, admin */}
         <Route path="/branch-staff-dashboard" element={
           <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
             <BranchStaffDashboard />
-          </ProtectedRoute>
-        } />
-        <Route path="/booking-management-portal" element={
-          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
-            <BookingManagementPortal />
           </ProtectedRoute>
         } />
         <Route path="/booking-details-assignment-modal" element={

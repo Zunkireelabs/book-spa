@@ -375,6 +375,7 @@ const AttendancePanel = ({ branchId }) => {
                     value={edit.status || ''}
                     onChange={(e) => handleFieldChange(t.therapistId, 'status', e.target.value)}
                     disabled={isDisabled}
+                    aria-label={`Attendance status for ${t.name}`}
                     className={`px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed ${
                       edit.status === 'Present' ? 'text-success' :
                       edit.status === 'Absent' ? 'text-error' :

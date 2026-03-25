@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import Icon from '../AppIcon';
 
 const Select = ({
@@ -9,7 +9,12 @@ const Select = ({
   placeholder = 'Select...',
   disabled = false,
   error,
+  id: externalId,
+  ...rest
 }) => {
+  const autoId = useId();
+  const selectId = externalId || autoId;
+
   const handleChange = (e) => {
     if (onChange) onChange(e.target.value);
   };
@@ -17,15 +22,17 @@ const Select = ({
   return (
     <div className="space-y-1">
       {label && (
-        <label className="block font-body font-body-medium text-sm text-text-primary">
+        <label htmlFor={selectId} className="block font-body font-body-medium text-sm text-text-primary">
           {label}
         </label>
       )}
       <div className="relative">
         <select
+          id={selectId}
           value={value}
           onChange={handleChange}
           disabled={disabled}
+          aria-label={!label ? placeholder : undefined}
           className={`
             w-full appearance-none rounded-spa border bg-surface px-3 py-2 pr-8
             font-body font-body-normal text-sm text-text-primary
@@ -34,6 +41,7 @@ const Select = ({
             spa-transition-fast
             ${error ? 'border-error' : 'border-border'}
           `}
+          {...rest}
         >
           {placeholder && !value && (
             <option value="" disabled>

@@ -220,8 +220,8 @@ const BookingManagementPortal = () => {
                       <div className="text-sm text-text-secondary">
                         <p className="font-caption font-caption-normal">
                           Need help? Contact us at{' '}
-                          <a href="tel:+977-1-555-SPA" className="text-primary hover:underline">
-                            +977-1-555-SPA
+                          <a href="tel:+977-1-4441234" className="text-primary hover:underline">
+                            +977-1-4441234
                           </a>
                         </p>
                       </div>
@@ -249,7 +249,7 @@ const BookingManagementPortal = () => {
                       variant="outline"
                       iconName="Phone"
                       iconPosition="left"
-                      onClick={() => window.location.href = 'tel:+977-1-555-SPA'}
+                      onClick={() => window.location.href = 'tel:+977-1-4441234'}
                     >
                       Call Support
                     </Button>

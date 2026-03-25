@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import StaffHeader from './components/StaffHeader';
+import { useSearchParams } from 'react-router-dom';
+import StaffSidebar from '../../components/ui/StaffSidebar';
+import Icon from '../../components/AppIcon';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingLookupPanel from './components/BookingLookupPanel';
 import StaffBookingForm from './components/StaffBookingForm';
 import TherapistAvailability from './components/TherapistAvailability';
+import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
@@ -13,9 +16,12 @@ import { supabase } from '../../lib/supabase';
 
 const BranchStaffDashboard = () => {
   const { profile } = useAuth();
-  const { branchId } = useBranch();
+  const { branchId, branchName } = useBranch();
+  const [searchParams] = useSearchParams();
 
-  const [viewMode, setViewMode] = useState('dashboard');
+  const viewMode = searchParams.get('view') || 'dashboard';
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   const [filters, setFilters] = useState({
     dateRange: 'today',
@@ -256,75 +262,140 @@ const BranchStaffDashboard = () => {
     return { error: null };
   };
 
+  // Clock update
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const userName = profile?.full_name || 'Staff Member';
+  const userRole = profile?.role || 'staff';
+
   return (
     <div className="min-h-screen bg-background">
-      <StaffHeader viewMode={viewMode} onViewChange={setViewMode} />
+      <StaffSidebar
+        onCollapseChange={setSidebarCollapsed}
+      />
 
-      {/* Toast notifications */}
-      {actionError && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-error text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
-          <span className="font-body font-body-medium text-sm">{actionError}</span>
-          <button onClick={() => setActionError(null)} className="ml-2 hover:opacity-80 text-white">✕</button>
-        </div>
-      )}
-      {actionSuccess && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-success text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
-          <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
-        </div>
-      )}
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {viewMode === 'dashboard' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-3">
-              <QuickFilters
-                onFiltersChange={handleFiltersChange}
-                bookingCounts={bookingCounts}
-              />
-            </div>
-
-            <div className="lg:col-span-6">
-              {loading ? (
-                <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
-                  <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-                  <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:pb-0 pb-16 spa-transition-slow`}>
+        {/* Compact Top Bar */}
+        <header className="bg-surface border-b border-border sticky top-0 z-header">
+          <div className="px-4 sm:px-6 lg:px-8 py-3">
+            <div className="flex items-center justify-between">
+              {/* Left: Branch + date/time */}
+              <div className="flex items-center space-x-3 min-w-0">
+                <div className="flex items-center space-x-2">
+                  <Icon name="MapPin" size={14} className="text-primary" />
+                  <span className="font-body font-body-medium text-sm text-text-primary">
+                    {branchName || 'Main Branch'}
+                  </span>
                 </div>
-              ) : (
-                <BookingsList
-                  bookings={filteredBookings}
-                  therapists={therapists}
-                  onStatusUpdate={handleStatusUpdate}
-                  onAssignTherapist={handleAssignTherapist}
-                  onRecordPayment={handleRecordPayment}
-                  onApplyDiscount={handleApplyDiscount}
-                  userRole={profile?.role || 'staff'}
-                  onRefresh={loadData}
-                  dateRange={filters.dateRange}
-                />
-              )}
-            </div>
+                <div className="hidden sm:block h-5 w-px bg-border"></div>
+                <p className="hidden sm:block font-caption font-caption-normal text-xs text-text-secondary">
+                  {currentTime.toLocaleDateString('en-GB', {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short'
+                  })} {'\u00B7'} {currentTime.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </p>
+              </div>
 
-            <div className="lg:col-span-3">
-              <TherapistAvailability
-                therapists={therapists}
-                pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
-                onAssignTherapist={handleAssignTherapist}
-              />
+              {/* Right: Role badge + Profile */}
+              <div className="flex items-center space-x-3 flex-shrink-0">
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize bg-accent/10 text-accent">
+                  {userRole}
+                </span>
+                <div className="flex items-center space-x-2 px-2 py-1 rounded-spa">
+                  <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Icon name="User" size={16} className="text-primary" />
+                  </div>
+                  <div className="hidden md:flex flex-col">
+                    <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
+                      {userName}
+                    </span>
+                    <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
+                      {userRole}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        ) : viewMode === 'bookings' ? (
-          <BookingLookupPanel
-            therapists={therapists}
-            onStatusUpdate={handleStatusUpdate}
-            onAssignTherapist={handleAssignTherapist}
-            onRecordPayment={handleRecordPayment}
-            onApplyDiscount={handleApplyDiscount}
-            userRole={profile?.role || 'staff'}
-            onRefresh={loadData}
-          />
-        ) : (
-          <StaffBookingForm onBookingCreated={loadData} />
+        </header>
+
+        {/* Toast notifications */}
+        {actionError && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-error text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
+            <span className="font-body font-body-medium text-sm">{actionError}</span>
+            <button onClick={() => setActionError(null)} className="ml-2 hover:opacity-80 text-white">✕</button>
+          </div>
         )}
+        {actionSuccess && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-success text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
+            <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
+          </div>
+        )}
+
+        <div className="px-4 sm:px-6 lg:px-8 py-6">
+          {viewMode === 'dashboard' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6">
+              <div className="md:col-span-1 lg:col-span-3">
+                <QuickFilters
+                  onFiltersChange={handleFiltersChange}
+                  bookingCounts={bookingCounts}
+                />
+              </div>
+
+              <div className="md:col-span-1 lg:col-span-6">
+                {loading ? (
+                  <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 text-center">
+                    <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+                    <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+                  </div>
+                ) : (
+                  <BookingsList
+                    bookings={filteredBookings}
+                    therapists={therapists}
+                    onStatusUpdate={handleStatusUpdate}
+                    onAssignTherapist={handleAssignTherapist}
+                    onRecordPayment={handleRecordPayment}
+                    onApplyDiscount={handleApplyDiscount}
+                    userRole={profile?.role || 'staff'}
+                    onRefresh={loadData}
+                    dateRange={filters.dateRange}
+                  />
+                )}
+              </div>
+
+              <div className="md:col-span-2 lg:col-span-3">
+                <TherapistAvailability
+                  therapists={therapists}
+                  pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
+                  onAssignTherapist={handleAssignTherapist}
+                />
+              </div>
+            </div>
+          ) : viewMode === 'bookings' ? (
+            <BookingLookupPanel
+              therapists={therapists}
+              onStatusUpdate={handleStatusUpdate}
+              onAssignTherapist={handleAssignTherapist}
+              onRecordPayment={handleRecordPayment}
+              onApplyDiscount={handleApplyDiscount}
+              userRole={profile?.role || 'staff'}
+              onRefresh={loadData}
+            />
+          ) : viewMode === 'calendar' ? (
+            <OperationalCalendar branchId={branchId} heightOffset={112} />
+          ) : viewMode === 'new-booking' ? (
+            <StaffBookingForm onBookingCreated={loadData} />
+          ) : (
+            <StaffBookingForm onBookingCreated={loadData} />
+          )}
+        </div>
       </div>
     </div>
   );

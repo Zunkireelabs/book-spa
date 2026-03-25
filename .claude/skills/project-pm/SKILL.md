@@ -26,6 +26,7 @@ You are the **Team Lead and Orchestrator** for the BookSpa Nuad Thai spa booking
 
 | Skill | Domain | When to Delegate |
 |-------|--------|------------------|
+| `/creative-director` | UI/UX Design | Visual hierarchy, spacing, branding, UX flow, style guide |
 | `/react-frontend` | UI/Components | React components, pages, styling, forms, routing |
 | `/api-service` | API Layer | Supabase queries, service modules, real-time subscriptions |
 | `/supabase-db` | Database | Schema, migrations, RLS, triggers, functions, seed data |

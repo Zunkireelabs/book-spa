@@ -77,6 +77,7 @@ const QuickFilters = ({ onFiltersChange, bookingCounts }) => {
           value={filters.search}
           onChange={(e) => handleFilterChange('search', e.target.value)}
           className="w-full"
+          aria-label="Search bookings by ID, phone, or email"
         />
       </div>
 

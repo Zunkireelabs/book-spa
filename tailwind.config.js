@@ -28,7 +28,7 @@ module.exports = {
           'text-secondary': '#6B7280', // medium gray
           
           // Status Colors
-          'success': '#059669', // natural green
+          'success': '#10B981', // emerald green (distinct from primary)
           'success-foreground': '#FFFFFF', // white
           
           'warning': '#D97706', // warm amber
@@ -38,14 +38,15 @@ module.exports = {
           'error-foreground': '#FFFFFF', // white
           
           // Border Colors
-          'border': '#E5E7EB', // light gray
-          'border-muted': 'rgba(229, 231, 235, 0.5)', // light gray with opacity
+          'border': '#E1E3E5', // soft gray (Shopify-style)
+          'border-muted': 'rgba(225, 227, 229, 0.5)', // soft gray with opacity
         },
         fontFamily: {
           'heading': ['Inter', 'sans-serif'],
-          'body': ['Source Sans Pro', 'sans-serif'],
-          'caption': ['Nunito Sans', 'sans-serif'],
-          'data': ['JetBrains Mono', 'monospace'],
+          'body': ['Inter', 'sans-serif'],
+          'caption': ['Inter', 'sans-serif'],
+          'accent': ['Playfair Display', 'serif'],
+          'data': ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
         },
         fontWeight: {
           'heading-normal': '400',
@@ -73,6 +74,9 @@ module.exports = {
         transitionTimingFunction: {
           'spa-smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
           'spa-out': 'ease-out',
+        },
+        fontSize: {
+          'xs': ['0.8125rem', { lineHeight: '1.125rem' }], // 13px — Shopify minimum
         },
         spacing: {
           'touch': '44px',

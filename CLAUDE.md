@@ -38,6 +38,7 @@ When the user gives ANY development request, **automatically invoke `/project-pm
 | Skill | Domain | When to Use |
 |-------|--------|-------------|
 | `/project-pm` | **Orchestrator** | All development tasks (routes to specialists) |
+| `/creative-director` | **UI/UX Design** | Visual hierarchy, spacing, branding, UX flow, style guide |
 | `/react-frontend` | **Frontend** | React components, pages, styling, forms, routing |
 | `/api-service` | **API Layer** | Supabase service modules, queries, real-time |
 | `/supabase-db` | **Database** | Schema, migrations, RLS, triggers, functions |

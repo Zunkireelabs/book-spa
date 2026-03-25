@@ -424,8 +424,17 @@ const CustomerBookingFlow = () => {
               <button className="hover:text-primary spa-transition-fast">Terms of Service</button>
               <button className="hover:text-primary spa-transition-fast">Contact Us</button>
             </div>
-            <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4">
-              © {new Date().getFullYear()} BookSpa. All rights reserved.
+            <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4 inline-flex items-center justify-center flex-wrap gap-1">
+              <span>© {new Date().getFullYear()} BookSpa. All rights reserved. A product from</span>
+              <a
+                href="https://zunkireelabs.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center space-x-1 hover:text-text-primary spa-transition-fast"
+              >
+                <img src="/zunkireelabs-icon.webp" alt="Zunkireelabs" className="w-4 h-4" />
+                <span className="font-caption font-caption-medium text-xs">zunkireelabs</span>
+              </a>
             </p>
           </div>
         </div>

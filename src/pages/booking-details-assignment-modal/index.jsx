@@ -21,6 +21,7 @@ const BookingDetailsAssignmentModal = () => {
   const { branchId } = useBranch();
   const userRole = profile?.role || 'staff';
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [isLoading, setIsLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -166,9 +167,9 @@ const BookingDetailsAssignmentModal = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <StaffSidebar userRole={userRole} />
+      <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
 
-      <div className="lg:ml-64 lg:mb-0 mb-16">
+      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:mb-0 mb-16 spa-transition-slow`}>
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-6xl max-h-[90vh] overflow-hidden animate-fade-in">
 

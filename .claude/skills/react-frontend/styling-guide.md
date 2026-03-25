@@ -29,25 +29,32 @@
 ### Status
 | Token | Value | Usage |
 |-------|-------|-------|
-| `success` | #059669 | Confirmed, completed, positive |
+| `success` | #10B981 (emerald) | Confirmed, completed, positive |
 | `warning` | #D97706 | Pending, attention needed |
 | `error` | #DC2626 | Cancelled, errors, destructive |
 
 ### Borders
 | Token | Value | Usage |
 |-------|-------|-------|
-| `border` | #E5E7EB | Card borders, dividers |
-| `border-muted` | rgba(229,231,235,0.5) | Subtle separators |
+| `border` | #E1E3E5 | Card borders, dividers |
+| `border-muted` | rgba(225,227,229,0.5) | Subtle separators |
 
 ## Typography
 
 ### Font Families
 ```
-font-heading    → Inter, sans-serif         (headings, titles)
-font-body       → Source Sans Pro, sans-serif (body text, descriptions)
-font-caption    → Nunito Sans, sans-serif    (small labels, captions)
-font-data       → JetBrains Mono, monospace  (numbers, codes, IDs)
+font-heading    → Inter, sans-serif               (headings, titles — weight 500/600/700)
+font-body       → Inter, sans-serif               (body text, descriptions — weight 400/500)
+font-caption    → Inter, sans-serif               (small labels, captions — weight 400)
+font-accent     → Playfair Display, serif         (display headlines, premium labels)
+font-data       → JetBrains Mono, monospace       (numbers, codes, IDs)
 ```
+
+Self-hosted fonts in `/public/fonts/` (no external Google Fonts dependency).
+
+### Minimum Font Size
+- **13px minimum** (Shopify standard) — `text-xs` is overridden to 13px (0.8125rem)
+- Never use raw `font-size` below 13px in custom CSS
 
 ### Font Weights
 ```

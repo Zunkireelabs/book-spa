@@ -1,0 +1,889 @@
+{
+  "base_url": "https://dev-nuad.zunkireelabs.com",
+  "audit_date": "2026-03-10 12:42",
+  "public_pages": [
+    {
+      "url": "https://dev-nuad.zunkireelabs.com/",
+      "name": "Homepage / Customer Booking Flow",
+      "viewport": "desktop",
+      "status": 200,
+      "title": "bookspa",
+      "load_time_ms": 943,
+      "console_errors": [],
+      "console_warnings": [],
+      "network_errors": [],
+      "screenshots": {
+        "desktop": "/tmp/web-audit/pages/public/homepage___customer_booking_flow_desktop.png"
+      },
+      "interactive_elements": {
+        "buttons": 8,
+        "forms": 0,
+        "inputs": 0,
+        "links": 14
+      },
+      "accessibility": [],
+      "issues": []
+    },
+    {
+      "url": "https://dev-nuad.zunkireelabs.com/customer-booking-flow",
+      "name": "Customer Booking Flow (explicit)",
+      "viewport": "desktop",
+      "status": 200,
+      "title": "bookspa",
+      "load_time_ms": 542,
+      "console_errors": [],
+      "console_warnings": [],
+      "network_errors": [],
+      "screenshots": {
+        "desktop": "/tmp/web-audit/pages/public/customer_booking_flow_(explicit)_desktop.png"
+      },
+      "interactive_elements": {
+        "buttons": 8,
+        "forms": 0,
+        "inputs": 0,
+        "links": 14
+      },
+      "accessibility": [],
+      "issues": []
+    },
+    {
+      "url": "https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+      "name": "Staff Login Page",
+      "viewport": "desktop",
+      "status": 200,
+      "title": "bookspa",
+      "load_time_ms": 553,
+      "console_errors": [],
+      "console_warnings": [],
+      "network_errors": [],
+      "screenshots": {
+        "desktop": "/tmp/web-audit/pages/public/staff_login_page_desktop.png"
+      },
+      "interactive_elements": {
+        "buttons": 6,
+        "forms": 1,
+        "inputs": 3,
+        "links": 2
+      },
+      "accessibility": [
+        {
+          "issue": "unlabeled_inputs",
+          "count": 2,
+          "details": [
+            {
+              "type": "email",
+              "name": "email"
+            },
+            {
+              "type": "password",
+              "name": "password"
+            }
+          ]
+        }
+      ],
+      "issues": []
+    },
+    {
+      "name": "404 Page",
+      "has_custom_404": true,
+      "screenshot": "/tmp/web-audit/pages/public/404_page.png",
+      "url": "https://dev-nuad.zunkireelabs.com/this-page-does-not-exist-12345"
+    }
+  ],
+  "role_audits": {
+    "staff": {
+      "login": {
+        "role": "staff",
+        "email": "staff@bookspa.com.np",
+        "success": true,
+        "error": null,
+        "screenshots": [
+          "/tmp/web-audit/flows/staff/staff_03_after_login.png"
+        ],
+        "post_login_url": "https://dev-nuad.zunkireelabs.com/branch-staff-dashboard",
+        "post_login_title": "bookspa"
+      },
+      "pages": [
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/branch-staff-dashboard",
+          "name": "staff_Staff Dashboard",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "bookspa",
+          "load_time_ms": 1051,
+          "console_errors": [],
+          "console_warnings": [],
+          "network_errors": [],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/staff/staff_staff_dashboard_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 13,
+            "forms": 0,
+            "inputs": 5,
+            "links": 1
+          },
+          "accessibility": [
+            {
+              "issue": "unlabeled_inputs",
+              "count": 5,
+              "details": [
+                {
+                  "type": "search",
+                  "name": "Search by ID, phone, or email..."
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                }
+              ]
+            }
+          ],
+          "issues": []
+        },
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/booking-management-portal",
+          "name": "staff_Booking Management Portal",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "bookspa",
+          "load_time_ms": 1016,
+          "console_errors": [],
+          "console_warnings": [],
+          "network_errors": [],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/staff/staff_booking_management_portal_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 13,
+            "forms": 0,
+            "inputs": 5,
+            "links": 1
+          },
+          "accessibility": [
+            {
+              "issue": "unlabeled_inputs",
+              "count": 5,
+              "details": [
+                {
+                  "type": "search",
+                  "name": "Search by ID, phone, or email..."
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                }
+              ]
+            }
+          ],
+          "issues": []
+        },
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/booking-details-assignment-modal",
+          "name": "staff_Booking Details Assignment",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "bookspa",
+          "load_time_ms": 1092,
+          "console_errors": [],
+          "console_warnings": [],
+          "network_errors": [],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/staff/staff_booking_details_assignment_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 13,
+            "forms": 0,
+            "inputs": 5,
+            "links": 1
+          },
+          "accessibility": [
+            {
+              "issue": "unlabeled_inputs",
+              "count": 5,
+              "details": [
+                {
+                  "type": "search",
+                  "name": "Search by ID, phone, or email..."
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                },
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                }
+              ]
+            }
+          ],
+          "issues": []
+        }
+      ],
+      "flows": [
+        {
+          "name": "Staff Dashboard Flow",
+          "steps": [
+            {
+              "name": "Load staff dashboard",
+              "success": true,
+              "details": "URL: https://dev-nuad.zunkireelabs.com/branch-staff-dashboard",
+              "screenshot": "/tmp/web-audit/flows/staff/staff_dash_01_overview.png"
+            },
+            {
+              "name": "Navigation/sidebar present",
+              "success": false,
+              "details": "Found 0 nav items",
+              "screenshot": null
+            },
+            {
+              "name": "Booking data visible",
+              "success": true,
+              "details": "Dashboard shows booking-related data",
+              "screenshot": null
+            },
+            {
+              "name": "New Booking form accessible",
+              "success": true,
+              "details": "",
+              "screenshot": "/tmp/web-audit/flows/staff/staff_dash_new_booking.png"
+            }
+          ],
+          "success": false
+        },
+        {
+          "name": "Booking Management Portal (staff)",
+          "steps": [
+            {
+              "name": "Load portal",
+              "success": true,
+              "details": "URL: https://dev-nuad.zunkireelabs.com/branch-staff-dashboard",
+              "screenshot": "/tmp/web-audit/flows/staff/bmp_staff_01_overview.png"
+            },
+            {
+              "name": "Search functionality",
+              "success": true,
+              "details": "Search input found",
+              "screenshot": null
+            },
+            {
+              "name": "Search returns results",
+              "success": true,
+              "details": "Searched for 'BK-'",
+              "screenshot": "/tmp/web-audit/flows/staff/bmp_staff_02_search_results.png"
+            },
+            {
+              "name": "Booking list visible",
+              "success": true,
+              "details": "Found booking data",
+              "screenshot": null
+            }
+          ],
+          "success": true
+        },
+        {
+          "name": "Mobile staff Dashboard",
+          "steps": [
+            {
+              "name": "Mobile viewport",
+              "success": true,
+              "details": "No overflow",
+              "screenshot": "/tmp/web-audit/flows/mobile/mobile_staff_dashboard.png"
+            }
+          ],
+          "success": true
+        }
+      ]
+    },
+    "manager": {
+      "login": {
+        "role": "manager",
+        "email": "manager@bookspa.com.np",
+        "success": true,
+        "error": null,
+        "screenshots": [
+          "/tmp/web-audit/flows/manager/manager_03_after_login.png"
+        ],
+        "post_login_url": "https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+        "post_login_title": "Branch Manager Dashboard - BookSpa"
+      },
+      "pages": [
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+          "name": "manager_Manager Dashboard",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "Branch Manager Dashboard - BookSpa",
+          "load_time_ms": 1759,
+          "console_errors": [
+            {
+              "type": "error",
+              "text": "Failed to load resource: the server responded with a status of 400 ()"
+            },
+            {
+              "type": "error",
+              "text": "[API] fetchPendingDiscounts error: column bookings.discount_reason does not exist"
+            }
+          ],
+          "console_warnings": [],
+          "network_errors": [
+            {
+              "url": "https://pmbvogiphelmpjdalmtv.supabase.co/rest/v1/bookings?select=id%2Cbooking_number%2Ccustomer_name%2Cdate%2Cstart_time%2Cbase_amount%2Cdiscount_amount%2Cfinal_amount%2Cdiscount_reason%2Cstatus%2Cservice_id%2Cservices%3Aservice_id%28name%29&branch_id=eq.b0000000-0000-0000-0000-000000000001&discount_status=eq.pending&is_locked=eq.false&order=created_at.desc",
+              "status": 400
+            }
+          ],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/manager/manager_manager_dashboard_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 36,
+            "forms": 0,
+            "inputs": 0,
+            "links": 21
+          },
+          "accessibility": [],
+          "issues": [
+            {
+              "type": "visible_error",
+              "text": "Logout"
+            }
+          ]
+        },
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/booking-management-portal",
+          "name": "manager_Booking Management Portal",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "Branch Manager Dashboard - BookSpa",
+          "load_time_ms": 1682,
+          "console_errors": [
+            {
+              "type": "error",
+              "text": "Failed to load resource: the server responded with a status of 400 ()"
+            },
+            {
+              "type": "error",
+              "text": "[API] fetchPendingDiscounts error: column bookings.discount_reason does not exist"
+            }
+          ],
+          "console_warnings": [],
+          "network_errors": [
+            {
+              "url": "https://pmbvogiphelmpjdalmtv.supabase.co/rest/v1/bookings?select=id%2Cbooking_number%2Ccustomer_name%2Cdate%2Cstart_time%2Cbase_amount%2Cdiscount_amount%2Cfinal_amount%2Cdiscount_reason%2Cstatus%2Cservice_id%2Cservices%3Aservice_id%28name%29&branch_id=eq.b0000000-0000-0000-0000-000000000001&discount_status=eq.pending&is_locked=eq.false&order=created_at.desc",
+              "status": 400
+            }
+          ],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/manager/manager_booking_management_portal_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 36,
+            "forms": 0,
+            "inputs": 0,
+            "links": 21
+          },
+          "accessibility": [],
+          "issues": [
+            {
+              "type": "visible_error",
+              "text": "Logout"
+            }
+          ]
+        },
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/booking-details-assignment-modal",
+          "name": "manager_Booking Details Assignment",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "Branch Manager Dashboard - BookSpa",
+          "load_time_ms": 1694,
+          "console_errors": [
+            {
+              "type": "error",
+              "text": "Failed to load resource: the server responded with a status of 400 ()"
+            },
+            {
+              "type": "error",
+              "text": "[API] fetchPendingDiscounts error: column bookings.discount_reason does not exist"
+            }
+          ],
+          "console_warnings": [],
+          "network_errors": [
+            {
+              "url": "https://pmbvogiphelmpjdalmtv.supabase.co/rest/v1/bookings?select=id%2Cbooking_number%2Ccustomer_name%2Cdate%2Cstart_time%2Cbase_amount%2Cdiscount_amount%2Cfinal_amount%2Cdiscount_reason%2Cstatus%2Cservice_id%2Cservices%3Aservice_id%28name%29&branch_id=eq.b0000000-0000-0000-0000-000000000001&discount_status=eq.pending&is_locked=eq.false&order=created_at.desc",
+              "status": 400
+            }
+          ],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/manager/manager_booking_details_assignment_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 36,
+            "forms": 0,
+            "inputs": 0,
+            "links": 21
+          },
+          "accessibility": [],
+          "issues": [
+            {
+              "type": "visible_error",
+              "text": "Logout"
+            }
+          ]
+        }
+      ],
+      "flows": [
+        {
+          "name": "Manager Dashboard Flow",
+          "steps": [
+            {
+              "name": "Load manager dashboard",
+              "success": true,
+              "details": "URL: https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+              "screenshot": "/tmp/web-audit/flows/manager/manager_dash_01_overview.png"
+            },
+            {
+              "name": "Metrics/KPIs visible",
+              "success": true,
+              "details": "Found metrics data",
+              "screenshot": null
+            },
+            {
+              "name": "Charts/visualizations present",
+              "success": true,
+              "details": "Found 133 chart elements",
+              "screenshot": null
+            },
+            {
+              "name": "Management features visible",
+              "success": true,
+              "details": "Found management-related content",
+              "screenshot": null
+            },
+            {
+              "name": "Quick Booking action",
+              "success": true,
+              "details": "Navigated to: https://dev-nuad.zunkireelabs.com/customer-booking-flow",
+              "screenshot": "/tmp/web-audit/flows/manager/manager_dash_quick_booking.png"
+            },
+            {
+              "name": "Discount approval area",
+              "success": true,
+              "details": "Discount management section found",
+              "screenshot": "/tmp/web-audit/flows/manager/manager_dash_discount_area.png"
+            }
+          ],
+          "success": true
+        },
+        {
+          "name": "Booking Management Portal (manager)",
+          "steps": [
+            {
+              "name": "Load portal",
+              "success": true,
+              "details": "URL: https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+              "screenshot": "/tmp/web-audit/flows/manager/bmp_manager_01_overview.png"
+            },
+            {
+              "name": "Search functionality",
+              "success": false,
+              "details": "No search input found",
+              "screenshot": null
+            },
+            {
+              "name": "Booking list visible",
+              "success": true,
+              "details": "Found booking data",
+              "screenshot": null
+            }
+          ],
+          "success": false
+        },
+        {
+          "name": "Mobile manager Dashboard",
+          "steps": [
+            {
+              "name": "Mobile viewport",
+              "success": true,
+              "details": "No overflow",
+              "screenshot": "/tmp/web-audit/flows/mobile/mobile_manager_dashboard.png"
+            }
+          ],
+          "success": true
+        }
+      ]
+    },
+    "admin": {
+      "login": {
+        "role": "admin",
+        "email": "admin@bookspa.com.np",
+        "success": true,
+        "error": null,
+        "screenshots": [
+          "/tmp/web-audit/flows/admin/admin_03_after_login.png"
+        ],
+        "post_login_url": "https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+        "post_login_title": "Branch Manager Dashboard - BookSpa"
+      },
+      "pages": [
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+          "name": "admin_Manager Dashboard",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "Branch Manager Dashboard - BookSpa",
+          "load_time_ms": 1896,
+          "console_errors": [
+            {
+              "type": "error",
+              "text": "Failed to load resource: the server responded with a status of 400 ()"
+            },
+            {
+              "type": "error",
+              "text": "[API] fetchPendingDiscounts error: column bookings.discount_reason does not exist"
+            }
+          ],
+          "console_warnings": [],
+          "network_errors": [
+            {
+              "url": "https://pmbvogiphelmpjdalmtv.supabase.co/rest/v1/bookings?select=id%2Cbooking_number%2Ccustomer_name%2Cdate%2Cstart_time%2Cbase_amount%2Cdiscount_amount%2Cfinal_amount%2Cdiscount_reason%2Cstatus%2Cservice_id%2Cservices%3Aservice_id%28name%29&branch_id=eq.b0000000-0000-0000-0000-000000000001&discount_status=eq.pending&is_locked=eq.false&order=created_at.desc",
+              "status": 400
+            }
+          ],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/admin/admin_manager_dashboard_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 36,
+            "forms": 0,
+            "inputs": 1,
+            "links": 21
+          },
+          "accessibility": [
+            {
+              "issue": "unlabeled_inputs",
+              "count": 1,
+              "details": [
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                }
+              ]
+            }
+          ],
+          "issues": [
+            {
+              "type": "visible_error",
+              "text": "Logout"
+            }
+          ]
+        },
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/booking-management-portal",
+          "name": "admin_Booking Management Portal",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "Branch Manager Dashboard - BookSpa",
+          "load_time_ms": 1932,
+          "console_errors": [
+            {
+              "type": "error",
+              "text": "Failed to load resource: the server responded with a status of 400 ()"
+            },
+            {
+              "type": "error",
+              "text": "[API] fetchPendingDiscounts error: column bookings.discount_reason does not exist"
+            }
+          ],
+          "console_warnings": [],
+          "network_errors": [
+            {
+              "url": "https://pmbvogiphelmpjdalmtv.supabase.co/rest/v1/bookings?select=id%2Cbooking_number%2Ccustomer_name%2Cdate%2Cstart_time%2Cbase_amount%2Cdiscount_amount%2Cfinal_amount%2Cdiscount_reason%2Cstatus%2Cservice_id%2Cservices%3Aservice_id%28name%29&branch_id=eq.b0000000-0000-0000-0000-000000000001&discount_status=eq.pending&is_locked=eq.false&order=created_at.desc",
+              "status": 400
+            }
+          ],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/admin/admin_booking_management_portal_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 36,
+            "forms": 0,
+            "inputs": 1,
+            "links": 21
+          },
+          "accessibility": [
+            {
+              "issue": "unlabeled_inputs",
+              "count": 1,
+              "details": [
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                }
+              ]
+            }
+          ],
+          "issues": [
+            {
+              "type": "visible_error",
+              "text": "Logout"
+            }
+          ]
+        },
+        {
+          "url": "https://dev-nuad.zunkireelabs.com/booking-details-assignment-modal",
+          "name": "admin_Booking Details Assignment",
+          "viewport": "desktop",
+          "status": 200,
+          "title": "Branch Manager Dashboard - BookSpa",
+          "load_time_ms": 1851,
+          "console_errors": [
+            {
+              "type": "error",
+              "text": "Failed to load resource: the server responded with a status of 400 ()"
+            },
+            {
+              "type": "error",
+              "text": "[API] fetchPendingDiscounts error: column bookings.discount_reason does not exist"
+            }
+          ],
+          "console_warnings": [],
+          "network_errors": [
+            {
+              "url": "https://pmbvogiphelmpjdalmtv.supabase.co/rest/v1/bookings?select=id%2Cbooking_number%2Ccustomer_name%2Cdate%2Cstart_time%2Cbase_amount%2Cdiscount_amount%2Cfinal_amount%2Cdiscount_reason%2Cstatus%2Cservice_id%2Cservices%3Aservice_id%28name%29&branch_id=eq.b0000000-0000-0000-0000-000000000001&discount_status=eq.pending&is_locked=eq.false&order=created_at.desc",
+              "status": 400
+            }
+          ],
+          "screenshots": {
+            "desktop": "/tmp/web-audit/pages/admin/admin_booking_details_assignment_desktop.png"
+          },
+          "interactive_elements": {
+            "buttons": 36,
+            "forms": 0,
+            "inputs": 1,
+            "links": 21
+          },
+          "accessibility": [
+            {
+              "issue": "unlabeled_inputs",
+              "count": 1,
+              "details": [
+                {
+                  "type": "select-one",
+                  "name": "unnamed"
+                }
+              ]
+            }
+          ],
+          "issues": [
+            {
+              "type": "visible_error",
+              "text": "Logout"
+            }
+          ]
+        }
+      ],
+      "flows": [
+        {
+          "name": "Manager Dashboard Flow",
+          "steps": [
+            {
+              "name": "Load manager dashboard",
+              "success": true,
+              "details": "URL: https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+              "screenshot": "/tmp/web-audit/flows/admin/manager_dash_01_overview.png"
+            },
+            {
+              "name": "Metrics/KPIs visible",
+              "success": true,
+              "details": "Found metrics data",
+              "screenshot": null
+            },
+            {
+              "name": "Charts/visualizations present",
+              "success": true,
+              "details": "Found 135 chart elements",
+              "screenshot": null
+            },
+            {
+              "name": "Management features visible",
+              "success": true,
+              "details": "Found management-related content",
+              "screenshot": null
+            },
+            {
+              "name": "Quick Booking action",
+              "success": true,
+              "details": "Navigated to: https://dev-nuad.zunkireelabs.com/customer-booking-flow",
+              "screenshot": "/tmp/web-audit/flows/admin/manager_dash_quick_booking.png"
+            },
+            {
+              "name": "Discount approval area",
+              "success": true,
+              "details": "Discount management section found",
+              "screenshot": "/tmp/web-audit/flows/admin/manager_dash_discount_area.png"
+            }
+          ],
+          "success": true
+        },
+        {
+          "name": "Booking Management Portal (admin)",
+          "steps": [
+            {
+              "name": "Load portal",
+              "success": true,
+              "details": "URL: https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
+              "screenshot": "/tmp/web-audit/flows/admin/bmp_admin_01_overview.png"
+            },
+            {
+              "name": "Search functionality",
+              "success": false,
+              "details": "No search input found",
+              "screenshot": null
+            },
+            {
+              "name": "Booking list visible",
+              "success": true,
+              "details": "Found booking data",
+              "screenshot": null
+            }
+          ],
+          "success": false
+        },
+        {
+          "name": "Mobile admin Dashboard",
+          "steps": [
+            {
+              "name": "Mobile viewport",
+              "success": true,
+              "details": "No overflow",
+              "screenshot": "/tmp/web-audit/flows/mobile/mobile_admin_dashboard.png"
+            }
+          ],
+          "success": true
+        }
+      ]
+    }
+  },
+  "flows": [
+    {
+      "name": "Customer Booking Flow",
+      "steps": [
+        {
+          "name": "Load homepage",
+          "success": true,
+          "details": "URL: https://dev-nuad.zunkireelabs.com/",
+          "screenshot": "/tmp/web-audit/flows/public/booking_01_homepage.png"
+        },
+        {
+          "name": "Booking elements visible",
+          "success": true,
+          "details": "Found booking-related content",
+          "screenshot": "/tmp/web-audit/flows/public/booking_02_initial_view.png"
+        },
+        {
+          "name": "Interactive elements found",
+          "success": true,
+          "details": "Found 7 visible buttons, 0 branch elements",
+          "screenshot": "/tmp/web-audit/flows/public/booking_03_elements_found.png"
+        },
+        {
+          "name": "Clicked 'Find Existing Booking'",
+          "success": true,
+          "details": "Now at: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "screenshot": "/tmp/web-audit/flows/public/booking_04_after_click.png"
+        },
+        {
+          "name": "Service selection visible",
+          "success": true,
+          "details": "Found service-related content",
+          "screenshot": "/tmp/web-audit/flows/public/booking_05_services.png"
+        }
+      ],
+      "success": true
+    }
+  ],
+  "security": [
+    {
+      "name": "Protected Route Access Control",
+      "steps": [
+        {
+          "name": "Protected: /branch-staff-dashboard",
+          "success": true,
+          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "screenshot": "/tmp/web-audit/flows/public/protected_branch-staff-dashboard.png"
+        },
+        {
+          "name": "Protected: /branch-manager-dashboard",
+          "success": true,
+          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "screenshot": "/tmp/web-audit/flows/public/protected_branch-manager-dashboard.png"
+        },
+        {
+          "name": "Protected: /booking-management-portal",
+          "success": true,
+          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "screenshot": "/tmp/web-audit/flows/public/protected_booking-management-portal.png"
+        }
+      ],
+      "success": true
+    }
+  ],
+  "mobile": [
+    {
+      "name": "Mobile Responsiveness",
+      "steps": [
+        {
+          "name": "Mobile: Homepage Mobile",
+          "success": true,
+          "details": "No horizontal overflow",
+          "screenshot": "/tmp/web-audit/flows/mobile/mobile_home.png"
+        },
+        {
+          "name": "Mobile: Login Mobile",
+          "success": true,
+          "details": "No horizontal overflow",
+          "screenshot": "/tmp/web-audit/flows/mobile/mobile_staff-login-authentication.png"
+        }
+      ],
+      "success": true
+    }
+  ],
+  "errors_summary": {
+    "console_errors": 12,
+    "network_errors": 6,
+    "issues": 6
+  }
+}

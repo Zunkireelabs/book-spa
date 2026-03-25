@@ -214,10 +214,11 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
           {/* Table filter */}
           <div>
-            <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">
+            <label htmlFor="audit-table-filter" className="block font-body font-body-medium text-xs text-text-secondary mb-1">
               Table
             </label>
             <select
+              id="audit-table-filter"
               value={tableName}
               onChange={(e) => setTableName(e.target.value)}
               className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm font-body text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"

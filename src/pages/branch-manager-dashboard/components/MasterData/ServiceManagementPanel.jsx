@@ -4,6 +4,7 @@ import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
 import {
   fetchServicesForManagement,
+  createService,
   updateServicePricing,
   toggleServiceActive,
 } from '../../../../services/api';
@@ -14,7 +15,7 @@ const ServiceManagementPanel = () => {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingService, setEditingService] = useState(null);
-  const [formData, setFormData] = useState({ priceNpr: '', durationMinutes: '', description: '' });
+  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '' });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -33,9 +34,17 @@ const ServiceManagementPanel = () => {
 
   useEffect(() => { loadServices(); }, [loadServices]);
 
+  const handleOpenCreate = () => {
+    setEditingService(null);
+    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '' });
+    setFormError(null);
+    setShowModal(true);
+  };
+
   const handleOpenEdit = (service) => {
     setEditingService(service);
     setFormData({
+      name: service.name,
       priceNpr: String(service.price_npr),
       durationMinutes: String(service.duration_minutes),
       description: service.description || '',
@@ -48,6 +57,10 @@ const ServiceManagementPanel = () => {
     const price = Number(formData.priceNpr);
     const duration = Number(formData.durationMinutes);
 
+    if (!editingService && !formData.name.trim()) {
+      setFormError('Service name is required.');
+      return;
+    }
     if (!price || price <= 0) {
       setFormError('Price must be a positive number.');
       return;
@@ -60,15 +73,25 @@ const ServiceManagementPanel = () => {
     setSaving(true);
     setFormError(null);
 
-    const result = await updateServicePricing({
-      serviceId: editingService.id,
-      priceNpr: price,
-      durationMinutes: duration,
-      description: formData.description.trim() || null,
-    });
+    let result;
+    if (editingService) {
+      result = await updateServicePricing({
+        serviceId: editingService.id,
+        priceNpr: price,
+        durationMinutes: duration,
+        description: formData.description.trim() || null,
+      });
+    } else {
+      result = await createService({
+        name: formData.name.trim(),
+        priceNpr: price,
+        durationMinutes: duration,
+        description: formData.description.trim() || null,
+      });
+    }
 
     if (result.error) {
-      setFormError(result.error.message || 'Update failed.');
+      setFormError(result.error.message || 'Save failed.');
     } else {
       setShowModal(false);
       await loadServices();
@@ -116,6 +139,9 @@ const ServiceManagementPanel = () => {
             {services.length} service{services.length !== 1 ? 's' : ''} configured — price changes affect future bookings only
           </p>
         </div>
+        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={handleOpenCreate}>
+          Add Service
+        </Button>
       </div>
 
       {/* Error Banner */}
@@ -144,7 +170,7 @@ const ServiceManagementPanel = () => {
             {services.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-                  No services found.
+                  No services found. Click "Add Service" to create one.
                 </td>
               </tr>
             ) : (
@@ -194,13 +220,13 @@ const ServiceManagementPanel = () => {
         </table>
       </div>
 
-      {/* Edit Modal */}
-      {showModal && editingService && (
+      {/* Create / Edit Modal */}
+      {showModal && (
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                Edit Service
+                {editingService ? 'Edit Service' : 'Add Service'}
               </h3>
               <button onClick={() => setShowModal(false)} className="p-1 rounded hover:bg-background">
                 <Icon name="X" size={20} className="text-text-secondary" />
@@ -215,12 +241,20 @@ const ServiceManagementPanel = () => {
             )}
 
             <div className="space-y-3">
-              {/* Service name (read-only) */}
+              {/* Service name — editable for create, read-only for edit */}
               <div className="space-y-1">
                 <label className="block font-body font-body-medium text-sm text-text-primary">Service Name</label>
-                <div className="px-3 py-2 bg-background rounded-spa border border-border font-body text-sm text-text-secondary">
-                  {editingService.name}
-                </div>
+                {editingService ? (
+                  <div className="px-3 py-2 bg-background rounded-spa border border-border font-body text-sm text-text-secondary">
+                    {editingService.name}
+                  </div>
+                ) : (
+                  <Input
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. Deep Tissue Massage"
+                  />
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -260,7 +294,9 @@ const ServiceManagementPanel = () => {
               <div className="p-3 bg-accent/5 border border-accent/20 rounded-spa">
                 <p className="font-caption text-xs text-accent flex items-center gap-1.5">
                   <Icon name="Info" size={14} />
-                  Price and duration changes only affect future bookings. Historical bookings are protected by snapshot fields.
+                  {editingService
+                    ? 'Price and duration changes only affect future bookings. Historical bookings are protected by snapshot fields.'
+                    : 'New services will be immediately available for booking across all branches.'}
                 </p>
               </div>
             </div>
@@ -268,7 +304,7 @@ const ServiceManagementPanel = () => {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>
               <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
-                Save Changes
+                {editingService ? 'Save Changes' : 'Create Service'}
               </Button>
             </div>
           </div>

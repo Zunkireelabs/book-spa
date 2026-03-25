@@ -63,7 +63,7 @@ const CustomerHeader = () => {
           <div className="flex items-center space-x-4">
             {/* Phone Contact */}
             <a 
-              href="tel:+1-555-SPA-BOOK"
+              href="tel:+977-1-4441234"
               className="hidden sm:flex items-center space-x-2 px-3 py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group"
             >
               <Icon 
@@ -72,7 +72,7 @@ const CustomerHeader = () => {
                 className="text-primary group-hover:text-primary/80" 
               />
               <span className="font-body font-body-medium text-sm text-text-primary">
-                (555) SPA-BOOK
+                +977-1-4441234
               </span>
             </a>
 
@@ -113,7 +113,7 @@ const CustomerHeader = () => {
               <span className="font-caption font-caption-normal text-xs">Manage</span>
             </Link>
             <a 
-              href="tel:+1-555-SPA-BOOK"
+              href="tel:+977-1-4441234"
               className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
             >
               <Icon name="Phone" size={20} />

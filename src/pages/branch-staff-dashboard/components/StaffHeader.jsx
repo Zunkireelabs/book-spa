@@ -43,7 +43,7 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
 
   return (
     <header className="bg-surface border-b border-border sticky top-0 z-header">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-screen-2xl mx-auto px-6 lg:px-10">
         <div className="flex items-center justify-between h-16">
           {/* Logo & Branch Info */}
           <div className="flex items-center space-x-4">
@@ -106,8 +106,19 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
                   : 'text-text-secondary hover:text-primary hover:bg-background'
               }`}
             >
-              <Icon name="Calendar" size={16} />
+              <Icon name="ClipboardList" size={16} />
               <span className="font-body font-body-medium text-sm">Bookings</span>
+            </button>
+            <button
+              onClick={() => onViewChange?.('calendar')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-spa spa-transition-fast ${
+                viewMode === 'calendar'
+                  ? 'text-primary bg-primary/5'
+                  : 'text-text-secondary hover:text-primary hover:bg-background'
+              }`}
+            >
+              <Icon name="Calendar" size={16} />
+              <span className="font-body font-body-medium text-sm">Calendar</span>
             </button>
             <button
               onClick={() => onViewChange?.('new-booking')}
@@ -226,8 +237,19 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
                 : 'text-text-secondary hover:text-primary'
             }`}
           >
-            <Icon name="Calendar" size={20} />
+            <Icon name="ClipboardList" size={20} />
             <span className="font-caption font-caption-normal text-xs">Bookings</span>
+          </button>
+          <button
+            onClick={() => onViewChange?.('calendar')}
+            className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
+              viewMode === 'calendar'
+                ? 'text-primary bg-primary/5'
+                : 'text-text-secondary hover:text-primary'
+            }`}
+          >
+            <Icon name="Calendar" size={20} />
+            <span className="font-caption font-caption-normal text-xs">Calendar</span>
           </button>
           <button
             onClick={() => onViewChange?.('new-booking')}
