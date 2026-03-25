@@ -1,0 +1,58 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Commit SHA to rollback to"
+        required: true
+        type: string
+      reason:
+        description: "Reason for rollback"
+        required: false
+        type: string
+        default: "Production issue"
+
+jobs:
+  rollback:
+    name: Rollback to ${{ inputs.commit_sha }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Rollback via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/zunkireelabs/devprojects/nuad-thai-web-app-prod
+            echo "Rolling back to ${{ inputs.commit_sha }}"
+            echo "Reason: ${{ inputs.reason }}"
+            git fetch origin
+            git checkout ${{ inputs.commit_sha }}
+            docker compose up -d --build
+            echo "Waiting for container to be healthy..."
+            sleep 10
+            for i in $(seq 1 12); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' nuad-thai-prod 2>/dev/null || echo "unknown")
+              if [ "$STATUS" = "healthy" ]; then
+                echo "Rollback successful! Container is healthy."
+                exit 0
+              fi
+              echo "Attempt $i/12: Status is $STATUS, waiting..."
+              sleep 10
+            done
+            echo "Rollback failed — container did not become healthy"
+            docker logs nuad-thai-prod --tail 50
+            exit 1
+
+      - name: Verify Health
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://bookings.zunkireelabs.com)
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Rollback verified (HTTP $HTTP_CODE)"
+          else
+            echo "Health check failed after rollback (HTTP $HTTP_CODE)"
+            exit 1
+          fi

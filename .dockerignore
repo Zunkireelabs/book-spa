@@ -1,0 +1,11 @@
+node_modules
+.git
+build
+docs
+temp_ss
+.env
+.env.*
+.mcp.json
+.claude
+*.md
+!README.md

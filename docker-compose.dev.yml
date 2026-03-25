@@ -3,13 +3,28 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: https://pmbvogiphelmpjdalmtv.supabase.co
+        VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBtYnZvZ2lwaGVsbXBqZGFsbXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4ODEzODcsImV4cCI6MjA4NjQ1NzM4N30.gB-ry-pn0-mOHBqj0MbTVLg5RBjp6MrgX1s_czsSBc4
     container_name: nuad-thai-dev
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.nuad-thai-dev.rule=Host(`dev-nuad.zunkireelabs.com`)"
+      - "traefik.docker.network=hosting"
+      - "traefik.http.routers.nuad-thai-dev.rule=Host(`dev-bookings.zunkireelabs.com`)"
       - "traefik.http.routers.nuad-thai-dev.entrypoints=websecure"
+      - "traefik.http.routers.nuad-thai-dev.tls=true"
       - "traefik.http.routers.nuad-thai-dev.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.nuad-thai-dev-http.rule=Host(`dev-bookings.zunkireelabs.com`)"
+      - "traefik.http.routers.nuad-thai-dev-http.entrypoints=web"
+      - "traefik.http.routers.nuad-thai-dev-http.middlewares=nuad-thai-dev-redirect"
+      - "traefik.http.middlewares.nuad-thai-dev-redirect.redirectscheme.scheme=https"
       - "traefik.http.services.nuad-thai-dev.loadbalancer.server.port=80"
     networks:
       - hosting

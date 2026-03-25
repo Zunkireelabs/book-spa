@@ -1,14 +1,17 @@
+# Stage 1: Build
+FROM node:22-alpine AS builder
+WORKDIR /app
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve
 FROM nginx:alpine
-
-# Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
-
-# Add custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy build output
-COPY build/ /usr/share/nginx/html/
-
+COPY --from=builder /app/build /usr/share/nginx/html
 EXPOSE 80
-
 CMD ["nginx", "-g", "daemon off;"]
