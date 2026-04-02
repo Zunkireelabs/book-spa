@@ -51,12 +51,20 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
           <h2 className="text-sm font-semibold text-gray-900">
             Therapist Availability
           </h2>
-          <div className="relative flex items-center border border-gray-200 rounded-md hover:border-gray-300 transition-colors">
+          <div className="relative">
             <select
               value={selectedTimeSlot}
               onChange={(e) => setSelectedTimeSlot(e.target.value)}
-              className="appearance-none bg-transparent h-7 pl-2 pr-6 text-xs text-gray-700 focus:outline-none cursor-pointer"
-              style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+              className="h-7 pl-2 pr-7 text-xs text-gray-700 bg-white border border-gray-200 rounded-md hover:border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
+              style={{
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                appearance: 'none',
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 6px center',
+                backgroundSize: '12px'
+              }}
             >
               {timeSlots.map((slot) => (
                 <option key={slot.value} value={slot.value}>
@@ -64,9 +72,6 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
                 </option>
               ))}
             </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5">
-              <Icon name="ChevronDown" size={12} className="text-gray-400" />
-            </div>
           </div>
         </div>
 
