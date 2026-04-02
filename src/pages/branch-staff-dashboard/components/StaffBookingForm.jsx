@@ -126,17 +126,17 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   if (step === 5 && createdBooking) {
     return (
       <div className="max-w-2xl mx-auto">
-        <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-success/20 p-8 text-center">
-          <div className="w-16 h-16 bg-success/10 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Icon name="CheckCircle" size={32} className="text-success" />
+        <div className="bg-white rounded-lg border border-emerald-200 p-8 text-center">
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Icon name="CheckCircle" size={32} className="text-emerald-600" />
           </div>
-          <h2 className="font-heading font-heading-semibold text-xl text-text-primary mb-2">
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
             Booking Created
           </h2>
-          <p className="font-data font-data-medium text-lg text-primary mb-1">
+          <p className="text-lg font-medium text-primary mb-1">
             {createdBooking.booking_number}
           </p>
-          <p className="font-body text-sm text-text-secondary mb-6">
+          <p className="text-sm text-gray-500 mb-6">
             {selectedService?.name} • {new Date(selectedDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })} at{' '}
             {timeSlots.find(s => s.time24 === selectedTime)?.time12}
           </p>
@@ -151,29 +151,29 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto flex flex-col gap-4">
       {/* Header */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border p-6">
-        <div className="flex items-center space-x-3 mb-4">
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
             <Icon name="CalendarPlus" size={20} className="text-primary" />
           </div>
           <div>
-            <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h2 className="text-lg font-semibold text-gray-900">
               New Booking
             </h2>
-            <p className="font-caption text-xs text-text-secondary">
+            <p className="text-xs text-gray-500">
               Step {step} of 4 — {['Select Service', 'Date & Time', 'Customer Info', 'Review & Confirm'][step - 1]}
             </p>
           </div>
         </div>
 
         {/* Step indicator */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           {[1, 2, 3, 4].map(s => (
             <div key={s} className="flex items-center flex-1">
-              <div className={`w-full h-1.5 rounded-full spa-transition-fast ${
-                s <= step ? 'bg-primary' : 'bg-border'
+              <div className={`w-full h-1.5 rounded-full transition-colors ${
+                s <= step ? 'bg-primary' : 'bg-gray-200'
               }`} />
             </div>
           ))}
@@ -181,12 +181,12 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       </div>
 
       {/* Step Content */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border p-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
 
         {/* STEP 1: Service */}
         {step === 1 && (
           <div>
-            <h3 className="font-heading font-heading-medium text-base text-text-primary mb-4">
+            <h3 className="text-base font-medium text-gray-900 mb-4">
               Select Service
             </h3>
             {loadingServices ? (
@@ -199,31 +199,31 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   <button
                     key={svc.id}
                     onClick={() => setSelectedService(svc)}
-                    className={`text-left p-4 rounded-spa border-2 spa-transition-fast ${
+                    className={`text-left p-4 rounded-lg border transition-colors ${
                       selectedService?.id === svc.id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/30 hover:bg-background'
+                        ? 'border-primary bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                     }`}
                   >
                     <div className="flex items-start justify-between mb-1">
-                      <span className="font-body font-body-medium text-sm text-text-primary">
+                      <span className="text-sm font-medium text-gray-900">
                         {svc.name}
                       </span>
                       {selectedService?.id === svc.id && (
                         <Icon name="CheckCircle" size={16} className="text-primary flex-shrink-0" />
                       )}
                     </div>
-                    <div className="flex items-center space-x-3 text-xs text-text-secondary">
-                      <span className="flex items-center space-x-1">
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
                         <Icon name="Clock" size={12} />
                         <span>{svc.duration_minutes} min</span>
                       </span>
-                      <span className="font-data font-data-medium text-primary">
+                      <span className="font-medium text-primary">
                         NPR {Number(svc.price_npr).toLocaleString('en-IN')}
                       </span>
                     </div>
                     {svc.description && (
-                      <p className="font-caption text-xs text-text-tertiary mt-1 line-clamp-1">
+                      <p className="text-xs text-gray-400 mt-1 line-clamp-1">
                         {svc.description}
                       </p>
                     )}
@@ -238,7 +238,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
         {step === 2 && (
           <div className="space-y-6">
             <div>
-              <h3 className="font-heading font-heading-medium text-base text-text-primary mb-3">
+              <h3 className="text-base font-medium text-gray-900 mb-3">
                 Select Date
               </h3>
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
@@ -246,12 +246,12 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   <button
                     key={d.value}
                     onClick={() => { setSelectedDate(d.value); setSelectedTime(''); }}
-                    className={`p-2 rounded-spa text-sm font-body spa-transition-fast text-center ${
+                    className={`p-2 rounded-md text-sm transition-colors text-center ${
                       selectedDate === d.value
-                        ? 'bg-primary text-primary-foreground'
+                        ? 'bg-primary text-white'
                         : d.isToday
-                          ? 'bg-accent/10 border border-accent/30 text-text-primary hover:bg-accent/20'
-                          : 'bg-background hover:bg-border text-text-primary'
+                          ? 'bg-amber-50 border border-amber-200 text-gray-900 hover:bg-amber-100'
+                          : 'bg-gray-50 hover:bg-gray-100 text-gray-900'
                     }`}
                   >
                     {d.label}
@@ -262,7 +262,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
 
             {selectedDate && (
               <div>
-                <h3 className="font-heading font-heading-medium text-base text-text-primary mb-3">
+                <h3 className="text-base font-medium text-gray-900 mb-3">
                   Select Time
                 </h3>
                 <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
@@ -270,10 +270,10 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                     <button
                       key={s.time24}
                       onClick={() => setSelectedTime(s.time24)}
-                      className={`p-2 rounded-spa text-sm font-body spa-transition-fast ${
+                      className={`p-2 rounded-md text-sm transition-colors ${
                         selectedTime === s.time24
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-background hover:bg-border text-text-primary'
+                          ? 'bg-primary text-white'
+                          : 'bg-gray-50 hover:bg-gray-100 text-gray-900'
                       }`}
                     >
                       {s.time12}
@@ -288,31 +288,31 @@ const StaffBookingForm = ({ onBookingCreated }) => {
         {/* STEP 3: Customer Info */}
         {step === 3 && (
           <div className="space-y-4">
-            <h3 className="font-heading font-heading-medium text-base text-text-primary mb-2">
+            <h3 className="text-base font-medium text-gray-900 mb-2">
               Customer Information
             </h3>
 
             <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-1">
-                Customer Name <span className="text-error">*</span>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Customer Name <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Full name"
-                className="w-full px-3 py-2.5 rounded-spa border border-border bg-background font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 autoFocus
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-body font-body-medium text-sm text-text-primary mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Phone
                 </label>
                 <div className="flex">
-                  <span className="inline-flex items-center px-3 rounded-l-spa border border-r-0 border-border bg-background font-body text-sm text-text-secondary">
+                  <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-200 bg-gray-50 text-sm text-gray-500">
                     +977
                   </span>
                   <input
@@ -320,13 +320,13 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                     placeholder="9800000000"
-                    className="flex-1 px-3 py-2.5 rounded-r-spa border border-border bg-background font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    className="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-body font-body-medium text-sm text-text-primary mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Email
                 </label>
                 <input
@@ -334,24 +334,24 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   value={customerEmail}
                   onChange={(e) => setCustomerEmail(e.target.value)}
                   placeholder="email@example.com"
-                  className="w-full px-3 py-2.5 rounded-spa border border-border bg-background font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Gender
               </label>
-              <div className="flex space-x-3">
+              <div className="flex gap-3">
                 {[{ value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }].map(g => (
                   <button
                     key={g.value}
                     onClick={() => setCustomerGender(customerGender === g.value ? '' : g.value)}
-                    className={`px-4 py-2 rounded-spa text-sm font-body spa-transition-fast border ${
+                    className={`px-4 py-2 rounded-md text-sm transition-colors border ${
                       customerGender === g.value
-                        ? 'border-primary bg-primary/5 text-primary'
-                        : 'border-border text-text-secondary hover:border-primary/30'
+                        ? 'border-primary bg-blue-50 text-primary'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
                     }`}
                   >
                     {g.label}
@@ -361,7 +361,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
             </div>
 
             <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Special Requests
               </label>
               <textarea
@@ -369,7 +369,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                 onChange={(e) => setSpecialRequests(e.target.value)}
                 placeholder="Any preferences or notes..."
                 rows={2}
-                className="w-full px-3 py-2.5 rounded-spa border border-border bg-background font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
+                className="w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
               />
             </div>
           </div>
@@ -378,65 +378,65 @@ const StaffBookingForm = ({ onBookingCreated }) => {
         {/* STEP 4: Review */}
         {step === 4 && (
           <div className="space-y-4">
-            <h3 className="font-heading font-heading-medium text-base text-text-primary mb-2">
+            <h3 className="text-base font-medium text-gray-900 mb-2">
               Review Booking
             </h3>
 
-            <div className="bg-background rounded-spa p-4 space-y-3">
+            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="font-body text-sm text-text-secondary">Service</span>
-                <span className="font-body font-body-medium text-sm text-text-primary">{selectedService?.name}</span>
+                <span className="text-sm text-gray-500">Service</span>
+                <span className="text-sm font-medium text-gray-900">{selectedService?.name}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-body text-sm text-text-secondary">Duration</span>
-                <span className="font-body text-sm text-text-primary">{selectedService?.duration_minutes} min</span>
+                <span className="text-sm text-gray-500">Duration</span>
+                <span className="text-sm text-gray-900">{selectedService?.duration_minutes} min</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-body text-sm text-text-secondary">Date</span>
-                <span className="font-body text-sm text-text-primary">
+                <span className="text-sm text-gray-500">Date</span>
+                <span className="text-sm text-gray-900">
                   {new Date(selectedDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-body text-sm text-text-secondary">Time</span>
-                <span className="font-body text-sm text-text-primary">
+                <span className="text-sm text-gray-500">Time</span>
+                <span className="text-sm text-gray-900">
                   {timeSlots.find(s => s.time24 === selectedTime)?.time12}
                 </span>
               </div>
-              <div className="border-t border-border pt-3 flex items-center justify-between">
-                <span className="font-body text-sm text-text-secondary">Customer</span>
-                <span className="font-body font-body-medium text-sm text-text-primary">{customerName}</span>
+              <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
+                <span className="text-sm text-gray-500">Customer</span>
+                <span className="text-sm font-medium text-gray-900">{customerName}</span>
               </div>
               {customerPhone && (
                 <div className="flex items-center justify-between">
-                  <span className="font-body text-sm text-text-secondary">Phone</span>
-                  <span className="font-body text-sm text-text-primary">+977 {customerPhone}</span>
+                  <span className="text-sm text-gray-500">Phone</span>
+                  <span className="text-sm text-gray-900">+977 {customerPhone}</span>
                 </div>
               )}
               {customerEmail && (
                 <div className="flex items-center justify-between">
-                  <span className="font-body text-sm text-text-secondary">Email</span>
-                  <span className="font-body text-sm text-text-primary">{customerEmail}</span>
+                  <span className="text-sm text-gray-500">Email</span>
+                  <span className="text-sm text-gray-900">{customerEmail}</span>
                 </div>
               )}
               {specialRequests && (
                 <div className="flex items-start justify-between">
-                  <span className="font-body text-sm text-text-secondary">Requests</span>
-                  <span className="font-body text-sm text-text-primary text-right max-w-xs">{specialRequests}</span>
+                  <span className="text-sm text-gray-500">Requests</span>
+                  <span className="text-sm text-gray-900 text-right max-w-xs">{specialRequests}</span>
                 </div>
               )}
-              <div className="border-t border-border pt-3 flex items-center justify-between">
-                <span className="font-heading font-heading-medium text-sm text-text-primary">Total</span>
-                <span className="font-heading font-heading-semibold text-lg text-primary">
+              <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-900">Total</span>
+                <span className="text-lg font-semibold text-primary">
                   NPR {Number(selectedService?.price_npr).toLocaleString('en-IN')}
                 </span>
               </div>
             </div>
 
             {error && (
-              <div className="flex items-center space-x-2 p-3 bg-error/10 border border-error/20 rounded-spa">
-                <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
-                <span className="font-body text-sm text-error">{error}</span>
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <Icon name="AlertTriangle" size={14} className="text-red-600 flex-shrink-0" />
+                <span className="text-sm text-red-600">{error}</span>
               </div>
             )}
           </div>
@@ -452,10 +452,10 @@ const StaffBookingForm = ({ onBookingCreated }) => {
             </Button>
           )}
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-3">
           <button
             onClick={resetForm}
-            className="font-body text-sm text-text-secondary hover:text-text-primary spa-transition-fast"
+            className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
           >
             Cancel
           </button>

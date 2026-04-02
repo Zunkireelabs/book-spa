@@ -48,12 +48,12 @@ const TherapistUtilizationChart = ({ branchId }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
-        <div className="bg-surface border border-border rounded-spa p-3 spa-shadow-elevated">
-          <p className="font-body font-body-medium text-sm text-text-primary mb-1">{label}</p>
-          <p className="font-body font-body-normal text-sm text-text-secondary">
+        <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-lg">
+          <p className="text-sm font-medium text-gray-900 mb-1">{label}</p>
+          <p className="text-sm text-gray-500">
             Utilization: {data.utilization}%
           </p>
-          <p className="font-body font-body-normal text-sm text-text-secondary">
+          <p className="text-sm text-gray-500">
             Booked: {data.bookedMinutes}m / {data.totalMinutes}m
           </p>
         </div>
@@ -64,25 +64,25 @@ const TherapistUtilizationChart = ({ branchId }) => {
 
   if (loading) {
     return (
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+      <div className="bg-white rounded-lg p-6 border border-gray-200">
         <div className="flex items-center space-x-3 mb-6">
-          <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center">
-            <Icon name="Users" size={20} className="text-accent" />
+          <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
+            <Icon name="Users" size={20} className="text-purple-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Therapist Utilization
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               Loading...
             </p>
           </div>
         </div>
         <div className="h-64 flex items-center justify-center">
           <div className="animate-pulse space-y-3 w-full">
-            <div className="h-4 bg-background rounded w-full" />
-            <div className="h-4 bg-background rounded w-3/4" />
-            <div className="h-4 bg-background rounded w-1/2" />
+            <div className="h-4 bg-gray-100 rounded w-full" />
+            <div className="h-4 bg-gray-100 rounded w-3/4" />
+            <div className="h-4 bg-gray-100 rounded w-1/2" />
           </div>
         </div>
       </div>
@@ -91,12 +91,12 @@ const TherapistUtilizationChart = ({ branchId }) => {
 
   if (error) {
     return (
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+      <div className="bg-white rounded-lg p-6 border border-gray-200">
         <div className="flex items-center space-x-3 mb-4">
-          <Icon name="AlertCircle" size={18} className="text-error" />
-          <p className="font-body text-sm text-error">{error}</p>
+          <Icon name="AlertCircle" size={18} className="text-red-600" />
+          <p className="text-sm text-red-600">{error}</p>
         </div>
-        <button onClick={loadData} className="font-body font-body-medium text-sm text-error underline">
+        <button onClick={loadData} className="text-sm font-medium text-red-600 underline">
           Retry
         </button>
       </div>
@@ -104,44 +104,44 @@ const TherapistUtilizationChart = ({ branchId }) => {
   }
 
   return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+    <div className="bg-white rounded-lg p-6 border border-gray-200">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center">
-            <Icon name="Users" size={20} className="text-accent" />
+          <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
+            <Icon name="Users" size={20} className="text-purple-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Therapist Utilization
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               Today's workload distribution
             </p>
           </div>
         </div>
-        <button className="p-2 rounded-spa hover:bg-background spa-transition-fast">
-          <Icon name="MoreVertical" size={16} className="text-text-secondary" />
+        <button className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
+          <Icon name="MoreVertical" size={16} className="text-gray-500" />
         </button>
       </div>
 
       {utilizationData.length === 0 ? (
         <div className="h-64 flex items-center justify-center">
-          <p className="font-body text-sm text-text-tertiary">No therapist data available</p>
+          <p className="text-sm text-gray-400">No therapist data available</p>
         </div>
       ) : (
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={utilizationData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey="name"
-                tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                tick={{ fontSize: 12, fill: '#6b7280' }}
                 angle={-45}
                 textAnchor="end"
                 height={80}
               />
               <YAxis
-                tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                tick={{ fontSize: 12, fill: '#6b7280' }}
                 domain={[0, 100]}
               />
               <Tooltip content={<CustomTooltip />} />
@@ -156,17 +156,17 @@ const TherapistUtilizationChart = ({ branchId }) => {
       )}
 
       <div className="mt-4 grid grid-cols-3 gap-4 text-center">
-        <div className="p-3 bg-success/10 rounded-spa">
-          <div className="font-heading font-heading-semibold text-lg text-success">{optimalCount}</div>
-          <div className="font-caption font-caption-normal text-xs text-text-secondary">Optimal</div>
+        <div className="p-3 bg-green-50 rounded-lg">
+          <div className="text-lg font-semibold text-green-600">{optimalCount}</div>
+          <div className="text-xs text-gray-500">Optimal</div>
         </div>
-        <div className="p-3 bg-warning/10 rounded-spa">
-          <div className="font-heading font-heading-semibold text-lg text-warning">{highLoadCount}</div>
-          <div className="font-caption font-caption-normal text-xs text-text-secondary">High Load</div>
+        <div className="p-3 bg-amber-50 rounded-lg">
+          <div className="text-lg font-semibold text-amber-600">{highLoadCount}</div>
+          <div className="text-xs text-gray-500">High Load</div>
         </div>
-        <div className="p-3 bg-error/10 rounded-spa">
-          <div className="font-heading font-heading-semibold text-lg text-error">{overloadedCount}</div>
-          <div className="font-caption font-caption-normal text-xs text-text-secondary">Overloaded</div>
+        <div className="p-3 bg-red-50 rounded-lg">
+          <div className="text-lg font-semibold text-red-600">{overloadedCount}</div>
+          <div className="text-xs text-gray-500">Overloaded</div>
         </div>
       </div>
     </div>

@@ -96,10 +96,10 @@ const RevenueAnalyticsChart = ({ branchId }) => {
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-surface border border-border rounded-spa p-3 spa-shadow-elevated">
-          <p className="font-body font-body-medium text-sm text-text-primary mb-2">{label}</p>
+        <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-lg">
+          <p className="text-sm font-medium text-gray-900 mb-2">{label}</p>
           {payload.map((entry, index) => (
-            <p key={index} className="font-body font-body-normal text-sm" style={{ color: entry.color }}>
+            <p key={index} className="text-sm" style={{ color: entry.color }}>
               {entry.name}: {entry.name.includes('Revenue') ? 'NPR ' : ''}{entry.value.toLocaleString('en-IN')}
             </p>
           ))}
@@ -114,9 +114,9 @@ const RevenueAnalyticsChart = ({ branchId }) => {
       return (
         <div className="h-64 flex items-center justify-center">
           <div className="animate-pulse space-y-3 w-full">
-            <div className="h-4 bg-background rounded w-full" />
-            <div className="h-4 bg-background rounded w-3/4" />
-            <div className="h-4 bg-background rounded w-1/2" />
+            <div className="h-4 bg-gray-100 rounded w-full" />
+            <div className="h-4 bg-gray-100 rounded w-3/4" />
+            <div className="h-4 bg-gray-100 rounded w-1/2" />
           </div>
         </div>
       );
@@ -125,9 +125,9 @@ const RevenueAnalyticsChart = ({ branchId }) => {
     if (error) {
       return (
         <div className="flex items-center space-x-3 p-4">
-          <Icon name="AlertCircle" size={18} className="text-error" />
-          <p className="font-body text-sm text-error">{error}</p>
-          <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
+          <Icon name="AlertCircle" size={18} className="text-red-600" />
+          <p className="text-sm text-red-600">{error}</p>
+          <button onClick={loadData} className="ml-auto text-sm font-medium text-red-600 underline">
             Retry
           </button>
         </div>
@@ -140,27 +140,27 @@ const RevenueAnalyticsChart = ({ branchId }) => {
           <div className="space-y-4">
             {revenueData.length === 0 ? (
               <div className="h-64 flex items-center justify-center">
-                <p className="font-body text-sm text-text-tertiary">No paid bookings yet today</p>
+                <p className="text-sm text-gray-400">No paid bookings yet today</p>
               </div>
             ) : (
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={revenueData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="time"
-                      tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                      tick={{ fontSize: 12, fill: '#6b7280' }}
                     />
                     <YAxis
-                      tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                      tick={{ fontSize: 12, fill: '#6b7280' }}
                     />
                     <Tooltip content={<CustomTooltip />} />
                     <Line
                       type="monotone"
                       dataKey="revenue"
-                      stroke="var(--color-primary)"
+                      stroke="#3b82f6"
                       strokeWidth={3}
-                      dot={{ fill: 'var(--color-primary)', strokeWidth: 2, r: 4 }}
+                      dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
                       name="Revenue (NPR)"
                     />
                   </LineChart>
@@ -168,21 +168,21 @@ const RevenueAnalyticsChart = ({ branchId }) => {
               </div>
             )}
             <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-lg font-semibold text-gray-900">
                   NPR {totalRevenue.toLocaleString('en-IN')}
                 </div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Current Revenue</div>
+                <div className="text-xs text-gray-500">Current Revenue</div>
               </div>
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">{paidCount}</div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Paid Bookings</div>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-lg font-semibold text-gray-900">{paidCount}</div>
+                <div className="text-xs text-gray-500">Paid Bookings</div>
               </div>
-              <div className="text-center p-3 bg-background rounded-spa">
-                <div className="font-heading font-heading-semibold text-lg text-text-primary">
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-lg font-semibold text-gray-900">
                   NPR {avgPerBooking.toLocaleString('en-IN')}
                 </div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary">Avg per Booking</div>
+                <div className="text-xs text-gray-500">Avg per Booking</div>
               </div>
             </div>
           </div>
@@ -193,7 +193,7 @@ const RevenueAnalyticsChart = ({ branchId }) => {
           <div className="space-y-4">
             {serviceData.length === 0 ? (
               <div className="h-64 flex items-center justify-center">
-                <p className="font-body text-sm text-text-tertiary">No bookings yet today</p>
+                <p className="text-sm text-gray-400">No bookings yet today</p>
               </div>
             ) : (
               <>
@@ -219,21 +219,21 @@ const RevenueAnalyticsChart = ({ branchId }) => {
                 </div>
                 <div className="space-y-2">
                   {serviceData.map((service, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-background rounded-spa">
+                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
                       <div className="flex items-center space-x-3">
                         <div
                           className="w-3 h-3 rounded-full"
                           style={{ backgroundColor: service.color }}
                         ></div>
-                        <span className="font-body font-body-medium text-sm text-text-primary">
+                        <span className="text-sm font-medium text-gray-900">
                           {service.name}
                         </span>
                       </div>
                       <div className="text-right">
-                        <div className="font-body font-body-medium text-sm text-text-primary">
+                        <div className="text-sm font-medium text-gray-900">
                           {service.value}% ({service.count})
                         </div>
-                        <div className="font-caption font-caption-normal text-xs text-text-secondary">
+                        <div className="text-xs text-gray-500">
                           NPR {service.revenue.toLocaleString('en-IN')}
                         </div>
                       </div>
@@ -251,17 +251,17 @@ const RevenueAnalyticsChart = ({ branchId }) => {
   };
 
   return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+    <div className="bg-white rounded-lg p-6 border border-gray-200">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center">
-            <Icon name="BarChart3" size={20} className="text-accent" />
+          <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
+            <Icon name="BarChart3" size={20} className="text-purple-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Revenue Analytics
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               Today's business insights
             </p>
           </div>
@@ -269,15 +269,15 @@ const RevenueAnalyticsChart = ({ branchId }) => {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-1 mb-6 bg-background rounded-spa p-1">
+      <div className="flex space-x-1 mb-6 bg-gray-100 rounded-lg p-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center space-x-2 px-3 py-2 rounded text-sm font-body font-body-medium spa-transition-fast ${
+            className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab.id
-                ? 'bg-surface text-text-primary spa-shadow-resting'
-                : 'text-text-secondary hover:text-text-primary'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-900'
             }`}
           >
             <Icon name={tab.icon} size={16} />

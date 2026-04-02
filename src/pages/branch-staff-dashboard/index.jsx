@@ -398,14 +398,14 @@ const BranchStaffDashboard = () => {
   const userRole = profile?.role || 'staff';
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFAFA' }}>
+    <div className="min-h-screen bg-[#ebebeb]">
       <StaffSidebar
         onCollapseChange={setSidebarCollapsed}
       />
 
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:pb-0 pb-16 spa-transition-slow`}>
+      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200`}>
         {/* Top Bar - Consistent with Admin */}
-        <header className="bg-[#FAFAFA] sticky top-0 z-header">
+        <header className="bg-[#ebebeb] sticky top-0 z-header">
           <div className="px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between">
               {/* Left: Branch + date/time */}
@@ -516,44 +516,42 @@ const BranchStaffDashboard = () => {
         )}
 
         {/* Main Content Area - Consistent with Admin */}
-        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-6'} bg-white rounded-tl-spa-lg border-l border-t border-[rgba(0,0,29,0.075)]`}>
+        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1] min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
           {viewMode === 'dashboard' ? (
-            <div className="min-h-[calc(100vh-120px)]">
+            <div className="flex flex-col gap-3 min-h-[calc(100vh-120px)]">
               {/* Overview Stats */}
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary mb-4">{getOverviewTitle()}</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Confirmed</div>
-                  <div className="font-heading font-heading-semibold text-2xl text-success">{bookingCounts.confirmed}</div>
+              <h2 className="text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-xs font-medium text-gray-500 mb-1">Confirmed</div>
+                  <div className="text-2xl font-semibold text-emerald-600">{bookingCounts.confirmed}</div>
                 </div>
-                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Pending</div>
-                  <div className="font-heading font-heading-semibold text-2xl text-warning">{bookingCounts.pending}</div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-xs font-medium text-gray-500 mb-1">Pending</div>
+                  <div className="text-2xl font-semibold text-amber-500">{bookingCounts.pending}</div>
                 </div>
-                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">In Progress</div>
-                  <div className="font-heading font-heading-semibold text-2xl text-primary">{bookingCounts.inProgress}</div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-xs font-medium text-gray-500 mb-1">In Progress</div>
+                  <div className="text-2xl font-semibold text-blue-600">{bookingCounts.inProgress}</div>
                 </div>
-                <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-                  <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Completed</div>
-                  <div className="font-heading font-heading-semibold text-2xl text-text-secondary">{bookingCounts.completed}</div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-xs font-medium text-gray-500 mb-1">Completed</div>
+                  <div className="text-2xl font-semibold text-gray-400">{bookingCounts.completed}</div>
                 </div>
               </div>
 
               {/* Inline Filters */}
-              <div className="mb-6">
-                <QuickFilters
-                  onFiltersChange={handleFiltersChange}
-                  bookingCounts={bookingCounts}
-                />
-              </div>
+              <QuickFilters
+                onFiltersChange={handleFiltersChange}
+                bookingCounts={bookingCounts}
+              />
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1">
               <div className="lg:col-span-9">
                 {loading ? (
-                  <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-12 text-center">
+                  <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
                     <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-                    <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+                    <p className="text-sm text-gray-500">Loading bookings...</p>
                   </div>
                 ) : (
                   <BookingsList

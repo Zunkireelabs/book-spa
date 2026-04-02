@@ -69,10 +69,10 @@ const BookingPipelineChart = ({ branchId }) => {
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-surface border border-border rounded-spa p-3 spa-shadow-elevated">
-          <p className="font-body font-body-medium text-sm text-text-primary mb-2">{label}</p>
+        <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-lg">
+          <p className="text-sm font-medium text-gray-900 mb-2">{label}</p>
           {payload.map((entry, index) => (
-            <p key={index} className="font-body font-body-normal text-sm" style={{ color: entry.color }}>
+            <p key={index} className="text-sm" style={{ color: entry.color }}>
               {entry.name}: {entry.value}
             </p>
           ))}
@@ -84,25 +84,25 @@ const BookingPipelineChart = ({ branchId }) => {
 
   if (loading) {
     return (
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+      <div className="bg-white rounded-lg p-6 border border-gray-200">
         <div className="flex items-center space-x-3 mb-6">
-          <div className="w-10 h-10 bg-secondary/10 rounded-lg flex items-center justify-center">
-            <Icon name="TrendingUp" size={20} className="text-secondary" />
+          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+            <Icon name="TrendingUp" size={20} className="text-blue-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Booking Pipeline
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               Loading...
             </p>
           </div>
         </div>
         <div className="h-48 flex items-center justify-center">
           <div className="animate-pulse space-y-3 w-full">
-            <div className="h-4 bg-background rounded w-full" />
-            <div className="h-4 bg-background rounded w-3/4" />
-            <div className="h-4 bg-background rounded w-1/2" />
+            <div className="h-4 bg-gray-100 rounded w-full" />
+            <div className="h-4 bg-gray-100 rounded w-3/4" />
+            <div className="h-4 bg-gray-100 rounded w-1/2" />
           </div>
         </div>
       </div>
@@ -111,12 +111,12 @@ const BookingPipelineChart = ({ branchId }) => {
 
   if (error) {
     return (
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+      <div className="bg-white rounded-lg p-6 border border-gray-200">
         <div className="flex items-center space-x-3 mb-4">
-          <Icon name="AlertCircle" size={18} className="text-error" />
-          <p className="font-body text-sm text-error">{error}</p>
+          <Icon name="AlertCircle" size={18} className="text-red-600" />
+          <p className="text-sm text-red-600">{error}</p>
         </div>
-        <button onClick={loadData} className="font-body font-body-medium text-sm text-error underline">
+        <button onClick={loadData} className="text-sm font-medium text-red-600 underline">
           Retry
         </button>
       </div>
@@ -130,23 +130,23 @@ const BookingPipelineChart = ({ branchId }) => {
   ];
 
   return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+    <div className="bg-white rounded-lg p-6 border border-gray-200">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-secondary/10 rounded-lg flex items-center justify-center">
-            <Icon name="TrendingUp" size={20} className="text-secondary" />
+          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+            <Icon name="TrendingUp" size={20} className="text-blue-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Booking Pipeline
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               Cumulative bookings for today
             </p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          <button className="px-3 py-1 bg-primary/10 text-primary rounded text-xs font-body font-body-medium">
+          <button className="px-3 py-1 bg-blue-50 text-blue-600 rounded text-xs font-medium">
             Today
           </button>
         </div>
@@ -154,7 +154,7 @@ const BookingPipelineChart = ({ branchId }) => {
 
       {pipelineData.length === 0 ? (
         <div className="h-48 flex items-center justify-center mb-6">
-          <p className="font-body text-sm text-text-tertiary">No bookings yet today</p>
+          <p className="text-sm text-gray-400">No bookings yet today</p>
         </div>
       ) : (
         <div className="h-48 w-full mb-6">
@@ -162,27 +162,27 @@ const BookingPipelineChart = ({ branchId }) => {
             <AreaChart data={pipelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="bookingsTotalGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                 </linearGradient>
                 <linearGradient id="bookingsCompletedGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-success)" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="var(--color-success)" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey="time"
-                tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                tick={{ fontSize: 12, fill: '#6b7280' }}
               />
               <YAxis
-                tick={{ fontSize: 12, fill: 'var(--color-text-secondary)' }}
+                tick={{ fontSize: 12, fill: '#6b7280' }}
               />
               <Tooltip content={<CustomTooltip />} />
               <Area
                 type="monotone"
                 dataKey="bookings"
-                stroke="var(--color-primary)"
+                stroke="#3b82f6"
                 fillOpacity={1}
                 fill="url(#bookingsTotalGradient)"
                 name="Total Bookings"
@@ -190,7 +190,7 @@ const BookingPipelineChart = ({ branchId }) => {
               <Area
                 type="monotone"
                 dataKey="completed"
-                stroke="var(--color-success)"
+                stroke="#22c55e"
                 fillOpacity={1}
                 fill="url(#bookingsCompletedGradient)"
                 name="Completed"
@@ -202,11 +202,11 @@ const BookingPipelineChart = ({ branchId }) => {
 
       <div className="grid grid-cols-3 gap-4">
         {conversionStats.map((stat, index) => (
-          <div key={index} className="text-center p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-text-primary">
+          <div key={index} className="text-center p-3 bg-gray-50 rounded-lg">
+            <div className="text-lg font-semibold text-gray-900">
               {stat.value}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">
+            <div className="text-xs text-gray-500 mb-1">
               {stat.label}
             </div>
           </div>

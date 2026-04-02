@@ -162,49 +162,47 @@ const BookingsViewPanel = ({ branchId }) => {
     <div className="relative">
       {/* Toast */}
       {actionToast && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
-          actionToast.type === 'error' ? 'bg-error text-white' : 'bg-success text-white'
+        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg animate-fade-in flex items-center gap-2 ${
+          actionToast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
         }`}>
-          <span className="font-body font-body-medium text-sm">{actionToast.msg}</span>
+          <span className="text-sm font-medium">{actionToast.msg}</span>
         </div>
       )}
 
-      <div className="bg-white rounded-spa-lg min-h-[calc(100vh-140px)]">
+      <div className="flex flex-col gap-3 min-h-[calc(100vh-120px)]">
         {/* Overview Stats */}
-        <h2 className="font-heading font-heading-semibold text-lg text-text-primary mb-4">{getOverviewTitle()}</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Confirmed</div>
-            <div className="font-heading font-heading-semibold text-2xl text-success">{bookingCounts.confirmed}</div>
+        <h2 className="text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">Confirmed</div>
+            <div className="text-2xl font-semibold text-emerald-600">{bookingCounts.confirmed}</div>
           </div>
-          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Pending</div>
-            <div className="font-heading font-heading-semibold text-2xl text-warning">{bookingCounts.pending}</div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">Pending</div>
+            <div className="text-2xl font-semibold text-amber-500">{bookingCounts.pending}</div>
           </div>
-          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">In Progress</div>
-            <div className="font-heading font-heading-semibold text-2xl text-primary">{bookingCounts.inProgress}</div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">In Progress</div>
+            <div className="text-2xl font-semibold text-blue-600">{bookingCounts.inProgress}</div>
           </div>
-          <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-            <div className="font-caption font-caption-normal text-xs text-text-secondary mb-1">Completed</div>
-            <div className="font-heading font-heading-semibold text-2xl text-text-secondary">{bookingCounts.completed}</div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="text-xs font-medium text-gray-500 mb-1">Completed</div>
+            <div className="text-2xl font-semibold text-gray-400">{bookingCounts.completed}</div>
           </div>
         </div>
 
         {/* Inline Filters */}
-        <div className="mb-6">
-          <QuickFilters
-            onFiltersChange={setFilters}
-            bookingCounts={bookingCounts}
-          />
-        </div>
+        <QuickFilters
+          onFiltersChange={setFilters}
+          bookingCounts={bookingCounts}
+        />
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1">
           <div className="lg:col-span-9">
             {loading ? (
-              <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-12 text-center">
+              <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
                 <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-                <p className="font-body font-body-normal text-text-secondary">Loading bookings...</p>
+                <p className="text-sm text-gray-500">Loading bookings...</p>
               </div>
             ) : (
               <BookingsList

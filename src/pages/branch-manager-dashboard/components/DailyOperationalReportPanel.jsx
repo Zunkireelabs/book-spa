@@ -81,38 +81,38 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
   if (!branchId) {
     return (
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border text-center">
-        <p className="font-body font-body-normal text-text-secondary">No branch selected.</p>
+      <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
+        <p className="text-sm text-gray-500">No branch selected.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
       {/* Header with Date Selector + Actions */}
-      <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+      <div className="bg-white rounded-lg p-6 border border-gray-200">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
               <Icon name="FileText" size={20} className="text-primary" />
             </div>
             <div>
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+              <h2 className="text-lg font-semibold text-gray-900">
                 Daily Operational Report
               </h2>
-              <p className="font-caption font-caption-normal text-sm text-text-secondary">
+              <p className="text-sm text-gray-500">
                 {formatDate(selectedDate)}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-3">
             <input
               type="date"
               value={selectedDate}
               max={today}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+              className="h-9 px-3 border border-gray-200 rounded-md bg-white text-gray-900 text-sm focus:ring-1 focus:ring-primary focus:border-primary"
             />
             <Button
               variant="outline"
@@ -140,13 +140,13 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
         {/* Closed Badge */}
         {report?.isClosed && (
-          <div className="flex items-center space-x-2 px-4 py-2 bg-success/5 border border-success/20 rounded-spa">
-            <Icon name="Lock" size={16} className="text-success" />
-            <span className="font-body font-body-medium text-sm text-success">
+          <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+            <Icon name="Lock" size={16} className="text-emerald-600" />
+            <span className="text-sm font-medium text-emerald-600">
               Day Closed
             </span>
             {report.closedAt && (
-              <span className="font-caption font-caption-normal text-xs text-text-secondary ml-auto">
+              <span className="text-xs text-gray-500 ml-auto">
                 at {new Date(report.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
@@ -156,25 +156,25 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
       {/* Loading */}
       {loading && (
-        <div className="bg-surface rounded-spa-lg spa-shadow-resting p-12 border border-border text-center">
+        <div className="bg-white rounded-lg p-12 border border-gray-200 text-center">
           <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-          <p className="font-body font-body-normal text-text-secondary">Loading report...</p>
+          <p className="text-sm text-gray-500">Loading report...</p>
         </div>
       )}
 
       {/* Error */}
       {error && (
-        <div className="flex items-start space-x-2 p-4 bg-error/5 border border-error/20 rounded-spa-lg">
-          <Icon name="AlertCircle" size={16} className="text-error mt-0.5 shrink-0" />
-          <p className="font-body font-body-normal text-sm text-error">{error}</p>
+        <div className="flex items-start gap-2 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <Icon name="AlertCircle" size={16} className="text-red-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-600">{error}</p>
         </div>
       )}
 
       {/* Success */}
       {successMsg && (
-        <div className="flex items-start space-x-2 p-4 bg-success/5 border border-success/20 rounded-spa-lg">
-          <Icon name="CheckCircle" size={16} className="text-success mt-0.5 shrink-0" />
-          <p className="font-body font-body-normal text-sm text-success">{successMsg}</p>
+        <div className="flex items-start gap-2 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <Icon name="CheckCircle" size={16} className="text-emerald-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-emerald-600">{successMsg}</p>
         </div>
       )}
 
@@ -182,66 +182,66 @@ const DailyOperationalReportPanel = ({ branchId }) => {
       {!loading && report && (
         <>
           {/* Revenue Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
-              <div className="flex items-center space-x-2 mb-2">
-                <Icon name="TrendingUp" size={16} className="text-text-secondary" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Gross Revenue</span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-white rounded-lg p-5 border border-gray-200">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon name="TrendingUp" size={16} className="text-gray-400" />
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Revenue</span>
               </div>
-              <p className="font-heading font-heading-semibold text-xl text-text-primary">
+              <p className="text-xl font-semibold text-gray-900">
                 {formatNPR(report.totals.grossRevenue)}
               </p>
             </div>
 
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
-              <div className="flex items-center space-x-2 mb-2">
-                <Icon name="Percent" size={16} className="text-text-secondary" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Total Discounts</span>
+            <div className="bg-white rounded-lg p-5 border border-gray-200">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon name="Percent" size={16} className="text-gray-400" />
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Discounts</span>
               </div>
-              <p className="font-heading font-heading-semibold text-xl text-error">
+              <p className="text-xl font-semibold text-red-600">
                 - {formatNPR(report.totals.totalDiscount)}
               </p>
             </div>
 
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border border-l-4 border-l-success">
-              <div className="flex items-center space-x-2 mb-2">
-                <Icon name="IndianRupee" size={16} className="text-success" />
-                <span className="font-caption font-caption-medium text-xs text-text-secondary uppercase tracking-wider">Net Revenue</span>
+            <div className="bg-white rounded-lg p-5 border border-gray-200 border-l-4 border-l-emerald-500">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon name="IndianRupee" size={16} className="text-emerald-600" />
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Net Revenue</span>
               </div>
-              <p className="font-heading font-heading-semibold text-xl text-success">
+              <p className="text-xl font-semibold text-emerald-600">
                 {formatNPR(report.totals.netRevenue)}
               </p>
             </div>
           </div>
 
           {/* Booking Breakdown + Payment Mode */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Booking Breakdown */}
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
-              <h3 className="font-heading font-heading-medium text-base text-text-primary mb-4 flex items-center space-x-2">
+            <div className="bg-white rounded-lg p-5 border border-gray-200">
+              <h3 className="text-base font-medium text-gray-900 mb-4 flex items-center gap-2">
                 <Icon name="Calendar" size={18} className="text-primary" />
                 <span>Booking Breakdown</span>
               </h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Total Bookings</span>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">{report.totals.totalBookings}</span>
+                  <span className="text-sm text-gray-500">Total Bookings</span>
+                  <span className="text-sm font-semibold text-gray-900">{report.totals.totalBookings}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Completed</span>
-                  <span className="font-body font-body-semibold text-sm text-success">{report.totals.completedBookings}</span>
+                  <span className="text-sm text-gray-500">Completed</span>
+                  <span className="text-sm font-semibold text-emerald-600">{report.totals.completedBookings}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Cancelled</span>
-                  <span className="font-body font-body-semibold text-sm text-error">{report.totals.cancelledBookings}</span>
+                  <span className="text-sm text-gray-500">Cancelled</span>
+                  <span className="text-sm font-semibold text-red-600">{report.totals.cancelledBookings}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">No Show</span>
-                  <span className="font-body font-body-semibold text-sm text-warning">{report.totals.noShowBookings}</span>
+                  <span className="text-sm text-gray-500">No Show</span>
+                  <span className="text-sm font-semibold text-amber-600">{report.totals.noShowBookings}</span>
                 </div>
-                <div className="border-t border-border pt-2 flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Unpaid (Confirmed/Completed)</span>
-                  <span className={`font-body font-body-semibold text-sm ${report.unpaidBookings.length > 0 ? 'text-warning' : 'text-success'}`}>
+                <div className="border-t border-gray-200 pt-2 flex items-center justify-between">
+                  <span className="text-sm text-gray-500">Unpaid (Confirmed/Completed)</span>
+                  <span className={`text-sm font-semibold ${report.unpaidBookings.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                     {report.unpaidBookings.length}
                   </span>
                 </div>
@@ -249,36 +249,36 @@ const DailyOperationalReportPanel = ({ branchId }) => {
             </div>
 
             {/* Payment Mode Breakdown */}
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
-              <h3 className="font-heading font-heading-medium text-base text-text-primary mb-4 flex items-center space-x-2">
+            <div className="bg-white rounded-lg p-5 border border-gray-200">
+              <h3 className="text-base font-medium text-gray-900 mb-4 flex items-center gap-2">
                 <Icon name="CreditCard" size={18} className="text-primary" />
                 <span>Payment Breakdown</span>
               </h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Icon name="Banknote" size={14} className="text-text-secondary" />
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Cash</span>
+                  <div className="flex items-center gap-2">
+                    <Icon name="Banknote" size={14} className="text-gray-400" />
+                    <span className="text-sm text-gray-500">Cash</span>
                   </div>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">
+                  <span className="text-sm font-semibold text-gray-900">
                     {formatNPR(report.paymentBreakdown.cash)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Icon name="CreditCard" size={14} className="text-text-secondary" />
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Card (Nabil / GlobalIME / NIC Asia)</span>
+                  <div className="flex items-center gap-2">
+                    <Icon name="CreditCard" size={14} className="text-gray-400" />
+                    <span className="text-sm text-gray-500">Card (Nabil / GlobalIME / NIC Asia)</span>
                   </div>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">
+                  <span className="text-sm font-semibold text-gray-900">
                     {formatNPR(report.paymentBreakdown.card)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Icon name="Smartphone" size={14} className="text-text-secondary" />
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Fonepay</span>
+                  <div className="flex items-center gap-2">
+                    <Icon name="Smartphone" size={14} className="text-gray-400" />
+                    <span className="text-sm text-gray-500">Fonepay</span>
                   </div>
-                  <span className="font-body font-body-semibold text-sm text-text-primary">
+                  <span className="text-sm font-semibold text-gray-900">
                     {formatNPR(report.paymentBreakdown.fonepay)}
                   </span>
                 </div>
@@ -288,12 +288,12 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
           {/* Bookings Detail Table */}
           {report.bookings.length > 0 && (
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border overflow-hidden">
-              <div className="p-5 border-b border-border">
-                <h3 className="font-heading font-heading-medium text-base text-text-primary flex items-center space-x-2">
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-base font-medium text-gray-900 flex items-center gap-2">
                   <Icon name="List" size={18} className="text-primary" />
                   <span>All Bookings</span>
-                  <span className="font-caption font-caption-normal text-xs text-text-secondary ml-2">
+                  <span className="text-xs text-gray-500 ml-2">
                     ({report.bookings.length})
                   </span>
                 </h3>
@@ -301,50 +301,50 @@ const DailyOperationalReportPanel = ({ branchId }) => {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-background">
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Booking #</th>
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Customer</th>
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Service</th>
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Therapist</th>
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Room</th>
-                      <th className="text-right px-4 py-3 font-body font-body-medium text-text-secondary">Amount</th>
-                      <th className="text-center px-4 py-3 font-body font-body-medium text-text-secondary">Payment</th>
-                      <th className="text-center px-4 py-3 font-body font-body-medium text-text-secondary">Status</th>
+                    <tr className="bg-gray-50">
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Booking #</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Customer</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Service</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Therapist</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Room</th>
+                      <th className="text-right px-4 py-3 font-medium text-gray-500">Amount</th>
+                      <th className="text-center px-4 py-3 font-medium text-gray-500">Payment</th>
+                      <th className="text-center px-4 py-3 font-medium text-gray-500">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-gray-100">
                     {report.bookings.map((b) => (
-                      <tr key={b.bookingId} className="hover:bg-background/50 spa-transition-fast">
-                        <td className="px-4 py-3 font-body font-body-medium text-text-primary whitespace-nowrap">
+                      <tr key={b.bookingId} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                           {b.bookingNumber}
                         </td>
-                        <td className="px-4 py-3 font-body font-body-normal text-text-primary">
+                        <td className="px-4 py-3 text-gray-900">
                           {b.customerName}
                         </td>
-                        <td className="px-4 py-3 font-body font-body-normal text-text-secondary">
+                        <td className="px-4 py-3 text-gray-500">
                           {b.serviceName}
                         </td>
-                        <td className="px-4 py-3 font-body font-body-normal text-text-secondary">
+                        <td className="px-4 py-3 text-gray-500">
                           {b.therapistName}
                         </td>
-                        <td className="px-4 py-3 font-body font-body-normal text-text-secondary">
+                        <td className="px-4 py-3 text-gray-500">
                           {b.roomName}
                         </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <div className="font-body font-body-semibold text-text-primary">
+                          <div className="font-semibold text-gray-900">
                             {formatNPR(b.finalAmount)}
                           </div>
                           {b.discountAmount > 0 && (
-                            <div className="font-caption font-caption-normal text-xs text-error">
+                            <div className="text-xs text-red-600">
                               -{formatNPR(b.discountAmount)} disc.
                             </div>
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-body font-body-medium ${
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             b.paymentStatus === 'paid'
-                              ? 'bg-success/10 text-success'
-                              : 'bg-warning/10 text-warning'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
                           }`}>
                             {b.paymentStatus === 'paid' ? b.paymentMode || 'Paid' : 'Unpaid'}
                           </span>
@@ -362,9 +362,9 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
           {/* Therapist Revenue Summary */}
           {report.therapistRevenueSummary.length > 0 && (
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border overflow-hidden">
-              <div className="p-5 border-b border-border">
-                <h3 className="font-heading font-heading-medium text-base text-text-primary flex items-center space-x-2">
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-base font-medium text-gray-900 flex items-center gap-2">
                   <Icon name="User" size={18} className="text-primary" />
                   <span>Therapist Revenue Summary</span>
                 </h3>
@@ -372,18 +372,18 @@ const DailyOperationalReportPanel = ({ branchId }) => {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-background">
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Therapist</th>
-                      <th className="text-center px-4 py-3 font-body font-body-medium text-text-secondary">Completed Bookings</th>
-                      <th className="text-right px-4 py-3 font-body font-body-medium text-text-secondary">Total Revenue</th>
+                    <tr className="bg-gray-50">
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Therapist</th>
+                      <th className="text-center px-4 py-3 font-medium text-gray-500">Completed Bookings</th>
+                      <th className="text-right px-4 py-3 font-medium text-gray-500">Total Revenue</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-gray-100">
                     {report.therapistRevenueSummary.map((t, i) => (
-                      <tr key={i} className="hover:bg-background/50 spa-transition-fast">
-                        <td className="px-4 py-3 font-body font-body-medium text-text-primary">{t.therapistName}</td>
-                        <td className="px-4 py-3 text-center font-body font-body-normal text-text-primary">{t.completedBookings}</td>
-                        <td className="px-4 py-3 text-right font-body font-body-semibold text-success">{formatNPR(t.totalRevenue)}</td>
+                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-gray-900">{t.therapistName}</td>
+                        <td className="px-4 py-3 text-center text-gray-900">{t.completedBookings}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-emerald-600">{formatNPR(t.totalRevenue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -394,9 +394,9 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
           {/* Staff Discount Summary */}
           {report.staffDiscountSummary.length > 0 && (
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border overflow-hidden">
-              <div className="p-5 border-b border-border">
-                <h3 className="font-heading font-heading-medium text-base text-text-primary flex items-center space-x-2">
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-base font-medium text-gray-900 flex items-center gap-2">
                   <Icon name="Percent" size={18} className="text-primary" />
                   <span>Staff Discount Summary</span>
                 </h3>
@@ -404,18 +404,18 @@ const DailyOperationalReportPanel = ({ branchId }) => {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-background">
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Staff Name</th>
-                      <th className="text-center px-4 py-3 font-body font-body-medium text-text-secondary">Discount Count</th>
-                      <th className="text-right px-4 py-3 font-body font-body-medium text-text-secondary">Total Discount Amount</th>
+                    <tr className="bg-gray-50">
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Staff Name</th>
+                      <th className="text-center px-4 py-3 font-medium text-gray-500">Discount Count</th>
+                      <th className="text-right px-4 py-3 font-medium text-gray-500">Total Discount Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-gray-100">
                     {report.staffDiscountSummary.map((s, i) => (
-                      <tr key={i} className="hover:bg-background/50 spa-transition-fast">
-                        <td className="px-4 py-3 font-body font-body-medium text-text-primary">{s.staffName}</td>
-                        <td className="px-4 py-3 text-center font-body font-body-normal text-text-primary">{s.discountCount}</td>
-                        <td className="px-4 py-3 text-right font-body font-body-semibold text-error">{formatNPR(s.totalDiscountAmount)}</td>
+                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-gray-900">{s.staffName}</td>
+                        <td className="px-4 py-3 text-center text-gray-900">{s.discountCount}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-red-600">{formatNPR(s.totalDiscountAmount)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -426,12 +426,12 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
           {/* Unpaid Bookings */}
           {report.unpaidBookings.length > 0 && (
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting border border-border border-l-4 border-l-warning overflow-hidden">
-              <div className="p-5 border-b border-border">
-                <h3 className="font-heading font-heading-medium text-base text-text-primary flex items-center space-x-2">
-                  <Icon name="AlertTriangle" size={18} className="text-warning" />
+            <div className="bg-white rounded-lg border border-gray-200 border-l-4 border-l-amber-500 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-base font-medium text-gray-900 flex items-center gap-2">
+                  <Icon name="AlertTriangle" size={18} className="text-amber-600" />
                   <span>Unpaid Bookings</span>
-                  <span className="font-caption font-caption-normal text-xs text-warning ml-2">
+                  <span className="text-xs text-amber-600 ml-2">
                     ({report.unpaidBookings.length})
                   </span>
                 </h3>
@@ -439,21 +439,21 @@ const DailyOperationalReportPanel = ({ branchId }) => {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-background">
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Booking #</th>
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Customer</th>
-                      <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary">Service</th>
-                      <th className="text-right px-4 py-3 font-body font-body-medium text-text-secondary">Amount Due</th>
-                      <th className="text-center px-4 py-3 font-body font-body-medium text-text-secondary">Status</th>
+                    <tr className="bg-gray-50">
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Booking #</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Customer</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Service</th>
+                      <th className="text-right px-4 py-3 font-medium text-gray-500">Amount Due</th>
+                      <th className="text-center px-4 py-3 font-medium text-gray-500">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-gray-100">
                     {report.unpaidBookings.map((u, i) => (
-                      <tr key={i} className="hover:bg-background/50 spa-transition-fast">
-                        <td className="px-4 py-3 font-body font-body-medium text-text-primary">{u.bookingNumber}</td>
-                        <td className="px-4 py-3 font-body font-body-normal text-text-primary">{u.customerName}</td>
-                        <td className="px-4 py-3 font-body font-body-normal text-text-secondary">{u.serviceName}</td>
-                        <td className="px-4 py-3 text-right font-body font-body-semibold text-warning">{formatNPR(u.finalAmount)}</td>
+                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-gray-900">{u.bookingNumber}</td>
+                        <td className="px-4 py-3 text-gray-900">{u.customerName}</td>
+                        <td className="px-4 py-3 text-gray-500">{u.serviceName}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-amber-600">{formatNPR(u.finalAmount)}</td>
                         <td className="px-4 py-3 text-center">
                           <StatusBadge status={u.status} />
                         </td>
@@ -467,13 +467,13 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
           {/* Close Day Action */}
           {!report.isClosed && (
-            <div className="bg-surface rounded-spa-lg spa-shadow-resting p-5 border border-border">
+            <div className="bg-white rounded-lg p-5 border border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-heading font-heading-medium text-base text-text-primary">
+                  <h3 className="text-base font-medium text-gray-900">
                     Close Day
                   </h3>
-                  <p className="font-caption font-caption-normal text-sm text-text-secondary mt-1">
+                  <p className="text-sm text-gray-500 mt-1">
                     Locks all bookings for {formatDate(selectedDate)}. This action cannot be undone.
                   </p>
                 </div>
@@ -494,9 +494,9 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
       {/* Empty State */}
       {!loading && report && report.totals.totalBookings === 0 && (
-        <div className="bg-surface rounded-spa-lg spa-shadow-resting p-8 border border-border text-center">
-          <Icon name="Calendar" size={48} className="text-text-secondary mx-auto mb-3" />
-          <p className="font-body font-body-normal text-text-secondary">
+        <div className="bg-white rounded-lg p-8 border border-gray-200 text-center">
+          <Icon name="Calendar" size={48} className="text-gray-300 mx-auto mb-3" />
+          <p className="text-sm text-gray-500">
             No bookings found for {formatDate(selectedDate)}.
           </p>
         </div>
@@ -504,29 +504,29 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 
       {/* Unpaid Warning Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md animate-fade-in">
             <div className="p-6 space-y-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-warning/10 rounded-lg flex items-center justify-center">
-                  <Icon name="AlertTriangle" size={20} className="text-warning" />
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                  <Icon name="AlertTriangle" size={20} className="text-amber-600" />
                 </div>
-                <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+                <h3 className="text-lg font-semibold text-gray-900">
                   Unpaid Bookings Warning
                 </h3>
               </div>
 
-              <p className="font-body font-body-normal text-sm text-text-secondary">
-                <strong className="text-warning">{report?.unpaidBookings?.length}</strong> booking{report?.unpaidBookings?.length !== 1 ? 's' : ''} still
+              <p className="text-sm text-gray-500">
+                <strong className="text-amber-600">{report?.unpaidBookings?.length}</strong> booking{report?.unpaidBookings?.length !== 1 ? 's' : ''} still
                 {report?.unpaidBookings?.length !== 1 ? ' have' : ' has'} unpaid status. Closing the day will lock all bookings,
                 preventing further payment recording for these bookings.
               </p>
-              <p className="font-body font-body-normal text-sm text-text-secondary">
+              <p className="text-sm text-gray-500">
                 Do you still want to close the day?
               </p>
             </div>
 
-            <div className="flex items-center justify-end space-x-3 p-6 border-t border-border">
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
               <Button
                 variant="outline"
                 onClick={() => setShowConfirmModal(false)}
@@ -553,16 +553,16 @@ const DailyOperationalReportPanel = ({ branchId }) => {
 // Status badge helper
 function StatusBadge({ status }) {
   const styles = {
-    'Pending': 'bg-blue-50 text-blue-700',
-    'Confirmed': 'bg-indigo-50 text-indigo-700',
-    'In-Progress': 'bg-amber-50 text-amber-700',
-    'Completed': 'bg-success/10 text-success',
-    'Cancelled': 'bg-error/10 text-error',
+    'Pending': 'bg-blue-100 text-blue-700',
+    'Confirmed': 'bg-indigo-100 text-indigo-700',
+    'In-Progress': 'bg-amber-100 text-amber-700',
+    'Completed': 'bg-emerald-100 text-emerald-700',
+    'Cancelled': 'bg-red-100 text-red-700',
     'No Show': 'bg-gray-100 text-gray-600',
   };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-body font-body-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
       {status}
     </span>
   );

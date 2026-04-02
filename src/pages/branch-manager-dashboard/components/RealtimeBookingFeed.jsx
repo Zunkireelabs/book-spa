@@ -79,17 +79,17 @@ const RealtimeBookingFeed = ({
   const getStatusConfig = (status) => {
     switch (status) {
       case 'pending':
-        return { color: 'bg-warning/10 text-warning', icon: 'Clock', label: 'Pending' };
+        return { color: 'bg-amber-50 text-amber-600', icon: 'Clock', label: 'Pending' };
       case 'confirmed':
-        return { color: 'bg-success/10 text-success', icon: 'CheckCircle', label: 'Confirmed' };
+        return { color: 'bg-green-50 text-green-600', icon: 'CheckCircle', label: 'Confirmed' };
       case 'in-progress':
-        return { color: 'bg-primary/10 text-primary', icon: 'Play', label: 'In Progress' };
+        return { color: 'bg-blue-50 text-blue-600', icon: 'Play', label: 'In Progress' };
       case 'completed':
-        return { color: 'bg-text-secondary/10 text-text-secondary', icon: 'Check', label: 'Completed' };
+        return { color: 'bg-gray-100 text-gray-500', icon: 'Check', label: 'Completed' };
       case 'cancelled':
-        return { color: 'bg-error/10 text-error', icon: 'X', label: 'Cancelled' };
+        return { color: 'bg-red-50 text-red-600', icon: 'X', label: 'Cancelled' };
       default:
-        return { color: 'bg-text-secondary/10 text-text-secondary', icon: 'Circle', label: status };
+        return { color: 'bg-gray-100 text-gray-500', icon: 'Circle', label: status };
     }
   };
 
@@ -157,17 +157,17 @@ const RealtimeBookingFeed = ({
   const connectionConfig = getConnectionStatusConfig();
 
   return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+    <div className="bg-white rounded-lg p-6 border border-gray-200">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-            <Icon name="Activity" size={20} className="text-primary" />
+          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+            <Icon name="Activity" size={20} className="text-blue-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Today's Bookings
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               {bookings.length} bookings today
             </p>
           </div>
@@ -176,12 +176,12 @@ const RealtimeBookingFeed = ({
         {/* Real-time Status Indicator */}
         <div className="flex items-center space-x-2">
           {lastUpdate && connectionStatus === 'connected' && (
-            <span className="text-xs text-text-secondary hidden sm:inline">
+            <span className="text-xs text-gray-500 hidden sm:inline">
               Updated {formatLastUpdate()}
             </span>
           )}
           <div
-            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-background border border-border"
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-gray-50 border border-gray-200"
             title={`Real-time: ${connectionConfig.label}`}
           >
             <span className="relative flex h-2 w-2">
@@ -190,7 +190,7 @@ const RealtimeBookingFeed = ({
               )}
               <span className={`relative inline-flex rounded-full h-2 w-2 ${connectionConfig.color}`}></span>
             </span>
-            <span className="text-xs font-caption font-caption-medium text-text-secondary">
+            <span className="text-xs font-medium text-gray-500">
               {connectionConfig.label}
             </span>
           </div>
@@ -208,7 +208,7 @@ const RealtimeBookingFeed = ({
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex space-x-1 mb-4 bg-background rounded-spa p-1">
+      <div className="flex space-x-1 mb-4 bg-gray-100 rounded-lg p-1">
         {[
           { key: 'all', label: 'All', count: bookings.length },
           { key: 'pending', label: 'Pending', count: pendingCount },
@@ -217,10 +217,10 @@ const RealtimeBookingFeed = ({
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
-            className={`flex-1 px-3 py-2 rounded text-sm font-body font-body-medium spa-transition-fast ${
+            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               filter === tab.key
-                ? 'bg-surface text-text-primary spa-shadow-resting'
-                : 'text-text-secondary hover:text-text-primary'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-900'
             }`}
           >
             {tab.label} ({tab.count})
@@ -236,28 +236,28 @@ const RealtimeBookingFeed = ({
           return (
             <div
               key={booking.bookingId}
-              className="p-4 bg-background rounded-spa hover:bg-border/30 spa-transition-fast"
+              className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
             >
               <div className="flex items-start justify-between mb-2">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-1">
-                    <h4 className="font-body font-body-medium text-sm text-text-primary">
+                    <h4 className="text-sm font-medium text-gray-900">
                       {booking.customerName}
                     </h4>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal ${statusConfig.color}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${statusConfig.color}`}>
                       <Icon name={statusConfig.icon} size={12} className="mr-1" />
                       {statusConfig.label}
                     </span>
                     {booking.paymentStatus === 'paid' && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-50 text-green-600">
                         Paid
                       </span>
                     )}
                   </div>
-                  <p className="font-body font-body-normal text-sm text-text-secondary mb-1">
+                  <p className="text-sm text-gray-500 mb-1">
                     {booking.service} {'\u00B7'} {booking.duration}
                   </p>
-                  <div className="flex items-center space-x-4 text-xs text-text-secondary">
+                  <div className="flex items-center space-x-4 text-xs text-gray-500">
                     <span className="flex items-center space-x-1">
                       <Icon name="Clock" size={12} />
                       <span>{formatTime(booking.time)}</span>
@@ -272,7 +272,7 @@ const RealtimeBookingFeed = ({
                         <span>{booking.therapist.name}</span>
                       </span>
                     ) : (
-                      <span className="flex items-center space-x-1 text-warning">
+                      <span className="flex items-center space-x-1 text-amber-600">
                         <Icon name="AlertCircle" size={12} />
                         <span>Unassigned</span>
                       </span>
@@ -284,7 +284,7 @@ const RealtimeBookingFeed = ({
                     <Button
                       variant="outline"
                       size="xs"
-                      className="border-primary text-primary hover:bg-primary/10 hover:text-primary"
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50 hover:text-blue-600"
                       onClick={() => onQuickStatusUpdate(booking.bookingId, 'confirmed')}
                     >
                       Confirm
@@ -299,8 +299,8 @@ const RealtimeBookingFeed = ({
 
       {filteredBookings.length === 0 && (
         <div className="text-center py-8">
-          <Icon name="Calendar" size={48} className="text-text-secondary mx-auto mb-3" />
-          <p className="font-body font-body-normal text-sm text-text-secondary">
+          <Icon name="Calendar" size={48} className="text-gray-400 mx-auto mb-3" />
+          <p className="text-sm text-gray-500">
             No bookings found for the selected filter
           </p>
         </div>

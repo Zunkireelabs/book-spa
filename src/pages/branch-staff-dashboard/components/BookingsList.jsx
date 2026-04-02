@@ -59,82 +59,82 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
 
   return (
     <>
-      <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)]">
+      <div className="bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="p-4 border-b border-border space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+        <div className="flex items-center justify-between p-3 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-semibold text-gray-900">
               {DATE_RANGE_LABELS[dateRange] || "Appointments"}
             </h2>
-            <div className="flex items-center space-x-2">
-              <span className="font-caption font-caption-normal text-sm text-text-secondary">
-                {bookings.length} bookings
-              </span>
-              <Button variant="outline" size="sm" iconName="RefreshCw" iconPosition="left" onClick={onRefresh}>
-                Refresh
-              </Button>
-            </div>
+            <StatusLegend compact />
           </div>
-          <StatusLegend compact />
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">
+              {bookings.length} bookings
+            </span>
+            <Button variant="outline" size="sm" iconName="RefreshCw" iconPosition="left" onClick={onRefresh}>
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Bookings List */}
-        <div className="divide-y divide-border overflow-y-auto">
+        <div className="divide-y divide-gray-100 overflow-y-auto flex-1">
           {bookings.length === 0 ? (
             <div className="p-8 text-center">
-              <Icon name="Calendar" size={48} className="text-text-secondary mx-auto mb-4" />
-              <h3 className="font-heading font-heading-medium text-base text-text-primary mb-2">
+              <Icon name="Calendar" size={48} className="text-gray-300 mx-auto mb-4" />
+              <h3 className="text-base font-medium text-gray-900 mb-2">
                 No appointments today
               </h3>
-              <p className="font-body font-body-normal text-sm text-text-secondary">
+              <p className="text-sm text-gray-500">
                 All bookings will appear here when scheduled
               </p>
             </div>
           ) : (
             bookings.map((booking) => (
-              <div key={booking.bookingId} className="p-3 hover:bg-background spa-transition-fast">
+              <div key={booking.bookingId} className="p-3 hover:bg-gray-50 transition-colors">
                 <div className="flex items-center justify-between">
                   {/* Booking Info */}
-                  <div className="flex items-center space-x-4 flex-1">
+                  <div className="flex items-center gap-4 flex-1">
                     {/* Time */}
-                    <div className="text-center min-w-0">
-                      <div className="font-data font-data-normal text-sm text-text-primary">
+                    <div className="text-left min-w-[70px]">
+                      <div className="text-sm font-medium text-gray-900">
                         {formatTime(booking.time)}
                       </div>
-                      <div className="font-caption font-caption-normal text-xs text-text-secondary">
+                      <div className="text-xs text-gray-500">
                         {booking.duration}
                       </div>
                     </div>
 
                     {/* Customer & Service */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <h3 className="font-body font-body-medium text-sm text-text-primary truncate">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-sm font-medium text-gray-900 truncate">
                           {booking.customerName}
                         </h3>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-${getStatusColor(booking.status)}/10 text-${getStatusColor(booking.status)}`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-${getStatusColor(booking.status)}/10 text-${getStatusColor(booking.status)}`}>
                           <Icon name={getStatusIcon(booking.status)} size={12} className="mr-1" />
                           {booking.status.replace('-', ' ')}
                         </span>
                         {booking.paymentStatus === 'paid' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
                             Paid
                           </span>
                         )}
                         {booking.isLocked && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-amber-100 text-amber-700" title="Day Closed — Locked">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700" title="Day Closed — Locked">
                             <Icon name="Lock" size={10} className="mr-1" />
                             Locked
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center space-x-4 text-xs text-text-secondary">
-                        <span className="flex items-center space-x-1">
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        <span className="flex items-center gap-1">
                           <Icon name="Scissors" size={12} />
                           <span>{booking.service}</span>
                         </span>
                         {booking.customerPhone && (
-                          <span className="flex items-center space-x-1">
+                          <span className="flex items-center gap-1">
                             <Icon name="Phone" size={12} />
                             <span>{booking.customerPhone}</span>
                           </span>
@@ -143,22 +143,22 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
                     </div>
 
                     {/* Therapist Assignment */}
-                    <div className="text-center min-w-0">
+                    <div className="text-right min-w-[120px]">
                       {booking.therapist ? (
                         <div>
-                          <div className="font-body font-body-medium text-sm text-text-primary">
+                          <div className="text-sm font-medium text-gray-900">
                             {booking.therapist.name}
                           </div>
-                          <div className="font-caption font-caption-normal text-xs text-text-secondary">
+                          <div className="text-xs text-gray-500">
                             {booking.therapist.gender}{booking.therapist.room ? ` \u00B7 Room ${booking.therapist.room}` : ''}
                           </div>
                         </div>
                       ) : (
-                        <div className="text-center">
-                          <div className="font-body font-body-medium text-sm text-warning">
+                        <div className="text-right">
+                          <div className="text-sm font-medium text-amber-600">
                             Unassigned
                           </div>
-                          <div className="font-caption font-caption-normal text-xs text-text-secondary">
+                          <div className="text-xs text-gray-500">
                             Needs therapist
                           </div>
                         </div>
@@ -167,7 +167,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center space-x-2 ml-4">
+                  <div className="flex items-center gap-2 ml-4">
                     {!TERMINAL_STATUSES.includes(booking.status) && !booking.isLocked && (
                       <>
                         {booking.status === 'pending' && (
@@ -212,10 +212,10 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
 
                 {/* Special Requests */}
                 {booking.specialRequests && (
-                  <div className="mt-3 p-2 bg-accent/5 rounded border-l-2 border-accent">
-                    <div className="flex items-start space-x-2">
-                      <Icon name="MessageSquare" size={14} className="text-accent mt-0.5" />
-                      <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                  <div className="mt-3 p-2 bg-amber-50 rounded border-l-2 border-amber-400">
+                    <div className="flex items-start gap-2">
+                      <Icon name="MessageSquare" size={14} className="text-amber-600 mt-0.5" />
+                      <p className="text-xs text-gray-600">
                         {booking.specialRequests}
                       </p>
                     </div>

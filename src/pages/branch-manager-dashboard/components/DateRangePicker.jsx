@@ -104,17 +104,17 @@ const DateRangePicker = ({ onDateRangeChange, onExport }) => {
   ];
 
   return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+    <div className="bg-white rounded-lg p-6 border border-gray-200">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-            <Icon name="Calendar" size={20} className="text-primary" />
+          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+            <Icon name="Calendar" size={20} className="text-blue-600" />
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Analytics Period
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               {formatDateRange()}
             </p>
           </div>
@@ -137,45 +137,45 @@ const DateRangePicker = ({ onDateRangeChange, onExport }) => {
           <button
             key={range.key}
             onClick={() => handleRangeSelect(range.key)}
-            className={`flex items-center space-x-2 px-3 py-2 rounded-spa spa-transition-fast ${
+            className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
               selectedRange === range.key
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-background text-text-secondary hover:text-text-primary hover:bg-border/50'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-50 text-gray-500 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <Icon name={range.icon} size={16} />
-            <span className="font-body font-body-medium text-sm">{range.label}</span>
+            <span className="text-sm font-medium">{range.label}</span>
           </button>
         ))}
       </div>
 
       {/* Custom Date Range */}
       {isCustomOpen && (
-        <div className="p-4 bg-background rounded-spa border border-border space-y-4">
-          <h4 className="font-body font-body-medium text-sm text-text-primary">
+        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-4">
+          <h4 className="text-sm font-medium text-gray-900">
             Select Custom Date Range
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-2">
+              <label className="block text-sm font-medium text-gray-900 mb-2">
                 Start Date
               </label>
               <input
                 type="date"
                 value={customRange.startDate}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, startDate: e.target.value }))}
-                className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
             </div>
             <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-2">
+              <label className="block text-sm font-medium text-gray-900 mb-2">
                 End Date
               </label>
               <input
                 type="date"
                 value={customRange.endDate}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, endDate: e.target.value }))}
-                className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
             </div>
           </div>
@@ -200,29 +200,29 @@ const DateRangePicker = ({ onDateRangeChange, onExport }) => {
       )}
 
       {/* Quick Stats */}
-      <div className="mt-6 pt-4 border-t border-border">
+      <div className="mt-6 pt-4 border-t border-gray-100">
         <div className="grid grid-cols-3 gap-4 text-center">
-          <div className="p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-text-primary">
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <div className="text-lg font-semibold text-gray-900">
               {selectedRange === 'today' ? '47' : '324'}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
+            <div className="text-xs text-gray-500">
               Total Bookings
             </div>
           </div>
-          <div className="p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-text-primary">
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <div className="text-lg font-semibold text-gray-900">
               NPR {selectedRange === 'today' ? '56,400' : '3,88,800'}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
+            <div className="text-xs text-gray-500">
               Revenue
             </div>
           </div>
-          <div className="p-3 bg-background rounded-spa">
-            <div className="font-heading font-heading-semibold text-lg text-text-primary">
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <div className="text-lg font-semibold text-gray-900">
               {selectedRange === 'today' ? '4.8' : '4.7'}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">
+            <div className="text-xs text-gray-500">
               Avg Rating
             </div>
           </div>
@@ -230,9 +230,9 @@ const DateRangePicker = ({ onDateRangeChange, onExport }) => {
       </div>
 
       {/* Export Options Dropdown */}
-      <div className="mt-4 pt-4 border-t border-border">
+      <div className="mt-4 pt-4 border-t border-gray-100">
         <div className="flex items-center justify-between">
-          <span className="font-body font-body-medium text-sm text-text-primary">
+          <span className="text-sm font-medium text-gray-900">
             Export Options
           </span>
           <div className="flex space-x-2">

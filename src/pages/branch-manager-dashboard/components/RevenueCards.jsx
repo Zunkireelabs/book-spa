@@ -51,10 +51,10 @@ const RevenueCards = ({ branchId }) => {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[0, 1, 2, 3].map(i => (
-          <div key={i} className="bg-surface rounded-spa-lg border border-border p-5 animate-pulse">
-            <div className="h-4 bg-background rounded w-24 mb-3" />
-            <div className="h-7 bg-background rounded w-32 mb-2" />
-            <div className="h-3 bg-background rounded w-20" />
+          <div key={i} className="bg-white rounded-lg border border-gray-200 p-5 animate-pulse">
+            <div className="h-4 bg-gray-100 rounded w-24 mb-3" />
+            <div className="h-7 bg-gray-100 rounded w-32 mb-2" />
+            <div className="h-3 bg-gray-100 rounded w-20" />
           </div>
         ))}
       </div>
@@ -63,10 +63,10 @@ const RevenueCards = ({ branchId }) => {
 
   if (error) {
     return (
-      <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
-        <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
-        <p className="font-body text-sm text-error">{error}</p>
-        <button onClick={loadRevenue} className="ml-auto font-body font-body-medium text-sm text-error underline">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center space-x-3">
+        <Icon name="AlertCircle" size={18} className="text-red-600 flex-shrink-0" />
+        <p className="text-sm text-red-600">{error}</p>
+        <button onClick={loadRevenue} className="ml-auto text-sm font-medium text-red-600 underline">
           Retry
         </button>
       </div>
@@ -92,25 +92,25 @@ const RevenueCards = ({ branchId }) => {
           return (
             <div
               key={period.key}
-              className={`bg-surface rounded-spa-lg border p-5 ${
-                isToday ? 'border-primary/30 ring-1 ring-primary/10' : 'border-border'
+              className={`bg-white rounded-lg border p-5 ${
+                isToday ? 'border-blue-300 ring-1 ring-blue-100' : 'border-gray-200'
               }`}
             >
               {/* Header */}
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center space-x-2">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                    isToday ? 'bg-primary/10' : 'bg-background'
+                    isToday ? 'bg-blue-50' : 'bg-gray-100'
                   }`}>
-                    <Icon name={period.icon} size={16} className={isToday ? 'text-primary' : 'text-text-secondary'} />
+                    <Icon name={period.icon} size={16} className={isToday ? 'text-blue-600' : 'text-gray-500'} />
                   </div>
-                  <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">
+                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                     {period.label}
                   </span>
                 </div>
                 {isToday && netDelta.type !== 'neutral' && (
-                  <span className={`inline-flex items-center space-x-0.5 text-xs font-caption font-caption-medium ${
-                    netDelta.type === 'positive' ? 'text-success' : 'text-error'
+                  <span className={`inline-flex items-center space-x-0.5 text-xs font-medium ${
+                    netDelta.type === 'positive' ? 'text-green-600' : 'text-red-600'
                   }`}>
                     <Icon name={netDelta.type === 'positive' ? 'TrendingUp' : 'TrendingDown'} size={12} />
                     <span>{netDelta.value}</span>
@@ -120,33 +120,33 @@ const RevenueCards = ({ branchId }) => {
 
               {/* Net Revenue (primary figure) */}
               <div className="mb-3">
-                <p className="font-heading font-heading-semibold text-xl text-text-primary">
+                <p className="text-xl font-semibold text-gray-900">
                   {formatNPR(periodData.netRevenue)}
                 </p>
-                <p className="font-caption font-caption-normal text-[11px] text-text-tertiary mt-0.5">
+                <p className="text-[11px] text-gray-400 mt-0.5">
                   Net Revenue
                 </p>
               </div>
 
               {/* Breakdown */}
-              <div className="space-y-1.5 pt-2 border-t border-border">
+              <div className="space-y-1.5 pt-2 border-t border-gray-100">
                 <div className="flex items-center justify-between">
-                  <span className="font-body text-xs text-text-secondary">Gross</span>
-                  <span className="font-data font-data-normal text-xs text-text-primary">
+                  <span className="text-xs text-gray-500">Gross</span>
+                  <span className="text-xs text-gray-900">
                     {formatNPR(periodData.grossRevenue)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="font-body text-xs text-text-secondary">Discounts</span>
-                  <span className={`font-data font-data-normal text-xs ${
-                    periodData.totalDiscount > 0 ? 'text-error' : 'text-text-primary'
+                  <span className="text-xs text-gray-500">Discounts</span>
+                  <span className={`text-xs ${
+                    periodData.totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'
                   }`}>
                     {periodData.totalDiscount > 0 ? '-' : ''}{formatNPR(periodData.totalDiscount)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="font-body text-xs text-text-secondary">Paid</span>
-                  <span className="font-data font-data-normal text-xs text-text-primary">
+                  <span className="text-xs text-gray-500">Paid</span>
+                  <span className="text-xs text-gray-900">
                     {periodData.paidBookings} {periodData.paidBookings === 1 ? 'booking' : 'bookings'}
                   </span>
                 </div>
@@ -159,17 +159,17 @@ const RevenueCards = ({ branchId }) => {
       {/* Today vs Yesterday delta summary */}
       {(netDelta.type !== 'neutral' || bookingsDelta.type !== 'neutral') && (
         <div className="flex items-center space-x-4 px-1">
-          <span className="font-caption font-caption-normal text-[11px] text-text-tertiary">
+          <span className="text-[11px] text-gray-400">
             vs Yesterday:
           </span>
-          <span className={`inline-flex items-center space-x-1 text-[11px] font-caption font-caption-medium ${
-            netDelta.type === 'positive' ? 'text-success' : netDelta.type === 'negative' ? 'text-error' : 'text-text-tertiary'
+          <span className={`inline-flex items-center space-x-1 text-[11px] font-medium ${
+            netDelta.type === 'positive' ? 'text-green-600' : netDelta.type === 'negative' ? 'text-red-600' : 'text-gray-400'
           }`}>
             <Icon name={netDelta.type === 'positive' ? 'TrendingUp' : netDelta.type === 'negative' ? 'TrendingDown' : 'Minus'} size={10} />
             <span>{netDelta.value} revenue</span>
           </span>
-          <span className={`inline-flex items-center space-x-1 text-[11px] font-caption font-caption-medium ${
-            bookingsDelta.type === 'positive' ? 'text-success' : bookingsDelta.type === 'negative' ? 'text-error' : 'text-text-tertiary'
+          <span className={`inline-flex items-center space-x-1 text-[11px] font-medium ${
+            bookingsDelta.type === 'positive' ? 'text-green-600' : bookingsDelta.type === 'negative' ? 'text-red-600' : 'text-gray-400'
           }`}>
             <Icon name={bookingsDelta.type === 'positive' ? 'TrendingUp' : bookingsDelta.type === 'negative' ? 'TrendingDown' : 'Minus'} size={10} />
             <span>{bookingsDelta.value} bookings</span>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import StaffSidebar from '../../components/ui/StaffSidebar';
@@ -38,10 +38,11 @@ import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 
 const BranchManagerDashboard = () => {
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const { branchId, branchName } = useBranch();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const profileDropdownRef = useRef(null);
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const viewMode = searchParams.get('view') || 'dashboard';
@@ -50,12 +51,32 @@ const BranchManagerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [newBookingNotification, setNewBookingNotification] = useState(null);
   const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 
   const managerData = {
     name: profile?.full_name || 'Manager',
     role: profile?.role === 'admin' ? 'Admin' : 'Branch Manager',
     branch: branchName || profile?.branches?.name || 'Main Branch',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150'
+    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
+    email: profile?.email || ''
+  };
+
+  // Handle click outside profile dropdown
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
+        setShowProfileDropdown(false);
+      }
+    };
+    if (showProfileDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showProfileDropdown]);
+
+  const handleLogout = async () => {
+    setShowProfileDropdown(false);
+    await signOut();
   };
 
   // Load live data
@@ -217,8 +238,8 @@ const BranchManagerDashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {loading ? (
           <div className="col-span-4 text-center py-8">
-            <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-            <p className="font-body font-body-normal text-text-secondary">Loading metrics...</p>
+            <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-3" />
+            <p className="text-gray-500">Loading metrics...</p>
           </div>
         ) : (
           metricsData.map((metric, index) => (
@@ -236,7 +257,7 @@ const BranchManagerDashboard = () => {
       </div>
 
       {/* Status Legend */}
-      <div className="bg-surface border border-border rounded-spa px-4 py-2.5">
+      <div className="bg-white border border-gray-200 rounded-lg px-4 py-2.5">
         <StatusLegend showPayment />
       </div>
 
@@ -290,7 +311,7 @@ const BranchManagerDashboard = () => {
         <meta name="description" content="Comprehensive branch management dashboard for BookSpa managers with analytics, staff oversight, and operational controls." />
       </Helmet>
 
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-[#ebebeb]">
         <StaffSidebar
           userRole="manager"
           userName={managerData.name}
@@ -298,9 +319,9 @@ const BranchManagerDashboard = () => {
           onCollapseChange={setSidebarCollapsed}
         />
 
-        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:pb-0 pb-16 spa-transition-slow`}>
+        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200`}>
           {/* Header */}
-          <header className="bg-[#FAFAFA] sticky top-0 z-header">
+          <header className="bg-[#ebebeb] sticky top-0 z-header">
             <div className="px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex items-center justify-between">
                 {/* Left: Branch name + date/time */}
@@ -357,25 +378,82 @@ const BranchManagerDashboard = () => {
                     <span className="hidden sm:inline">New Booking</span>
                   </Button>
 
-                  <div className="flex items-center space-x-2 px-2 py-1 rounded-spa hover:bg-background spa-transition-fast cursor-pointer">
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-primary/10 flex-shrink-0">
-                      <img
-                        src={managerData.avatar}
-                        alt={managerData.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          e.target.src = '/assets/images/no_image.png';
-                        }}
-                      />
-                    </div>
-                    <div className="hidden md:flex flex-col">
-                      <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
-                        {managerData.name}
-                      </span>
-                      <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
-                        {profile?.role || 'manager'}
-                      </span>
-                    </div>
+                  {/* Profile Dropdown */}
+                  <div className="relative" ref={profileDropdownRef}>
+                    <button
+                      onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                      className="flex items-center space-x-2 px-2 py-1 rounded-spa hover:bg-background spa-transition-fast"
+                    >
+                      <div className="w-8 h-8 rounded-full overflow-hidden bg-primary/10 flex-shrink-0">
+                        <img
+                          src={managerData.avatar}
+                          alt={managerData.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.target.src = '/assets/images/no_image.png';
+                          }}
+                        />
+                      </div>
+                      <div className="hidden md:flex flex-col">
+                        <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
+                          {managerData.name}
+                        </span>
+                        <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
+                          {profile?.role || 'manager'}
+                        </span>
+                      </div>
+                      <Icon name="ChevronDown" size={16} className={`text-gray-400 transition-transform ${showProfileDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {/* Dropdown Menu */}
+                    {showProfileDropdown && (
+                      <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-dropdown">
+                        {/* User Info Section */}
+                        <div className="px-4 py-3 border-b border-gray-100">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full overflow-hidden bg-primary/10 flex-shrink-0">
+                              <img
+                                src={managerData.avatar}
+                                alt={managerData.name}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.target.src = '/assets/images/no_image.png';
+                                }}
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{managerData.name}</p>
+                              <p className="text-xs text-gray-500 truncate">{managerData.email}</p>
+                              <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
+                                profile?.role === 'admin'
+                                  ? 'bg-pink-100 text-pink-700'
+                                  : 'bg-blue-100 text-blue-700'
+                              }`}>
+                                {profile?.role || 'manager'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Settings */}
+                        <button
+                          onClick={() => setShowProfileDropdown(false)}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Icon name="Settings" size={16} className="text-gray-500" />
+                          <span>Settings</span>
+                        </button>
+
+                        {/* Logout */}
+                        <button
+                          onClick={handleLogout}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Icon name="LogOut" size={16} />
+                          <span>Logout</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -429,7 +507,7 @@ const BranchManagerDashboard = () => {
           )}
 
           {/* Main Content Area */}
-          <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-6'} bg-white rounded-tl-spa-lg border-l border-t border-[rgba(0,0,29,0.075)]`}>
+          <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1] min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
             {viewMode === 'dashboard' && renderDashboardView()}
             {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
             {viewMode === 'calendar' && renderCalendarView()}

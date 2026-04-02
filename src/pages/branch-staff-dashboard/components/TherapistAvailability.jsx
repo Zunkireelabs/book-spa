@@ -14,12 +14,13 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
 
   const getAvailabilityColor = (status) => {
     const colors = {
-      available: 'success',
-      busy: 'error',
-      break: 'warning',
-      'off-duty': 'text-secondary'
+      available: 'emerald',
+      busy: 'red',
+      break: 'amber',
+      upcoming: 'blue',
+      'off-duty': 'gray'
     };
-    return colors[status] || 'text-secondary';
+    return colors[status] || 'gray';
   };
 
   const getAvailabilityIcon = (status) => {
@@ -27,6 +28,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
       available: 'CheckCircle',
       busy: 'Clock',
       break: 'Coffee',
+      upcoming: 'Calendar',
       'off-duty': 'Moon'
     };
     return icons[status] || 'Circle';
@@ -44,15 +46,15 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
   return (
     <div className="space-y-3">
       {/* Therapist Availability */}
-      <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-heading font-heading-semibold text-base text-text-primary">
+      <div className="bg-white rounded-lg border border-gray-200">
+        <div className="flex items-center justify-between p-3 border-b border-gray-200">
+          <h2 className="text-sm font-semibold text-gray-900">
             Therapist Availability
           </h2>
           <select
             value={selectedTimeSlot}
             onChange={(e) => setSelectedTimeSlot(e.target.value)}
-            className="px-2 py-1 text-xs border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary"
+            className="h-7 px-2 text-xs border border-gray-200 rounded-md bg-white text-gray-700 focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
           >
             {timeSlots.map((slot) => (
               <option key={slot.value} value={slot.value}>
@@ -62,7 +64,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
           </select>
         </div>
 
-        <div className="space-y-2">
+        <div className="divide-y divide-gray-100">
           {therapists.map((therapist) => {
             const color = getAvailabilityColor(therapist.status);
             const icon = getAvailabilityIcon(therapist.status);
@@ -70,29 +72,29 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
             return (
               <div
                 key={therapist.id}
-                className="p-3 bg-background rounded-spa hover:bg-border/30 spa-transition-fast"
+                className="p-3 hover:bg-gray-50 transition-colors"
               >
                 {/* Row 1: Avatar + Name + Status */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-8 h-8 shrink-0 bg-primary/10 rounded-full flex items-center justify-center">
+                    <div className="w-8 h-8 shrink-0 bg-gray-100 rounded-full flex items-center justify-center">
                       <Icon
                         name={therapist.gender === 'Female' ? 'User' : 'UserCheck'}
                         size={16}
-                        className="text-primary"
+                        className="text-gray-500"
                       />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-body font-body-medium text-sm text-text-primary truncate">
+                      <div className="text-sm font-medium text-gray-900 truncate">
                         {therapist.name}
                       </div>
-                      <div className="font-caption font-caption-normal text-xs text-text-secondary">
+                      <div className="text-xs text-gray-500">
                         {therapist.gender}
                         {therapist.room && ` \u00B7 Room ${therapist.room}`}
                       </div>
                     </div>
                   </div>
-                  <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-caption font-caption-normal bg-${color}/10 text-${color}`}>
+                  <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-${color}-100 text-${color}-700`}>
                     <Icon name={icon} size={10} />
                     {therapist.status.replace('-', ' ')}
                   </span>
@@ -104,7 +106,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
                     {therapist.specialties.slice(0, 3).map((specialty) => (
                       <span
                         key={specialty}
-                        className="px-1.5 py-0.5 bg-accent/10 text-accent-foreground rounded text-xs font-caption font-caption-normal"
+                        className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
                       >
                         {specialty}
                       </span>
@@ -119,26 +121,26 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
 
       {/* Pending Assignments — from real data */}
       {pendingBookings.length > 0 && (
-        <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-heading font-heading-semibold text-base text-text-primary">
+        <div className="bg-white rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between p-3 border-b border-gray-200">
+            <h2 className="text-sm font-semibold text-gray-900">
               Pending Assignments
             </h2>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-caption font-caption-normal bg-warning/10 text-warning">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
               {pendingBookings.length} pending
             </span>
           </div>
 
-          <div className="space-y-2">
+          <div className="divide-y divide-gray-100">
             {pendingBookings.map((booking) => (
               <div
                 key={booking.bookingId}
-                className="p-3 bg-warning/5 border border-warning/20 rounded-spa"
+                className="p-3"
               >
-                <div className="font-body font-body-medium text-sm text-text-primary">
+                <div className="text-sm font-medium text-gray-900">
                   {booking.customerName}
                 </div>
-                <div className="font-caption font-caption-normal text-xs text-text-secondary mt-1 space-y-0.5">
+                <div className="text-xs text-gray-500 mt-1 space-y-0.5">
                   <div>{booking.service}</div>
                   <div className="flex items-center gap-1.5">
                     <Icon name="Clock" size={10} className="shrink-0" />
@@ -152,8 +154,8 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
       )}
 
       {/* Quick Actions */}
-      <div className="bg-surface rounded-spa-lg border border-[rgba(0,0,29,0.102)] p-4">
-        <h2 className="font-heading font-heading-semibold text-base text-text-primary mb-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">
           Quick Actions
         </h2>
         <div className="grid grid-cols-1 gap-2">

@@ -20,20 +20,20 @@ function BarRow({ label, percent, bookedMinutes, totalMinutes, color }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <span className="font-body text-xs text-text-primary truncate max-w-[120px]">{label}</span>
-        <span className="font-data font-data-normal text-xs text-text-secondary">
+        <span className="text-xs text-gray-900 truncate max-w-[120px]">{label}</span>
+        <span className="text-xs text-gray-500">
           {formatMinutes(bookedMinutes)} / {formatMinutes(totalMinutes)}
         </span>
       </div>
-      <div className="h-2 bg-background rounded-full overflow-hidden">
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full spa-transition-slow ${color}`}
+          className={`h-full rounded-full transition-all duration-300 ${color}`}
           style={{ width: `${Math.min(percent, 100)}%` }}
         />
       </div>
       <div className="text-right">
-        <span className={`font-data font-data-medium text-[11px] ${
-          percent >= 80 ? 'text-success' : percent >= 40 ? 'text-primary' : 'text-text-tertiary'
+        <span className={`text-[11px] font-medium ${
+          percent >= 80 ? 'text-green-600' : percent >= 40 ? 'text-blue-600' : 'text-gray-400'
         }`}>
           {percent}%
         </span>
@@ -70,12 +70,12 @@ const UtilizationPanel = ({ branchId }) => {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {[0, 1, 2].map(i => (
-          <div key={i} className="bg-surface rounded-spa-lg border border-border p-5 animate-pulse">
-            <div className="h-4 bg-background rounded w-32 mb-4" />
+          <div key={i} className="bg-white rounded-lg border border-gray-200 p-5 animate-pulse">
+            <div className="h-4 bg-gray-100 rounded w-32 mb-4" />
             <div className="space-y-3">
-              <div className="h-2 bg-background rounded w-full" />
-              <div className="h-2 bg-background rounded w-3/4" />
-              <div className="h-2 bg-background rounded w-1/2" />
+              <div className="h-2 bg-gray-100 rounded w-full" />
+              <div className="h-2 bg-gray-100 rounded w-3/4" />
+              <div className="h-2 bg-gray-100 rounded w-1/2" />
             </div>
           </div>
         ))}
@@ -85,10 +85,10 @@ const UtilizationPanel = ({ branchId }) => {
 
   if (error) {
     return (
-      <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
-        <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
-        <p className="font-body text-sm text-error">{error}</p>
-        <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center space-x-3">
+        <Icon name="AlertCircle" size={18} className="text-red-600 flex-shrink-0" />
+        <p className="text-sm text-red-600">{error}</p>
+        <button onClick={loadData} className="ml-auto text-sm font-medium text-red-600 underline">
           Retry
         </button>
       </div>
@@ -111,22 +111,22 @@ const UtilizationPanel = ({ branchId }) => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       {/* Room Utilization */}
-      <div className="bg-surface rounded-spa-lg border border-border p-5">
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Icon name="DoorOpen" size={16} className="text-primary" />
+            <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+              <Icon name="DoorOpen" size={16} className="text-blue-600" />
             </div>
             <div>
-              <h3 className="font-body font-body-medium text-sm text-text-primary">Room Utilization</h3>
-              <p className="font-caption font-caption-normal text-[11px] text-text-tertiary">
+              <h3 className="text-sm font-medium text-gray-900">Room Utilization</h3>
+              <p className="text-[11px] text-gray-400">
                 {summary.roomCount} active rooms
               </p>
             </div>
           </div>
           <div className="text-right">
-            <p className="font-heading font-heading-semibold text-lg text-text-primary">{summary.avgRoomUtilization}%</p>
-            <p className="font-caption font-caption-normal text-[11px] text-text-tertiary">avg</p>
+            <p className="text-lg font-semibold text-gray-900">{summary.avgRoomUtilization}%</p>
+            <p className="text-[11px] text-gray-400">avg</p>
           </div>
         </div>
 
@@ -139,32 +139,32 @@ const UtilizationPanel = ({ branchId }) => {
                 percent={r.percent}
                 bookedMinutes={r.bookedMinutes}
                 totalMinutes={r.totalMinutes}
-                color="bg-primary"
+                color="bg-blue-500"
               />
             ))
           ) : (
-            <p className="font-body text-xs text-text-tertiary text-center py-4">No active rooms</p>
+            <p className="text-xs text-gray-400 text-center py-4">No active rooms</p>
           )}
         </div>
       </div>
 
       {/* Therapist Utilization */}
-      <div className="bg-surface rounded-spa-lg border border-border p-5">
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center">
-              <Icon name="Users" size={16} className="text-accent" />
+            <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center">
+              <Icon name="Users" size={16} className="text-purple-600" />
             </div>
             <div>
-              <h3 className="font-body font-body-medium text-sm text-text-primary">Therapist Utilization</h3>
-              <p className="font-caption font-caption-normal text-[11px] text-text-tertiary">
+              <h3 className="text-sm font-medium text-gray-900">Therapist Utilization</h3>
+              <p className="text-[11px] text-gray-400">
                 {summary.therapistCount} active therapists
               </p>
             </div>
           </div>
           <div className="text-right">
-            <p className="font-heading font-heading-semibold text-lg text-text-primary">{summary.avgTherapistUtilization}%</p>
-            <p className="font-caption font-caption-normal text-[11px] text-text-tertiary">avg</p>
+            <p className="text-lg font-semibold text-gray-900">{summary.avgTherapistUtilization}%</p>
+            <p className="text-[11px] text-gray-400">avg</p>
           </div>
         </div>
 
@@ -177,33 +177,33 @@ const UtilizationPanel = ({ branchId }) => {
                 percent={t.percent}
                 bookedMinutes={t.bookedMinutes}
                 totalMinutes={t.totalMinutes}
-                color="bg-accent"
+                color="bg-purple-500"
               />
             ))
           ) : (
-            <p className="font-body text-xs text-text-tertiary text-center py-4">No active therapists</p>
+            <p className="text-xs text-gray-400 text-center py-4">No active therapists</p>
           )}
         </div>
       </div>
 
       {/* Hourly Distribution + Summary */}
-      <div className="bg-surface rounded-spa-lg border border-border p-5">
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center">
-              <Icon name="Clock" size={16} className="text-success" />
+            <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
+              <Icon name="Clock" size={16} className="text-green-600" />
             </div>
             <div>
-              <h3 className="font-body font-body-medium text-sm text-text-primary">Hourly Load</h3>
-              <p className="font-caption font-caption-normal text-[11px] text-text-tertiary">
+              <h3 className="text-sm font-medium text-gray-900">Hourly Load</h3>
+              <p className="text-[11px] text-gray-400">
                 {data.operatingHours}
               </p>
             </div>
           </div>
           {summary.totalBookings > 0 && (
             <div className="text-right">
-              <p className="font-heading font-heading-semibold text-lg text-text-primary">{formatHour(summary.peakHour)}</p>
-              <p className="font-caption font-caption-normal text-[11px] text-text-tertiary">peak</p>
+              <p className="text-lg font-semibold text-gray-900">{formatHour(summary.peakHour)}</p>
+              <p className="text-[11px] text-gray-400">peak</p>
             </div>
           )}
         </div>
@@ -217,8 +217,8 @@ const UtilizationPanel = ({ branchId }) => {
             return (
               <div key={h} className="flex-1 flex flex-col items-center justify-end h-full">
                 <div
-                  className={`w-full rounded-t spa-transition-slow ${
-                    isPeak ? 'bg-success' : count > 0 ? 'bg-success/40' : 'bg-background'
+                  className={`w-full rounded-t transition-all duration-300 ${
+                    isPeak ? 'bg-green-500' : count > 0 ? 'bg-green-200' : 'bg-gray-100'
                   }`}
                   style={{ height: `${Math.max(heightPct, 4)}%`, minHeight: '2px' }}
                   title={`${formatHour(h)}: ${count} booking${count !== 1 ? 's' : ''}`}
@@ -232,10 +232,10 @@ const UtilizationPanel = ({ branchId }) => {
         <div className="flex space-x-1 mb-4">
           {operatingHours.map(h => (
             <div key={h} className="flex-1 text-center">
-              <span className={`font-caption text-[9px] ${
+              <span className={`text-[9px] ${
                 h === summary.peakHour && hourlyDistribution[h] > 0
-                  ? 'text-success font-caption-medium'
-                  : 'text-text-tertiary font-caption-normal'
+                  ? 'text-green-600 font-medium'
+                  : 'text-gray-400'
               }`}>
                 {h}
               </span>
@@ -244,24 +244,24 @@ const UtilizationPanel = ({ branchId }) => {
         </div>
 
         {/* Summary stats */}
-        <div className="border-t border-border pt-3 space-y-2">
+        <div className="border-t border-gray-100 pt-3 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="font-body text-xs text-text-secondary">Total Booked</span>
-            <span className="font-data font-data-normal text-xs text-text-primary">
+            <span className="text-xs text-gray-500">Total Booked</span>
+            <span className="text-xs text-gray-900">
               {formatMinutes(summary.totalBookedMinutes)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="font-body text-xs text-text-secondary">Idle Capacity</span>
-            <span className={`font-data font-data-normal text-xs ${
-              summary.idleMinutes > summary.totalBookedMinutes ? 'text-warning' : 'text-text-primary'
+            <span className="text-xs text-gray-500">Idle Capacity</span>
+            <span className={`text-xs ${
+              summary.idleMinutes > summary.totalBookedMinutes ? 'text-amber-600' : 'text-gray-900'
             }`}>
               {formatMinutes(summary.idleMinutes)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="font-body text-xs text-text-secondary">Bookings</span>
-            <span className="font-data font-data-normal text-xs text-text-primary">
+            <span className="text-xs text-gray-500">Bookings</span>
+            <span className="text-xs text-gray-900">
               {summary.totalBookings}
             </span>
           </div>

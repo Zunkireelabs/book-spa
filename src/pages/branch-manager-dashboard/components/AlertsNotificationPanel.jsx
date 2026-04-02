@@ -62,38 +62,38 @@ const AlertsNotificationPanel = () => {
     switch (type) {
       case 'urgent':
         return {
-          color: 'border-l-error bg-error/5',
-          iconColor: 'text-error',
+          color: 'border-l-red-500 bg-red-50',
+          iconColor: 'text-red-600',
           icon: 'AlertTriangle',
-          bgColor: 'bg-error/10'
+          bgColor: 'bg-red-50'
         };
       case 'warning':
         return {
-          color: 'border-l-warning bg-warning/5',
-          iconColor: 'text-warning',
+          color: 'border-l-amber-500 bg-amber-50',
+          iconColor: 'text-amber-600',
           icon: 'AlertCircle',
-          bgColor: 'bg-warning/10'
+          bgColor: 'bg-amber-50'
         };
       case 'info':
         return {
-          color: 'border-l-primary bg-primary/5',
-          iconColor: 'text-primary',
+          color: 'border-l-blue-500 bg-blue-50',
+          iconColor: 'text-blue-600',
           icon: 'Info',
-          bgColor: 'bg-primary/10'
+          bgColor: 'bg-blue-50'
         };
       case 'success':
         return {
-          color: 'border-l-success bg-success/5',
-          iconColor: 'text-success',
+          color: 'border-l-green-500 bg-green-50',
+          iconColor: 'text-green-600',
           icon: 'CheckCircle',
-          bgColor: 'bg-success/10'
+          bgColor: 'bg-green-50'
         };
       default:
         return {
-          color: 'border-l-text-secondary bg-background',
-          iconColor: 'text-text-secondary',
+          color: 'border-l-gray-500 bg-gray-50',
+          iconColor: 'text-gray-500',
           icon: 'Bell',
-          bgColor: 'bg-text-secondary/10'
+          bgColor: 'bg-gray-50'
         };
     }
   };
@@ -136,22 +136,22 @@ const AlertsNotificationPanel = () => {
   ];
 
   return (
-    <div className="bg-surface rounded-spa-lg spa-shadow-resting p-6 border border-border">
+    <div className="bg-white rounded-lg p-6 border border-gray-200">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-error/10 rounded-lg flex items-center justify-center relative">
-            <Icon name="Bell" size={20} className="text-error" />
+          <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center relative">
+            <Icon name="Bell" size={20} className="text-red-600" />
             {unresolvedCount > 0 && (
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-error text-error-foreground rounded-full flex items-center justify-center">
-                <span className="font-caption font-caption-normal text-xs">{unresolvedCount}</span>
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white rounded-full flex items-center justify-center">
+                <span className="text-xs">{unresolvedCount}</span>
               </div>
             )}
           </div>
           <div>
-            <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <h3 className="text-lg font-semibold text-gray-900">
               Alerts & Notifications
             </h3>
-            <p className="font-body font-body-normal text-sm text-text-secondary">
+            <p className="text-sm text-gray-500">
               {unresolvedCount} items require attention
             </p>
           </div>
@@ -167,15 +167,15 @@ const AlertsNotificationPanel = () => {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex space-x-1 mb-4 bg-background rounded-spa p-1">
+      <div className="flex space-x-1 mb-4 bg-gray-100 rounded-lg p-1">
         {filterOptions.map((option) => (
           <button
             key={option.key}
             onClick={() => setFilter(option.key)}
-            className={`flex-1 px-3 py-2 rounded text-sm font-body font-body-medium spa-transition-fast ${
+            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               filter === option.key
-                ? 'bg-surface text-text-primary spa-shadow-resting'
-                : 'text-text-secondary hover:text-text-primary'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-900'
             }`}
           >
             {option.label} ({option.count})
@@ -187,41 +187,41 @@ const AlertsNotificationPanel = () => {
       <div className="space-y-3 max-h-96 overflow-y-auto">
         {filteredAlerts.map((alert) => {
           const config = getAlertConfig(alert.type);
-          
+
           return (
-            <div 
-              key={alert.id} 
-              className={`p-4 rounded-spa border-l-4 ${config.color} ${
+            <div
+              key={alert.id}
+              className={`p-4 rounded-lg border-l-4 ${config.color} ${
                 alert.resolved ? 'opacity-60' : ''
-              } hover:bg-border/20 spa-transition-fast`}
+              } hover:brightness-95 transition-all`}
             >
               <div className="flex items-start space-x-3">
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${config.bgColor}`}>
                   <Icon name={config.icon} size={16} className={config.iconColor} />
                 </div>
-                
+
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between mb-2">
-                    <h4 className="font-body font-body-medium text-sm text-text-primary">
+                    <h4 className="text-sm font-medium text-gray-900">
                       {alert.title}
                     </h4>
                     <div className="flex items-center space-x-2">
                       {alert.resolved && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-50 text-green-600">
                           <Icon name="Check" size={12} className="mr-1" />
                           Resolved
                         </span>
                       )}
-                      <span className="font-caption font-caption-normal text-xs text-text-secondary">
+                      <span className="text-xs text-gray-500">
                         {getTimeAgo(alert.timestamp)}
                       </span>
                     </div>
                   </div>
-                  
-                  <p className="font-body font-body-normal text-sm text-text-secondary mb-3">
+
+                  <p className="text-sm text-gray-500 mb-3">
                     {alert.message}
                   </p>
-                  
+
                   {!alert.resolved && (
                     <div className="flex items-center space-x-2">
                       <Button
@@ -254,39 +254,39 @@ const AlertsNotificationPanel = () => {
 
       {filteredAlerts.length === 0 && (
         <div className="text-center py-8">
-          <Icon name="CheckCircle" size={48} className="text-success mx-auto mb-3" />
-          <p className="font-body font-body-normal text-sm text-text-secondary">
+          <Icon name="CheckCircle" size={48} className="text-green-600 mx-auto mb-3" />
+          <p className="text-sm text-gray-500">
             No alerts found for the selected filter
           </p>
         </div>
       )}
 
       {/* Summary Stats */}
-      <div className="mt-6 pt-4 border-t border-border">
+      <div className="mt-6 pt-4 border-t border-gray-100">
         <div className="grid grid-cols-4 gap-4 text-center">
           <div className="p-2">
-            <div className="font-heading font-heading-semibold text-lg text-error">
+            <div className="text-lg font-semibold text-red-600">
               {alerts.filter(a => a.type === 'urgent' && !a.resolved).length}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">Urgent</div>
+            <div className="text-xs text-gray-500">Urgent</div>
           </div>
           <div className="p-2">
-            <div className="font-heading font-heading-semibold text-lg text-warning">
+            <div className="text-lg font-semibold text-amber-600">
               {alerts.filter(a => a.type === 'warning' && !a.resolved).length}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">Warnings</div>
+            <div className="text-xs text-gray-500">Warnings</div>
           </div>
           <div className="p-2">
-            <div className="font-heading font-heading-semibold text-lg text-primary">
+            <div className="text-lg font-semibold text-blue-600">
               {alerts.filter(a => a.type === 'info' && !a.resolved).length}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">Info</div>
+            <div className="text-xs text-gray-500">Info</div>
           </div>
           <div className="p-2">
-            <div className="font-heading font-heading-semibold text-lg text-success">
+            <div className="text-lg font-semibold text-green-600">
               {alerts.filter(a => a.resolved).length}
             </div>
-            <div className="font-caption font-caption-normal text-xs text-text-secondary">Resolved</div>
+            <div className="text-xs text-gray-500">Resolved</div>
           </div>
         </div>
       </div>

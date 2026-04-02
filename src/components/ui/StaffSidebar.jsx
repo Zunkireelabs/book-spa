@@ -10,7 +10,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const { branchName: contextBranchName } = useBranch();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
-
+  const [expandedItems, setExpandedItems] = useState(['operations']); // Default expanded
   const userRole = profile?.role || propRole || 'staff';
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
@@ -20,37 +20,42 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     await signOut();
   };
 
-  // Grouped navigation sections
-  const navigationSections = [
+  const toggleExpand = (id) => {
+    setExpandedItems((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Navigation items with collapsible groups (Agentic Commerce style)
+  const navigationItems = [
     {
-      id: 'core',
-      label: null, // No section label for core items
-      items: [
-        {
-          id: 'dashboard',
-          label: 'Home',
-          icon: 'Home',
-          path: isManagerOrAdmin ? '/branch-manager-dashboard' : '/branch-staff-dashboard',
-          roles: ['staff', 'manager', 'admin']
-        },
+      id: 'dashboard',
+      label: 'Dashboard',
+      icon: 'LayoutDashboard',
+      path: isManagerOrAdmin ? '/branch-manager-dashboard' : '/branch-staff-dashboard',
+      roles: ['staff', 'manager', 'admin']
+    },
+    {
+      id: 'operations',
+      label: 'Operations',
+      icon: 'ClipboardList',
+      roles: ['staff', 'manager', 'admin'],
+      children: [
         {
           id: 'bookings',
           label: 'Bookings',
-          icon: 'ClipboardList',
           path: isManagerOrAdmin ? '/branch-manager-dashboard?view=bookings' : '/branch-staff-dashboard?view=bookings',
           roles: ['staff', 'manager', 'admin']
         },
         {
           id: 'calendar',
           label: 'Calendar',
-          icon: 'Calendar',
           path: isManagerOrAdmin ? '/branch-manager-dashboard?view=calendar' : '/branch-staff-dashboard?view=calendar',
           roles: ['staff', 'manager', 'admin']
         },
         {
           id: 'new-booking',
           label: 'New Booking',
-          icon: 'PlusCircle',
           path: isManagerOrAdmin ? '/branch-manager-dashboard?view=new-booking' : '/branch-staff-dashboard?view=new-booking',
           roles: ['staff', 'manager', 'admin']
         },
@@ -59,97 +64,112 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     {
       id: 'customers',
       label: 'Customers',
-      items: [
-        {
-          id: 'customers',
-          label: 'Customers',
-          icon: 'Users',
-          path: '/branch-manager-dashboard?view=customers',
-          roles: ['manager', 'admin']
-        },
-      ]
+      icon: 'Users',
+      path: '/branch-manager-dashboard?view=customers',
+      roles: ['manager', 'admin']
     },
     {
-      id: 'staff',
-      label: 'Staff',
-      items: [
+      id: 'insights',
+      label: 'Insights',
+      icon: 'BarChart3',
+      roles: ['manager', 'admin'],
+      children: [
         {
-          id: 'attendance',
-          label: 'Attendance',
-          icon: 'ClipboardCheck',
-          path: '/branch-manager-dashboard?view=attendance',
+          id: 'reports',
+          label: 'Reports',
+          path: '/branch-manager-dashboard?view=reports',
           roles: ['manager', 'admin']
         },
         {
           id: 'performance',
           label: 'Performance',
-          icon: 'Award',
           path: '/branch-manager-dashboard?view=performance',
           roles: ['manager', 'admin']
         },
       ]
     },
     {
-      id: 'analytics',
-      label: 'Analytics',
-      items: [
+      id: 'staff-mgmt',
+      label: 'Staff',
+      icon: 'UserCog',
+      roles: ['manager', 'admin'],
+      children: [
         {
-          id: 'reports',
-          label: 'Reports',
-          icon: 'BarChart3',
-          path: '/branch-manager-dashboard?view=reports',
+          id: 'therapists',
+          label: 'Therapists',
+          path: '/branch-manager-dashboard?view=therapists',
           roles: ['manager', 'admin']
         },
         {
-          id: 'audit',
-          label: 'Audit Log',
-          icon: 'Shield',
-          path: '/branch-manager-dashboard?view=audit',
+          id: 'attendance',
+          label: 'Attendance',
+          path: '/branch-manager-dashboard?view=attendance',
           roles: ['manager', 'admin']
         },
       ]
     },
     {
-      id: 'setup',
+      id: 'infrastructure',
       label: 'Setup',
-      items: [
+      icon: 'Settings',
+      roles: ['manager', 'admin'],
+      children: [
         {
           id: 'rooms',
           label: 'Rooms',
-          icon: 'DoorOpen',
           path: '/branch-manager-dashboard?view=rooms',
           roles: ['manager', 'admin']
         },
         {
           id: 'services',
           label: 'Services',
-          icon: 'Sparkles',
           path: '/branch-manager-dashboard?view=services',
           roles: ['admin']
         },
         {
-          id: 'therapists',
-          label: 'Therapists',
-          icon: 'UserCog',
-          path: '/branch-manager-dashboard?view=therapists',
+          id: 'audit',
+          label: 'Audit Log',
+          path: '/branch-manager-dashboard?view=audit',
           roles: ['manager', 'admin']
         },
       ]
     },
   ];
 
-  // Filter sections and items by role
-  const filteredSections = navigationSections
-    .map(section => ({
-      ...section,
-      items: section.items.filter(item => item.roles.includes(userRole))
-    }))
-    .filter(section => section.items.length > 0);
+  // Filter items by role (including children)
+  const filterByRole = (items) => {
+    return items
+      .filter(item => item.roles.includes(userRole))
+      .map(item => {
+        if (item.children) {
+          return {
+            ...item,
+            children: item.children.filter(child => child.roles.includes(userRole))
+          };
+        }
+        return item;
+      })
+      .filter(item => !item.children || item.children.length > 0);
+  };
 
-  // Flat list for mobile
-  const allNavItems = filteredSections.flatMap(s => s.items);
-  const mobilePrimaryItems = allNavItems.slice(0, 4);
-  const mobileOverflowItems = allNavItems.slice(4);
+  const filteredNavItems = filterByRole(navigationItems);
+
+  // Flatten for mobile nav
+  const flattenNav = (items) => {
+    const result = [];
+    items.forEach(item => {
+      if (item.children) {
+        item.children.forEach(child => result.push(child));
+      } else if (item.path) {
+        result.push(item);
+      }
+    });
+    return result;
+  };
+
+  const flatNavItems = flattenNav(filteredNavItems);
+  const mobilePrimaryItems = flatNavItems.slice(0, 4);
+  const mobileOverflowItems = flatNavItems.slice(4);
 
   const isActive = (path) => {
     if (path.includes('?')) {
@@ -158,150 +178,229 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     return location.pathname === path && !location.search;
   };
 
+  const isParentActive = (item) => {
+    if (item.children) {
+      return item.children.some(child => isActive(child.path));
+    }
+    return item.path && isActive(item.path);
+  };
+
+  const getActiveChildIndex = (children) => {
+    return children.findIndex(child => isActive(child.path));
+  };
+
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside style={{ backgroundColor: '#FAFAFA' }} className={`fixed left-0 top-0 h-full z-staff-sidebar spa-transition-slow ${
-        isCollapsed ? 'w-16' : 'w-64'
-      } hidden lg:block`}>
-        <div className="flex flex-col h-full">
-          {/* Header */}
-          <div className="flex items-center justify-between p-4">
-            {!isCollapsed && (
-              <Link to="/branch-staff-dashboard" className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    className="text-primary-foreground"
-                  >
-                    <path
-                      d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
-                      fill="currentColor"
-                    />
-                    <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
-                  </svg>
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-heading font-heading-semibold text-sm text-text-primary">
-                    BookSpa
-                  </span>
-                  <span className="font-caption font-caption-normal text-xs text-text-secondary -mt-0.5">
-                    Staff Portal
-                  </span>
-                </div>
-              </Link>
-            )}
-            <button
-              onClick={() => {
-                const next = !isCollapsed;
-                setIsCollapsed(next);
-                onCollapseChange?.(next);
-              }}
-              className="p-2 rounded-spa hover:bg-background spa-transition-fast"
-            >
-              <Icon
-                name={isCollapsed ? "ChevronRight" : "ChevronLeft"}
-                size={16}
-                className="text-text-secondary"
-              />
-            </button>
-          </div>
-
-          {/* Navigation — grouped sections */}
-          <nav className="flex-1 overflow-y-auto sidebar-scroll px-3 pt-1 pb-3">
-            {filteredSections.map((section, sIdx) => (
-              <div key={section.id} className={sIdx > 0 ? 'mt-4' : ''}>
-                {/* Section label */}
-                {section.label && !isCollapsed && (
-                  <div className="px-3 mb-1">
-                    <span className="font-caption font-caption-normal text-xs text-text-secondary uppercase tracking-wider">
-                      {section.label}
-                    </span>
-                  </div>
-                )}
-                {section.label && isCollapsed && (
-                  <div className="mx-2 mb-1 border-t border-border" />
-                )}
-                <div className="space-y-0.5">
-                  {section.items.map((item) => (
-                    <Link
-                      key={item.id}
-                      to={item.path}
-                      className={`flex items-center space-x-3 px-3 py-2 rounded-spa spa-transition-fast spa-touch-target ${
-                        isActive(item.path)
-                          ? 'bg-[rgba(0,0,23,0.043)] border border-[rgba(0,0,29,0.075)] text-text-primary'
-                          : 'text-text-secondary hover:text-text-primary hover:bg-background border border-transparent'
-                      } ${isCollapsed ? 'justify-center' : ''}`}
-                    >
-                      <Icon name={item.icon} size={20} />
-                      {!isCollapsed && (
-                        <span className="font-body font-body-medium text-sm">
-                          {item.label}
-                        </span>
-                      )}
-                    </Link>
-                  ))}
-                </div>
+      <aside className={`fixed left-0 top-0 h-full z-staff-sidebar bg-[#ebebeb] flex flex-col transition-all duration-200 ${
+        isCollapsed ? 'w-16' : 'w-60'
+      } hidden lg:flex`}>
+        {/* Header */}
+        <div className="px-5 py-3 h-[52px] flex items-center justify-between">
+          {!isCollapsed && (
+            <Link to="/branch-staff-dashboard" className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="text-white"
+                >
+                  <path
+                    d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
+                    fill="currentColor"
+                  />
+                  <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
+                </svg>
               </div>
-            ))}
-          </nav>
+              <div>
+                <h1 className="text-sm font-semibold text-gray-900">BookSpa</h1>
+                <p className="text-xs text-gray-500">Staff Portal</p>
+              </div>
+            </Link>
+          )}
+          <button
+            onClick={() => {
+              const next = !isCollapsed;
+              setIsCollapsed(next);
+              onCollapseChange?.(next);
+            }}
+            className="p-2 rounded-md hover:bg-[#fafafa] transition-colors"
+          >
+            <Icon
+              name={isCollapsed ? "ChevronRight" : "ChevronLeft"}
+              size={16}
+              className="text-gray-500"
+            />
+          </button>
+        </div>
 
-          {/* Footer Actions */}
-          <div className="p-4 border-t border-border space-y-2">
-            <button className={`flex items-center space-x-3 px-3 py-2 rounded-spa text-text-secondary hover:text-text-primary hover:bg-background spa-transition-fast w-full spa-touch-target ${
-              isCollapsed ? 'justify-center' : ''
-            }`}>
-              <Icon name="Settings" size={20} />
-              {!isCollapsed && (
-                <span className="font-body font-body-medium text-sm">Settings</span>
-              )}
-            </button>
-            <button
-              onClick={handleLogout}
-              className={`flex items-center space-x-3 px-3 py-2 rounded-spa text-error hover:bg-error/10 spa-transition-fast w-full spa-touch-target ${
-                isCollapsed ? 'justify-center' : ''
-              }`}
-            >
-              <Icon name="LogOut" size={20} />
-              {!isCollapsed && (
-                <span className="font-body font-body-medium text-sm">Logout</span>
-              )}
-            </button>
-          </div>
+        {/* Navigation — collapsible groups (Agentic Commerce style) */}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+          {filteredNavItems.map((item) => {
+            const hasChildren = item.children && item.children.length > 0;
+            const isExpanded = expandedItems.includes(item.id);
+            const parentActive = isParentActive(item);
+
+            // Collapsible group
+            if (hasChildren) {
+              return (
+                <div key={item.id}>
+                  {/* Parent item (button) */}
+                  <button
+                    onClick={() => toggleExpand(item.id)}
+                    className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      parentActive
+                        ? 'bg-[#fafafa] text-gray-900'
+                        : 'text-gray-500 hover:bg-[#fafafa] hover:text-gray-900'
+                    } ${isCollapsed ? 'justify-center' : ''}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon name={item.icon} size={18} className="flex-shrink-0" />
+                      {!isCollapsed && <span>{item.label}</span>}
+                    </div>
+                    {!isCollapsed && (
+                      <Icon
+                        name="ChevronDown"
+                        size={16}
+                        className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                      />
+                    )}
+                  </button>
+
+                  {/* Children (expanded state) */}
+                  {isExpanded && !isCollapsed && (() => {
+                    const activeIndex = getActiveChildIndex(item.children);
+
+                    return (
+                      <div className="relative mt-1">
+                        {/* Vertical line from parent to active item */}
+                        {activeIndex >= 0 && (
+                          <div
+                            className="absolute bg-gray-300"
+                            style={{
+                              left: '20px',
+                              top: '-4px',
+                              width: '1.5px',
+                              height: `calc(${activeIndex} * 32px + 4px)`
+                            }}
+                          />
+                        )}
+
+                        {item.children.map((child, index) => {
+                          const isChildActive = index === activeIndex;
+
+                          return (
+                            <div key={child.id} className="relative flex items-center pl-3 h-[32px]">
+                              {/* Corner connector for active item */}
+                              {isChildActive && (
+                                <>
+                                  {/* Curved corner */}
+                                  <div
+                                    className="absolute"
+                                    style={{
+                                      left: '19.25px',
+                                      top: 0,
+                                      height: 'calc(50% + 1px)',
+                                      width: '12px',
+                                      borderLeft: '1.5px solid #d1d5db',
+                                      borderBottom: '1.5px solid #d1d5db',
+                                      borderBottomLeftRadius: '6px'
+                                    }}
+                                  />
+                                  {/* Arrow */}
+                                  <div
+                                    className="absolute text-gray-300 text-xs"
+                                    style={{
+                                      left: '30px',
+                                      top: '50%',
+                                      transform: 'translateY(-50%)'
+                                    }}
+                                  >
+                                    →
+                                  </div>
+                                </>
+                              )}
+
+                              {/* Spacer for alignment */}
+                              <div className="w-[38px] shrink-0" />
+
+                              <Link
+                                to={child.path}
+                                className={`flex-1 px-2 py-1.5 rounded-md text-sm transition-colors ${
+                                  isChildActive
+                                    ? 'text-gray-900 font-medium bg-[#fafafa]'
+                                    : 'text-gray-500 hover:text-gray-900'
+                                }`}
+                              >
+                                {child.label}
+                              </Link>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            }
+
+            // Regular nav item (no children)
+            return (
+              <Link
+                key={item.id}
+                to={item.path}
+                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  isActive(item.path)
+                    ? 'bg-[#fafafa] text-gray-900'
+                    : 'text-gray-500 hover:bg-[#fafafa] hover:text-gray-900'
+                } ${isCollapsed ? 'justify-center' : ''}`}
+              >
+                <Icon name={item.icon} size={18} className="flex-shrink-0" />
+                {!isCollapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Footer - Branch Info */}
+        <div className="p-3">
+          {!isCollapsed && (
+            <div className="px-3 py-2 text-xs text-gray-400">
+              <Icon name="MapPin" size={12} className="inline mr-1" />
+              {branchName}
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav style={{ backgroundColor: '#FAFAFA' }} className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border z-staff-sidebar">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#ebebeb] border-t border-gray-200 z-staff-sidebar">
         <div className="flex items-center justify-around py-2">
           {mobilePrimaryItems.map((item) => (
             <Link
               key={item.id}
               to={item.path}
-              className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast spa-touch-target ${
+              className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
                 isActive(item.path)
-                  ? 'text-text-primary bg-[rgba(0,0,23,0.043)] border border-[rgba(0,0,29,0.075)]'
-                  : 'text-text-secondary hover:text-primary border border-transparent'
+                  ? 'text-gray-900 bg-[#fafafa]'
+                  : 'text-gray-500 hover:text-gray-900'
               }`}
             >
-              <Icon name={item.icon} size={20} />
-              <span className="font-caption font-caption-normal text-xs">
-                {item.label}
-              </span>
+              <Icon name={item.icon} size={18} />
+              <span className="text-xs font-medium">{item.label}</span>
             </Link>
           ))}
           {mobileOverflowItems.length > 0 && (
             <button
               onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
-              className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast spa-touch-target ${
-                mobileMoreOpen ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
+              className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
+                mobileMoreOpen ? 'text-gray-900 bg-[#fafafa]' : 'text-gray-500 hover:text-gray-900'
               }`}
             >
-              <Icon name="MoreHorizontal" size={20} />
-              <span className="font-caption font-caption-normal text-xs">More</span>
+              <Icon name="MoreHorizontal" size={18} />
+              <span className="text-xs font-medium">More</span>
             </button>
           )}
         </div>
@@ -310,15 +409,15 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         {mobileMoreOpen && (
           <>
             <div
-              className="fixed inset-0 bg-text-primary/30 z-modal-overlay"
+              className="fixed inset-0 bg-black/30 z-modal-overlay"
               onClick={() => setMobileMoreOpen(false)}
             />
-            <div className="absolute bottom-full left-0 right-0 bg-surface border-t border-border rounded-t-spa-lg shadow-spa-modal z-modal animate-slide-in">
+            <div className="absolute bottom-full left-0 right-0 bg-[#ebebeb] border-t border-gray-200 rounded-t-xl shadow-lg z-modal animate-slide-in">
               <div className="p-4 space-y-1">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="font-heading font-heading-medium text-sm text-text-primary">More</span>
-                  <button onClick={() => setMobileMoreOpen(false)} className="p-1 rounded-spa hover:bg-background">
-                    <Icon name="X" size={16} className="text-text-secondary" />
+                  <span className="text-sm font-semibold text-gray-900">More</span>
+                  <button onClick={() => setMobileMoreOpen(false)} className="p-1 rounded-md hover:bg-[#fafafa]">
+                    <Icon name="X" size={16} className="text-gray-500" />
                   </button>
                 </div>
                 {mobileOverflowItems.map((item) => (
@@ -326,23 +425,23 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                     key={item.id}
                     to={item.path}
                     onClick={() => setMobileMoreOpen(false)}
-                    className={`flex items-center space-x-3 px-3 py-2.5 rounded-spa spa-transition-fast ${
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                       isActive(item.path)
-                        ? 'bg-[rgba(0,0,23,0.043)] border border-[rgba(0,0,29,0.075)] text-text-primary'
-                        : 'text-text-secondary hover:text-text-primary hover:bg-background border border-transparent'
+                        ? 'bg-[#fafafa] text-gray-900'
+                        : 'text-gray-500 hover:bg-[#fafafa] hover:text-gray-900'
                     }`}
                   >
-                    <Icon name={item.icon} size={20} />
-                    <span className="font-body font-body-medium text-sm">{item.label}</span>
+                    <Icon name={item.icon} size={18} />
+                    <span>{item.label}</span>
                   </Link>
                 ))}
-                <div className="border-t border-border mt-2 pt-2">
+                <div className="border-t border-gray-200 mt-2 pt-2">
                   <button
                     onClick={() => { setMobileMoreOpen(false); handleLogout(); }}
-                    className="flex items-center space-x-3 px-3 py-2.5 rounded-spa text-error hover:bg-error/10 spa-transition-fast w-full"
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 transition-colors w-full"
                   >
-                    <Icon name="LogOut" size={20} />
-                    <span className="font-body font-body-medium text-sm">Logout</span>
+                    <Icon name="LogOut" size={18} />
+                    <span>Logout</span>
                   </button>
                 </div>
               </div>
