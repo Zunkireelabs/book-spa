@@ -395,7 +395,7 @@ const BranchManagerDashboard = () => {
 
           {/* New Booking Notification Toast */}
           {newBookingNotification && (
-            <div className="fixed top-20 right-6 z-50 bg-primary text-white px-5 py-3 rounded-lg shadow-lg animate-fade-in max-w-sm">
+            <div className="fixed top-20 right-6 z-toast bg-primary text-white px-5 py-3 rounded-lg shadow-lg animate-fade-in max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Icon name="CalendarPlus" size={20} />

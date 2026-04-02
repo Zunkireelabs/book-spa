@@ -131,10 +131,13 @@ CREATE POLICY "Staff can create branch bookings"
   );
 
 -- Anonymous users can create bookings (customer booking flow)
+-- Restricted: branch must exist and be active
 CREATE POLICY "Anonymous users can create bookings"
   ON bookings FOR INSERT
   TO anon
-  WITH CHECK (true);
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM branches WHERE id = branch_id AND is_active = true)
+  );
 
 -- Staff can update bookings (status, therapist assignment)
 CREATE POLICY "Staff can update branch bookings"
@@ -328,10 +331,8 @@ CREATE POLICY "Manager can read branch audit logs"
     AND (branch_id = get_user_branch_id() OR get_user_role() = 'admin')
   );
 
-CREATE POLICY "System can write audit logs"
-  ON audit_logs FOR INSERT
-  TO authenticated
-  WITH CHECK (true);
+-- Audit logs are written only via SECURITY DEFINER triggers (log_booking_changes)
+-- No direct INSERT policy needed - triggers bypass RLS
 
 -- ============================================================
 -- RLS COMPLETE

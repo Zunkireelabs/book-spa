@@ -226,7 +226,7 @@ const CalendarGrid = ({
   const renderNowIndicator = (day) => {
     if (day !== todayStr || nowTop < 0 || nowTop > totalHeight) return null;
     return (
-      <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nowTop }}>
+      <div className="absolute left-0 right-0 z-dropdown pointer-events-none" style={{ top: nowTop }}>
         <div className="flex items-center">
           <div className="w-2.5 h-2.5 rounded-full bg-primary -ml-1" />
           <div className="flex-1 h-0.5 bg-primary" />
@@ -321,7 +321,7 @@ const CalendarGrid = ({
                   className={`flex-1 relative ${di < days.length - 1 ? 'border-r-2 border-border' : ''} ${isCurrentDay ? 'bg-primary/[0.02]' : ''}`}
                 >
                   {isCurrentDay && nowTop >= 0 && nowTop <= totalHeight && (
-                    <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nowTop }}>
+                    <div className="absolute left-0 right-0 z-dropdown pointer-events-none" style={{ top: nowTop }}>
                       <div className="flex items-center">
                         <div className="w-2.5 h-2.5 rounded-full bg-primary -ml-1" />
                         <div className="flex-1 h-0.5 bg-primary" />

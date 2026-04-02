@@ -66,7 +66,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   return (
     <div
       ref={cardRef}
-      className="absolute left-1 right-1 rounded-md cursor-pointer overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-10"
+      className="absolute left-1 right-1 rounded-md cursor-pointer overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown"
       style={{
         ...style,
         backgroundColor: colors.light,

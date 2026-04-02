@@ -510,6 +510,31 @@ export async function approveDiscount(bookingId) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers can approve discounts.' } };
     }
 
+    // Fetch booking to validate state before approval
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, payment_status, is_locked, discount_status')
+      .eq('id', bookingId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+
+    // Cannot modify discount on paid or locked bookings
+    if (booking.payment_status === 'paid') {
+      return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot modify discount on a paid booking.' } };
+    }
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'BOOKING_LOCKED', message: 'Cannot modify discount on a locked booking.' } };
+    }
+    if (booking.discount_status !== 'pending') {
+      return { data: null, error: { code: 'INVALID_STATE', message: 'Discount is not pending approval.' } };
+    }
+
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
       .update({
@@ -547,6 +572,31 @@ export async function rejectDiscount(bookingId) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers can reject discounts.' } };
     }
 
+    // Fetch booking to validate state before rejection
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, payment_status, is_locked, discount_status')
+      .eq('id', bookingId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+
+    // Cannot modify discount on paid or locked bookings
+    if (booking.payment_status === 'paid') {
+      return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot modify discount on a paid booking.' } };
+    }
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'BOOKING_LOCKED', message: 'Cannot modify discount on a locked booking.' } };
+    }
+    if (booking.discount_status !== 'pending') {
+      return { data: null, error: { code: 'INVALID_STATE', message: 'Discount is not pending.' } };
+    }
+
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
       .update({
@@ -580,10 +630,10 @@ export async function rejectDiscount(bookingId) {
  */
 export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
   try {
-    // 1. Fetch booking with service duration and room
+    // 1. Fetch booking with service duration, room, and branch
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, room_id, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, room_id, branch_id, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -1608,13 +1658,13 @@ export async function createBooking({
       return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
     }
 
-    // 4. Find rooms with overlapping non-cancelled bookings
+    // 4. Find rooms with overlapping non-cancelled/no-show bookings
     const { data: overlapping, error: overlapError } = await supabase
       .from('bookings')
       .select('room_id')
       .eq('branch_id', resolvedBranchId)
       .eq('date', date)
-      .neq('status', 'Cancelled')
+      .not('status', 'in', '("Cancelled","No Show")')
       .lt('start_time', endTime)
       .gt('end_time', startTime);
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
+import { updateBookingStatus } from '../../../services/api';
 
 const CancellationModal = ({ isOpen, onClose, booking, onConfirm }) => {
   const [reason, setReason] = useState('');
@@ -42,7 +43,17 @@ const CancellationModal = ({ isOpen, onClose, booking, onConfirm }) => {
   const handleConfirm = async () => {
     setIsLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Call actual API to cancel booking
+      const { data, error } = await updateBookingStatus({
+        bookingId: booking.bookingId,
+        newStatus: 'Cancelled',
+      });
+
+      if (error) {
+        console.error('Cancellation failed:', error.message);
+        return;
+      }
+
       onConfirm({
         ...booking,
         status: 'cancelled',
