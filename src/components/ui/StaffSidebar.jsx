@@ -364,12 +364,17 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           })}
         </nav>
 
-        {/* Footer - Branch Info */}
+        {/* Footer - Powered by Zunkireelabs */}
         <div className="p-3">
-          {!isCollapsed && (
-            <div className="px-3 py-2 text-xs text-gray-400">
-              <Icon name="MapPin" size={12} className="inline mr-1" />
-              {branchName}
+          {isCollapsed ? (
+            <div className="flex justify-center py-2">
+              <img src="/zunkireelabs-icon.png" alt="Zunkireelabs" className="w-5 h-5" />
+            </div>
+          ) : (
+            <div className="px-3 py-2 flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">A Product of</span>
+              <img src="/zunkireelabs-icon.png" alt="Zunkireelabs" className="w-4 h-4" />
+              <span className="text-xs font-medium text-gray-700">zunkireelabs</span>
             </div>
           )}
         </div>
