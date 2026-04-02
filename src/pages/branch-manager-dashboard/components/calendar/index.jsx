@@ -230,7 +230,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
   return (
     <>
-      <div className="bg-surface rounded-spa-lg overflow-hidden flex flex-col" style={{ height: `calc(100vh - ${heightOffset}px)` }}>
+      <div className="bg-surface overflow-hidden flex flex-col" style={{ height: `calc(100vh - ${heightOffset}px)` }}>
         {/* Top toolbar */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
           {/* Left: Navigation */}
@@ -259,10 +259,26 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
             </button>
           </div>
 
-          {/* Center: Date title */}
-          <h2 className="font-heading font-heading-semibold text-base text-text-primary">
-            {formatDateTitle(currentDate, viewMode)}
-          </h2>
+          {/* Center: Date title with navigation */}
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={goPrev}
+              className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+              aria-label="Previous"
+            >
+              <Icon name="ChevronLeft" size={18} className="text-text-secondary" />
+            </button>
+            <h2 className="font-heading font-heading-semibold text-base text-text-primary min-w-[140px] text-center">
+              {formatDateTitle(currentDate, viewMode)}
+            </h2>
+            <button
+              onClick={goNext}
+              className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+              aria-label="Next"
+            >
+              <Icon name="ChevronRight" size={18} className="text-text-secondary" />
+            </button>
+          </div>
 
           {/* Right: View toggle + loading */}
           <div className="flex items-center space-x-3">
@@ -384,7 +400,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
           </div>
 
           {/* Calendar grid */}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 overflow-hidden">
             {calendarData ? (
               <CalendarGrid
                 therapists={calendarData.therapists}

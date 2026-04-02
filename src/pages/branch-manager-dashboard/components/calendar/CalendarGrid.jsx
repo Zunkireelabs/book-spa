@@ -177,7 +177,7 @@ const CalendarGrid = ({
             size={14}
             className={isUnassigned ? 'text-warning' : 'text-text-secondary'}
           />
-          <span className={`font-body text-sm truncate ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}>
+          <span className={`font-body text-sm whitespace-nowrap ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}>
             {col.name}
           </span>
           {col.attendance === 'Absent' && (
@@ -260,20 +260,26 @@ const CalendarGrid = ({
   };
 
   // ── Single-day view ───────────────────────────────────────
+  const columnsMinWidth = columns.length * minColWidth;
+
   const renderDayView = () => (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex border-b-2 border-border bg-background flex-shrink-0">
-        <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center" style={{ width: TIME_COL_WIDTH }}>
-          <Icon name="Clock" size={14} className="text-text-secondary" />
-        </div>
-        <div className="flex flex-1 min-w-0">
-          {columns.map(col => renderColumnHeader(col))}
-        </div>
-      </div>
       <div ref={scrollRef} className="flex-1 overflow-auto sidebar-scroll">
-        <div className="flex relative" style={{ height: totalHeight }}>
+        {/* Sticky header inside scroll container */}
+        <div className="sticky top-0 z-header bg-background border-b-2 border-border" style={{ minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
+          <div className="flex">
+            <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center" style={{ width: TIME_COL_WIDTH }}>
+              <Icon name="Clock" size={14} className="text-text-secondary" />
+            </div>
+            <div className="flex" style={{ minWidth: columnsMinWidth }}>
+              {columns.map(col => renderColumnHeader(col))}
+            </div>
+          </div>
+        </div>
+        {/* Grid body */}
+        <div className="flex relative" style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
           {renderTimeLabels()}
-          <div className="flex flex-1 relative min-w-0">
+          <div className="flex relative" style={{ minWidth: columnsMinWidth }}>
             {renderGridLines()}
             {renderNowIndicator(currentDate)}
             {columns.map(col => renderColumn(col, currentDate))}
@@ -284,30 +290,37 @@ const CalendarGrid = ({
   );
 
   // ── Multi-day (4-day) view ────────────────────────────────
+  const daysMinWidth = days.length * minColWidth;
+
   const renderMultiDayView = () => (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="border-b-2 border-border bg-background flex-shrink-0">
-        <div className="flex">
-          <div className="flex-shrink-0 border-r border-border" style={{ width: TIME_COL_WIDTH }} />
-          {days.map(day => {
-            const isCurrentDay = day === todayStr;
-            return (
-              <div
-                key={day}
-                className={`flex-1 text-center py-1.5 border-r border-border last:border-r-0 ${isCurrentDay ? 'bg-primary/5' : ''}`}
-              >
-                <span className={`font-heading text-xs font-semibold ${isCurrentDay ? 'text-primary' : 'text-text-secondary'}`}>
-                  {formatShortDate(day)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
       <div ref={scrollRef} className="flex-1 overflow-auto sidebar-scroll">
-        <div className="flex relative" style={{ height: totalHeight }}>
+        {/* Sticky header inside scroll container */}
+        <div className="sticky top-0 z-header bg-background border-b-2 border-border" style={{ minWidth: TIME_COL_WIDTH + daysMinWidth }}>
+          <div className="flex">
+            <div className="flex-shrink-0 border-r border-border" style={{ width: TIME_COL_WIDTH }} />
+            <div className="flex" style={{ minWidth: daysMinWidth }}>
+              {days.map(day => {
+                const isCurrentDay = day === todayStr;
+                return (
+                  <div
+                    key={day}
+                    className={`flex-1 text-center py-1.5 border-r border-border last:border-r-0 ${isCurrentDay ? 'bg-primary/5' : ''}`}
+                    style={{ minWidth: minColWidth }}
+                  >
+                    <span className={`font-heading text-xs font-semibold ${isCurrentDay ? 'text-primary' : 'text-text-secondary'}`}>
+                      {formatShortDate(day)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        {/* Grid body */}
+        <div className="flex relative" style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + daysMinWidth }}>
           {renderTimeLabels()}
-          <div className="flex flex-1 relative min-w-0">
+          <div className="flex relative" style={{ minWidth: daysMinWidth }}>
             {renderGridLines()}
             {days.map((day, di) => {
               const isCurrentDay = day === todayStr;
@@ -319,6 +332,7 @@ const CalendarGrid = ({
                 <div
                   key={day}
                   className={`flex-1 relative ${di < days.length - 1 ? 'border-r-2 border-border' : ''} ${isCurrentDay ? 'bg-primary/[0.02]' : ''}`}
+                  style={{ minWidth: minColWidth }}
                 >
                   {isCurrentDay && nowTop >= 0 && nowTop <= totalHeight && (
                     <div className="absolute left-0 right-0 z-dropdown pointer-events-none" style={{ top: nowTop }}>

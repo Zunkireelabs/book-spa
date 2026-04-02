@@ -404,9 +404,9 @@ const BranchStaffDashboard = () => {
       />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:pb-0 pb-16 spa-transition-slow`}>
-        {/* Compact Top Bar */}
-        <header style={{ backgroundColor: '#FAFAFA' }} className="sticky top-0 z-header">
-          <div className="px-2 sm:px-3 lg:px-4 py-2">
+        {/* Top Bar - Consistent with Admin */}
+        <header className="bg-[#FAFAFA] sticky top-0 z-header">
+          <div className="px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between">
               {/* Left: Branch + date/time */}
               <div className="flex items-center space-x-3 min-w-0">
@@ -515,9 +515,10 @@ const BranchStaffDashboard = () => {
           </div>
         )}
 
-        <div className="px-2 sm:px-3 lg:px-4 py-2">
+        {/* Main Content Area - Consistent with Admin */}
+        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-6'} bg-white rounded-tl-spa-lg border-l border-t border-[rgba(0,0,29,0.075)]`}>
           {viewMode === 'dashboard' ? (
-            <div className="bg-white rounded-spa-lg pt-6 pl-[34px] pr-4 pb-4 shadow-sm border border-[rgba(0,0,29,0.102)] min-h-[calc(100vh-100px)]">
+            <div className="min-h-[calc(100vh-120px)]">
               {/* Overview Stats */}
               <h2 className="font-heading font-heading-semibold text-lg text-text-primary mb-4">{getOverviewTitle()}</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -589,13 +590,13 @@ const BranchStaffDashboard = () => {
               onRefresh={loadData}
             />
           ) : viewMode === 'calendar' ? (
-            <OperationalCalendar branchId={branchId} heightOffset={112} />
+            <OperationalCalendar branchId={branchId} heightOffset={56} />
           ) : viewMode === 'new-booking' ? (
             <StaffBookingForm onBookingCreated={loadData} />
           ) : (
             <StaffBookingForm onBookingCreated={loadData} />
           )}
-        </div>
+        </main>
       </div>
     </div>
   );

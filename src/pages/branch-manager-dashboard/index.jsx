@@ -35,6 +35,7 @@ import TherapistPerformancePanel from './components/Performance/TherapistPerform
 import TopPerformersCard from './components/Performance/TopPerformersCard';
 import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
+import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 
 const BranchManagerDashboard = () => {
   const { profile } = useAuth();
@@ -267,7 +268,7 @@ const BranchManagerDashboard = () => {
   );
 
   const renderCalendarView = () => (
-    <OperationalCalendar branchId={branchId} />
+    <OperationalCalendar branchId={branchId} heightOffset={56} />
   );
 
   const renderReportsView = () => (
@@ -428,7 +429,7 @@ const BranchManagerDashboard = () => {
           )}
 
           {/* Main Content Area */}
-          <main className="px-4 sm:px-6 lg:px-8 py-6 bg-white rounded-tl-spa-lg border-l border-t border-[rgba(0,0,29,0.075)]">
+          <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-6'} bg-white rounded-tl-spa-lg border-l border-t border-[rgba(0,0,29,0.075)]`}>
             {viewMode === 'dashboard' && renderDashboardView()}
             {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
             {viewMode === 'calendar' && renderCalendarView()}
@@ -441,6 +442,7 @@ const BranchManagerDashboard = () => {
             {viewMode === 'services' && <ServiceManagementPanel />}
             {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} />}
             {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
+            {viewMode === 'new-booking' && <StaffBookingForm onBookingCreated={loadData} />}
           </main>
         </div>
       </div>
