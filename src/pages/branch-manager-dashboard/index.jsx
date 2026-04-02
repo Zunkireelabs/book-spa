@@ -524,7 +524,7 @@ const BranchManagerDashboard = () => {
 
           {/* Main Content Area with AI Assistant */}
           <div className="flex gap-3 min-h-[calc(100vh-52px)]">
-            <main className={`flex-1 min-w-0 overflow-hidden transition-all duration-500 ease-out ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+            <main className={`flex-1 min-w-0 overflow-hidden ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
               {viewMode === 'dashboard' && renderDashboardView()}
               {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
               {viewMode === 'calendar' && renderCalendarView()}
