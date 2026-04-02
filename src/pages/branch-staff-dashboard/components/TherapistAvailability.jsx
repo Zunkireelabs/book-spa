@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
 const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignTherapist }) => {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState('current');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   const timeSlots = [
     { value: 'current', label: 'Current Hour' },
@@ -11,6 +13,21 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
     { value: 'afternoon', label: 'Afternoon' },
     { value: 'evening', label: 'Evening' }
   ];
+
+  const selectedLabel = timeSlots.find(s => s.value === selectedTimeSlot)?.label || 'Current Hour';
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDropdownOpen]);
 
   const getAvailabilityColor = (status) => {
     const colors = {
@@ -45,85 +62,6 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
 
   return (
     <div className="space-y-3">
-      {/* Therapist Availability */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="flex items-center justify-between p-3 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-gray-900">
-            Therapist Availability
-          </h2>
-          <div className="relative">
-            <select
-              value={selectedTimeSlot}
-              onChange={(e) => setSelectedTimeSlot(e.target.value)}
-              className="appearance-none h-7 pl-2 pr-7 text-xs text-gray-700 bg-white border border-gray-200 rounded-md hover:border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
-            >
-              {timeSlots.map((slot) => (
-                <option key={slot.value} value={slot.value}>
-                  {slot.label}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-              <Icon name="ChevronDown" size={12} className="text-gray-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="divide-y divide-gray-100">
-          {therapists.map((therapist) => {
-            const color = getAvailabilityColor(therapist.status);
-            const icon = getAvailabilityIcon(therapist.status);
-
-            return (
-              <div
-                key={therapist.id}
-                className="p-3 hover:bg-gray-50 transition-colors"
-              >
-                {/* Row 1: Avatar + Name + Status */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-8 h-8 shrink-0 bg-gray-100 rounded-full flex items-center justify-center">
-                      <Icon
-                        name={therapist.gender === 'Female' ? 'User' : 'UserCheck'}
-                        size={16}
-                        className="text-gray-500"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">
-                        {therapist.name}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {therapist.gender}
-                        {therapist.room && ` \u00B7 Room ${therapist.room}`}
-                      </div>
-                    </div>
-                  </div>
-                  <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-${color}-100 text-${color}-700`}>
-                    <Icon name={icon} size={10} />
-                    {therapist.status.replace('-', ' ')}
-                  </span>
-                </div>
-
-                {/* Row 2: Specialties */}
-                {therapist.specialties && therapist.specialties.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2 pl-10">
-                    {therapist.specialties.slice(0, 3).map((specialty) => (
-                      <span
-                        key={specialty}
-                        className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
-                      >
-                        {specialty}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Pending Assignments — from real data */}
       {pendingBookings.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200">
@@ -183,6 +121,98 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
           >
             View Full Schedule
           </Button>
+        </div>
+      </div>
+
+      {/* Therapist Availability */}
+      <div className="bg-white rounded-lg border border-gray-200">
+        <div className="flex items-center justify-between p-3 border-b border-gray-200">
+          <h2 className="text-sm font-semibold text-gray-900">
+            Therapist Availability
+          </h2>
+          <div className="relative" ref={dropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center gap-1.5 h-7 px-2.5 text-xs border border-gray-200 rounded-md bg-white text-gray-700 hover:border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer whitespace-nowrap"
+            >
+              <span>{selectedLabel}</span>
+              <Icon name="ChevronDown" size={12} className={`text-gray-400 flex-shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isDropdownOpen && (
+              <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+                {timeSlots.map((slot) => (
+                  <button
+                    key={slot.value}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTimeSlot(slot.value);
+                      setIsDropdownOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${
+                      selectedTimeSlot === slot.value ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
+                    }`}
+                  >
+                    {slot.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {therapists.map((therapist) => {
+            const color = getAvailabilityColor(therapist.status);
+            const icon = getAvailabilityIcon(therapist.status);
+
+            return (
+              <div
+                key={therapist.id}
+                className="p-3 hover:bg-gray-50 transition-colors"
+              >
+                {/* Row 1: Avatar + Name + Status */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 shrink-0 bg-gray-100 rounded-full flex items-center justify-center">
+                      <Icon
+                        name={therapist.gender === 'Female' ? 'User' : 'UserCheck'}
+                        size={16}
+                        className="text-gray-500"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {therapist.name}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {therapist.gender}
+                        {therapist.room && ` · Room ${therapist.room}`}
+                      </div>
+                    </div>
+                  </div>
+                  <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-${color}-100 text-${color}-700`}>
+                    <Icon name={icon} size={10} />
+                    {therapist.status.replace('-', ' ')}
+                  </span>
+                </div>
+
+                {/* Row 2: Specialties */}
+                {therapist.specialties && therapist.specialties.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2 pl-10">
+                    {therapist.specialties.slice(0, 3).map((specialty) => (
+                      <span
+                        key={specialty}
+                        className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                      >
+                        {specialty}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
