@@ -199,7 +199,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         <div className="px-5 py-3 h-[52px] flex items-center justify-between">
           {!isCollapsed && (
             <Link to="/branch-staff-dashboard" className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
+              <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
                 <svg
                   width="18"
                   height="18"
