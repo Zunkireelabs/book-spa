@@ -36,10 +36,13 @@ import TopPerformersCard from './components/Performance/TopPerformersCard';
 import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
+import { AIAssistantPanel } from '../../components/ui/AIAssistant';
+import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
   const { profile, signOut } = useAuth();
   const { branchId, branchName } = useBranch();
+  const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const profileDropdownRef = useRef(null);
@@ -369,6 +372,19 @@ const BranchManagerDashboard = () => {
                     {profile?.role === 'admin' ? 'Admin' : managerData.role}
                   </span>
 
+                  {/* AI Assistant Button */}
+                  <button
+                    onClick={toggleAssistant}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all ${
+                      isAssistantOpen
+                        ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md'
+                        : 'hover:bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    <Icon name="Sparkles" size={16} className={isAssistantOpen ? 'text-white' : 'text-purple-500'} />
+                    <span className="text-sm font-medium hidden sm:inline">Assistant</span>
+                  </button>
+
                   <Button
                     variant="primary"
                     size="sm"
@@ -506,22 +522,27 @@ const BranchManagerDashboard = () => {
             </div>
           )}
 
-          {/* Main Content Area */}
-          <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1] min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
-            {viewMode === 'dashboard' && renderDashboardView()}
-            {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
-            {viewMode === 'calendar' && renderCalendarView()}
-            {viewMode === 'reports' && renderReportsView()}
-            {viewMode === 'customers' && <CustomersPanel branchId={branchId} />}
-            {viewMode === 'attendance' && <AttendancePanel branchId={branchId} />}
-            {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
-            {viewMode === 'infrastructure' && renderInfrastructureView()}
-            {viewMode === 'rooms' && <RoomManagementPanel branchId={branchId} />}
-            {viewMode === 'services' && <ServiceManagementPanel />}
-            {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} />}
-            {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
-            {viewMode === 'new-booking' && <StaffBookingForm onBookingCreated={loadData} />}
-          </main>
+          {/* Main Content Area with AI Assistant */}
+          <div className="flex gap-3 min-h-[calc(100vh-52px)]">
+            <main className={`flex-1 min-w-0 overflow-hidden transition-all duration-500 ease-out ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+              {viewMode === 'dashboard' && renderDashboardView()}
+              {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
+              {viewMode === 'calendar' && renderCalendarView()}
+              {viewMode === 'reports' && renderReportsView()}
+              {viewMode === 'customers' && <CustomersPanel branchId={branchId} />}
+              {viewMode === 'attendance' && <AttendancePanel branchId={branchId} />}
+              {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
+              {viewMode === 'infrastructure' && renderInfrastructureView()}
+              {viewMode === 'rooms' && <RoomManagementPanel branchId={branchId} />}
+              {viewMode === 'services' && <ServiceManagementPanel />}
+              {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} />}
+              {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
+              {viewMode === 'new-booking' && <StaffBookingForm onBookingCreated={loadData} />}
+            </main>
+
+            {/* AI Assistant Panel */}
+            <AIAssistantPanel />
+          </div>
         </div>
       </div>
     </>

@@ -1,13 +1,16 @@
 import React from "react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { BranchProvider } from "./contexts/BranchContext";
+import { AIAssistantProvider } from "./contexts/AIAssistantContext";
 import Routes from "./Routes";
 
 function App() {
   return (
     <AuthProvider>
       <BranchProvider>
-        <Routes />
+        <AIAssistantProvider>
+          <Routes />
+        </AIAssistantProvider>
       </BranchProvider>
     </AuthProvider>
   );
