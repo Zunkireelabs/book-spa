@@ -51,17 +51,23 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
           <h2 className="text-sm font-semibold text-gray-900">
             Therapist Availability
           </h2>
-          <select
-            value={selectedTimeSlot}
-            onChange={(e) => setSelectedTimeSlot(e.target.value)}
-            className="h-7 px-2 text-xs border border-gray-200 rounded-md bg-white text-gray-700 focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
-          >
-            {timeSlots.map((slot) => (
-              <option key={slot.value} value={slot.value}>
-                {slot.label}
-              </option>
-            ))}
-          </select>
+          <div className="relative flex items-center border border-gray-200 rounded-md hover:border-gray-300 transition-colors">
+            <select
+              value={selectedTimeSlot}
+              onChange={(e) => setSelectedTimeSlot(e.target.value)}
+              className="appearance-none bg-transparent h-7 pl-2 pr-6 text-xs text-gray-700 focus:outline-none cursor-pointer"
+              style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+            >
+              {timeSlots.map((slot) => (
+                <option key={slot.value} value={slot.value}>
+                  {slot.label}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5">
+              <Icon name="ChevronDown" size={12} className="text-gray-400" />
+            </div>
+          </div>
         </div>
 
         <div className="divide-y divide-gray-100">
