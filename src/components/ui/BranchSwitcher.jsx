@@ -13,11 +13,12 @@ const BranchSwitcher = () => {
           Platform Admin
         </span>
         <Icon name="Building2" size={16} className="text-text-secondary" />
-        <div className="relative">
+        <div className="relative flex items-center bg-background border border-border rounded-spa hover:border-gray-300 transition-colors">
           <select
             value={branchId || ''}
             onChange={(e) => switchBranch(e.target.value)}
-            className="appearance-none bg-background border border-border rounded-spa px-3 py-1.5 pr-8 font-body font-body-medium text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast cursor-pointer"
+            className="appearance-none bg-transparent border-none pl-3 pr-7 py-1.5 font-body font-body-medium text-sm text-text-primary focus:outline-none cursor-pointer"
+            style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
           >
             {branches.map((b) => (
               <option key={b.id} value={b.id}>
