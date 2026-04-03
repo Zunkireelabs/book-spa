@@ -1,9 +1,27 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../AppIcon';
 import { useBranch } from '../../contexts/BranchContext';
 
 const BranchSwitcher = () => {
   const { branchId, branchName, branches, isAdmin, switchBranch } = useBranch();
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const selectedBranch = branches.find(b => b.id === branchId);
+  const selectedName = selectedBranch?.name || 'Select Branch';
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
 
   // Admin: show dropdown to switch branches
   if (isAdmin && branches.length > 0) {
@@ -13,22 +31,36 @@ const BranchSwitcher = () => {
           Platform Admin
         </span>
         <Icon name="Building2" size={16} className="text-text-secondary" />
-        <div className="relative flex items-center bg-background border border-border rounded-spa hover:border-gray-300 transition-colors">
-          <select
-            value={branchId || ''}
-            onChange={(e) => switchBranch(e.target.value)}
-            className="appearance-none bg-transparent border-none pl-3 pr-7 py-1.5 font-body font-body-medium text-sm text-text-primary focus:outline-none cursor-pointer"
-            style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-spa hover:border-gray-300 transition-colors cursor-pointer"
           >
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}{!b.is_active ? ' (Inactive)' : ''}
-              </option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-            <Icon name="ChevronDown" size={14} className="text-text-secondary" />
-          </div>
+            <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
+              {selectedName}
+            </span>
+            <Icon name="ChevronDown" size={14} className={`text-text-secondary flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {isOpen && (
+            <div className="absolute left-0 top-full mt-1 min-w-full bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+              {branches.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => {
+                    switchBranch(b.id);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap ${
+                    branchId === b.id ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
+                  }`}
+                >
+                  {b.name}{!b.is_active ? ' (Inactive)' : ''}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );

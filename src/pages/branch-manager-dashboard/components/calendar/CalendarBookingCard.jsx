@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
@@ -9,6 +11,9 @@ const STATUS_COLORS = {
 };
 
 const UNPAID_BORDER = '#facc15';
+
+// Statuses that cannot be dragged (terminal states)
+const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 function formatDateLabel(dateStr) {
   if (!dateStr) return '';
@@ -21,14 +26,51 @@ function formatAmount(amount) {
   return Number(amount).toLocaleString('en-IN');
 }
 
+// Check if booking can be dragged
+function canDragBooking(booking) {
+  // Cannot drag terminal statuses
+  if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
+  // Cannot drag paid bookings
+  if (booking.paymentStatus === 'paid') return false;
+  // Cannot drag locked bookings
+  if (booking.isLocked) return false;
+  return true;
+}
+
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist' }) => {
   const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isLocked = booking.isLocked;
+  const isPaid = booking.paymentStatus === 'paid';
+  const isDraggable = canDragBooking(booking);
+
   const cardRef = useRef(null);
   const [showPopover, setShowPopover] = useState(false);
-  const [popoverSide, setPopoverSide] = useState('right'); // right | left
+  const [popoverSide, setPopoverSide] = useState('right');
   const hoverTimer = useRef(null);
+
+  // Setup draggable
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({
+    id: booking.bookingId || booking.id,
+    data: {
+      booking,
+      type: 'booking',
+    },
+    disabled: !isDraggable,
+  });
+
+  const dragStyle = transform ? {
+    transform: CSS.Translate.toString(transform),
+    zIndex: 9999,
+    opacity: isDragging ? 0.9 : 1,
+    boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
+  } : {};
 
   const durationMins = (() => {
     if (!booking.startTime || !booking.endTime) return null;
@@ -42,17 +84,16 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     : '';
 
   const handleMouseEnter = useCallback(() => {
+    if (isDragging) return;
     hoverTimer.current = setTimeout(() => {
-      // Determine side based on card position
       if (cardRef.current) {
         const rect = cardRef.current.getBoundingClientRect();
         const viewportWidth = window.innerWidth;
-        // If card is in the right half of the screen, show popover on left
         setPopoverSide(rect.right > viewportWidth * 0.6 ? 'left' : 'right');
       }
       setShowPopover(true);
     }, 200);
-  }, []);
+  }, [isDragging]);
 
   const handleMouseLeave = useCallback(() => {
     clearTimeout(hoverTimer.current);
@@ -63,21 +104,43 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     return () => clearTimeout(hoverTimer.current);
   }, []);
 
+  // Hide popover when dragging
+  useEffect(() => {
+    if (isDragging) {
+      clearTimeout(hoverTimer.current);
+      setShowPopover(false);
+    }
+  }, [isDragging]);
+
   return (
     <div
-      ref={cardRef}
-      className="absolute left-1 right-1 rounded-md cursor-pointer overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown"
+      ref={(node) => {
+        cardRef.current = node;
+        setNodeRef(node);
+      }}
+      className={`absolute left-1 right-1 rounded-md overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown ${
+        isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      }`}
       style={{
         ...style,
+        ...dragStyle,
         backgroundColor: colors.light,
         borderLeft: `3px solid ${colors.bg}`,
         borderTop: isUnpaid ? `2px solid ${UNPAID_BORDER}` : 'none',
         borderRight: isUnpaid ? `1px solid ${UNPAID_BORDER}` : `1px solid ${colors.bg}20`,
         borderBottom: isUnpaid ? `1px solid ${UNPAID_BORDER}` : `1px solid ${colors.bg}20`,
+        // Hide original card when being dragged (DragOverlay shows the visual)
+        opacity: isDragging ? 0.3 : 1,
       }}
-      onClick={(e) => { e.stopPropagation(); onClick(booking); }}
+      onClick={(e) => {
+        if (!isDragging) {
+          e.stopPropagation();
+          onClick(booking);
+        }
+      }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      {...(isDraggable ? { ...listeners, ...attributes } : {})}
     >
       {/* Card content */}
       <div className="px-2 py-1.5 h-full flex flex-col overflow-hidden">
@@ -107,7 +170,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {durationMins} mins
           </div>
         )}
-        {(isUnpaid || isLocked) && (
+        {(isUnpaid || isLocked || isPaid) && (
           <div className="flex items-center gap-1 mt-0.5 flex-shrink-0">
             {isUnpaid && (
               <span className="inline-flex items-center gap-0.5">
@@ -115,13 +178,13 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
                 <span className="text-[9px] text-yellow-600 font-medium">Unpaid</span>
               </span>
             )}
-            {isLocked && <span className="text-[9px]">🔒</span>}
+            {(isLocked || isPaid) && <span className="text-[9px]">🔒</span>}
           </div>
         )}
       </div>
 
       {/* Rich hover popover */}
-      {showPopover && (
+      {showPopover && !isDragging && (
         <div
           className={`absolute z-[9999] pointer-events-none ${
             popoverSide === 'right'
@@ -220,7 +283,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {/* CTA hint */}
             <div className="px-3 py-1.5 bg-background/50">
               <div className="font-caption text-[10px] text-text-secondary text-center">
-                Click for full details →
+                {isDraggable ? 'Drag to reschedule • Click for details →' : 'Click for full details →'}
               </div>
             </div>
           </div>
