@@ -100,6 +100,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [activeDragBooking, setActiveDragBooking] = useState(null);
   const [overSlotData, setOverSlotData] = useState(null); // { hour, minute, day }
   const [isRescheduling, setIsRescheduling] = useState(false);
+  const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
 
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
@@ -194,8 +195,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const gridRect = gridRef.current.getBoundingClientRect();
 
     // Get cursor position relative to the grid body element
-    // getBoundingClientRect returns viewport coordinates which already account for scroll
-    const relativeY = pointerYRef.current - gridRect.top;
+    // Subtract dragGrabOffset so the card's TOP edge aligns with the time slot
+    // (not the cursor position which could be anywhere on the card)
+    const relativeY = pointerYRef.current - gridRect.top - dragGrabOffset;
 
     // Calculate hour and minute from Y position
     const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
@@ -209,15 +211,38 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     }
 
     return { day, colId, hour, minute };
-  }, []);
+  }, [dragGrabOffset]);
 
   // ── Drag and Drop Handlers ────────────────────────────────
 
   const handleDragStart = useCallback((event) => {
-    const { active } = event;
+    const { active, activatorEvent } = event;
     setActiveDragId(active.id);
-    if (active.data.current?.booking) {
-      setActiveDragBooking(active.data.current.booking);
+
+    const booking = active.data.current?.booking;
+    if (booking) {
+      setActiveDragBooking(booking);
+    }
+
+    // Calculate how far down the card the user grabbed
+    // This offset is used to align the card's TOP edge with the time slot
+    const cursorY = activatorEvent?.clientY ?? 0;
+
+    // Calculate expected card top position based on booking's start time
+    // This is more reliable than trying to get the DOM element's position
+    if (booking?.startTime && gridRef.current) {
+      const gridRect = gridRef.current.getBoundingClientRect();
+      const openHour = parseInt(gridRef.current.dataset?.openHour || '9', 10);
+      const hourHeight = parseInt(gridRef.current.dataset?.hourHeight || '120', 10);
+
+      const [bookingHour, bookingMinute] = booking.startTime.split(':').map(Number);
+      const minutesFromOpen = (bookingHour - openHour) * 60 + bookingMinute;
+      const expectedCardTop = gridRect.top + (minutesFromOpen / 60) * hourHeight;
+
+      const grabOffset = cursorY - expectedCardTop;
+      setDragGrabOffset(grabOffset);
+    } else {
+      setDragGrabOffset(0);
     }
   }, []);
 
@@ -255,12 +280,12 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     // Capture final position before clearing state
     const finalTimeData = over?.data?.current ? calculateTimeFromPointer(over.data.current) : null;
 
-    setActiveDragId(null);
-    setActiveDragBooking(null);
-    setOverSlotData(null);
-
-    // If not dropped on a valid target, do nothing
+    // If not dropped on a valid target, just clear state
     if (!over || !active.data.current?.booking || !finalTimeData) {
+      setActiveDragId(null);
+      setActiveDragBooking(null);
+      setOverSlotData(null);
+      setDragGrabOffset(0);
       return;
     }
 
@@ -268,6 +293,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const { day: newDate, hour, minute } = finalTimeData;
 
     if (hour === undefined || minute === undefined) {
+      setActiveDragId(null);
+      setActiveDragBooking(null);
+      setOverSlotData(null);
+      setDragGrabOffset(0);
       return;
     }
 
@@ -278,12 +307,51 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const oldTime = booking.startTime?.slice(0, 5);
     const oldDate = booking.date;
     if (oldTime === newStartTime && oldDate === newDate) {
+      setActiveDragId(null);
+      setActiveDragBooking(null);
+      setOverSlotData(null);
+      setDragGrabOffset(0);
       return; // No change
     }
 
-    // Perform reschedule
+    // Calculate new end time for optimistic update
+    const durationMinutes = booking.serviceDuration ||
+      (booking.startTime && booking.endTime
+        ? (() => {
+            const [sh, sm] = booking.startTime.split(':').map(Number);
+            const [eh, em] = booking.endTime.split(':').map(Number);
+            return (eh * 60 + em) - (sh * 60 + sm);
+          })()
+        : 60);
+    const newEndTime = calculateEndTime(hour, minute, durationMinutes);
+
+    // Optimistic UI update: update local booking data immediately
+    setCalendarData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        bookings: prev.bookings.map(b => {
+          if (b.id === bookingId) {
+            return {
+              ...b,
+              date: newDate,
+              start_time: newStartTime,
+              end_time: newEndTime,
+            };
+          }
+          return b;
+        }),
+      };
+    });
+
+    // Now clear drag state - card will render at new position immediately
+    setActiveDragId(null);
+    setActiveDragBooking(null);
+    setOverSlotData(null);
+    setDragGrabOffset(0);
+
+    // Perform reschedule API call in background
     setIsRescheduling(true);
-    showToast(`Rescheduling to ${newStartTime}...`, 'info');
 
     try {
       const result = await rescheduleBooking({
@@ -294,12 +362,15 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
       if (result.error) {
         showToast(result.error.message || 'Failed to reschedule booking.', 'error');
-      } else {
-        showToast(`Booking rescheduled to ${newStartTime}`, 'success');
+        // Revert optimistic update by refreshing from server
         refreshCalendar();
+      } else {
+        showToast(`Rescheduled to ${newStartTime}`, 'success');
       }
     } catch (err) {
       showToast('An error occurred while rescheduling.', 'error');
+      // Revert optimistic update by refreshing from server
+      refreshCalendar();
     } finally {
       setIsRescheduling(false);
     }
@@ -309,6 +380,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     setActiveDragId(null);
     setActiveDragBooking(null);
     setOverSlotData(null);
+    setDragGrabOffset(0);
   }, []);
 
   // ── Event click → modal ────────────────────────────────────
