@@ -687,12 +687,13 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
       }
     }
 
-    // 7. Update the booking
+    // 7. Update the booking (including end_time based on service duration)
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
       .update({
         date: newDate,
         start_time: newStartTime,
+        end_time: newEndTime,
       })
       .eq('id', bookingId)
       .select('id, date, start_time, end_time')

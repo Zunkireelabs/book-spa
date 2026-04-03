@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import { useDroppable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
 
-const SLOT_HEIGHT = 60; // px per 30-min slot (120px per hour)
-const HOUR_HEIGHT = SLOT_HEIGHT * 2;
+// Export these constants for time calculation in parent
+export const SLOT_HEIGHT = 60; // px per 30-min slot (120px per hour) - for visual grid lines
+export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 120px per hour
 const TIME_COL_WIDTH = 64;
 
 function addDaysToStr(dateStr, days) {
@@ -17,6 +19,29 @@ function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// Single droppable column component (replaces 144 tiny zones per column)
+// Note: This is a sibling to booking cards, not a parent, so pointerEvents doesn't block them
+const DroppableColumn = ({ id, data, height, isActive }) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id,
+    data,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`absolute inset-0 transition-colors duration-100 ${
+        isOver && isActive ? 'bg-primary/5' : ''
+      }`}
+      style={{
+        height,
+        // Only capture pointer events when actively dragging
+        pointerEvents: isActive ? 'auto' : 'none',
+      }}
+    />
+  );
+};
+
 const CalendarGrid = ({
   therapists,
   rooms = [],
@@ -27,8 +52,18 @@ const CalendarGrid = ({
   currentDate,
   viewMode = 'day',
   columnMode = 'therapist',
+  activeDragId = null,
+  gridRef, // Ref to get grid position for time calculation
 }) => {
   const scrollRef = useRef(null);
+  const gridBodyRef = useRef(null);
+
+  // Expose grid body ref to parent for position calculation
+  useEffect(() => {
+    if (gridRef) {
+      gridRef.current = gridBodyRef.current;
+    }
+  }, [gridRef]);
 
   const openHour = useMemo(() => {
     const [h] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
@@ -237,12 +272,23 @@ const CalendarGrid = ({
 
   const renderColumn = (col, day) => {
     const colBookings = (bookingsByDayAndCol[day] || {})[col.id] || [];
+    const droppableId = `drop-col-${day}-${col.id}`;
+
     return (
       <div
         key={col.id}
         className="flex-1 relative border-r border-border/50 last:border-r-0"
         style={{ minWidth: minColWidth, height: totalHeight }}
       >
+        {/* Single droppable zone for the entire column (sibling to booking cards) */}
+        <DroppableColumn
+          id={droppableId}
+          data={{ day, colId: col.id, openHour, totalHeight }}
+          height={totalHeight}
+          isActive={!!activeDragId}
+        />
+
+        {/* Booking cards rendered as siblings to droppable, not children */}
         {colBookings.map(booking => (
           <CalendarBookingCard
             key={booking.id}
@@ -277,7 +323,13 @@ const CalendarGrid = ({
           </div>
         </div>
         {/* Grid body */}
-        <div className="flex relative" style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
+        <div
+          ref={gridBodyRef}
+          className="flex relative"
+          style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + columnsMinWidth }}
+          data-open-hour={openHour}
+          data-hour-height={HOUR_HEIGHT}
+        >
           {renderTimeLabels()}
           <div className="flex relative" style={{ minWidth: columnsMinWidth }}>
             {renderGridLines()}
@@ -318,7 +370,13 @@ const CalendarGrid = ({
           </div>
         </div>
         {/* Grid body */}
-        <div className="flex relative" style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + daysMinWidth }}>
+        <div
+          ref={gridBodyRef}
+          className="flex relative"
+          style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + daysMinWidth }}
+          data-open-hour={openHour}
+          data-hour-height={HOUR_HEIGHT}
+        >
           {renderTimeLabels()}
           <div className="flex relative" style={{ minWidth: daysMinWidth }}>
             {renderGridLines()}
@@ -327,6 +385,7 @@ const CalendarGrid = ({
               const dayBookings = [];
               const dayMap = bookingsByDayAndCol[day] || {};
               Object.values(dayMap).forEach(arr => dayBookings.push(...arr));
+              const droppableId = `drop-col-${day}-all`;
 
               return (
                 <div
@@ -334,6 +393,15 @@ const CalendarGrid = ({
                   className={`flex-1 relative ${di < days.length - 1 ? 'border-r-2 border-border' : ''} ${isCurrentDay ? 'bg-primary/[0.02]' : ''}`}
                   style={{ minWidth: minColWidth }}
                 >
+                  {/* Single droppable zone for the entire day column (sibling to booking cards) */}
+                  <DroppableColumn
+                    id={droppableId}
+                    data={{ day, colId: 'all', openHour, totalHeight }}
+                    height={totalHeight}
+                    isActive={!!activeDragId}
+                  />
+
+                  {/* Now indicator */}
                   {isCurrentDay && nowTop >= 0 && nowTop <= totalHeight && (
                     <div className="absolute left-0 right-0 z-dropdown pointer-events-none" style={{ top: nowTop }}>
                       <div className="flex items-center">
@@ -342,6 +410,8 @@ const CalendarGrid = ({
                       </div>
                     </div>
                   )}
+
+                  {/* Booking cards rendered as siblings to droppable */}
                   {dayBookings.map(booking => (
                     <CalendarBookingCard
                       key={booking.id}
