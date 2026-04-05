@@ -1947,8 +1947,64 @@ export async function toggleRoomActive({ roomId, isActive }) {
   }
 }
 
-export async function deleteRoom() {
-  return { data: null, error: { code: 'HARD_DELETE_NOT_ALLOWED', message: 'Rooms cannot be deleted. Use deactivation instead.' } };
+export async function deleteRoom({ roomId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    // Only manager and admin can delete rooms
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    // Fetch room to verify it exists and check branch ownership
+    const { data: room, error: fetchError } = await supabase
+      .from('rooms')
+      .select('id, branch_id, name')
+      .eq('id', roomId)
+      .single();
+
+    if (fetchError || !room) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Room not found.' } };
+    }
+
+    // Manager can only delete rooms in their own branch
+    if (profile.role === 'manager' && room.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot delete rooms outside your branch.' } };
+    }
+
+    // Check if room has any bookings (past or future)
+    const { data: bookings, error: bookingError } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('room_id', roomId)
+      .limit(1);
+
+    if (bookingError) throw bookingError;
+
+    if (bookings && bookings.length > 0) {
+      return {
+        data: null,
+        error: {
+          code: 'HAS_BOOKINGS',
+          message: 'This room has booking history and cannot be deleted. Deactivate it instead to hide from new bookings.'
+        }
+      };
+    }
+
+    // Safe to delete - no bookings exist
+    const { error: deleteError } = await supabase
+      .from('rooms')
+      .delete()
+      .eq('id', roomId);
+
+    if (deleteError) throw deleteError;
+
+    return { data: { deleted: true, roomId, roomName: room.name }, error: null };
+  } catch (error) {
+    console.error('[API] deleteRoom error:', error.message);
+    return { data: null, error };
+  }
 }
 
 // ============================================================
