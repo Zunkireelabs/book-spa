@@ -7,6 +7,7 @@ import {
   createService,
   updateServicePricing,
   toggleServiceActive,
+  deleteService,
 } from '../../../../services/api';
 
 const ServiceManagementPanel = () => {
@@ -19,6 +20,8 @@ const ServiceManagementPanel = () => {
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadServices = useCallback(async () => {
     setLoading(true);
@@ -118,6 +121,27 @@ const ServiceManagementPanel = () => {
     setConfirmToggle(null);
   };
 
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    setError(null);
+
+    const result = await deleteService({ serviceId: confirmDelete.id });
+
+    if (result.error) {
+      if (result.error.code === 'HAS_BOOKINGS') {
+        setError(`"${confirmDelete.name}" has booking history and cannot be deleted. Use the toggle to deactivate instead.`);
+      } else {
+        setError(result.error.message || 'Delete failed.');
+      }
+    } else {
+      await loadServices();
+    }
+
+    setConfirmDelete(null);
+    setDeleting(false);
+  };
+
   const formatNPR = (amount) => `NPR ${Number(amount).toLocaleString('en-IN')}`;
 
   if (loading) {
@@ -199,6 +223,13 @@ const ServiceManagementPanel = () => {
                         title="Edit"
                       >
                         <Icon name="Pencil" size={16} />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(s)}
+                        className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
+                        title="Delete"
+                      >
+                        <Icon name="Trash2" size={16} />
                       </button>
                       <button
                         onClick={() => handleToggle(s)}
@@ -329,6 +360,32 @@ const ServiceManagementPanel = () => {
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setConfirmToggle(null)}>Cancel</Button>
               <Button variant="warning" size="sm" onClick={() => executeToggle(confirmToggle, false)}>Deactivate</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !deleting && setConfirmDelete(null)}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
+                <Icon name="Trash2" size={20} className="text-error" />
+              </div>
+              <div>
+                <h3 className="font-heading font-heading-semibold text-text-primary">Delete Service?</h3>
+                <p className="font-body text-sm text-text-secondary">
+                  "{confirmDelete.name}" will be permanently deleted. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <p className="font-body text-xs text-text-tertiary bg-background rounded-spa p-2">
+              Note: Services with booking history cannot be deleted. Use deactivation instead to hide them from new bookings.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
+              <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
             </div>
           </div>
         </div>
