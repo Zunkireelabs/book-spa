@@ -105,6 +105,16 @@ nuad-thai-web-app/
 
 ---
 
+## Git Attribution
+
+**IMPORTANT**: For all git operations (commits, PRs, etc.):
+- **DO NOT** use "Generated with Claude Code" or any Claude branding
+- **DO** attribute to the GitHub account: `@sthasadin`
+- PR footers should end with: `Created by @sthasadin`
+- Commit co-author line: `Co-Authored-By: sthasadin <sthasadin@users.noreply.github.com>`
+
+---
+
 ## Documentation
 
 - `docs/session-logs/` — Daily session logs

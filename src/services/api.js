@@ -2207,8 +2207,64 @@ export async function toggleTherapistActive({ therapistId, isActive }) {
   }
 }
 
-export async function deleteTherapist() {
-  return { data: null, error: { code: 'HARD_DELETE_NOT_ALLOWED', message: 'Therapists cannot be deleted. Use deactivation instead.' } };
+export async function deleteTherapist({ therapistId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    // Only manager and admin can delete therapists
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    // Fetch therapist to verify it exists and check branch ownership
+    const { data: therapist, error: fetchError } = await supabase
+      .from('therapists')
+      .select('id, branch_id, name')
+      .eq('id', therapistId)
+      .single();
+
+    if (fetchError || !therapist) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+    }
+
+    // Manager can only delete therapists in their own branch
+    if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot delete therapists outside your branch.' } };
+    }
+
+    // Check if therapist has any bookings (past or future)
+    const { data: bookings, error: bookingError } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('therapist_id', therapistId)
+      .limit(1);
+
+    if (bookingError) throw bookingError;
+
+    if (bookings && bookings.length > 0) {
+      return {
+        data: null,
+        error: {
+          code: 'HAS_BOOKINGS',
+          message: 'This therapist has booking history and cannot be deleted. Deactivate instead to hide from new bookings.'
+        }
+      };
+    }
+
+    // Safe to delete - no bookings exist
+    const { error: deleteError } = await supabase
+      .from('therapists')
+      .delete()
+      .eq('id', therapistId);
+
+    if (deleteError) throw deleteError;
+
+    return { data: { deleted: true, therapistId, therapistName: therapist.name }, error: null };
+  } catch (error) {
+    console.error('[API] deleteTherapist error:', error.message);
+    return { data: null, error };
+  }
 }
 
 // ============================================================
@@ -2366,8 +2422,59 @@ export async function toggleServiceActive({ serviceId, isActive }) {
   }
 }
 
-export async function deleteService() {
-  return { data: null, error: { code: 'HARD_DELETE_NOT_ALLOWED', message: 'Services cannot be deleted. Use deactivation instead.' } };
+export async function deleteService({ serviceId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    // Only admin can delete services (services are global, not branch-scoped)
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can delete services.' } };
+    }
+
+    // Fetch service to verify it exists
+    const { data: service, error: fetchError } = await supabase
+      .from('services')
+      .select('id, name')
+      .eq('id', serviceId)
+      .single();
+
+    if (fetchError || !service) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Service not found.' } };
+    }
+
+    // Check if service has any bookings (past or future)
+    const { data: bookings, error: bookingError } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('service_id', serviceId)
+      .limit(1);
+
+    if (bookingError) throw bookingError;
+
+    if (bookings && bookings.length > 0) {
+      return {
+        data: null,
+        error: {
+          code: 'HAS_BOOKINGS',
+          message: 'This service has booking history and cannot be deleted. Deactivate instead to hide from new bookings.'
+        }
+      };
+    }
+
+    // Safe to delete - no bookings exist
+    const { error: deleteError } = await supabase
+      .from('services')
+      .delete()
+      .eq('id', serviceId);
+
+    if (deleteError) throw deleteError;
+
+    return { data: { deleted: true, serviceId, serviceName: service.name }, error: null };
+  } catch (error) {
+    console.error('[API] deleteService error:', error.message);
+    return { data: null, error };
+  }
 }
 
 // ============================================================
