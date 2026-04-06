@@ -81,13 +81,34 @@ If deploying via Docker:
 - `nginx.conf` has proper proxy settings
 - SPA routing configured (all paths → index.html)
 
-### Step 7: Git Status
+### Step 7: Git Status & Branching
+
+**CRITICAL BRANCHING RULES:**
+```
+feature/* ──► stage ──► main
+              │          │
+           (testing)  (production)
+```
 
 Check:
 - No uncommitted changes
 - On correct branch for deployment
 - No merge conflicts
 - Remote is up to date
+
+**Branch Validation:**
+- Feature branches (`feature/*`) → MUST target `stage`, NEVER `main`
+- PRs from feature branches → base must be `stage`
+- Only `stage` branch can be merged to `main`
+- **BLOCK** any attempt to merge feature branches directly to `main`
+
+```bash
+# CORRECT: PR targeting stage
+gh pr create --base stage ...
+
+# WRONG: Never do this for feature branches
+gh pr create --base main ...
+```
 
 ## Output Format
 

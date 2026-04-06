@@ -105,6 +105,33 @@ nuad-thai-web-app/
 
 ---
 
+## Git Workflow & Branching Strategy
+
+**CRITICAL: Follow this branching strategy strictly.**
+
+```
+feature/* ──► stage ──► main
+              │          │
+           (testing)  (production)
+```
+
+### Rules
+1. **Feature branches** → merge to `stage` ONLY (never directly to `main`)
+2. **PRs** → always target `stage` branch, not `main`
+3. **After testing on stage** → merge `stage` to `main` for production
+4. **NEVER** merge feature branches directly to `main`
+
+### PR Commands
+```bash
+# Create PR targeting stage (CORRECT)
+gh pr create --base stage --title "..." --body "..."
+
+# WRONG - never do this for feature branches
+gh pr create --base main ...
+```
+
+---
+
 ## Git Attribution
 
 **IMPORTANT**: For all git operations (commits, PRs, etc.):
