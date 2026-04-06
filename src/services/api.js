@@ -2306,15 +2306,16 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
       return { data: null, error: { code: 'VALIDATION', message: 'Service name is required.' } };
     }
 
-    // Check for duplicate name
+    // Check for duplicate name within the same organization
     const { data: existing } = await supabase
       .from('services')
       .select('id')
+      .eq('org_id', profile.org_id)
       .ilike('name', name.trim())
       .maybeSingle();
 
     if (existing) {
-      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A service with this name already exists.' } };
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A service with this name already exists in your organization.' } };
     }
 
     const { data, error } = await supabase
@@ -2325,6 +2326,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         duration_minutes: durationMinutes,
         description: description || null,
         is_active: true,
+        org_id: profile.org_id,
       })
       .select('id, name, duration_minutes, price_npr, description, is_active, created_at')
       .single();
