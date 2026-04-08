@@ -93,7 +93,7 @@ export async function fetchServices() {
   try {
     const { data, error } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr, description')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category')
       .eq('is_active', true)
       .order('name');
 
@@ -2282,7 +2282,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr, description, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
       .order('name');
 
     if (error) throw error;
@@ -2293,7 +2293,58 @@ export async function fetchServicesForManagement() {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description }) {
+/**
+ * Upload a service image to Supabase Storage.
+ * Returns the public URL of the uploaded image.
+ */
+export async function uploadServiceImage(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload service images.' } };
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    // Generate unique filename
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `services/${fileName}`;
+
+    // Upload to Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadServiceImage error:', error.message);
+    return { url: null, error };
+  }
+}
+
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2325,10 +2376,12 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         price_npr: priceNpr,
         duration_minutes: durationMinutes,
         description: description || null,
+        image_url: imageUrl || null,
+        category: category || 'Spa',
         is_active: true,
         org_id: profile.org_id,
       })
-      .select('id, name, duration_minutes, price_npr, description, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
       .single();
 
     if (error) throw error;
@@ -2339,7 +2392,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description }) {
+export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2352,6 +2405,8 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
     if (durationMinutes !== undefined) updatePayload.duration_minutes = durationMinutes;
     if (description !== undefined) updatePayload.description = description;
+    if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
+    if (category !== undefined) updatePayload.category = category;
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -2361,7 +2416,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .from('services')
       .update(updatePayload)
       .eq('id', serviceId)
-      .select('id, name, duration_minutes, price_npr, description, is_active')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active')
       .single();
 
     if (error) {
@@ -3598,6 +3653,250 @@ export async function fetchAllBranches() {
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchAllBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Service Categories Management (Admin only)
+// ============================================================
+
+/**
+ * Fetch all categories for management (admin view)
+ */
+export async function fetchCategoriesForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage categories.' } };
+    }
+
+    // Get categories with service count
+    const { data: categories, error } = await supabase
+      .from('service_categories')
+      .select('id, name, description, is_active, display_order, created_at')
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+
+    // Get service counts per category
+    const { data: services } = await supabase
+      .from('services')
+      .select('category');
+
+    const serviceCounts = {};
+    (services || []).forEach(s => {
+      const cat = s.category || 'Other';
+      serviceCounts[cat] = (serviceCounts[cat] || 0) + 1;
+    });
+
+    // Merge counts into categories
+    const categoriesWithCounts = (categories || []).map(cat => ({
+      ...cat,
+      service_count: serviceCounts[cat.name] || 0
+    }));
+
+    return { data: categoriesWithCounts, error: null };
+  } catch (error) {
+    console.error('[API] fetchCategoriesForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch active categories for dropdowns
+ */
+export async function fetchActiveCategories() {
+  try {
+    const { data, error } = await supabase
+      .from('service_categories')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchActiveCategories error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Create a new category
+ */
+export async function createCategory({ name, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can create categories.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Category name is required.' } };
+    }
+
+    // Get max display_order
+    const { data: maxOrder } = await supabase
+      .from('service_categories')
+      .select('display_order')
+      .order('display_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    const nextOrder = (maxOrder?.display_order || 0) + 1;
+
+    const { data, error } = await supabase
+      .from('service_categories')
+      .insert({
+        name: name.trim(),
+        description: description?.trim() || null,
+        display_order: nextOrder,
+        is_active: true,
+        org_id: profile.org_id,
+      })
+      .select('id, name, description, is_active, display_order, created_at')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A category with this name already exists.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Update an existing category
+ */
+export async function updateCategory({ categoryId, name, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can update categories.' } };
+    }
+
+    // Get old name for service update
+    const { data: oldCategory } = await supabase
+      .from('service_categories')
+      .select('name')
+      .eq('id', categoryId)
+      .single();
+
+    const oldName = oldCategory?.name;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description?.trim() || null;
+
+    const { data, error } = await supabase
+      .from('service_categories')
+      .update(updateData)
+      .eq('id', categoryId)
+      .select('id, name, description, is_active, display_order, created_at')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A category with this name already exists.' } };
+      }
+      throw error;
+    }
+
+    // Update services with old category name to new name
+    if (name && oldName && name.trim() !== oldName) {
+      await supabase
+        .from('services')
+        .update({ category: name.trim() })
+        .eq('category', oldName);
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Toggle category active status
+ */
+export async function toggleCategoryActive({ categoryId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can toggle categories.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('service_categories')
+      .update({ is_active: isActive })
+      .eq('id', categoryId)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleCategoryActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Delete a category (only if no services use it)
+ */
+export async function deleteCategory({ categoryId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can delete categories.' } };
+    }
+
+    // Check if category has services
+    const { data: category } = await supabase
+      .from('service_categories')
+      .select('name')
+      .eq('id', categoryId)
+      .single();
+
+    if (!category) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+    }
+
+    const { count } = await supabase
+      .from('services')
+      .select('id', { count: 'exact', head: true })
+      .eq('category', category.name);
+
+    if (count > 0) {
+      return { data: null, error: { code: 'HAS_SERVICES', message: `Cannot delete category with ${count} service(s). Reassign services first or deactivate the category.` } };
+    }
+
+    const { error } = await supabase
+      .from('service_categories')
+      .delete()
+      .eq('id', categoryId);
+
+    if (error) throw error;
+    return { data: { deleted: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCategory error:', error.message);
     return { data: null, error };
   }
 }

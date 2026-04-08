@@ -83,10 +83,12 @@ export function enrichService(dbService) {
     description: dbService.description,
     duration: `${dbService.duration_minutes} minutes`,
     price: Number(dbService.price_npr),
-    image: uiData.image,
+    // Prefer database image_url over hardcoded fallback
+    image: dbService.image_url || uiData.image,
     benefits: uiData.benefits,
     therapistPreference: uiData.therapistPreference,
-    category: uiData.category,
+    // Prefer database category over hardcoded fallback
+    category: dbService.category || uiData.category,
     popularity: uiData.popularity,
     specialty: uiData.specialty,
   };

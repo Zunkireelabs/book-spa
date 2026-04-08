@@ -2,26 +2,68 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
+import FilterBar from '../../../../components/ui/FilterBar';
 import {
   fetchServicesForManagement,
+  fetchActiveCategories,
   createService,
   updateServicePricing,
   toggleServiceActive,
   deleteService,
+  uploadServiceImage,
 } from '../../../../services/api';
 
 const ServiceManagementPanel = () => {
   const [services, setServices] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingService, setEditingService] = useState(null);
-  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '' });
+  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa' });
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  // Filtered services
+  const filteredServices = services.filter((service) => {
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      if (!service.name.toLowerCase().includes(query)) {
+        return false;
+      }
+    }
+    // Category filter
+    if (categoryFilter !== 'all' && service.category !== categoryFilter) {
+      return false;
+    }
+    // Status filter
+    if (statusFilter === 'active' && !service.is_active) {
+      return false;
+    }
+    if (statusFilter === 'inactive' && service.is_active) {
+      return false;
+    }
+    return true;
+  });
+
+  const loadCategories = useCallback(async () => {
+    const result = await fetchActiveCategories();
+    if (!result.error) {
+      setCategories(result.data || []);
+    }
+  }, []);
 
   const loadServices = useCallback(async () => {
     setLoading(true);
@@ -35,11 +77,16 @@ const ServiceManagementPanel = () => {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadServices(); }, [loadServices]);
+  useEffect(() => {
+    loadCategories();
+    loadServices();
+  }, [loadCategories, loadServices]);
 
   const handleOpenCreate = () => {
     setEditingService(null);
-    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '' });
+    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: categories[0]?.name || 'Spa' });
+    setImageFile(null);
+    setImagePreview(null);
     setFormError(null);
     setShowModal(true);
   };
@@ -51,9 +98,39 @@ const ServiceManagementPanel = () => {
       priceNpr: String(service.price_npr),
       durationMinutes: String(service.duration_minutes),
       description: service.description || '',
+      imageUrl: service.image_url || '',
+      category: service.category || 'Spa',
     });
+    setImageFile(null);
+    setImagePreview(service.image_url || null);
     setFormError(null);
     setShowModal(true);
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      if (!allowedTypes.includes(file.type)) {
+        setFormError('Only JPEG, PNG, WebP, and GIF images are allowed.');
+        return;
+      }
+      // Validate file size (5MB max)
+      if (file.size > 5 * 1024 * 1024) {
+        setFormError('Image must be less than 5MB.');
+        return;
+      }
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(file));
+      setFormError(null);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setFormData({ ...formData, imageUrl: '' });
   };
 
   const handleSave = async () => {
@@ -76,6 +153,21 @@ const ServiceManagementPanel = () => {
     setSaving(true);
     setFormError(null);
 
+    // Upload image if a new file was selected
+    let finalImageUrl = formData.imageUrl.trim() || null;
+    if (imageFile) {
+      setUploading(true);
+      const uploadResult = await uploadServiceImage(imageFile);
+      setUploading(false);
+
+      if (uploadResult.error) {
+        setFormError(uploadResult.error.message || 'Failed to upload image.');
+        setSaving(false);
+        return;
+      }
+      finalImageUrl = uploadResult.url;
+    }
+
     let result;
     if (editingService) {
       result = await updateServicePricing({
@@ -83,6 +175,8 @@ const ServiceManagementPanel = () => {
         priceNpr: price,
         durationMinutes: duration,
         description: formData.description.trim() || null,
+        imageUrl: finalImageUrl,
+        category: formData.category,
       });
     } else {
       result = await createService({
@@ -90,6 +184,8 @@ const ServiceManagementPanel = () => {
         priceNpr: price,
         durationMinutes: duration,
         description: formData.description.trim() || null,
+        imageUrl: finalImageUrl,
+        category: formData.category,
       });
     }
 
@@ -177,12 +273,48 @@ const ServiceManagementPanel = () => {
         </div>
       )}
 
+      {/* Filter Bar */}
+      <FilterBar
+        search={{
+          value: searchQuery,
+          onChange: setSearchQuery,
+          placeholder: 'Search by service name...',
+        }}
+        filters={[
+          {
+            value: categoryFilter,
+            onChange: setCategoryFilter,
+            options: [
+              { value: 'all', label: 'All Categories' },
+              ...categories.map((cat) => ({ value: cat.name, label: cat.name })),
+            ],
+          },
+          {
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { value: 'all', label: 'All Status' },
+              { value: 'active', label: 'Active' },
+              { value: 'inactive', label: 'Inactive' },
+            ],
+          },
+        ]}
+        resultCount={{ filtered: filteredServices.length, total: services.length }}
+        hasActiveFilters={searchQuery || categoryFilter !== 'all' || statusFilter !== 'all'}
+        onClear={() => {
+          setSearchQuery('');
+          setCategoryFilter('all');
+          setStatusFilter('all');
+        }}
+      />
+
       {/* Table */}
       <div className="bg-surface border border-border rounded-spa overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="bg-background border-b border-border">
               <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Service Name</th>
+              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden lg:table-cell">Category</th>
               <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Duration</th>
               <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Price</th>
               <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden md:table-cell">Description</th>
@@ -191,16 +323,19 @@ const ServiceManagementPanel = () => {
             </tr>
           </thead>
           <tbody>
-            {services.length === 0 ? (
+            {filteredServices.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-                  No services found. Click "Add Service" to create one.
+                <td colSpan={7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
+                  {services.length === 0
+                    ? 'No services found. Click "Add Service" to create one.'
+                    : 'No services match your filters.'}
                 </td>
               </tr>
             ) : (
-              services.map((s) => (
+              filteredServices.map((s) => (
                 <tr key={s.id} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
                   <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{s.name}</td>
+                  <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || 'Spa'}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary">{s.duration_minutes} min</td>
                   <td className="px-4 py-3 font-data text-sm text-text-primary">{formatNPR(s.price_npr)}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden md:table-cell max-w-[200px] truncate">
@@ -288,6 +423,20 @@ const ServiceManagementPanel = () => {
                 )}
               </div>
 
+              {/* Category dropdown */}
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Category</label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full rounded-spa border border-border bg-background px-3 py-2 font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
+                >
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="block font-body font-body-medium text-sm text-text-primary">Price (NPR)</label>
@@ -320,6 +469,65 @@ const ServiceManagementPanel = () => {
                   rows={3}
                   className="w-full rounded-spa border border-border bg-background px-3 py-2 font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast resize-none"
                 />
+              </div>
+
+              {/* Service Image for customer portal */}
+              <div className="space-y-2">
+                <label className="block font-body font-body-medium text-sm text-text-primary">
+                  Service Image <span className="text-text-tertiary font-normal">(for customer portal)</span>
+                </label>
+
+                {imagePreview ? (
+                  <div className="flex items-start gap-3">
+                    <div className="relative w-24 h-24 rounded-spa overflow-hidden border border-border flex-shrink-0">
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=100&h=100&fit=crop'; }}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-background hover:bg-background/80 spa-transition-fast text-sm text-text-secondary">
+                        <Icon name="RefreshCw" size={14} />
+                        Replace
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          onChange={handleImageChange}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-error/30 bg-error/5 hover:bg-error/10 spa-transition-fast text-sm text-error"
+                      >
+                        <Icon name="Trash2" size={14} />
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-border rounded-spa hover:border-primary/50 hover:bg-primary/5 spa-transition-fast">
+                    <Icon name="Upload" size={24} className="text-text-tertiary mb-2" />
+                    <span className="font-body text-sm text-text-secondary">Click to upload image</span>
+                    <span className="font-caption text-xs text-text-tertiary mt-1">JPEG, PNG, WebP, GIF (max 5MB)</span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={handleImageChange}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+
+                {uploading && (
+                  <div className="flex items-center gap-2 text-sm text-text-secondary">
+                    <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                    Uploading image...
+                  </div>
+                )}
               </div>
 
               <div className="p-3 bg-accent/5 border border-accent/20 rounded-spa">
