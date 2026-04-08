@@ -127,6 +127,12 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['admin']
         },
         {
+          id: 'categories',
+          label: 'Categories',
+          path: '/branch-manager-dashboard?view=categories',
+          roles: ['admin']
+        },
+        {
           id: 'audit',
           label: 'Audit Log',
           path: '/branch-manager-dashboard?view=audit',

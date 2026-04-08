@@ -24,6 +24,7 @@ import OperationalCalendar from './components/calendar';
 import RoomManagementPanel from './components/MasterData/RoomManagementPanel';
 import TherapistManagementPanel from './components/MasterData/TherapistManagementPanel';
 import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
+import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -535,6 +536,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && <ServiceManagementPanel />}
+              {viewMode === 'categories' && <CategoryManagementPanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && <StaffBookingForm onBookingCreated={loadData} />}
