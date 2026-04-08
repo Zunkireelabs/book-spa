@@ -424,7 +424,7 @@ const BranchManagerDashboard = () => {
 
                     {/* Dropdown Menu */}
                     {showProfileDropdown && (
-                      <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-dropdown">
+                      <div className="absolute right-0 top-full mt-3 w-64 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-dropdown">
                         {/* User Info Section */}
                         <div className="px-4 py-3 border-b border-gray-100">
                           <div className="flex items-center gap-3">
@@ -440,7 +440,7 @@ const BranchManagerDashboard = () => {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-gray-900 truncate">{managerData.name}</p>
-                              <p className="text-xs text-gray-500 truncate">{managerData.email}</p>
+                              {managerData.email && <p className="text-xs text-gray-500 truncate">{managerData.email}</p>}
                               <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
                                 profile?.role === 'admin'
                                   ? 'bg-pink-100 text-pink-700'
@@ -524,8 +524,8 @@ const BranchManagerDashboard = () => {
           )}
 
           {/* Main Content Area with AI Assistant */}
-          <div className="flex gap-3 min-h-[calc(100vh-52px)]">
-            <main className={`flex-1 min-w-0 overflow-hidden ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+          <div className="relative z-0 flex gap-3 min-h-[calc(100vh-52px)]">
+            <main className={`flex-1 min-w-0 ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
               {viewMode === 'dashboard' && renderDashboardView()}
               {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
               {viewMode === 'calendar' && renderCalendarView()}

@@ -15,13 +15,15 @@ import { transformBookings, toDbStatus } from '../../services/bookingTransformer
 import { supabase } from '../../lib/supabase';
 
 const BranchStaffDashboard = () => {
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const { branchId, branchName } = useBranch();
   const [searchParams] = useSearchParams();
 
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const profileDropdownRef = useRef(null);
 
   const [filters, setFilters] = useState({
     dateRange: 'today',
@@ -388,6 +390,22 @@ const BranchStaffDashboard = () => {
     return { error: null };
   };
 
+  // Close profile dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
+        setShowProfileDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleLogout = async () => {
+    setShowProfileDropdown(false);
+    await signOut();
+  };
+
   // Clock update
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -452,18 +470,36 @@ const BranchStaffDashboard = () => {
                 <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize bg-accent/10 text-accent">
                   {userRole}
                 </span>
-                <div className="flex items-center space-x-2 px-2 py-1 rounded-spa">
-                  <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Icon name="User" size={16} className="text-primary" />
-                  </div>
-                  <div className="hidden md:flex flex-col">
-                    <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
-                      {userName}
-                    </span>
-                    <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
-                      {userRole}
-                    </span>
-                  </div>
+                <div className="relative" ref={profileDropdownRef}>
+                  <button
+                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                    className="flex items-center space-x-2 px-2 py-1 rounded-spa hover:bg-black/5 transition-colors"
+                  >
+                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                      <Icon name="User" size={16} className="text-primary" />
+                    </div>
+                    <div className="hidden md:flex flex-col text-left">
+                      <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
+                        {userName}
+                      </span>
+                      <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
+                        {userRole}
+                      </span>
+                    </div>
+                    <Icon name="ChevronDown" size={14} className={`hidden md:block text-text-secondary transition-transform ${showProfileDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showProfileDropdown && (
+                    <div className="absolute right-0 mt-2 w-56 bg-background rounded-spa spa-shadow-elevated z-dropdown border border-border overflow-hidden">
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center space-x-2 px-4 py-2.5 text-sm text-error hover:bg-error/5 transition-colors"
+                      >
+                        <Icon name="LogOut" size={16} />
+                        <span className="font-body font-body-medium">Logout</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

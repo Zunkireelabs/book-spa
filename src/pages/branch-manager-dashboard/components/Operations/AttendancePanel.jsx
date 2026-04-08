@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchAttendance, fetchAttendanceSummary, markAttendance } from '../../../../services/api';
 
 const ATTENDANCE_OPTIONS = [
@@ -371,23 +372,20 @@ const AttendancePanel = ({ branchId }) => {
                   </div>
 
                   {/* Status dropdown */}
-                  <select
+                  <CustomSelect
                     value={edit.status || ''}
-                    onChange={(e) => handleFieldChange(t.therapistId, 'status', e.target.value)}
+                    onChange={(val) => handleFieldChange(t.therapistId, 'status', val)}
+                    options={ATTENDANCE_OPTIONS}
                     disabled={isDisabled}
-                    aria-label={`Attendance status for ${t.name}`}
-                    className={`px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    size="sm"
+                    valueClassName={
                       edit.status === 'Present' ? 'text-success' :
                       edit.status === 'Absent' ? 'text-error' :
                       edit.status === 'Leave' ? 'text-warning' :
                       edit.status === 'Half-Day' ? 'text-accent' :
                       'text-text-tertiary'
-                    }`}
-                  >
-                    {ATTENDANCE_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                    }
+                  />
 
                   {/* Check-in */}
                   <input

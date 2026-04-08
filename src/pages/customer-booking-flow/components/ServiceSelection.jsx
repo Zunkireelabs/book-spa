@@ -8,6 +8,19 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+
+  const hasUncategorized = services.some(s => !s.category);
+  const categories = ['All', ...new Set(services.map(s => s.category).filter(Boolean)), ...(hasUncategorized ? ['Others'] : [])];
+
+  const filteredServices = services.filter(service => {
+    const matchesSearch = service.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory =
+      selectedCategory === 'All' ||
+      (selectedCategory === 'Others' ? !service.category : service.category === selectedCategory);
+    return matchesSearch && matchesCategory;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -64,8 +77,56 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       )}
 
       {!loading && !error && services.length > 0 && (
+        <>
+          {/* Search & Category Filter */}
+          <div className="space-y-3">
+            <div className="relative">
+              <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search services..."
+                className="w-full pl-10 pr-10 py-2.5 rounded-spa-lg border border-border bg-surface font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                >
+                  <Icon name="X" size={16} />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                    selectedCategory === category
+                      ? 'bg-primary text-white'
+                      : 'bg-background text-text-secondary hover:bg-primary/10'
+                  }`}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {!loading && !error && services.length > 0 && filteredServices.length === 0 && (
+        <div className="text-center py-12">
+          <Icon name="SearchX" size={32} className="text-text-secondary mx-auto mb-3" />
+          <p className="font-body font-body-normal text-text-secondary">No services found matching your search.</p>
+        </div>
+      )}
+
+      {!loading && !error && filteredServices.length > 0 && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {services.map((service) => (
+        {filteredServices.map((service) => (
             <div
               key={service.id}
               onClick={() => onServiceSelect(service)}
@@ -152,5 +213,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     </div>
   );
 };
+
+
 
 export default ServiceSelection;

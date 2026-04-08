@@ -1,5 +1,6 @@
 import React from 'react';
 import Icon from '../AppIcon';
+import CustomSelect from './CustomSelect';
 
 /**
  * Reusable FilterBar component for consistent filtering UI across the app.
@@ -53,23 +54,13 @@ const FilterBar = ({
 
         {/* Filter Dropdowns */}
         {filters.map((filter, index) => (
-          <div key={index} className="relative">
-            <select
-              value={filter.value}
-              onChange={(e) => filter.onChange(e.target.value)}
-              className="h-9 pl-3 pr-8 text-sm border border-gray-200 rounded-md bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
-              style={{ WebkitAppearance: 'none', MozAppearance: 'none', appearance: 'none', backgroundImage: 'none' }}
-            >
-              {filter.options.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <Icon
-              name="ChevronDown"
-              size={14}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-            />
-          </div>
+          <CustomSelect
+            key={index}
+            value={filter.value}
+            onChange={filter.onChange}
+            options={filter.options}
+            size="sm"
+          />
         ))}
 
         {/* Result Count */}

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchAuditLogs } from '../../../../services/api';
 
 const TABLE_OPTIONS = [
@@ -217,16 +218,12 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
             <label htmlFor="audit-table-filter" className="block font-body font-body-medium text-xs text-text-secondary mb-1">
               Table
             </label>
-            <select
-              id="audit-table-filter"
+            <CustomSelect
               value={tableName}
-              onChange={(e) => setTableName(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm font-body text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-            >
-              {TABLE_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+              onChange={(val) => setTableName(val)}
+              options={TABLE_OPTIONS}
+              size="md"
+            />
           </div>
 
           {/* Date from */}

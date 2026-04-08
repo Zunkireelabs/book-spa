@@ -13,8 +13,11 @@ import {
   recordPayment,
   fetchAttendance,
   rescheduleBooking,
+  fetchServices,
+  createBooking,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -73,6 +76,214 @@ function formatTimeDisplay(time) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+// ── Quick Create Panel ────────────────────────────────────────
+
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubmit }) => {
+  const [serviceId, setServiceId] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [specialRequests, setSpecialRequests] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const nameRef = useRef(null);
+
+  // Reset form when slot changes
+  useEffect(() => {
+    setServiceId('');
+    setCustomerName('');
+    setCustomerPhone('');
+    setSpecialRequests('');
+    setError(null);
+    setSubmitting(false);
+  }, [slotInfo]);
+
+  // Autofocus name field when panel opens
+  useEffect(() => {
+    if (slotInfo && nameRef.current) {
+      const timer = setTimeout(() => nameRef.current?.focus(), 350);
+      return () => clearTimeout(timer);
+    }
+  }, [slotInfo]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!serviceId || !customerName.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    const err = await onSubmit({
+      serviceId,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone.replace(/\D/g, '') || null,
+      specialRequests: specialRequests.trim() || null,
+    });
+    if (err) {
+      setError(err);
+      setSubmitting(false);
+    }
+  };
+
+  const isOpen = !!slotInfo;
+  const timeStr = slotInfo
+    ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
+    : '';
+  const dateDisplay = slotInfo
+    ? new Date(slotInfo.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 bg-text-primary/20 z-sidebar transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
+      {/* Panel */}
+      <div
+        className={`fixed top-0 right-0 h-full w-[400px] z-modal bg-surface border-l border-border shadow-2xl flex flex-col transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-background/50">
+          <div className="flex items-center gap-2">
+            <Icon name="CalendarPlus" size={20} className="text-primary" />
+            <h3 className="font-heading font-heading-semibold text-base text-text-primary">Quick Booking</h3>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-spa hover:bg-background spa-transition-fast">
+            <Icon name="X" size={18} className="text-text-secondary" />
+          </button>
+        </div>
+
+        {/* Context banner */}
+        {slotInfo && (
+          <div className="px-5 py-3 bg-primary/5 border-b border-border">
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-1.5">
+                <Icon name="Calendar" size={14} className="text-primary" />
+                <span className="font-body font-body-medium text-text-primary">{dateDisplay}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Icon name="Clock" size={14} className="text-primary" />
+                <span className="font-body font-body-medium text-text-primary">{timeStr}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Icon name={slotInfo.colType === 'room' ? 'DoorOpen' : slotInfo.colType === 'therapist' ? 'User' : 'LayoutGrid'} size={14} className="text-text-secondary" />
+              <span className="font-body text-sm text-text-secondary">{slotInfo.colName}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-y-auto">
+          <div className="px-5 py-4 space-y-4 flex-1">
+            {/* Service */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Service <span className="text-error">*</span>
+              </label>
+              {servicesLoading ? (
+                <div className="flex items-center gap-2 py-2">
+                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                  <span className="text-sm text-text-secondary">Loading services...</span>
+                </div>
+              ) : (
+                <CustomSelect
+                  value={serviceId}
+                  onChange={(val) => setServiceId(val)}
+                  options={[
+                    { value: '', label: 'Select a service' },
+                    ...(services || []).map((s) => ({
+                      value: s.id,
+                      label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                    })),
+                  ]}
+                  placeholder="Select a service"
+                  size="md"
+                />
+              )}
+            </div>
+
+            {/* Customer name */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Customer Name <span className="text-error">*</span>
+              </label>
+              <input
+                ref={nameRef}
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                required
+                placeholder="Enter customer name"
+                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+            </div>
+
+            {/* Phone */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Phone
+              </label>
+              <div className="flex">
+                <span className="inline-flex items-center px-3 py-2 text-sm border border-r-0 border-border rounded-l-spa bg-background text-text-secondary">
+                  +977
+                </span>
+                <input
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="98XXXXXXXX"
+                  className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+              </div>
+            </div>
+
+            {/* Special requests */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Special Requests
+              </label>
+              <textarea
+                value={specialRequests}
+                onChange={(e) => setSpecialRequests(e.target.value)}
+                placeholder="Any special requests or notes..."
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
+              />
+            </div>
+
+            {/* Error display */}
+            {error && (
+              <div className="flex items-start gap-2 p-3 bg-error/10 border border-error/20 rounded-spa">
+                <Icon name="AlertCircle" size={16} className="text-error mt-0.5 flex-shrink-0" />
+                <span className="font-body text-sm text-error">{error}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 py-4 border-t border-border bg-background/50 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !serviceId || !customerName.trim()}
+              className="px-4 py-2 text-sm font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
+              {submitting ? 'Creating...' : 'Create Booking'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+};
+
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
@@ -101,6 +312,15 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [overSlotData, setOverSlotData] = useState(null); // { hour, minute, day }
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
+
+  // Cross-column reassignment confirmation
+  // Shape: { booking, bookingId, newDate, newStartTime, newEndTime, targetColId, targetColName, sourceColName, type: 'therapist'|'room', durationMinutes }
+  const [pendingReassign, setPendingReassign] = useState(null);
+
+  // Quick-create panel state
+  const [quickCreateSlot, setQuickCreateSlot] = useState(null);
+  const [servicesCache, setServicesCache] = useState(null);
+  const [servicesLoading, setServicesLoading] = useState(false);
 
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
@@ -274,7 +494,19 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     }
   }, [calculateTimeFromPointer]);
 
-  const handleDragEnd = useCallback(async (event) => {
+  // Build column name lookup maps for confirmation dialog
+  const colNameMap = useMemo(() => {
+    const map = { unassigned: 'Unassigned' };
+    if (calendarData?.therapists) {
+      for (const t of calendarData.therapists) map[t.id] = t.name;
+    }
+    if (calendarData?.rooms) {
+      for (const r of calendarData.rooms) map[r.id] = r.name;
+    }
+    return map;
+  }, [calendarData]);
+
+  const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
 
     // Capture final position before clearing state
@@ -290,7 +522,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     }
 
     const booking = active.data.current.booking;
-    const { day: newDate, hour, minute } = finalTimeData;
+    const { day: newDate, colId: targetColId, hour, minute } = finalTimeData;
 
     if (hour === undefined || minute === undefined) {
       setActiveDragId(null);
@@ -303,10 +535,18 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const newStartTime = formatTimeFromSlot(hour, minute);
     const bookingId = booking.bookingId || booking.id;
 
-    // Check if the time actually changed
+    // Determine source column based on column mode
+    const sourceColId = columnMode === 'therapist'
+      ? (booking.therapistId || 'unassigned')
+      : (booking.roomId || 'unassigned');
+    const effectiveTargetColId = targetColId || 'unassigned';
+
+    const isCrossColumn = sourceColId !== effectiveTargetColId;
+
+    // Check if anything actually changed
     const oldTime = booking.startTime?.slice(0, 5);
     const oldDate = booking.date;
-    if (oldTime === newStartTime && oldDate === newDate) {
+    if (oldTime === newStartTime && oldDate === newDate && !isCrossColumn) {
       setActiveDragId(null);
       setActiveDragBooking(null);
       setOverSlotData(null);
@@ -314,7 +554,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       return; // No change
     }
 
-    // Calculate new end time for optimistic update
+    // Calculate new end time
     const durationMinutes = booking.serviceDuration ||
       (booking.startTime && booking.endTime
         ? (() => {
@@ -325,56 +565,119 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         : 60);
     const newEndTime = calculateEndTime(hour, minute, durationMinutes);
 
-    // Optimistic UI update: update local booking data immediately
+    // Clear drag state
+    setActiveDragId(null);
+    setActiveDragBooking(null);
+    setOverSlotData(null);
+    setDragGrabOffset(0);
+
+    if (isCrossColumn) {
+      // Cross-column drop → show confirmation dialog
+      setPendingReassign({
+        booking,
+        bookingId,
+        newDate,
+        newStartTime,
+        newEndTime,
+        durationMinutes,
+        targetColId: effectiveTargetColId,
+        sourceColId,
+        targetColName: colNameMap[effectiveTargetColId] || effectiveTargetColId,
+        sourceColName: colNameMap[sourceColId] || sourceColId,
+        type: columnMode,
+        timeChanged: oldTime !== newStartTime || oldDate !== newDate,
+      });
+    } else {
+      // Same column — time-only reschedule (existing behavior, no confirmation)
+      executeReschedule({ booking, bookingId, newDate, newStartTime, newEndTime, durationMinutes });
+    }
+  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap]);
+
+  // Execute reschedule with optimistic update (time-only, no column change)
+  const executeReschedule = useCallback(async ({ bookingId, newDate, newStartTime, newEndTime, durationMinutes }) => {
+    // Optimistic UI update
     setCalendarData(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         bookings: prev.bookings.map(b => {
           if (b.id === bookingId) {
-            return {
-              ...b,
-              date: newDate,
-              start_time: newStartTime,
-              end_time: newEndTime,
-            };
+            return { ...b, date: newDate, start_time: newStartTime, end_time: newEndTime };
           }
           return b;
         }),
       };
     });
 
-    // Now clear drag state - card will render at new position immediately
-    setActiveDragId(null);
-    setActiveDragBooking(null);
-    setOverSlotData(null);
-    setDragGrabOffset(0);
-
-    // Perform reschedule API call in background
     setIsRescheduling(true);
-
     try {
-      const result = await rescheduleBooking({
-        bookingId,
-        newDate,
-        newStartTime,
-      });
-
+      const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
       if (result.error) {
         showToast(result.error.message || 'Failed to reschedule booking.', 'error');
-        // Revert optimistic update by refreshing from server
         refreshCalendar();
       } else {
         showToast(`Rescheduled to ${newStartTime}`, 'success');
       }
     } catch (err) {
       showToast('An error occurred while rescheduling.', 'error');
-      // Revert optimistic update by refreshing from server
       refreshCalendar();
     } finally {
       setIsRescheduling(false);
     }
-  }, [refreshCalendar, calculateTimeFromPointer]);
+  }, [refreshCalendar]);
+
+  // Handle cross-column reassignment confirmation
+  const handleConfirmReassign = useCallback(async () => {
+    if (!pendingReassign) return;
+
+    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName } = pendingReassign;
+
+    // Build API params
+    const apiParams = { bookingId, newDate, newStartTime };
+    const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
+
+    if (type === 'therapist') {
+      const therapistVal = targetColId === 'unassigned' ? null : targetColId;
+      apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+      optimisticFields.therapist_id = therapistVal;
+    } else {
+      const roomVal = targetColId === 'unassigned' ? null : targetColId;
+      apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+      optimisticFields.room_id = roomVal;
+    }
+
+    // Optimistic UI update
+    setCalendarData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        bookings: prev.bookings.map(b => {
+          if (b.id === bookingId) {
+            return { ...b, ...optimisticFields };
+          }
+          return b;
+        }),
+      };
+    });
+
+    setPendingReassign(null);
+    setIsRescheduling(true);
+
+    try {
+      const result = await rescheduleBooking(apiParams);
+      if (result.error) {
+        showToast(result.error.message || 'Failed to reassign booking.', 'error');
+        refreshCalendar();
+      } else {
+        showToast(`Reassigned to ${targetColName}`, 'success');
+      }
+    } catch (err) {
+      showToast('An error occurred while reassigning.', 'error');
+      refreshCalendar();
+    } finally {
+      setIsRescheduling(false);
+    }
+  }, [pendingReassign, refreshCalendar]);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragId(null);
@@ -382,6 +685,44 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     setOverSlotData(null);
     setDragGrabOffset(0);
   }, []);
+
+  // ── Quick-create handlers ──────────────────────────────────
+
+  const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    setQuickCreateSlot(slotInfo);
+    if (!servicesCache && !servicesLoading) {
+      setServicesLoading(true);
+      const result = await fetchServices();
+      if (result.data) setServicesCache(result.data);
+      setServicesLoading(false);
+    }
+  }, [servicesCache, servicesLoading]);
+
+  const handleQuickCreateClose = useCallback(() => {
+    setQuickCreateSlot(null);
+  }, []);
+
+  const handleQuickCreateSubmit = useCallback(async (formData) => {
+    if (!quickCreateSlot || !branchId) return 'Missing slot or branch info.';
+    const date = quickCreateSlot.day;
+    const startTime = `${String(quickCreateSlot.hour).padStart(2, '0')}:${String(quickCreateSlot.minute).padStart(2, '0')}`;
+    const result = await createBooking({
+      branchId,
+      serviceId: formData.serviceId,
+      date,
+      startTime,
+      customerName: formData.customerName,
+      customerPhone: formData.customerPhone,
+      specialRequests: formData.specialRequests,
+    });
+    if (result.error) {
+      return result.error.message || 'Failed to create booking.';
+    }
+    showToast('Booking created successfully');
+    setQuickCreateSlot(null);
+    refreshCalendar();
+    return null;
+  }, [quickCreateSlot, branchId, refreshCalendar]);
 
   // ── Event click → modal ────────────────────────────────────
 
@@ -685,6 +1026,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   onBookingClick={handleBookingClick}
+                  onEmptySlotClick={handleEmptySlotClick}
                   currentDate={currentDate}
                   viewMode={viewMode}
                   columnMode={columnMode}
@@ -782,6 +1124,59 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         }`}>
           <Icon name={actionToast.type === 'error' ? 'AlertCircle' : actionToast.type === 'info' ? 'Clock' : 'CheckCircle'} size={16} />
           <span className="font-body font-body-medium text-sm">{actionToast.msg}</span>
+        </div>
+      )}
+
+      {/* Quick Create Panel */}
+      <QuickCreatePanel
+        slotInfo={quickCreateSlot}
+        services={servicesCache}
+        servicesLoading={servicesLoading}
+        onClose={handleQuickCreateClose}
+        onSubmit={handleQuickCreateSubmit}
+      />
+
+      {/* Reassignment Confirmation Dialog */}
+      {pendingReassign && (
+        <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
+            <div className="flex items-center gap-2 mb-4">
+              <Icon name={pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen'} size={20} className="text-primary" />
+              <h3 className="font-heading font-heading-semibold text-base text-text-primary">
+                Reassign {pendingReassign.type === 'therapist' ? 'Therapist' : 'Room'}
+              </h3>
+            </div>
+            <p className="font-body text-sm text-text-secondary mb-1">
+              Move <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
+            </p>
+            <p className="font-body text-sm text-text-secondary mb-3">
+              from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
+              {' '}&rarr;{' '}
+              <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span>
+            </p>
+            {pendingReassign.timeChanged && (
+              <p className="font-body text-xs text-text-secondary mb-3">
+                Time: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
+                {pendingReassign.newDate !== pendingReassign.booking.date && (
+                  <span> on {pendingReassign.newDate}</span>
+                )}
+              </p>
+            )}
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button
+                onClick={() => setPendingReassign(null)}
+                className="px-4 py-2 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReassign}
+                className="px-4 py-2 text-sm font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

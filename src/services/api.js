@@ -626,14 +626,15 @@ export async function rejectDiscount(bookingId) {
 
 /**
  * Reschedule a booking to a new date/time.
- * Validates lifecycle, checks room availability, and updates the booking.
+ * Optionally reassign to a different therapist or room (cross-column drag).
+ * Validates lifecycle, checks room/therapist availability, and updates the booking.
  */
-export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
+export async function rescheduleBooking({ bookingId, newDate, newStartTime, newTherapistId, newRoomId }) {
   try {
-    // 1. Fetch booking with service duration, room, and branch
+    // 1. Fetch booking with service duration, room, therapist, and branch
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, room_id, branch_id, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, room_id, therapist_id, branch_id, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -664,12 +665,60 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
     }
     const newEndTime = addMinutesToTime(newStartTime, durationMinutes);
 
-    // 6. Check room availability — overlapping bookings in same room (exclude cancelled/no-show)
-    if (booking.room_id) {
+    // 6. Build update payload (time fields always included)
+    const updatePayload = {
+      date: newDate,
+      start_time: newStartTime,
+      end_time: newEndTime,
+    };
+
+    // 6a. Therapist reassignment
+    if (newTherapistId !== undefined) {
+      if (newTherapistId === 'unassigned' || newTherapistId === null) {
+        updatePayload.therapist_id = null;
+        updatePayload.therapist_name_snapshot = null;
+      } else {
+        // Resolve therapist name + check active status
+        const { data: therapist } = await supabase
+          .from('therapists')
+          .select('name, is_active')
+          .eq('id', newTherapistId)
+          .single();
+
+        if (therapist && !therapist.is_active) {
+          return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Cannot assign an inactive therapist.' } };
+        }
+        updatePayload.therapist_id = newTherapistId;
+        updatePayload.therapist_name_snapshot = therapist?.name || null;
+      }
+    }
+
+    // 6b. Room reassignment
+    const effectiveRoomId = newRoomId !== undefined
+      ? (newRoomId === 'unassigned' || newRoomId === null ? null : newRoomId)
+      : booking.room_id;
+
+    if (newRoomId !== undefined) {
+      if (newRoomId === 'unassigned' || newRoomId === null) {
+        updatePayload.room_id = null;
+        updatePayload.room_name_snapshot = null;
+      } else {
+        const { data: room } = await supabase
+          .from('rooms')
+          .select('name')
+          .eq('id', newRoomId)
+          .single();
+        updatePayload.room_id = newRoomId;
+        updatePayload.room_name_snapshot = room?.name || null;
+      }
+    }
+
+    // 7. Check room availability — overlapping bookings in same room (exclude cancelled/no-show)
+    if (effectiveRoomId) {
       const { data: conflicts, error: conflictError } = await supabase
         .from('bookings')
         .select('id')
-        .eq('room_id', booking.room_id)
+        .eq('room_id', effectiveRoomId)
         .eq('branch_id', booking.branch_id)
         .eq('date', newDate)
         .not('status', 'in', '("Cancelled","No Show")')
@@ -687,19 +736,21 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
       }
     }
 
-    // 7. Update the booking (including end_time based on service duration)
+    // 8. Update the booking
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
-      .update({
-        date: newDate,
-        start_time: newStartTime,
-        end_time: newEndTime,
-      })
+      .update(updatePayload)
       .eq('id', bookingId)
-      .select('id, date, start_time, end_time')
+      .select('id, date, start_time, end_time, therapist_id, room_id')
       .single();
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      // GIST exclusion: therapist double-booking
+      if (updateError.code === '23P01') {
+        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
+      }
+      throw updateError;
+    }
 
     return {
       data: {
@@ -708,6 +759,8 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime }) {
         bookingDate: updated.date,
         startTime: updated.start_time,
         endTime: updated.end_time,
+        therapistId: updated.therapist_id,
+        roomId: updated.room_id,
       },
       error: null,
     };
