@@ -49,6 +49,7 @@ const CalendarGrid = ({
   branchHours,
   attendanceMap,
   onBookingClick,
+  onEmptySlotClick,
   currentDate,
   viewMode = 'day',
   columnMode = 'therapist',
@@ -270,6 +271,16 @@ const CalendarGrid = ({
     );
   };
 
+  const handleColumnClick = (e, day, col) => {
+    if (activeDragId || !onEmptySlotClick) return;
+    const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top;
+    const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
+    const hour = Math.floor(minutesFromTop / 60) + openHour;
+    const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
+    if (hour < openHour || hour >= closeHour) return;
+    onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour, minute });
+  };
+
   const renderColumn = (col, day) => {
     const colBookings = (bookingsByDayAndCol[day] || {})[col.id] || [];
     const droppableId = `drop-col-${day}-${col.id}`;
@@ -277,8 +288,9 @@ const CalendarGrid = ({
     return (
       <div
         key={col.id}
-        className="flex-1 relative border-r border-border/50 last:border-r-0"
+        className="flex-1 relative border-r border-border/50 last:border-r-0 cursor-pointer"
         style={{ minWidth: minColWidth, height: totalHeight }}
+        onClick={(e) => handleColumnClick(e, day, col)}
       >
         {/* Single droppable zone for the entire column (sibling to booking cards) */}
         <DroppableColumn
@@ -390,8 +402,17 @@ const CalendarGrid = ({
               return (
                 <div
                   key={day}
-                  className={`flex-1 relative ${di < days.length - 1 ? 'border-r-2 border-border' : ''} ${isCurrentDay ? 'bg-primary/[0.02]' : ''}`}
+                  className={`flex-1 relative cursor-pointer ${di < days.length - 1 ? 'border-r-2 border-border' : ''} ${isCurrentDay ? 'bg-primary/[0.02]' : ''}`}
                   style={{ minWidth: minColWidth }}
+                  onClick={(e) => {
+                    if (activeDragId || !onEmptySlotClick) return;
+                    const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top;
+                    const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
+                    const hour = Math.floor(minutesFromTop / 60) + openHour;
+                    const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
+                    if (hour < openHour || hour >= closeHour) return;
+                    onEmptySlotClick({ day, colId: 'all', colName: formatShortDate(day), colType: 'day', hour, minute });
+                  }}
                 >
                   {/* Single droppable zone for the entire day column (sibling to booking cards) */}
                   <DroppableColumn

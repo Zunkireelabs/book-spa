@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Button from './Button';
 import Input from './Input';
 import Icon from '../AppIcon';
+import CustomSelect from './CustomSelect';
 
 const AuthenticationModal = ({ isOpen = true, onClose }) => {
   const navigate = useNavigate();
@@ -172,18 +173,15 @@ const AuthenticationModal = ({ isOpen = true, onClose }) => {
             <label className="font-body font-body-medium text-sm text-text-primary">
               Branch Location
             </label>
-            <select
-              name="branch"
+            <CustomSelect
               value={formData.branch}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
-            >
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => {
+                setFormData((prev) => ({ ...prev, branch: val }));
+                if (errors.branch) setErrors((prev) => ({ ...prev, branch: '' }));
+              }}
+              options={branches.map((b) => ({ value: b.id, label: b.name }))}
+              size="md"
+            />
           </div>
 
           {/* Email */}

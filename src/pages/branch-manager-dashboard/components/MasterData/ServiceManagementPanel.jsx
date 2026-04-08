@@ -3,6 +3,7 @@ import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
 import FilterBar from '../../../../components/ui/FilterBar';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import {
   fetchServicesForManagement,
   fetchActiveCategories,
@@ -426,15 +427,12 @@ const ServiceManagementPanel = () => {
               {/* Category dropdown */}
               <div className="space-y-1">
                 <label className="block font-body font-body-medium text-sm text-text-primary">Category</label>
-                <select
+                <CustomSelect
                   value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full rounded-spa border border-border bg-background px-3 py-2 font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
-                >
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.name}>{cat.name}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setFormData({ ...formData, category: val })}
+                  options={categories.map((cat) => ({ value: cat.name, label: cat.name }))}
+                  size="md"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
