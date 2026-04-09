@@ -318,20 +318,22 @@ const CustomerBookingFlow = () => {
 
       {/* Main Content */}
       <main className="max-w-4xl mx-auto px-4 py-4 lg:py-6">
-        {/* Step Header */}
-        <div className="text-center mb-4">
-          <div className="flex items-center justify-center space-x-2 mb-2">
-            <Icon name="Sparkles" size={20} className="text-primary" />
-            <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-              {getStepTitle()}
-            </h1>
+        {/* Step Header — Step 2 renders its own header inside ServiceSelection */}
+        {currentStep !== 2 && (
+          <div className="text-center mb-4">
+            <div className="flex items-center justify-center space-x-2 mb-2">
+              <Icon name="Sparkles" size={20} className="text-primary" />
+              <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                {getStepTitle()}
+              </h1>
+            </div>
+            {currentStep < 6 && (
+              <p className="font-body font-body-normal text-text-secondary">
+                Step {currentStep} of 5 - {getBookingJourneyText()}
+              </p>
+            )}
           </div>
-          {currentStep < 6 && (
-            <p className="font-body font-body-normal text-text-secondary">
-              Step {currentStep} of 5 - {getBookingJourneyText()}
-            </p>
-          )}
-        </div>
+        )} (feat: Fix now-indicator line bleeding and calendar improvements)
 
         {/* Step Content */}
         <div className="mb-8">
