@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
+import { useIndustry } from '../../../../hooks/useIndustry';
 import {
   fetchRoomsForManagement,
   createRoom,
@@ -11,6 +12,7 @@ import {
 } from '../../../../services/api';
 
 const RoomManagementPanel = ({ branchId }) => {
+  const { enableRooms, locationLabel, locationLabelPlural } = useIndustry();
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -118,11 +120,16 @@ const RoomManagementPanel = ({ branchId }) => {
     setDeleting(false);
   };
 
+  // Hide panel for industries that don't use rooms (e.g., cleaning services)
+  if (!enableRooms) {
+    return null;
+  }
+
   if (loading) {
     return (
       <div className="text-center py-12">
         <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-        <p className="font-body text-sm text-text-secondary">Loading rooms...</p>
+        <p className="font-body text-sm text-text-secondary">Loading {locationLabelPlural.toLowerCase()}...</p>
       </div>
     );
   }
@@ -132,11 +139,11 @@ const RoomManagementPanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Room Management</h3>
-          <p className="font-body text-sm text-text-secondary">{rooms.length} room{rooms.length !== 1 ? 's' : ''} configured</p>
+          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{locationLabel} Management</h3>
+          <p className="font-body text-sm text-text-secondary">{rooms.length} {rooms.length !== 1 ? locationLabelPlural.toLowerCase() : locationLabel.toLowerCase()} configured</p>
         </div>
         <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
-          Add Room
+          Add {locationLabel}
         </Button>
       </div>
 
@@ -154,7 +161,7 @@ const RoomManagementPanel = ({ branchId }) => {
         <table className="w-full">
           <thead>
             <tr className="bg-background border-b border-border">
-              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Room Name</th>
+              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">{locationLabel} Name</th>
               <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
               <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Actions</th>
             </tr>
@@ -163,7 +170,7 @@ const RoomManagementPanel = ({ branchId }) => {
             {rooms.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-                  No rooms found. Add your first room.
+                  No {locationLabelPlural.toLowerCase()} found. Add your first {locationLabel.toLowerCase()}.
                 </td>
               </tr>
             ) : (
@@ -221,7 +228,7 @@ const RoomManagementPanel = ({ branchId }) => {
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                {editingRoom ? 'Edit Room' : 'Add Room'}
+                {editingRoom ? `Edit ${locationLabel}` : `Add ${locationLabel}`}
               </h3>
               <button onClick={() => setShowModal(false)} className="p-1 rounded hover:bg-background">
                 <Icon name="X" size={20} className="text-text-secondary" />
@@ -236,11 +243,11 @@ const RoomManagementPanel = ({ branchId }) => {
             )}
 
             <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Room Name</label>
+              <label className="block font-body font-body-medium text-sm text-text-primary">{locationLabel} Name</label>
               <Input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
-                placeholder="e.g. Room 10"
+                placeholder={`e.g. ${locationLabel} 1`}
                 autoFocus
               />
             </div>
@@ -248,7 +255,7 @@ const RoomManagementPanel = ({ branchId }) => {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>
               <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
-                {editingRoom ? 'Save Changes' : 'Add Room'}
+                {editingRoom ? 'Save Changes' : `Add ${locationLabel}`}
               </Button>
             </div>
           </div>
@@ -264,7 +271,7 @@ const RoomManagementPanel = ({ branchId }) => {
                 <Icon name="AlertTriangle" size={20} className="text-warning" />
               </div>
               <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Deactivate Room?</h3>
+                <h3 className="font-heading font-heading-semibold text-text-primary">Deactivate {locationLabel}?</h3>
                 <p className="font-body text-sm text-text-secondary">
                   "{confirmToggle.name}" will be hidden from new bookings but remain in historical records.
                 </p>
@@ -287,14 +294,14 @@ const RoomManagementPanel = ({ branchId }) => {
                 <Icon name="Trash2" size={20} className="text-error" />
               </div>
               <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Delete Room?</h3>
+                <h3 className="font-heading font-heading-semibold text-text-primary">Delete {locationLabel}?</h3>
                 <p className="font-body text-sm text-text-secondary">
                   "{confirmDelete.name}" will be permanently deleted. This action cannot be undone.
                 </p>
               </div>
             </div>
             <p className="font-body text-xs text-text-tertiary bg-background rounded-spa p-2">
-              Note: Rooms with booking history cannot be deleted. Use deactivation instead to hide them from new bookings.
+              Note: {locationLabelPlural} with booking history cannot be deleted. Use deactivation instead to hide them from new bookings.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
