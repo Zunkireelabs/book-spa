@@ -4,7 +4,10 @@ import { fetchAllBranches } from '../services/api';
 
 const BranchContext = createContext(null);
 
-const STORAGE_KEY = 'bookspa_admin_branch_id';
+// Use org-specific storage key to prevent cross-tenant branch selection
+const getStorageKey = (orgId) => `bookspa_admin_branch_id_${orgId}`;
+// Legacy key (remove on first load to clean up)
+const LEGACY_STORAGE_KEY = 'bookspa_admin_branch_id';
 
 export const useBranch = () => {
   const context = useContext(BranchContext);
@@ -60,18 +63,25 @@ export const BranchProvider = ({ children }) => {
       return;
     }
 
-    // Restore saved branch from localStorage
-    const savedId = localStorage.getItem(STORAGE_KEY);
+    // Clean up legacy non-org-specific key (one-time migration)
+    if (localStorage.getItem(LEGACY_STORAGE_KEY)) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    }
+
+    // Use org-specific storage key to prevent cross-tenant branch selection
+    const storageKey = getStorageKey(profile.org_id);
+    const savedId = localStorage.getItem(storageKey);
+    // Validate saved branch exists in current org's branches
     const savedBranch = savedId ? allBranches.find(b => b.id === savedId) : null;
 
     if (savedBranch) {
       setBranchId(savedBranch.id);
       setBranchName(savedBranch.name);
     } else {
-      // Default to first branch
+      // Default to first branch of this org
       setBranchId(allBranches[0].id);
       setBranchName(allBranches[0].name);
-      localStorage.setItem(STORAGE_KEY, allBranches[0].id);
+      localStorage.setItem(storageKey, allBranches[0].id);
     }
     setLoading(false);
   };
@@ -84,8 +94,11 @@ export const BranchProvider = ({ children }) => {
 
     setBranchId(branch.id);
     setBranchName(branch.name);
-    localStorage.setItem(STORAGE_KEY, branch.id);
-  }, [isAdmin, branches]);
+    // Use org-specific storage key
+    if (profile?.org_id) {
+      localStorage.setItem(getStorageKey(profile.org_id), branch.id);
+    }
+  }, [isAdmin, branches, profile?.org_id]);
 
   return (
     <BranchContext.Provider value={{
