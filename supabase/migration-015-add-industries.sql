@@ -83,7 +83,7 @@ VALUES
     'Crew Member', 'Crew',
     'Job Site', 'Job Sites',
     'Job', 'Jobs',
-    false, false, true, false,
+    false, true, true, false,
     '["Residential", "Commercial", "Deep Clean", "Regular Clean", "Post-Construction", "Move In/Out", "Office", "Carpet Cleaning", "Window Cleaning", "Other"]'::jsonb,
     'spray-can', 'blue'
   ),
