@@ -48,7 +48,7 @@ async function getAuthenticatedUser() {
   }
   const { data: profile, error: profileError } = await supabase
     .from('users')
-    .select('id, role, branch_id')
+    .select('id, role, branch_id, org_id')
     .eq('id', user.id)
     .single();
 
@@ -91,9 +91,17 @@ function validateStatusTransition(currentStatus, newStatus) {
 
 export async function fetchServices() {
   try {
+    // Get authenticated user's org_id for tenant isolation
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError || !profile?.org_id) {
+      console.error('[API] fetchServices: No authenticated user or org_id');
+      return { data: [], error: null };
+    }
+
     const { data, error } = await supabase
       .from('services')
       .select('id, name, duration_minutes, price_npr, description, image_url, category')
+      .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
 
@@ -1699,38 +1707,65 @@ export async function createBooking({
     // 2. Compute end time for overlap check
     const endTime = addMinutesToTime(startTime, service.duration_minutes);
 
-    // 3. Fetch active rooms for branch
-    const { data: rooms, error: roomsError } = await supabase
-      .from('rooms')
-      .select('id, name')
-      .eq('branch_id', resolvedBranchId)
-      .eq('is_active', true)
-      .order('name');
+    // 2b. Check if this industry requires rooms
+    const { data: branchData, error: branchError } = await supabase
+      .from('branches')
+      .select('org_id, organizations(industry_type)')
+      .eq('id', resolvedBranchId)
+      .single();
 
-    if (roomsError) throw roomsError;
-    if (!rooms || rooms.length === 0) {
-      return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
+    if (branchError) throw branchError;
+
+    const industryType = branchData?.organizations?.industry_type;
+    let enableRooms = true; // default to requiring rooms
+
+    if (industryType) {
+      const { data: industryData } = await supabase
+        .from('industries')
+        .select('enable_rooms')
+        .eq('id', industryType)
+        .single();
+      enableRooms = industryData?.enable_rooms !== false;
     }
 
-    // 4. Find rooms with overlapping non-cancelled/no-show bookings
-    const { data: overlapping, error: overlapError } = await supabase
-      .from('bookings')
-      .select('room_id')
-      .eq('branch_id', resolvedBranchId)
-      .eq('date', date)
-      .not('status', 'in', '("Cancelled","No Show")')
-      .lt('start_time', endTime)
-      .gt('end_time', startTime);
+    // Room handling - only required for industries that use rooms
+    let availableRoom = null;
 
-    if (overlapError) throw overlapError;
+    if (enableRooms) {
+      // 3. Fetch active rooms for branch
+      const { data: rooms, error: roomsError } = await supabase
+        .from('rooms')
+        .select('id, name')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('name');
 
-    // 5. Pick first available room
-    const occupiedRoomIds = new Set((overlapping || []).map(b => b.room_id));
-    const availableRoom = rooms.find(r => !occupiedRoomIds.has(r.id));
+      if (roomsError) throw roomsError;
+      if (!rooms || rooms.length === 0) {
+        return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
+      }
 
-    if (!availableRoom) {
-      return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
+      // 4. Find rooms with overlapping non-cancelled/no-show bookings
+      const { data: overlapping, error: overlapError } = await supabase
+        .from('bookings')
+        .select('room_id')
+        .eq('branch_id', resolvedBranchId)
+        .eq('date', date)
+        .not('status', 'in', '("Cancelled","No Show")')
+        .lt('start_time', endTime)
+        .gt('end_time', startTime);
+
+      if (overlapError) throw overlapError;
+
+      // 5. Pick first available room
+      const occupiedRoomIds = new Set((overlapping || []).map(b => b.room_id));
+      availableRoom = rooms.find(r => !occupiedRoomIds.has(r.id));
+
+      if (!availableRoom) {
+        return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
+      }
     }
+    // End of room handling - industries without rooms skip the above block
 
     // 6. Look up or create customer record for CRM linking
     let customerId = null;
@@ -1792,7 +1827,7 @@ export async function createBooking({
       .from('bookings')
       .insert({
         branch_id: resolvedBranchId,
-        room_id: availableRoom.id,
+        room_id: availableRoom?.id || null,
         service_id: serviceId,
         therapist_id: null,
         customer_id: customerId,
@@ -1810,7 +1845,7 @@ export async function createBooking({
         service_name_snapshot: service.name,
         service_duration_snapshot: service.duration_minutes,
         service_price_snapshot: Number(service.price_npr),
-        room_name_snapshot: availableRoom.name,
+        room_name_snapshot: availableRoom?.name || null,
       })
       .select()
       .single();
@@ -2333,9 +2368,15 @@ export async function fetchServicesForManagement() {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage services.' } };
     }
 
+    // Filter by user's organization for tenant isolation
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
     const { data, error } = await supabase
       .from('services')
       .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
+      .eq('org_id', profile.org_id)
       .order('name');
 
     if (error) throw error;
@@ -2454,6 +2495,11 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can update service pricing.' } };
     }
 
+    // Tenant isolation: ensure service belongs to user's org
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
     const updatePayload = {};
     if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
     if (durationMinutes !== undefined) updatePayload.duration_minutes = durationMinutes;
@@ -2469,6 +2515,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .from('services')
       .update(updatePayload)
       .eq('id', serviceId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active')
       .single();
 
@@ -2494,13 +2541,31 @@ export async function toggleServiceActive({ serviceId, isActive }) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage service status.' } };
     }
 
-    // If deactivating, check for future bookings
+    // Tenant isolation: ensure user has org
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    // Verify service belongs to user's org before proceeding
+    const { data: service, error: serviceError } = await supabase
+      .from('services')
+      .select('id')
+      .eq('id', serviceId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (serviceError || !service) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Service not found.' } };
+    }
+
+    // If deactivating, check for future bookings (within this org's branches)
     if (!isActive) {
       const today = new Date().toISOString().split('T')[0];
       const { data: futureBookings, error: bookingsError } = await supabase
         .from('bookings')
-        .select('id')
+        .select('id, branches!inner(org_id)')
         .eq('service_id', serviceId)
+        .eq('branches.org_id', profile.org_id)
         .gte('date', today)
         .in('status', ['Pending', 'Confirmed', 'In-Progress'])
         .limit(1);
@@ -2516,6 +2581,7 @@ export async function toggleServiceActive({ serviceId, isActive }) {
       .from('services')
       .update({ is_active: isActive })
       .eq('id', serviceId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .select('id, name, is_active')
       .single();
 
@@ -2542,22 +2608,29 @@ export async function deleteService({ serviceId }) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can delete services.' } };
     }
 
-    // Fetch service to verify it exists
+    // Tenant isolation: ensure user has org
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    // Fetch service to verify it exists AND belongs to user's org
     const { data: service, error: fetchError } = await supabase
       .from('services')
       .select('id, name')
       .eq('id', serviceId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .single();
 
     if (fetchError || !service) {
       return { data: null, error: { code: 'NOT_FOUND', message: 'Service not found.' } };
     }
 
-    // Check if service has any bookings (past or future)
+    // Check if service has any bookings within this org's branches
     const { data: bookings, error: bookingError } = await supabase
       .from('bookings')
-      .select('id')
+      .select('id, branches!inner(org_id)')
       .eq('service_id', serviceId)
+      .eq('branches.org_id', profile.org_id)
       .limit(1);
 
     if (bookingError) throw bookingError;
@@ -2572,11 +2645,12 @@ export async function deleteService({ serviceId }) {
       };
     }
 
-    // Safe to delete - no bookings exist
+    // Safe to delete - no bookings exist in this org
     const { error: deleteError } = await supabase
       .from('services')
       .delete()
-      .eq('id', serviceId);
+      .eq('id', serviceId)
+      .eq('org_id', profile.org_id);  // Tenant isolation filter
 
     if (deleteError) throw deleteError;
 
@@ -3697,9 +3771,17 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
 
 export async function fetchAllBranches() {
   try {
+    // Get authenticated user's org_id for tenant isolation
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError || !profile?.org_id) {
+      console.error('[API] fetchAllBranches: No authenticated user or org_id');
+      return { data: [], error: null };
+    }
+
     const { data, error } = await supabase
       .from('branches')
       .select('id, name, address, phone, is_active')
+      .eq('org_id', profile.org_id)
       .order('name');
 
     if (error) throw error;
@@ -3812,18 +3894,25 @@ export async function fetchCategoriesForManagement() {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage categories.' } };
     }
 
-    // Get categories with service count
+    // Filter by user's organization for tenant isolation
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    // Get categories with service count - filtered by org
     const { data: categories, error } = await supabase
       .from('service_categories')
       .select('id, name, description, is_active, display_order, created_at')
+      .eq('org_id', profile.org_id)
       .order('display_order', { ascending: true });
 
     if (error) throw error;
 
-    // Get service counts per category
+    // Get service counts per category - filtered by org
     const { data: services } = await supabase
       .from('services')
-      .select('category');
+      .select('category')
+      .eq('org_id', profile.org_id);
 
     const serviceCounts = {};
     (services || []).forEach(s => {
@@ -3845,13 +3934,21 @@ export async function fetchCategoriesForManagement() {
 }
 
 /**
- * Fetch active categories for dropdowns
+ * Fetch active categories for dropdowns (org-scoped)
  */
 export async function fetchActiveCategories() {
   try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
     const { data, error } = await supabase
       .from('service_categories')
       .select('id, name')
+      .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('display_order', { ascending: true });
 
@@ -3926,12 +4023,22 @@ export async function updateCategory({ categoryId, name, description }) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can update categories.' } };
     }
 
-    // Get old name for service update
-    const { data: oldCategory } = await supabase
+    // Tenant isolation: ensure user has org
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    // Get old name for service update - verify category belongs to user's org
+    const { data: oldCategory, error: catError } = await supabase
       .from('service_categories')
       .select('name')
       .eq('id', categoryId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .single();
+
+    if (catError || !oldCategory) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+    }
 
     const oldName = oldCategory?.name;
 
@@ -3943,6 +4050,7 @@ export async function updateCategory({ categoryId, name, description }) {
       .from('service_categories')
       .update(updateData)
       .eq('id', categoryId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .select('id, name, description, is_active, display_order, created_at')
       .single();
 
@@ -3953,12 +4061,13 @@ export async function updateCategory({ categoryId, name, description }) {
       throw error;
     }
 
-    // Update services with old category name to new name
+    // Update services with old category name to new name (within this org only)
     if (name && oldName && name.trim() !== oldName) {
       await supabase
         .from('services')
         .update({ category: name.trim() })
-        .eq('category', oldName);
+        .eq('category', oldName)
+        .eq('org_id', profile.org_id);  // Tenant isolation filter
     }
 
     return { data, error: null };
@@ -3980,14 +4089,25 @@ export async function toggleCategoryActive({ categoryId, isActive }) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can toggle categories.' } };
     }
 
+    // Tenant isolation: ensure user has org
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
     const { data, error } = await supabase
       .from('service_categories')
       .update({ is_active: isActive })
       .eq('id', categoryId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .select('id, name, is_active')
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+      }
+      throw error;
+    }
     return { data, error: null };
   } catch (error) {
     console.error('[API] toggleCategoryActive error:', error.message);
@@ -4007,21 +4127,29 @@ export async function deleteCategory({ categoryId }) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can delete categories.' } };
     }
 
-    // Check if category has services
+    // Tenant isolation: ensure user has org
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    // Check if category exists and belongs to user's org
     const { data: category } = await supabase
       .from('service_categories')
       .select('name')
       .eq('id', categoryId)
+      .eq('org_id', profile.org_id)  // Tenant isolation filter
       .single();
 
     if (!category) {
       return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
     }
 
+    // Check if category has services (within this org only)
     const { count } = await supabase
       .from('services')
       .select('id', { count: 'exact', head: true })
-      .eq('category', category.name);
+      .eq('category', category.name)
+      .eq('org_id', profile.org_id);  // Tenant isolation filter
 
     if (count > 0) {
       return { data: null, error: { code: 'HAS_SERVICES', message: `Cannot delete category with ${count} service(s). Reassign services first or deactivate the category.` } };
@@ -4030,7 +4158,8 @@ export async function deleteCategory({ categoryId }) {
     const { error } = await supabase
       .from('service_categories')
       .delete()
-      .eq('id', categoryId);
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id);  // Tenant isolation filter
 
     if (error) throw error;
     return { data: { deleted: true }, error: null };

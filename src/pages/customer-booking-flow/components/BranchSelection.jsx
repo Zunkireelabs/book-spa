@@ -4,11 +4,17 @@ import Image from '../../../components/AppImage';
 import { useTenant } from '../../../contexts/TenantContext';
 import { fetchBranchesByOrgId } from '../../../services/api';
 
-const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop';
+// Industry-specific default images
+const INDUSTRY_IMAGES = {
+  spa: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop',
+  cleaning: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400&h=300&fit=crop',
+  salon: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop',
+};
+const DEFAULT_IMAGE = INDUSTRY_IMAGES.spa;
 const DEFAULT_OPEN_HOURS = '9:00 AM - 9:00 PM';
 
 const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
-  const { orgId, loading: tenantLoading, error: tenantError } = useTenant();
+  const { orgId, industryType, loading: tenantLoading, error: tenantError } = useTenant();
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -40,11 +46,12 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
           return;
         }
 
+        const branchImage = INDUSTRY_IMAGES[industryType] || DEFAULT_IMAGE;
         const activeBranches = (data || [])
           .map((b) => ({
             ...b,
             openHours: DEFAULT_OPEN_HOURS,
-            image: DEFAULT_IMAGE,
+            image: branchImage,
           }));
 
         setBranches(activeBranches);

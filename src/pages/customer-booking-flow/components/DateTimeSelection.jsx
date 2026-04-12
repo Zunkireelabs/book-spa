@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import { supabase } from '../../../lib/supabase';
+import { useTenant } from '../../../contexts/TenantContext';
 
 const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService, genderPreference, onGenderPreferenceChange }) => {
+  const { enableStaffGender, staffLabel } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
   const [bookedSlots, setBookedSlots] = useState([]);
@@ -182,52 +184,54 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
 
   return (
     <div className="space-y-4">
-      {/* Gender Preference */}
-      <div className="bg-surface rounded-spa-lg border border-border p-6">
-        <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
-          Therapist Gender Preference
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[
-            { value: 'female', label: 'Female Therapist', icon: 'User', color: 'pink' },
-            { value: 'male', label: 'Male Therapist', icon: 'User', color: 'blue' },
-            { value: 'no-preference', label: 'No Preference', icon: 'Users', color: 'primary' }
-          ].map((option) => (
-            <label
-              key={option.value}
-              className={`flex items-center space-x-3 p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
-                genderPreference === option.value
-                  ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
-              }`}
-            >
-              <input
-                type="radio"
-                name="genderPreference"
-                value={option.value}
-                checked={genderPreference === option.value}
-                onChange={(e) => onGenderPreferenceChange(e.target.value)}
-                className="text-primary focus:ring-primary"
-              />
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                option.color === 'pink' ? 'bg-pink-100' :
-                option.color === 'blue' ? 'bg-blue-100' : 'bg-primary/10'
-              }`}>
-                <Icon
-                  name={option.icon}
-                  size={16}
-                  className={
-                    option.color === 'pink' ? 'text-pink-600' :
-                    option.color === 'blue' ? 'text-blue-600' : 'text-primary'
-                  }
+      {/* Gender Preference - only shown for industries that use it */}
+      {enableStaffGender && (
+        <div className="bg-surface rounded-spa-lg border border-border p-6">
+          <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
+            {staffLabel} Gender Preference
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              { value: 'female', label: `Female ${staffLabel}`, icon: 'User', color: 'pink' },
+              { value: 'male', label: `Male ${staffLabel}`, icon: 'User', color: 'blue' },
+              { value: 'no-preference', label: 'No Preference', icon: 'Users', color: 'primary' }
+            ].map((option) => (
+              <label
+                key={option.value}
+                className={`flex items-center space-x-3 p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                  genderPreference === option.value
+                    ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="genderPreference"
+                  value={option.value}
+                  checked={genderPreference === option.value}
+                  onChange={(e) => onGenderPreferenceChange(e.target.value)}
+                  className="text-primary focus:ring-primary"
                 />
-              </div>
-              <span className="font-body font-body-medium text-sm text-text-primary">
-                {option.label}
-              </span>
-            </label>
-          ))}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  option.color === 'pink' ? 'bg-pink-100' :
+                  option.color === 'blue' ? 'bg-blue-100' : 'bg-primary/10'
+                }`}>
+                  <Icon
+                    name={option.icon}
+                    size={16}
+                    className={
+                      option.color === 'pink' ? 'text-pink-600' :
+                      option.color === 'blue' ? 'text-blue-600' : 'text-primary'
+                    }
+                  />
+                </div>
+                <span className="font-body font-body-medium text-sm text-text-primary">
+                  {option.label}
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Date Selection */}
       <div className="bg-surface rounded-spa-lg border border-border p-6">

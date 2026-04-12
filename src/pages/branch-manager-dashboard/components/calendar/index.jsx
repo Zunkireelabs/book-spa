@@ -18,6 +18,7 @@ import {
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import { useAuth } from '../../../../contexts/AuthContext';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -287,9 +288,19 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
+  // Industry-specific labels from auth context
+  const { profile } = useAuth();
+  const industry = profile?.organizations?.industries;
+  const staffLabel = industry?.staff_label || 'Therapist';
+  const staffLabelPlural = industry?.staff_label_plural || 'Therapists';
+  const locationLabel = industry?.location_label || 'Room';
+  const locationLabelPlural = industry?.location_label_plural || 'Rooms';
+  const enableRooms = industry?.enable_rooms !== false;
+
   // View state
   const [currentDate, setCurrentDate] = useState(todayStr());
   const [viewMode, setViewMode] = useState('day'); // day | 4day
+  // Default to staff view if rooms are disabled
   const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
 
   // Calendar data state
@@ -772,10 +783,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleAssignTherapist = async (bookingId, therapistId) => {
     const result = await assignTherapist({ bookingId, therapistId });
     if (result.error) {
-      showToast(result.error.message || 'Failed to assign therapist.', 'error');
+      showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
     }
-    showToast('Therapist assigned successfully');
+    showToast(`${staffLabel} assigned successfully`);
   };
 
   const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
@@ -925,35 +936,42 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                 onDateSelect={setCurrentDate}
               />
 
-              {/* View By toggle */}
+              {/* View By toggle - only show if rooms are enabled, otherwise just show staff */}
               <div className="mt-4 pt-4 border-t border-border">
                 <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
                   View By
                 </div>
-                <div className="flex border border-border rounded-spa overflow-hidden">
-                  <button
-                    onClick={() => setColumnMode('therapist')}
-                    className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-body font-body-medium spa-transition-fast ${
-                      columnMode === 'therapist'
-                        ? 'bg-primary text-white'
-                        : 'text-text-primary hover:bg-background'
-                    }`}
-                  >
-                    <Icon name="User" size={12} />
-                    <span>Therapist</span>
-                  </button>
-                  <button
-                    onClick={() => setColumnMode('room')}
-                    className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-body font-body-medium spa-transition-fast border-l border-border ${
-                      columnMode === 'room'
-                        ? 'bg-primary text-white'
-                        : 'text-text-primary hover:bg-background'
-                    }`}
-                  >
-                    <Icon name="DoorOpen" size={12} />
-                    <span>Room</span>
-                  </button>
-                </div>
+                {enableRooms ? (
+                  <div className="flex border border-border rounded-spa overflow-hidden">
+                    <button
+                      onClick={() => setColumnMode('therapist')}
+                      className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-body font-body-medium spa-transition-fast ${
+                        columnMode === 'therapist'
+                          ? 'bg-primary text-white'
+                          : 'text-text-primary hover:bg-background'
+                      }`}
+                    >
+                      <Icon name="User" size={12} />
+                      <span>{staffLabel}</span>
+                    </button>
+                    <button
+                      onClick={() => setColumnMode('room')}
+                      className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-body font-body-medium spa-transition-fast border-l border-border ${
+                        columnMode === 'room'
+                          ? 'bg-primary text-white'
+                          : 'text-text-primary hover:bg-background'
+                      }`}
+                    >
+                      <Icon name="DoorOpen" size={12} />
+                      <span>{locationLabel}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
+                    <Icon name="User" size={14} className="text-text-secondary" />
+                    <span>{staffLabelPlural}</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 pt-4 border-t border-border">
@@ -976,10 +994,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
               {/* Resource count */}
               {calendarData && (
                 <div className="mt-4 pt-4 border-t border-border">
-                  {columnMode === 'therapist' ? (
+                  {columnMode === 'therapist' || !enableRooms ? (
                     <>
                       <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                        Therapists
+                        {staffLabelPlural}
                       </div>
                       <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
                         <Icon name="Users" size={14} className="text-text-secondary" />
@@ -1004,7 +1022,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                   ) : (
                     <>
                       <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                        Rooms
+                        {locationLabelPlural}
                       </div>
                       <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
                         <Icon name="DoorOpen" size={14} className="text-text-secondary" />
@@ -1143,7 +1161,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
             <div className="flex items-center gap-2 mb-4">
               <Icon name={pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen'} size={20} className="text-primary" />
               <h3 className="font-heading font-heading-semibold text-base text-text-primary">
-                Reassign {pendingReassign.type === 'therapist' ? 'Therapist' : 'Room'}
+                Reassign {pendingReassign.type === 'therapist' ? staffLabel : locationLabel}
               </h3>
             </div>
             <p className="font-body text-sm text-text-secondary mb-1">
