@@ -1,6 +1,6 @@
 # Industry-Based Multi-Tenancy Plan
 
-## BookSpa — Multi-Industry SaaS Platform
+## BooX — Multi-Industry SaaS Platform
 
 **Created**: 2026-04-12
 **Status**: Draft - Pending Approval
@@ -13,7 +13,7 @@
 ### Current State
 ```
 ┌─────────────────────────────────────────────┐
-│         BookSpa (Spa-Only Platform)         │
+│         BooX (Spa-Only Platform)         │
 ├─────────────────────────────────────────────┤
 │  Nuad Thai Spa (NTS)                        │
 │  ├─ Therapists (individual staff)           │
@@ -26,7 +26,7 @@
 ### Target State
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              BookSpa (Multi-Industry Platform)                  │
+│              BooX (Multi-Industry Platform)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  INDUSTRY: Spa                │  INDUSTRY: Cleaning             │
 │  ├─ Tenant: Nuad Thai Spa     │  ├─ Tenant: Khems Cleaning      │
@@ -45,7 +45,7 @@
 
 1. **Current tenant (Nuad Thai Spa)** uses full spa features: rooms, therapists, gender-based assignment
 2. **New tenant (Khems Cleaning)** is a cleaning service company with different needs
-3. **BookSpa is hardcoded** for spa terminology and features
+3. **BooX is hardcoded** for spa terminology and features
 4. **Need flexibility** to support multiple industries without forking codebase
 
 ---

@@ -1,5 +1,5 @@
 -- ============================================================
--- BookSpa Migration 002: Missing Tables & Schema Reconciliation
+-- BooX Migration 002: Missing Tables & Schema Reconciliation
 -- Run this in Supabase SQL Editor AFTER schema.sql + rls.sql
 -- ============================================================
 

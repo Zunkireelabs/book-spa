@@ -1,4 +1,4 @@
-# Web Audit Report: BookSpa — Nuad Thai Spa
+# Web Audit Report: BooX — Nuad Thai Spa
 
 **URL**: https://dev-nuad.zunkireelabs.com
 **Date**: 2026-03-10
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-BookSpa is a well-built spa booking platform with a clean UI, solid multi-step booking flow, and comprehensive management dashboards. The app is mostly functional with good mobile responsiveness and proper auth/route protection. However, there is **one critical database issue** — the `discount_reason` column is missing from the live database, causing API errors on every manager/admin page load. Additionally, there are accessibility gaps (unlabeled form inputs) and a UX issue with the "Find Existing Booking" button routing customers to the staff login page.
+BooX is a well-built spa booking platform with a clean UI, solid multi-step booking flow, and comprehensive management dashboards. The app is mostly functional with good mobile responsiveness and proper auth/route protection. However, there is **one critical database issue** — the `discount_reason` column is missing from the live database, causing API errors on every manager/admin page load. Additionally, there are accessibility gaps (unlabeled form inputs) and a UX issue with the "Find Existing Booking" button routing customers to the staff login page.
 
 **Overall Score**: 7.5/10
 

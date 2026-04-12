@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Project**: BookSpa — Nuad Thai Spa Booking Web App
+**Project**: BooX — Multi-tenant Booking Web App
 **Type**: React 18 + Vite SPA with Supabase backend
 **Tech Stack**: React, Vite, Tailwind CSS, Supabase (Postgres, Auth, RLS, Realtime), Framer Motion, Lucide Icons
 

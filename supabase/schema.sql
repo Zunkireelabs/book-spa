@@ -1,5 +1,5 @@
 -- ============================================================
--- BookSpa Phase 1: Database Schema
+-- BooX Phase 1: Database Schema
 -- Target: Supabase (Postgres 15+)
 -- Run this FIRST in Supabase SQL Editor
 -- ============================================================

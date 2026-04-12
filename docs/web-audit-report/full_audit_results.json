@@ -7,7 +7,7 @@
       "name": "Homepage / Customer Booking Flow",
       "viewport": "desktop",
       "status": 200,
-      "title": "bookspa",
+      "title": "boox",
       "load_time_ms": 943,
       "console_errors": [],
       "console_warnings": [],
@@ -29,7 +29,7 @@
       "name": "Customer Booking Flow (explicit)",
       "viewport": "desktop",
       "status": 200,
-      "title": "bookspa",
+      "title": "boox",
       "load_time_ms": 542,
       "console_errors": [],
       "console_warnings": [],
@@ -51,7 +51,7 @@
       "name": "Staff Login Page",
       "viewport": "desktop",
       "status": 200,
-      "title": "bookspa",
+      "title": "boox",
       "load_time_ms": 553,
       "console_errors": [],
       "console_warnings": [],
@@ -94,14 +94,14 @@
     "staff": {
       "login": {
         "role": "staff",
-        "email": "staff@bookspa.com.np",
+        "email": "staff@boox.com.np",
         "success": true,
         "error": null,
         "screenshots": [
           "/tmp/web-audit/flows/staff/staff_03_after_login.png"
         ],
         "post_login_url": "https://dev-nuad.zunkireelabs.com/branch-staff-dashboard",
-        "post_login_title": "bookspa"
+        "post_login_title": "boox"
       },
       "pages": [
         {
@@ -109,7 +109,7 @@
           "name": "staff_Staff Dashboard",
           "viewport": "desktop",
           "status": 200,
-          "title": "bookspa",
+          "title": "boox",
           "load_time_ms": 1051,
           "console_errors": [],
           "console_warnings": [],
@@ -158,7 +158,7 @@
           "name": "staff_Booking Management Portal",
           "viewport": "desktop",
           "status": 200,
-          "title": "bookspa",
+          "title": "boox",
           "load_time_ms": 1016,
           "console_errors": [],
           "console_warnings": [],
@@ -207,7 +207,7 @@
           "name": "staff_Booking Details Assignment",
           "viewport": "desktop",
           "status": 200,
-          "title": "bookspa",
+          "title": "boox",
           "load_time_ms": 1092,
           "console_errors": [],
           "console_warnings": [],
@@ -330,14 +330,14 @@
     "manager": {
       "login": {
         "role": "manager",
-        "email": "manager@bookspa.com.np",
+        "email": "manager@boox.com.np",
         "success": true,
         "error": null,
         "screenshots": [
           "/tmp/web-audit/flows/manager/manager_03_after_login.png"
         ],
         "post_login_url": "https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
-        "post_login_title": "Branch Manager Dashboard - BookSpa"
+        "post_login_title": "Branch Manager Dashboard - BooX"
       },
       "pages": [
         {
@@ -345,7 +345,7 @@
           "name": "manager_Manager Dashboard",
           "viewport": "desktop",
           "status": 200,
-          "title": "Branch Manager Dashboard - BookSpa",
+          "title": "Branch Manager Dashboard - BooX",
           "load_time_ms": 1759,
           "console_errors": [
             {
@@ -386,7 +386,7 @@
           "name": "manager_Booking Management Portal",
           "viewport": "desktop",
           "status": 200,
-          "title": "Branch Manager Dashboard - BookSpa",
+          "title": "Branch Manager Dashboard - BooX",
           "load_time_ms": 1682,
           "console_errors": [
             {
@@ -427,7 +427,7 @@
           "name": "manager_Booking Details Assignment",
           "viewport": "desktop",
           "status": 200,
-          "title": "Branch Manager Dashboard - BookSpa",
+          "title": "Branch Manager Dashboard - BooX",
           "load_time_ms": 1694,
           "console_errors": [
             {
@@ -548,14 +548,14 @@
     "admin": {
       "login": {
         "role": "admin",
-        "email": "admin@bookspa.com.np",
+        "email": "admin@boox.com.np",
         "success": true,
         "error": null,
         "screenshots": [
           "/tmp/web-audit/flows/admin/admin_03_after_login.png"
         ],
         "post_login_url": "https://dev-nuad.zunkireelabs.com/branch-manager-dashboard",
-        "post_login_title": "Branch Manager Dashboard - BookSpa"
+        "post_login_title": "Branch Manager Dashboard - BooX"
       },
       "pages": [
         {
@@ -563,7 +563,7 @@
           "name": "admin_Manager Dashboard",
           "viewport": "desktop",
           "status": 200,
-          "title": "Branch Manager Dashboard - BookSpa",
+          "title": "Branch Manager Dashboard - BooX",
           "load_time_ms": 1896,
           "console_errors": [
             {
@@ -615,7 +615,7 @@
           "name": "admin_Booking Management Portal",
           "viewport": "desktop",
           "status": 200,
-          "title": "Branch Manager Dashboard - BookSpa",
+          "title": "Branch Manager Dashboard - BooX",
           "load_time_ms": 1932,
           "console_errors": [
             {
@@ -667,7 +667,7 @@
           "name": "admin_Booking Details Assignment",
           "viewport": "desktop",
           "status": 200,
-          "title": "Branch Manager Dashboard - BookSpa",
+          "title": "Branch Manager Dashboard - BooX",
           "load_time_ms": 1851,
           "console_errors": [
             {

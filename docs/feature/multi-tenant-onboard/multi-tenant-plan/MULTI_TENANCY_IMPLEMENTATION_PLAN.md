@@ -1,6 +1,6 @@
 # Multi-Tenancy Implementation Plan
 
-## BookSpa - Organization-Level Multi-Tenancy
+## BooX - Organization-Level Multi-Tenancy
 
 **Created**: 2026-04-06
 **Status**: Draft - Pending Approval
@@ -13,7 +13,7 @@
 ### Current State: Single-Tenant, Multi-Branch
 ```
 ┌─────────────────────────────────────────────┐
-│         BookSpa (Single Tenant)             │
+│         BooX (Single Tenant)             │
 ├─────────────────────────────────────────────┤
 │  Lazimpat  │  Branch B  │  Branch C  │ ...  │
 ├─────────────────────────────────────────────┤

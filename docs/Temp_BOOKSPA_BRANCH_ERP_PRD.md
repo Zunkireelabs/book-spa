@@ -1,4 +1,4 @@
-# BookSpa — Branch Operations ERP
+# BooX — Branch Operations ERP
 ## Phase 1: Excel Replacement First
 ### Project Context & Product Requirements Document (PRD)
 ### Version: v1.0 — Scope Locked
@@ -7,7 +7,7 @@
 
 # 1. Executive Summary
 
-BookSpa is being built as a **Branch Operations ERP system** for spa businesses.
+BooX is being built as a **Branch Operations ERP system** for spa businesses.
 
 The primary objective of Phase 1 is to **replace the client’s daily Excel Sales Report workflow** with a production-grade, database-backed system.
 
@@ -47,7 +47,7 @@ The ERP must fully replace this workflow.
 
 # 3. Product Vision
 
-BookSpa will become:
+BooX will become:
 
 > A branch-level operational ERP system with booking as one module,
 > scalable to multi-branch and public booking in later phases.

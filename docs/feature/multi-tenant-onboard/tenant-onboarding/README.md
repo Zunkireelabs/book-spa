@@ -1,12 +1,12 @@
 # Tenant Onboarding Guide
 
-This guide explains how to onboard a new tenant (organization) to BookSpa.
+This guide explains how to onboard a new tenant (organization) to BooX.
 
 ---
 
 ## Overview
 
-BookSpa uses organization-level multi-tenancy with **industry-based configuration**. Each tenant has:
+BooX uses organization-level multi-tenancy with **industry-based configuration**. Each tenant has:
 - Isolated data (services, bookings, customers)
 - Industry-specific features and terminology
 - Own branches, staff, and (optionally) rooms

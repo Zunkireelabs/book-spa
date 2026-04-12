@@ -1,16 +1,16 @@
 ---
 name: booking-domain
-description: BookSpa business domain knowledge — booking workflow, financial rules, discount approval, room/therapist scheduling, Nepal timezone handling, reconciliation formulas, and spa operational logic.
+description: BooX business domain knowledge — booking workflow, financial rules, discount approval, room/therapist scheduling, Nepal timezone handling, reconciliation formulas, and spa operational logic.
 user-invocable: false
 ---
 
-# BookSpa Domain Knowledge
+# BooX Domain Knowledge
 
-This skill provides background business logic knowledge for the BookSpa spa management system. Claude loads this automatically when working on booking, payment, scheduling, or financial features.
+This skill provides background business logic knowledge for the BooX spa management system. Claude loads this automatically when working on booking, payment, scheduling, or financial features.
 
 ## Business Context
 
-BookSpa is a spa booking management system for a massage parlor in Lazimpat, Kathmandu, Nepal. It replaces an Excel-based workflow with a Supabase-backed web application.
+BooX is a spa booking management system for a massage parlor in Lazimpat, Kathmandu, Nepal. It replaces an Excel-based workflow with a Supabase-backed web application.
 
 - **Single branch:** Lazimpat (multi-branch architecture ready for future)
 - **Operating hours:** 09:00 — 21:00 (12 hours = 720 minutes)

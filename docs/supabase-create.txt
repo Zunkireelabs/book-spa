@@ -3,7 +3,7 @@ Step 1: Create Supabase Project
   1. Go to https://supabase.com and sign in (or create account)                                                                      
   2. Click "New Project"
   3. Fill in:
-    - Name: bookspa
+    - Name: boox
     - Database Password: (save this securely, you'll need it)
     - Region: Pick closest to Nepal (e.g., Southeast Asia (Singapore))
   4. Wait for project to provision (~2 minutes)
@@ -50,30 +50,30 @@ Step 1: Create Supabase Project
 
   | Email                  | Password           | Auto Confirm |
   |------------------------|--------------------|--------------|
-  | staff@bookspa.com.np   | BookSpa@Staff123   |     Yes      |
-  | manager@bookspa.com.np | BookSpa@Manager123 |     Yes      |
-  | admin@bookspa.com.np   | BookSpa@Admin123   |     Yes      |
+  | staff@boox.com.np   | BooX@Staff123   |     Yes      |
+  | manager@boox.com.np | BooX@Manager123 |     Yes      |
+  | admin@boox.com.np   | BooX@Admin123   |     Yes      |
 
   8. After creating each user, copy their UUID from the user list
   9. Go back to SQL Editor, create a new query, and run (replacing UUIDs):
 
   INSERT INTO users (id, email, full_name, role, branch_id) VALUES
     ('<STAFF_UUID_HERE>',
-     'staff@bookspa.com.np',
+     'staff@boox.com.np',
      'Ramesh Thapa',
      'staff',
      'b0000000-0000-0000-0000-000000000001');
 
   INSERT INTO users (id, email, full_name, role, branch_id) VALUES
     ('<MANAGER_UUID_HERE>',
-     'manager@bookspa.com.np',
+     'manager@boox.com.np',
      'Rajesh Shrestha',
      'manager',
      'b0000000-0000-0000-0000-000000000001');
 
   INSERT INTO users (id, email, full_name, role, branch_id) VALUES
     ('<ADMIN_UUID_HERE>',
-     'admin@bookspa.com.np',
+     'admin@boox.com.np',
      'Sunil Maharjan',
      'admin',
      'b0000000-0000-0000-0000-000000000001');

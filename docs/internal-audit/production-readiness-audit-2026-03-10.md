@@ -1,4 +1,4 @@
-# BookSpa Production Readiness Audit Report
+# BooX Production Readiness Audit Report
 
 **Date:** 2026-03-10
 **Purpose:** Pre-pilot production audit for Nuad Thai client

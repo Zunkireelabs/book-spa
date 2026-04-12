@@ -1,4 +1,4 @@
-# BookSpa Internal Audit — 2026-03-08
+# BooX Internal Audit — 2026-03-08
 
 Comprehensive platform audit covering business logic, code quality, database integrity, API layer, and user story compliance.
 

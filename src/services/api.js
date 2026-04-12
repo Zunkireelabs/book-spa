@@ -3711,6 +3711,92 @@ export async function fetchAllBranches() {
 }
 
 // ============================================================
+// Customer-Facing Tenant-Isolated Queries
+// ============================================================
+
+/**
+ * Fetch organization by slug (for customer-facing booking)
+ * Includes industry configuration for terminology
+ */
+export async function fetchOrganizationBySlug(slug) {
+  try {
+    const { data, error } = await supabase
+      .from('organizations')
+      .select(`
+        id,
+        name,
+        code,
+        slug,
+        owner_email,
+        timezone,
+        currency,
+        industry_type,
+        is_active,
+        industries (
+          id,
+          name,
+          staff_label,
+          staff_label_plural,
+          location_label,
+          location_label_plural,
+          enable_rooms,
+          enable_staff_gender,
+          default_categories
+        )
+      `)
+      .eq('slug', slug)
+      .eq('is_active', true)
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchOrganizationBySlug error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch branches for a specific organization (customer-facing)
+ */
+export async function fetchBranchesByOrgId(orgId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, address, phone, is_active')
+      .eq('org_id', orgId)
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchesByOrgId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch services for a specific organization (customer-facing)
+ */
+export async function fetchServicesByOrgId(orgId) {
+  try {
+    const { data, error } = await supabase
+      .from('services')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category')
+      .eq('org_id', orgId)
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicesByOrgId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
 // Service Categories Management (Admin only)
 // ============================================================
 

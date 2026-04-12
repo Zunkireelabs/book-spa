@@ -1,6 +1,6 @@
-# BookSpa Styling Guide
+# BooX Styling Guide
 
-> Tailwind CSS conventions and custom theme tokens for the BookSpa project.
+> Tailwind CSS conventions and custom theme tokens for the BooX project.
 
 ## Color Tokens
 

@@ -1,4 +1,4 @@
-# BookSpa Schema Reference
+# BooX Schema Reference
 
 > This file is a quick-reference for the database engineer skill. Keep it updated when schema changes are applied.
 

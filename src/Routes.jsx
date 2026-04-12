@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { BrowserRouter, Routes as RouterRoutes, Route, useLocation } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
+import { TenantProvider } from "contexts/TenantContext";
 import CustomerBookingFlow from "pages/customer-booking-flow";
 import StaffLoginAuthentication from "pages/staff-login-authentication";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
@@ -11,17 +12,48 @@ import BookingDetailsAssignmentModal from "pages/booking-details-assignment-moda
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import NotFound from "pages/NotFound";
 
+// External redirect component for root URL
+const ExternalRedirect = ({ to }) => {
+  useEffect(() => {
+    window.location.href = to;
+  }, [to]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center">
+        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-text-secondary">Redirecting...</p>
+      </div>
+    </div>
+  );
+};
+
+// Wrapper component that provides tenant context
+const TenantWrapper = ({ children }) => (
+  <TenantProvider>
+    {children}
+  </TenantProvider>
+);
+
 const AppRoutes = () => {
   const location = useLocation();
   return (
       <ErrorBoundary key={location.pathname}>
       <ScrollToTop />
       <RouterRoutes>
-        {/* Public routes */}
-        <Route path="/" element={<CustomerBookingFlow />} />
-        <Route path="/customer-booking-flow" element={<CustomerBookingFlow />} />
+        {/* Root redirects to Zunkireelabs product page */}
+        <Route path="/" element={<ExternalRedirect to="https://www.zunkireelabs.com/products/ai-booking-engine/" />} />
+
+        {/* Staff authentication */}
         <Route path="/staff-login-authentication" element={<StaffLoginAuthentication />} />
-        <Route path="/booking-management-portal" element={<BookingManagementPortal />} />
+
+        {/* Tenant-specific customer booking routes */}
+        <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
+        <Route path="/:orgSlug/manage" element={<TenantWrapper><BookingManagementPortal /></TenantWrapper>} />
+
+        {/* Legacy routes - redirect to default tenant for backwards compatibility */}
+        <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa" />} />
+        <Route path="/booking-management-portal" element={<ExternalRedirect to="/nuad-thai-spa/manage" />} />
 
         {/* Protected routes - staff, manager, admin */}
         <Route path="/branch-staff-dashboard" element={

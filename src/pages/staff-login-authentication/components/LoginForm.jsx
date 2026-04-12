@@ -132,7 +132,7 @@ const LoginForm = () => {
           Staff Portal Access
         </h1>
         <p className="font-body font-body-normal text-text-secondary">
-          Secure login for BookSpa team members
+          Secure login for BooX team members
         </p>
       </div>
 
@@ -254,13 +254,13 @@ const LoginForm = () => {
           </h4>
           <div className="space-y-2 text-xs">
             <div className="font-data font-data-normal text-text-secondary">
-              <strong>Staff:</strong> staff@bookspa.com.np / BookSpa@Staff123
+              <strong>Staff:</strong> staff@bookspa.com.np / BooX@Staff123
             </div>
             <div className="font-data font-data-normal text-text-secondary">
-              <strong>Manager:</strong> manager@bookspa.com.np / BookSpa@Manager123
+              <strong>Manager:</strong> manager@bookspa.com.np / BooX@Manager123
             </div>
             <div className="font-data font-data-normal text-text-secondary">
-              <strong>Admin:</strong> admin@bookspa.com.np / BookSpa@Admin123
+              <strong>Admin:</strong> admin@bookspa.com.np / BooX@Admin123
             </div>
           </div>
         </div>

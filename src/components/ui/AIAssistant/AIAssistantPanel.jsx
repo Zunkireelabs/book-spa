@@ -5,13 +5,13 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import TypingIndicator from './TypingIndicator';
 
-// Mock responses for BookSpa domain
+// Mock responses for BooX domain
 const getMockResponse = (message) => {
   const lowerMessage = message.toLowerCase();
 
   // Greetings
   if (['hello', 'hi', 'hey'].some(g => lowerMessage.includes(g))) {
-    return "Hi! I'm your AI assistant. I can help you with:\n\n• Finding and managing bookings\n• Understanding your revenue\n• Checking therapist availability\n• Answering questions about BookSpa\n\nHow can I help you today?";
+    return "Hi! I'm your AI assistant. I can help you with:\n\n• Finding and managing bookings\n• Understanding your revenue\n• Checking therapist availability\n• Answering questions about BooX\n\nHow can I help you today?";
   }
 
   // Bookings
@@ -36,7 +36,7 @@ const getMockResponse = (message) => {
 
   // Help
   if (['help', 'what can you', 'how do'].some(k => lowerMessage.includes(k))) {
-    return "I'm here to help you manage BookSpa more efficiently! I can assist with:\n\n• **Bookings** - Find, filter, and understand appointment data\n• **Revenue** - Analyze earnings and financial insights\n• **Staff** - Check therapist availability and performance\n• **Schedule** - View calendar and find open slots\n• **Reports** - Summarize daily operations\n\nJust ask me anything in natural language!";
+    return "I'm here to help you manage BooX more efficiently! I can assist with:\n\n• **Bookings** - Find, filter, and understand appointment data\n• **Revenue** - Analyze earnings and financial insights\n• **Staff** - Check therapist availability and performance\n• **Schedule** - View calendar and find open slots\n• **Reports** - Summarize daily operations\n\nJust ask me anything in natural language!";
   }
 
   // Thank you
@@ -118,7 +118,7 @@ const AIAssistantPanel = () => {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-gray-900">AI Assistant</h3>
-              <p className="text-xs text-gray-500">Powered by BookSpa AI</p>
+              <p className="text-xs text-gray-500">Powered by BooX AI</p>
             </div>
           </div>
           <div className="flex items-center gap-1">

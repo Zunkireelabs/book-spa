@@ -1,6 +1,6 @@
 # Supabase Real-Time Patterns
 
-> Use these patterns when implementing live data updates in BookSpa.
+> Use these patterns when implementing live data updates in BooX.
 
 ## When to Use Real-Time
 

@@ -1,13 +1,13 @@
 ---
 name: deploy-check
-description: Pre-deployment validator for BookSpa. Checks build, environment variables, Docker config, code quality, and security before deploying.
+description: Pre-deployment validator for BooX. Checks build, environment variables, Docker config, code quality, and security before deploying.
 disable-model-invocation: true
 argument-hint: "[environment]"
 ---
 
-# BookSpa Pre-Deployment Check
+# BooX Pre-Deployment Check
 
-Run comprehensive pre-deployment validation before deploying BookSpa. Environment target: `$ARGUMENTS` (defaults to production).
+Run comprehensive pre-deployment validation before deploying BooX. Environment target: `$ARGUMENTS` (defaults to production).
 
 ## Validation Steps
 
@@ -114,7 +114,7 @@ gh pr create --base main ...
 
 ```
 ========================================
-  BookSpa Pre-Deployment Report
+  BooX Pre-Deployment Report
   Target: [environment]
   Date: [timestamp]
 ========================================

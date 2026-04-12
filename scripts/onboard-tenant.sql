@@ -1,6 +1,6 @@
 -- ============================================================
 -- Tenant Onboarding Script
--- BookSpa Multi-Industry Multi-Tenancy
+-- BooX Multi-Industry Multi-Tenancy
 -- ============================================================
 --
 -- USAGE:

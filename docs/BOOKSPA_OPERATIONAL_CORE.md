@@ -1,4 +1,4 @@
-# BookSpa - Operational Core Specification v1.0
+# BooX - Operational Core Specification v1.0
 
 > **Status:** Production Blueprint
 > **Owner:** Zunkiree Labs
@@ -8,7 +8,7 @@
 
 ## 1. System Vision
 
-BookSpa is a **Branch-Level Operational ERP** that replaces daily Excel-based booking, revenue, and reconciliation workflows — while supporting public booking and multi-branch scalability from Day One.
+BooX is a **Branch-Level Operational ERP** that replaces daily Excel-based booking, revenue, and reconciliation workflows — while supporting public booking and multi-branch scalability from Day One.
 
 ### Primary Objective (Phase 1)
 - Replace daily Excel sales report within 30 days
