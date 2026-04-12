@@ -1,4 +1,4 @@
-# BookSpa RLS Patterns
+# BooX RLS Patterns
 
 > Follow these established patterns when creating new RLS policies.
 

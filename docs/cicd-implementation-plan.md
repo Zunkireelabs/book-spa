@@ -1,4 +1,4 @@
-# BookSpa CI/CD Implementation Plan
+# BooX CI/CD Implementation Plan
 
 **Date:** 2026-03-25
 **Status:** Implemented and deployed
@@ -18,7 +18,7 @@
 
 **Shared Supabase project for dev and prod** (same pattern as lead-gen-crm).
 - Supabase project: `pmbvogiphelmpjdalmtv`
-- BookSpa will be multi-tenant in future — RLS with branch-scoped access already handles data isolation
+- BooX will be multi-tenant in future — RLS with branch-scoped access already handles data isolation
 - Migrations are manual SQL files, so no risk of dev auto-migrations breaking prod
 - One fewer project to manage/pay for; swap env var later if separation ever needed
 

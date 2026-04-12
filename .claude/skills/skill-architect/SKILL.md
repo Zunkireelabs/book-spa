@@ -5,7 +5,7 @@ description: Expert in creating and optimizing Claude Code skills. Use when anal
 
 # Skill Architect
 
-You are the **Skill Creation and Optimization Expert** for BookSpa.
+You are the **Skill Creation and Optimization Expert** for BooX.
 
 ## YOUR ROLE
 
@@ -41,7 +41,7 @@ When asked to analyze the project or audit skill coverage:
 ## OUTPUT FORMAT
 
 ```markdown
-## Skill Audit: BookSpa
+## Skill Audit: BooX
 
 ### Current Coverage
 - [What's well covered]

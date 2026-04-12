@@ -3,11 +3,13 @@ import { Link, useLocation } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
+import { useIndustry } from '../../hooks/useIndustry';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
   const { profile, signOut } = useAuth();
   const { branchName: contextBranchName } = useBranch();
+  const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState(['operations']); // Default expanded
@@ -96,7 +98,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       children: [
         {
           id: 'therapists',
-          label: 'Therapists',
+          label: staffLabelPlural,
           path: '/branch-manager-dashboard?view=therapists',
           roles: ['manager', 'admin']
         },
@@ -114,12 +116,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       icon: 'Settings',
       roles: ['manager', 'admin'],
       children: [
-        {
+        // Only show rooms/locations for industries that use them
+        ...(enableRooms ? [{
           id: 'rooms',
-          label: 'Rooms',
+          label: locationLabelPlural,
           path: '/branch-manager-dashboard?view=rooms',
           roles: ['manager', 'admin']
-        },
+        }] : []),
         {
           id: 'services',
           label: 'Services',
@@ -221,7 +224,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 </svg>
               </div>
               <div>
-                <h1 className="text-sm font-semibold text-gray-900">BookSpa</h1>
+                <h1 className="text-sm font-semibold text-gray-900">BooX</h1>
                 <p className="text-xs text-gray-500">Staff Portal</p>
               </div>
             </Link>

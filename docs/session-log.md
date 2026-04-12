@@ -1,4 +1,4 @@
-# BookSpa MVP – Session Log
+# BooX MVP – Session Log
 # Last Updated: 2026-02-13 19:30 NPT
 
 ---
@@ -211,7 +211,7 @@ Made the app operationally testable end-to-end: Customer books → Staff confirm
 - Fixes the broken flow where clicking a calendar event navigated away and closing the modal landed on the wrong dashboard
 
 **Styling (`src/styles/tailwind.css`):**
-- Custom FullCalendar theme matching BookSpa design tokens (colors, fonts, borders, buttons, scrollbar)
+- Custom FullCalendar theme matching BooX design tokens (colors, fonts, borders, buttons, scrollbar)
 
 **Dependencies installed:**
 - `@fullcalendar/react`, `@fullcalendar/resource-timeline`, `@fullcalendar/daygrid`, `@fullcalendar/interaction`
@@ -267,9 +267,9 @@ Made the app operationally testable end-to-end: Customer books → Staff confirm
 **Auth Users:**
 | Email | Password | Role | Name |
 |-------|----------|------|------|
-| staff@bookspa.com.np | BookSpa@Staff123 | staff | Ramesh Thapa |
-| manager@bookspa.com.np | BookSpa@Manager123 | manager | Rajesh Shrestha |
-| admin@bookspa.com.np | BookSpa@Admin123 | admin | Sunil Maharjan |
+| staff@bookspa.com.np | BooX@Staff123 | staff | Ramesh Thapa |
+| manager@bookspa.com.np | BooX@Manager123 | manager | Rajesh Shrestha |
+| admin@bookspa.com.np | BooX@Admin123 | admin | Sunil Maharjan |
 
 ---
 

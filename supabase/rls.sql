@@ -1,5 +1,5 @@
 -- ============================================================
--- BookSpa Phase 1: Row Level Security Policies
+-- BooX Phase 1: Row Level Security Policies
 -- Run this AFTER schema.sql in Supabase SQL Editor
 -- ============================================================
 

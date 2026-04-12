@@ -3,6 +3,7 @@ import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
 import Select from '../../../../components/ui/Select';
+import { useIndustry } from '../../../../hooks/useIndustry';
 import {
   fetchTherapistsForManagement,
   createTherapist,
@@ -17,6 +18,7 @@ const GENDER_OPTIONS = [
 ];
 
 const TherapistManagementPanel = ({ branchId }) => {
+  const { staffLabel, staffLabelPlural } = useIndustry();
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -145,7 +147,7 @@ const TherapistManagementPanel = ({ branchId }) => {
     return (
       <div className="text-center py-12">
         <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-        <p className="font-body text-sm text-text-secondary">Loading therapists...</p>
+        <p className="font-body text-sm text-text-secondary">Loading {staffLabelPlural.toLowerCase()}...</p>
       </div>
     );
   }
@@ -155,11 +157,11 @@ const TherapistManagementPanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Therapist Management</h3>
-          <p className="font-body text-sm text-text-secondary">{therapists.length} therapist{therapists.length !== 1 ? 's' : ''} configured</p>
+          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{staffLabel} Management</h3>
+          <p className="font-body text-sm text-text-secondary">{therapists.length} {therapists.length !== 1 ? staffLabelPlural.toLowerCase() : staffLabel.toLowerCase()} configured</p>
         </div>
         <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
-          Add Therapist
+          Add {staffLabel}
         </Button>
       </div>
 
@@ -188,7 +190,7 @@ const TherapistManagementPanel = ({ branchId }) => {
             {therapists.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-                  No therapists found. Add your first therapist.
+                  No {staffLabelPlural.toLowerCase()} found. Add your first {staffLabel.toLowerCase()}.
                 </td>
               </tr>
             ) : (
@@ -260,7 +262,7 @@ const TherapistManagementPanel = ({ branchId }) => {
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                {editingTherapist ? 'Edit Therapist' : 'Add Therapist'}
+                {editingTherapist ? `Edit ${staffLabel}` : `Add ${staffLabel}`}
               </h3>
               <button onClick={() => setShowModal(false)} className="p-1 rounded hover:bg-background">
                 <Icon name="X" size={20} className="text-text-secondary" />
@@ -306,7 +308,7 @@ const TherapistManagementPanel = ({ branchId }) => {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>
               <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
-                {editingTherapist ? 'Save Changes' : 'Add Therapist'}
+                {editingTherapist ? 'Save Changes' : `Add ${staffLabel}`}
               </Button>
             </div>
           </div>
@@ -322,9 +324,9 @@ const TherapistManagementPanel = ({ branchId }) => {
                 <Icon name="AlertTriangle" size={20} className="text-warning" />
               </div>
               <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Deactivate Therapist?</h3>
+                <h3 className="font-heading font-heading-semibold text-text-primary">Deactivate {staffLabel}?</h3>
                 <p className="font-body text-sm text-text-secondary">
-                  "{confirmToggle.name}" will be hidden from therapist assignment but remain in historical booking records.
+                  "{confirmToggle.name}" will be hidden from assignment but remain in historical booking records.
                 </p>
               </div>
             </div>
@@ -345,14 +347,14 @@ const TherapistManagementPanel = ({ branchId }) => {
                 <Icon name="Trash2" size={20} className="text-error" />
               </div>
               <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Delete Therapist?</h3>
+                <h3 className="font-heading font-heading-semibold text-text-primary">Delete {staffLabel}?</h3>
                 <p className="font-body text-sm text-text-secondary">
                   "{confirmDelete.name}" will be permanently deleted. This action cannot be undone.
                 </p>
               </div>
             </div>
             <p className="font-body text-xs text-text-tertiary bg-background rounded-spa p-2">
-              Note: Therapists with booking history cannot be deleted. Use deactivation instead to hide them from new bookings.
+              Note: {staffLabelPlural} with booking history cannot be deleted. Use deactivation instead to hide them from new bookings.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>

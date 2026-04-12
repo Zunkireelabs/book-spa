@@ -119,8 +119,8 @@ const BookingManagementPortal = () => {
   return (
     <>
       <Helmet>
-        <title>Booking Management Portal - BookSpa</title>
-        <meta name="description" content="Manage your spa bookings - reschedule, cancel, or view booking history at BookSpa Nepal" />
+        <title>Booking Management Portal - BooX</title>
+        <meta name="description" content="Manage your bookings - reschedule, cancel, or view booking history at BooX Nepal" />
       </Helmet>
 
       <div className="min-h-screen bg-background">
@@ -289,14 +289,14 @@ const BookingManagementPortal = () => {
                   </svg>
                 </div>
                 <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                  BookSpa
+                  BooX
                 </span>
               </div>
               <p className="font-caption font-caption-normal text-sm text-text-secondary mb-4">
                 Your wellness journey, simplified and secure.
               </p>
               <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4">
-                &copy; {new Date().getFullYear()} BookSpa Nepal. All rights reserved.
+                &copy; {new Date().getFullYear()} BooX Nepal. All rights reserved.
               </p>
             </div>
           </div>

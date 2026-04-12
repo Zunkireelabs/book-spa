@@ -1,5 +1,5 @@
 -- ============================================================
--- BookSpa Phase 1: Seed Data
+-- BooX Phase 1: Seed Data
 -- Run this AFTER schema.sql and rls.sql
 -- ============================================================
 -- NOTE: User rows (staff, manager, admin) must be created AFTER
@@ -110,9 +110,9 @@ INSERT INTO therapists (id, branch_id, name, gender, specialties) VALUES
 -- INSTRUCTIONS:
 -- 1. Go to Supabase Dashboard → Authentication → Users
 -- 2. Click "Add user" → "Create new user" for each:
---    a. Email: staff@bookspa.com.np    Password: BookSpa@Staff123
---    b. Email: manager@bookspa.com.np  Password: BookSpa@Manager123
---    c. Email: admin@bookspa.com.np    Password: BookSpa@Admin123
+--    a. Email: staff@bookspa.com.np    Password: BooX@Staff123
+--    b. Email: manager@bookspa.com.np  Password: BooX@Manager123
+--    c. Email: admin@bookspa.com.np    Password: BooX@Admin123
 --    (Check "Auto Confirm User" for each)
 -- 3. Copy the UUID for each created user
 -- 4. Replace the UUIDs below with the actual UUIDs from step 3

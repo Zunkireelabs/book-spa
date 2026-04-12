@@ -51,11 +51,11 @@ const StaffLoginAuthentication = () => {
                   </svg>
                 </div>
                 <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                  BookSpa
+                  BooX
                 </span>
               </div>
               <p className="font-body font-body-normal text-sm text-text-secondary">
-                Nepal's premier spa booking management system serving wellness centers across the country.
+                Nepal's premier booking management system serving businesses across the country.
               </p>
             </div>
 
@@ -111,7 +111,7 @@ const StaffLoginAuthentication = () => {
           {/* Bottom Bar */}
           <div className="flex flex-col md:flex-row items-center justify-between pt-8 mt-8 border-t border-border">
             <p className="font-caption font-caption-normal text-sm text-text-secondary">
-              © {new Date().getFullYear()} BookSpa Nepal. All rights reserved.
+              © {new Date().getFullYear()} BooX Nepal. All rights reserved.
             </p>
             <div className="flex items-center space-x-6 mt-4 md:mt-0">
               <button className="font-caption font-caption-normal text-sm text-text-secondary hover:text-primary spa-transition-fast">

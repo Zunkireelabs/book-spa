@@ -1,4 +1,4 @@
-# Executive Summary — BookSpa Platform Audit
+# Executive Summary — BooX Platform Audit
 
 **Date:** 2026-03-08
 **Audited by:** Claude Code (PM + Domain + Code Review + DB + API skills)

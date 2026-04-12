@@ -1,51 +1,85 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
-import { fetchAllBranches } from '../../../services/api';
+import { useTenant } from '../../../contexts/TenantContext';
+import { fetchBranchesByOrgId } from '../../../services/api';
 
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop';
 const DEFAULT_OPEN_HOURS = '9:00 AM - 9:00 PM';
 
 const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
+  const { orgId, loading: tenantLoading, error: tenantError } = useTenant();
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     async function loadBranches() {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: fetchError } = await fetchAllBranches();
-
-      if (fetchError) {
-        setError('Failed to load branches. Please try again.');
-        setLoading(false);
+      // Wait for tenant to finish loading
+      if (tenantLoading) {
         return;
       }
 
-      const activeBranches = (data || [])
-        .filter((b) => b.is_active === true)
-        .map((b) => ({
-          ...b,
-          openHours: DEFAULT_OPEN_HOURS,
-          image: DEFAULT_IMAGE,
-        }));
-
-      setBranches(activeBranches);
-
-      // Auto-select if only one branch exists
-      if (activeBranches.length === 1 && !selectedBranch) {
-        onBranchSelect(activeBranches[0]);
+      // If no orgId after tenant loaded, something went wrong
+      if (!orgId) {
+        setLoading(false);
+        setError('Unable to load organization data.');
+        return;
       }
 
-      setLoading(false);
+      setLoading(true);
+      setError(null);
+
+      try {
+        const { data, error: fetchError } = await fetchBranchesByOrgId(orgId);
+
+        if (fetchError) {
+          console.error('[BranchSelection] Fetch error:', fetchError);
+          setError('Failed to load branches. Please try again.');
+          setLoading(false);
+          return;
+        }
+
+        const activeBranches = (data || [])
+          .map((b) => ({
+            ...b,
+            openHours: DEFAULT_OPEN_HOURS,
+            image: DEFAULT_IMAGE,
+          }));
+
+        setBranches(activeBranches);
+
+        // Auto-select if only one branch exists
+        if (activeBranches.length === 1 && !selectedBranch) {
+          onBranchSelect(activeBranches[0]);
+        }
+
+        setLoading(false);
+      } catch (err) {
+        console.error('[BranchSelection] Unexpected error:', err);
+        setError('An unexpected error occurred.');
+        setLoading(false);
+      }
     }
 
     loadBranches();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orgId, tenantLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) {
+  // Show tenant error
+  if (tenantError) {
+    return (
+      <div className="space-y-4">
+        <div className="bg-surface rounded-spa-lg border-2 border-error/30 p-8 text-center">
+          <Icon name="AlertCircle" size={40} className="text-error mx-auto mb-4" />
+          <p className="font-body font-body-medium text-text-primary mb-2">
+            {tenantError}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading || tenantLoading) {
     return (
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

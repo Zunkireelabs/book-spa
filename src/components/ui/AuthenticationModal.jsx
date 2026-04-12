@@ -116,7 +116,7 @@ const AuthenticationModal = ({ isOpen = true, onClose }) => {
                   Staff Login
                 </h2>
                 <p className="font-caption font-caption-normal text-sm text-text-secondary">
-                  Access your BookSpa dashboard
+                  Access your BooX dashboard
                 </p>
               </div>
             </div>

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
-import { fetchServices } from '../../../services/api';
+import { useTenant } from '../../../contexts/TenantContext';
+import { fetchServicesByOrgId } from '../../../services/api';
 import { enrichServices } from '../../../services/serviceEnrichment';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
+  const { orgId, loading: tenantLoading } = useTenant();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -26,24 +28,45 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     let cancelled = false;
 
     async function loadServices() {
-      setLoading(true);
-      setError(null);
-      const { data, error: fetchError } = await fetchServices();
-      if (cancelled) return;
-
-      if (fetchError) {
-        setError('Failed to load services. Please try again.');
-        setLoading(false);
+      // Wait for tenant to finish loading
+      if (tenantLoading) {
         return;
       }
 
-      setServices(enrichServices(data || []));
-      setLoading(false);
+      // If no orgId after tenant loaded, something went wrong
+      if (!orgId) {
+        setLoading(false);
+        setError('Unable to load organization data.');
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const { data, error: fetchError } = await fetchServicesByOrgId(orgId);
+        if (cancelled) return;
+
+        if (fetchError) {
+          console.error('[ServiceSelection] Fetch error:', fetchError);
+          setError('Failed to load services. Please try again.');
+          setLoading(false);
+          return;
+        }
+
+        setServices(enrichServices(data || []));
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('[ServiceSelection] Unexpected error:', err);
+        setError('An unexpected error occurred.');
+        setLoading(false);
+      }
     }
 
     loadServices();
     return () => { cancelled = true; };
-  }, []);
+  }, [orgId, tenantLoading]);
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat('ne-NP', {

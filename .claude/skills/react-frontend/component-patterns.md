@@ -1,4 +1,4 @@
-# BookSpa Component Patterns
+# BooX Component Patterns
 
 > Reference for how components are structured in this project.
 
@@ -164,7 +164,7 @@ Styled checkbox with label support
 Side navigation for staff/manager pages — uses useAuth() for user info
 
 ### CustomerHeader.jsx
-Top navigation for customer-facing pages — BookSpa branding
+Top navigation for customer-facing pages — BooX branding
 
 ### AuthenticationModal.jsx
 Login/register modal overlay

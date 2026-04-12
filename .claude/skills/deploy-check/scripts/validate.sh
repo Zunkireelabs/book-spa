@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BookSpa Pre-Deployment Validation Script
+# BooX Pre-Deployment Validation Script
 # Run: bash .claude/skills/deploy-check/scripts/validate.sh
 
 set -e
@@ -13,7 +13,7 @@ ERRORS=0
 WARNINGS=0
 
 echo "========================================"
-echo "  BookSpa Pre-Deployment Validator"
+echo "  BooX Pre-Deployment Validator"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================"
 echo ""

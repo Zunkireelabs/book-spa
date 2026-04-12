@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import CustomerHeader from '../../components/ui/CustomerHeader';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
@@ -10,9 +10,12 @@ import DateTimeSelection from './components/DateTimeSelection';
 import CustomerForm from './components/CustomerForm';
 import BookingConfirmation from './components/BookingConfirmation';
 import BookingSuccess from './components/BookingSuccess';
+import { useTenant } from '../../contexts/TenantContext';
 
 const CustomerBookingFlow = () => {
   const navigate = useNavigate();
+  const { orgSlug } = useParams();
+  const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   
@@ -266,14 +269,49 @@ const CustomerBookingFlow = () => {
     }
   };
 
+  // Show error if tenant not found
+  if (tenantError) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center p-8">
+          <Icon name="AlertCircle" size={48} className="text-error mx-auto mb-4" />
+          <h1 className="font-heading font-heading-semibold text-2xl text-text-primary mb-2">
+            Organization Not Found
+          </h1>
+          <p className="font-body font-body-normal text-text-secondary mb-4">
+            The booking page you're looking for doesn't exist or is no longer available.
+          </p>
+          <a
+            href="https://www.zunkireelabs.com/products/ai-booking-engine/"
+            className="inline-flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-spa font-body font-body-medium text-sm hover:bg-primary/90"
+          >
+            Learn More About BooX
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading while tenant is being fetched
+  if (tenantLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-text-secondary">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background pt-32">
       <CustomerHeader />
-      
+
       {/* Progress Indicator */}
       {currentStep < 6 && (
-        <ProgressIndicator 
-          currentStep={currentStep} 
+        <ProgressIndicator
+          currentStep={currentStep}
           totalSteps={5} // Don't count success step
         />
       )}
@@ -290,7 +328,7 @@ const CustomerBookingFlow = () => {
           </div>
           {currentStep < 6 && (
             <p className="font-body font-body-normal text-text-secondary">
-              Step {currentStep} of 5 - Complete your spa booking journey
+              Step {currentStep} of 5 - {getBookingJourneyText()}
             </p>
           )}
         </div>
@@ -413,7 +451,7 @@ const CustomerBookingFlow = () => {
                 </svg>
               </div>
               <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                BookSpa
+                BooX
               </span>
             </div>
             <p className="font-body font-body-normal text-sm text-text-secondary mb-4">
@@ -425,7 +463,7 @@ const CustomerBookingFlow = () => {
               <button className="hover:text-primary spa-transition-fast">Contact Us</button>
             </div>
             <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4 inline-flex items-center justify-center flex-wrap gap-1">
-              <span>© {new Date().getFullYear()} BookSpa. All rights reserved. A product from</span>
+              <span>© {new Date().getFullYear()} BooX. All rights reserved. A product from</span>
               <a
                 href="https://zunkireelabs.com"
                 target="_blank"

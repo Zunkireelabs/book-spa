@@ -1,6 +1,6 @@
 ---
 name: review-code
-description: Code reviewer for BookSpa. Reviews code for project conventions, security issues, Supabase best practices, and common mistakes.
+description: Code reviewer for BooX. Reviews code for project conventions, security issues, Supabase best practices, and common mistakes.
 disable-model-invocation: true
 context: fork
 agent: Explore
@@ -8,7 +8,7 @@ allowed-tools: Read, Grep, Glob
 argument-hint: "[file-path or feature-name]"
 ---
 
-# BookSpa Code Review
+# BooX Code Review
 
 Review the code specified by `$ARGUMENTS`. If no argument provided, review all recently modified files.
 

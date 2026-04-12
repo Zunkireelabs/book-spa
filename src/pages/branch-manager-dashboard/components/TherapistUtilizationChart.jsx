@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import Icon from '../../../components/AppIcon';
+import { useIndustry } from '../../../hooks/useIndustry';
 import { getUtilizationIntelligence } from '../../../services/api';
 
 const TherapistUtilizationChart = ({ branchId }) => {
+  const { staffLabel, staffLabelPlural } = useIndustry();
   const [utilizationData, setUtilizationData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -71,7 +73,7 @@ const TherapistUtilizationChart = ({ branchId }) => {
           </div>
           <div>
             <h3 className="text-lg font-semibold text-gray-900">
-              Therapist Utilization
+              {staffLabel} Utilization
             </h3>
             <p className="text-sm text-gray-500">
               Loading...
@@ -112,7 +114,7 @@ const TherapistUtilizationChart = ({ branchId }) => {
           </div>
           <div>
             <h3 className="text-lg font-semibold text-gray-900">
-              Therapist Utilization
+              {staffLabel} Utilization
             </h3>
             <p className="text-sm text-gray-500">
               Today's workload distribution
@@ -126,7 +128,7 @@ const TherapistUtilizationChart = ({ branchId }) => {
 
       {utilizationData.length === 0 ? (
         <div className="h-64 flex items-center justify-center">
-          <p className="text-sm text-gray-400">No therapist data available</p>
+          <p className="text-sm text-gray-400">No {staffLabelPlural.toLowerCase()} data available</p>
         </div>
       ) : (
         <div className="h-64 w-full">

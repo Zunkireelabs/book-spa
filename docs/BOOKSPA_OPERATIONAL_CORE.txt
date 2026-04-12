@@ -1,6 +1,6 @@
-📘 BookSpa – Operational Core Specification v1.0
+📘 BooX – Operational Core Specification v1.0
 
-📘 BookSpa – Operational Core Specification (Excel Replacement First)
+📘 BooX – Operational Core Specification (Excel Replacement First)
 
 Version: 1.0
 Status: Production Blueprint
@@ -9,7 +9,7 @@ Scope: Branch Operations ERP (Customer Booking Included)
 
 1️⃣ System Vision
 
-BookSpa is:
+BooX is:
 
 A Branch-Level Operational ERP that replaces daily Excel-based booking, revenue, and reconciliation workflows — while supporting public booking and multi-branch scalability from Day One.
 

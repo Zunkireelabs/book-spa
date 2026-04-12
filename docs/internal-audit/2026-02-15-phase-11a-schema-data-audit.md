@@ -1,6 +1,6 @@
 # Phase 11A — Database Schema & Data Integrity Audit
 
-**Project:** BookSpa (bookspa-nuad-thai)
+**Project:** BooX (bookspa-nuad-thai)
 **Database:** pmbvogiphelmpjdalmtv.supabase.co
 **Audit Date:** 2026-02-15
 **Auditor:** Claude Code (read-only inspection)
