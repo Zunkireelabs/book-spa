@@ -116,7 +116,7 @@ const AuthenticationModal = ({ isOpen = true, onClose }) => {
                   Staff Login
                 </h2>
                 <p className="font-caption font-caption-normal text-sm text-text-secondary">
-                  Access your BooX dashboard
+                  Access your Zenly dashboard
                 </p>
               </div>
             </div>

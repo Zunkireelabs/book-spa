@@ -285,7 +285,7 @@ const CustomerBookingFlow = () => {
             href="https://www.zunkireelabs.com/products/ai-booking-engine/"
             className="inline-flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-spa font-body font-body-medium text-sm hover:bg-primary/90"
           >
-            Learn More About BooX
+            Learn More About Zenly
           </a>
         </div>
       </div>
@@ -451,7 +451,7 @@ const CustomerBookingFlow = () => {
                 </svg>
               </div>
               <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                BooX
+                Zenly
               </span>
             </div>
             <p className="font-body font-body-normal text-sm text-text-secondary mb-4">
@@ -463,7 +463,7 @@ const CustomerBookingFlow = () => {
               <button className="hover:text-primary spa-transition-fast">Contact Us</button>
             </div>
             <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4 inline-flex items-center justify-center flex-wrap gap-1">
-              <span>© {new Date().getFullYear()} BooX. All rights reserved. A product from</span>
+              <span>© {new Date().getFullYear()} Zenly. All rights reserved. A product from</span>
               <a
                 href="https://zunkireelabs.com"
                 target="_blank"

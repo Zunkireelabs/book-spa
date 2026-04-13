@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Project**: BooX — Multi-tenant Booking Web App
+**Project**: Zenly — Multi-tenant Booking Web App
 **Type**: React 18 + Vite SPA with Supabase backend
 **Tech Stack**: React, Vite, Tailwind CSS, Supabase (Postgres, Auth, RLS, Realtime), Framer Motion, Lucide Icons
 
