@@ -224,7 +224,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 </svg>
               </div>
               <div>
-                <h1 className="text-sm font-semibold text-gray-900">BooX</h1>
+                <h1 className="text-sm font-semibold text-gray-900">Zenly</h1>
                 <p className="text-xs text-gray-500">Staff Portal</p>
               </div>
             </Link>

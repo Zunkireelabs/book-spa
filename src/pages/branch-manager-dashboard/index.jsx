@@ -311,8 +311,8 @@ const BranchManagerDashboard = () => {
   return (
     <>
       <Helmet>
-        <title>Branch Manager Dashboard - BooX</title>
-        <meta name="description" content="Comprehensive branch management dashboard for BooX managers with analytics, staff oversight, and operational controls." />
+        <title>Branch Manager Dashboard - Zenly</title>
+        <meta name="description" content="Comprehensive branch management dashboard for Zenly managers with analytics, staff oversight, and operational controls." />
       </Helmet>
 
       <div className="min-h-screen bg-[#ebebeb]">

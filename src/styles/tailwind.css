@@ -188,9 +188,9 @@
   }
 }
 
-/* ── FullCalendar BooX Theme ─────────────────────────────── */
+/* ── FullCalendar Zenly Theme ─────────────────────────────── */
 .bookspa-calendar {
-  /* Reset FullCalendar chrome to match BooX surface tokens */
+  /* Reset FullCalendar chrome to match Zenly surface tokens */
   --fc-border-color: var(--color-border);
   --fc-button-bg-color: var(--color-background);
   --fc-button-border-color: var(--color-border);
