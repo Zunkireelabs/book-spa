@@ -386,15 +386,6 @@ const BranchManagerDashboard = () => {
                     <span className="text-sm font-medium hidden sm:inline">Assistant</span>
                   </button>
 
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    iconName="Plus"
-                    onClick={() => navigate('/customer-booking-flow')}
-                  >
-                    <span className="hidden sm:inline">New Booking</span>
-                  </Button>
-
                   {/* Profile Dropdown */}
                   <div className="relative" ref={profileDropdownRef}>
                     <button
