@@ -61,7 +61,7 @@ jobs:
       - name: Verify Health
         run: |
           # Check staff login page (root redirects externally now)
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://dev-bookings.zunkireelabs.com/staff-login-authentication)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://dev-zenly.zunkireelabs.com/staff-login-authentication)
           if [ "$HTTP_CODE" = "200" ]; then
             echo "Staging health check passed (HTTP $HTTP_CODE)"
           else

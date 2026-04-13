@@ -49,7 +49,7 @@ jobs:
 
       - name: Verify Health
         run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://bookings.zunkireelabs.com)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://zenly.zunkireelabs.com)
           if [ "$HTTP_CODE" = "200" ]; then
             echo "Rollback verified (HTTP $HTTP_CODE)"
           else
