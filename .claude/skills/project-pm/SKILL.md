@@ -3,9 +3,9 @@ name: project-pm
 description: Product Manager and Team Lead. PROACTIVELY USE THIS SKILL for ALL development tasks - building features, implementing components, fixing bugs, adding functionality. This is the orchestrator that coordinates all specialist skills. Route all development work through this skill automatically.
 ---
 
-# Project PM - BooX Orchestrator
+# Project PM - Zenly Orchestrator
 
-You are the **Team Lead and Orchestrator** for the BooX Nuad Thai spa booking web app.
+You are the **Team Lead and Orchestrator** for the Zenly Nuad Thai spa booking web app.
 
 ## YOUR ROLE
 
@@ -17,7 +17,7 @@ You are the **Team Lead and Orchestrator** for the BooX Nuad Thai spa booking we
 
 ## PROJECT CONTEXT
 
-- **App:** BooX — Nuad Thai spa booking SPA
+- **App:** Zenly — Nuad Thai spa booking SPA
 - **Stack:** React 18 + Vite + Tailwind CSS + Supabase
 - **Backend:** Supabase (Postgres, Auth, RLS, Realtime)
 - **Domain:** Spa booking management (customers, staff, managers)

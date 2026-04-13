@@ -51,7 +51,7 @@ const StaffLoginAuthentication = () => {
                   </svg>
                 </div>
                 <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                  BooX
+                  Zenly
                 </span>
               </div>
               <p className="font-body font-body-normal text-sm text-text-secondary">
@@ -72,7 +72,7 @@ const StaffLoginAuthentication = () => {
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="font-body font-body-normal text-sm text-text-secondary">
-                    Email: support@bookspa.com.np
+                    Email: support@zenly.app
                   </span>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -111,7 +111,7 @@ const StaffLoginAuthentication = () => {
           {/* Bottom Bar */}
           <div className="flex flex-col md:flex-row items-center justify-between pt-8 mt-8 border-t border-border">
             <p className="font-caption font-caption-normal text-sm text-text-secondary">
-              © {new Date().getFullYear()} BooX Nepal. All rights reserved.
+              © {new Date().getFullYear()} Zenly. All rights reserved.
             </p>
             <div className="flex items-center space-x-6 mt-4 md:mt-0">
               <button className="font-caption font-caption-normal text-sm text-text-secondary hover:text-primary spa-transition-fast">

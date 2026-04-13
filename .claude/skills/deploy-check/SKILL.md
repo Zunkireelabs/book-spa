@@ -1,13 +1,13 @@
 ---
 name: deploy-check
-description: Pre-deployment validator for BooX. Checks build, environment variables, Docker config, code quality, and security before deploying.
+description: Pre-deployment validator for Zenly. Checks build, environment variables, Docker config, code quality, and security before deploying.
 disable-model-invocation: true
 argument-hint: "[environment]"
 ---
 
-# BooX Pre-Deployment Check
+# Zenly Pre-Deployment Check
 
-Run comprehensive pre-deployment validation before deploying BooX. Environment target: `$ARGUMENTS` (defaults to production).
+Run comprehensive pre-deployment validation before deploying Zenly. Environment target: `$ARGUMENTS` (defaults to production).
 
 ## Validation Steps
 
@@ -114,7 +114,7 @@ gh pr create --base main ...
 
 ```
 ========================================
-  BooX Pre-Deployment Report
+  Zenly Pre-Deployment Report
   Target: [environment]
   Date: [timestamp]
 ========================================

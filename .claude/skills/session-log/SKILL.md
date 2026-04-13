@@ -1,6 +1,6 @@
 ---
 name: session-log
-description: Update the BooX session log after completing a phase or making significant changes.
+description: Update the Zenly session log after completing a phase or making significant changes.
 disable-model-invocation: true
 argument-hint: "[phase-number or description]"
 ---

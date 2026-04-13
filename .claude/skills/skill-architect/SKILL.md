@@ -5,7 +5,7 @@ description: Expert in creating and optimizing Claude Code skills. Use when anal
 
 # Skill Architect
 
-You are the **Skill Creation and Optimization Expert** for BooX.
+You are the **Skill Creation and Optimization Expert** for Zenly.
 
 ## YOUR ROLE
 
@@ -41,7 +41,7 @@ When asked to analyze the project or audit skill coverage:
 ## OUTPUT FORMAT
 
 ```markdown
-## Skill Audit: BooX
+## Skill Audit: Zenly
 
 ### Current Coverage
 - [What's well covered]
