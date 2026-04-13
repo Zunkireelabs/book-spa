@@ -17,11 +17,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=hosting"
-      - "traefik.http.routers.nuad-thai-dev.rule=Host(`dev-bookings.zunkireelabs.com`)"
+      - "traefik.http.routers.nuad-thai-dev.rule=Host(`dev-zenly.zunkireelabs.com`)"
       - "traefik.http.routers.nuad-thai-dev.entrypoints=websecure"
       - "traefik.http.routers.nuad-thai-dev.tls=true"
       - "traefik.http.routers.nuad-thai-dev.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.nuad-thai-dev-http.rule=Host(`dev-bookings.zunkireelabs.com`)"
+      - "traefik.http.routers.nuad-thai-dev-http.rule=Host(`dev-zenly.zunkireelabs.com`)"
       - "traefik.http.routers.nuad-thai-dev-http.entrypoints=web"
       - "traefik.http.routers.nuad-thai-dev-http.middlewares=nuad-thai-dev-redirect"
       - "traefik.http.middlewares.nuad-thai-dev-redirect.redirectscheme.scheme=https"

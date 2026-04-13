@@ -19,11 +19,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=hosting"
-      - "traefik.http.routers.nuad-thai-prod.rule=Host(`bookings.zunkireelabs.com`)"
+      - "traefik.http.routers.nuad-thai-prod.rule=Host(`zenly.zunkireelabs.com`)"
       - "traefik.http.routers.nuad-thai-prod.entrypoints=websecure"
       - "traefik.http.routers.nuad-thai-prod.tls=true"
       - "traefik.http.routers.nuad-thai-prod.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.nuad-thai-prod-http.rule=Host(`bookings.zunkireelabs.com`)"
+      - "traefik.http.routers.nuad-thai-prod-http.rule=Host(`zenly.zunkireelabs.com`)"
       - "traefik.http.routers.nuad-thai-prod-http.entrypoints=web"
       - "traefik.http.routers.nuad-thai-prod-http.middlewares=nuad-thai-prod-redirect"
       - "traefik.http.middlewares.nuad-thai-prod-redirect.redirectscheme.scheme=https"
