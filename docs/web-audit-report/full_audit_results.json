@@ -47,7 +47,7 @@
       "issues": []
     },
     {
-      "url": "https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+      "url": "https://dev-nuad.zunkireelabs.com/login",
       "name": "Staff Login Page",
       "viewport": "desktop",
       "status": 200,
@@ -822,7 +822,7 @@
         {
           "name": "Clicked 'Find Existing Booking'",
           "success": true,
-          "details": "Now at: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "details": "Now at: https://dev-nuad.zunkireelabs.com/login",
           "screenshot": "/tmp/web-audit/flows/public/booking_04_after_click.png"
         },
         {
@@ -842,19 +842,19 @@
         {
           "name": "Protected: /branch-staff-dashboard",
           "success": true,
-          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/login",
           "screenshot": "/tmp/web-audit/flows/public/protected_branch-staff-dashboard.png"
         },
         {
           "name": "Protected: /branch-manager-dashboard",
           "success": true,
-          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/login",
           "screenshot": "/tmp/web-audit/flows/public/protected_branch-manager-dashboard.png"
         },
         {
           "name": "Protected: /booking-management-portal",
           "success": true,
-          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/staff-login-authentication",
+          "details": "Redirected to: https://dev-nuad.zunkireelabs.com/login",
           "screenshot": "/tmp/web-audit/flows/public/protected_booking-management-portal.png"
         }
       ],
@@ -875,7 +875,7 @@
           "name": "Mobile: Login Mobile",
           "success": true,
           "details": "No horizontal overflow",
-          "screenshot": "/tmp/web-audit/flows/mobile/mobile_staff-login-authentication.png"
+          "screenshot": "/tmp/web-audit/flows/mobile/mobile_login.png"
         }
       ],
       "success": true

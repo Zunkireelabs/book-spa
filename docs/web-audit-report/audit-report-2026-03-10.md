@@ -31,7 +31,7 @@ BooX is a well-built spa booking platform with a clean UI, solid multi-step book
 ```
 / (Customer Booking Flow — Branch Selection)
 ├── /customer-booking-flow (same as /)
-├── /staff-login-authentication (Staff Portal Login)
+├── /login (Staff Portal Login)
 ├── /branch-staff-dashboard (Staff — Protected)
 │   ├── Dashboard view (default)
 │   ├── Bookings view
@@ -64,7 +64,7 @@ BooX is a well-built spa booking platform with a clean UI, solid multi-step book
 |---|---------|----------|--------|-------|
 | 1 | Branch selection (5 branches) | `/` | Working | Cards with ratings, services, therapists, hours |
 | 2 | Multi-step booking flow (5 steps) | `/` | Working | Branch → Service → Date/Time → Details → Confirm |
-| 3 | Staff login with Supabase Auth | `/staff-login-authentication` | Working | Email/password, role-based redirect |
+| 3 | Staff login with Supabase Auth | `/login` | Working | Email/password, role-based redirect |
 | 4 | Protected route enforcement | All dashboard routes | Working | Redirects to login |
 | 5 | Staff dashboard — Today's appointments | `/branch-staff-dashboard` | Working | Filters, search, status legend |
 | 6 | Staff — Therapist availability panel | `/branch-staff-dashboard` | Working | Real-time availability with specialties |
@@ -107,14 +107,14 @@ BooX is a well-built spa booking platform with a clean UI, solid multi-step book
 - Footer with contact info and help section
 
 **Issues found**:
-- **[Major]** "Find Existing Booking" / "Manage Booking" header link navigates to `/staff-login-authentication` — a customer should not be sent to the staff login. This needs a customer-facing booking lookup page.
+- **[Major]** "Find Existing Booking" / "Manage Booking" header link navigates to `/login` — a customer should not be sent to the staff login. This needs a customer-facing booking lookup page.
 - **[Minor]** Header nav shows "(555) SPA-BOOK" — placeholder phone number instead of real Nepal number
 
 **Mobile**: No horizontal overflow. Cards stack vertically. Fully responsive.
 
 ---
 
-### Staff Login Page — `/staff-login-authentication`
+### Staff Login Page — `/login`
 
 **Load Time**: 553ms | **Status**: 200 | **Console Errors**: 0 | **Network Errors**: 0
 
@@ -346,10 +346,10 @@ All pages load well within acceptable limits:
 
 ### High Priority
 
-2. **Fix "Find Existing Booking" routing** — The "Manage Booking" link in the customer header navigates to `/staff-login-authentication`. Customers should either see a booking lookup page (enter booking number + phone) or this link should be removed from the customer-facing header.
+2. **Fix "Find Existing Booking" routing** — The "Manage Booking" link in the customer header navigates to `/login`. Customers should either see a booking lookup page (enter booking number + phone) or this link should be removed from the customer-facing header.
 
 3. **Add ARIA labels to form inputs** — Add `aria-label` attributes to all unlabeled inputs:
-   - Login page: email input, password input (`src/pages/staff-login-authentication/components/LoginForm.jsx`)
+   - Login page: email input, password input (`src/pages/login/components/LoginForm.jsx`)
    - Staff dashboard: search input, 4 filter selects (`src/pages/branch-staff-dashboard/index.jsx`)
    - Manager dashboard: period select
 

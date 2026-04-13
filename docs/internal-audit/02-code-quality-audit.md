@@ -8,7 +8,7 @@
 
 ### 1. Demo Credentials Exposed in Production UI
 
-**File:** `src/pages/staff-login-authentication/components/LoginForm.jsx:248-263`
+**File:** `src/pages/login/components/LoginForm.jsx:248-263`
 **Severity:** Critical
 **Category:** Security
 

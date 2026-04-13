@@ -28,9 +28,9 @@ Each story follows this format:
 | Role | Description | Login Required |
 |------|-------------|----------------|
 | **Customer** | Public user booking a spa service | No |
-| **Staff** | Branch front-desk operator | Yes — `/staff-login-authentication` |
-| **Manager** | Branch manager with oversight & closing authority | Yes — `/staff-login-authentication` |
-| **Admin** | System administrator, multi-branch access | Yes — `/staff-login-authentication` |
+| **Staff** | Branch front-desk operator | Yes — `/login` |
+| **Manager** | Branch manager with oversight & closing authority | Yes — `/login` |
+| **Admin** | System administrator, multi-branch access | Yes — `/login` |
 
 ---
 
@@ -39,7 +39,7 @@ Each story follows this format:
 | Screen | Route | Access |
 |--------|-------|--------|
 | Customer Booking Flow | `/` or `/customer-booking-flow` | Public |
-| Staff Login | `/staff-login-authentication` | Public |
+| Staff Login | `/login` | Public |
 | Staff Dashboard | `/branch-staff-dashboard` | Staff, Manager, Admin |
 | Manager Dashboard | `/branch-manager-dashboard` | Manager, Admin |
 | Booking Details Modal | `/booking-details-assignment-modal` | Staff, Manager, Admin |

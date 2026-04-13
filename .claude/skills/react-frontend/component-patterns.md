@@ -95,7 +95,7 @@ const FeatureList = ({ data, loading, onAction }) => {
 
 ## Existing Feature Modules
 
-### staff-login-authentication (3 components)
+### login (3 components)
 - `LoginForm.jsx` — Supabase auth, password strength, auto-redirect
 - `SecurityHeader.jsx` — visual trust element
 - `TrustSignals.jsx` — security badges

@@ -1,7 +1,7 @@
 # 02 — Authentication & Access Control
 
 > **Module:** Role & Permission Control (H)
-> **Primary Screen:** `/staff-login-authentication`
+> **Primary Screen:** `/login`
 > **Roles:** Staff, Manager, Admin
 
 ---
@@ -12,7 +12,7 @@
 **I want to** log in with my email and password,
 **so that** I can access the branch operations system.
 
-**Screen:** `/staff-login-authentication`
+**Screen:** `/login`
 
 **Acceptance Criteria:**
 - [ ] Email and password fields with validation
@@ -59,7 +59,7 @@
 **Screen:** All protected routes
 
 **Acceptance Criteria:**
-- [ ] Unauthenticated users redirected to `/staff-login-authentication`
+- [ ] Unauthenticated users redirected to `/login`
 - [ ] Staff cannot access `/branch-manager-dashboard`
 - [ ] Manager and Admin can access all staff routes
 - [ ] Admin can access all routes
@@ -82,7 +82,7 @@
 **Acceptance Criteria:**
 - [ ] Logout button visible in sidebar/header
 - [ ] Clicking logout clears the session
-- [ ] Redirects to `/staff-login-authentication`
+- [ ] Redirects to `/login`
 - [ ] Subsequent navigation to protected routes requires re-login
 
 **Priority:** P0

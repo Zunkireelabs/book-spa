@@ -5,7 +5,7 @@ import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
 import { TenantProvider } from "contexts/TenantContext";
 import CustomerBookingFlow from "pages/customer-booking-flow";
-import StaffLoginAuthentication from "pages/staff-login-authentication";
+import StaffLoginAuthentication from "pages/login";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingManagementPortal from "pages/booking-management-portal";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
@@ -45,7 +45,7 @@ const AppRoutes = () => {
         <Route path="/" element={<ExternalRedirect to="https://www.zunkireelabs.com/products/ai-booking-engine/" />} />
 
         {/* Staff authentication */}
-        <Route path="/staff-login-authentication" element={<StaffLoginAuthentication />} />
+        <Route path="/login" element={<StaffLoginAuthentication />} />
 
         {/* Tenant-specific customer booking routes */}
         <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
