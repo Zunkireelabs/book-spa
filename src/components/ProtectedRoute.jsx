@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 const LoadingScreen = () => (
@@ -29,21 +29,48 @@ const LoadingScreen = () => (
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, profile, loading } = useAuth();
+  const { orgSlug: urlOrgSlug } = useParams();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
+  // Not authenticated - redirect to login
   if (!user) {
+    // If we have an org slug in the URL, redirect to that org's login
+    if (urlOrgSlug) {
+      return <Navigate to={`/${urlOrgSlug}/login`} replace />;
+    }
     return <Navigate to="/login" replace />;
   }
 
+  // No profile loaded - something went wrong
   if (!profile) {
+    if (urlOrgSlug) {
+      return <Navigate to={`/${urlOrgSlug}/login`} replace />;
+    }
     return <Navigate to="/login" replace />;
   }
 
+  // Check role authorization
   if (allowedRoles && !allowedRoles.includes(profile.role)) {
+    // User doesn't have the required role
+    // Redirect to their appropriate dashboard based on their actual role
+    const userOrgSlug = profile?.organizations?.slug;
+    if (userOrgSlug) {
+      return <Navigate to={`/${userOrgSlug}/dashboard`} replace />;
+    }
     return <Navigate to="/login" replace />;
+  }
+
+  // If URL has an org slug, validate it matches the user's org
+  if (urlOrgSlug) {
+    const userOrgSlug = profile?.organizations?.slug;
+
+    if (userOrgSlug && urlOrgSlug !== userOrgSlug) {
+      // URL org doesn't match user's org - redirect to user's actual org
+      return <Navigate to={`/${userOrgSlug}/dashboard`} replace />;
+    }
   }
 
   return children;

@@ -16,7 +16,7 @@ import { transformBooking, toDbStatus } from '../../services/bookingTransformers
 const BookingDetailsAssignmentModal = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { bookingId: paramBookingId } = useParams();
+  const { bookingId: paramBookingId, orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
   const { branchId } = useBranch();
   const userRole = profile?.role || 'staff';
@@ -83,13 +83,21 @@ const BookingDetailsAssignmentModal = () => {
     if (from) {
       navigate(from);
     } else {
-      // Role-aware fallback: managers/admins go to manager dashboard, staff to staff dashboard
-      const fallback = ['manager', 'admin'].includes(userRole)
-        ? '/branch-manager-dashboard'
-        : '/branch-staff-dashboard';
-      navigate(fallback);
+      // Get org slug from URL or profile
+      const orgSlug = urlOrgSlug || profile?.organizations?.slug;
+
+      // Use org-scoped URL if available, otherwise fall back to legacy routes
+      if (orgSlug) {
+        navigate(`/${orgSlug}/dashboard`);
+      } else {
+        // Legacy fallback
+        const fallback = ['manager', 'admin'].includes(userRole)
+          ? '/branch-manager-dashboard'
+          : '/branch-staff-dashboard';
+        navigate(fallback);
+      }
     }
-  }, [location.state?.from, navigate, userRole]);
+  }, [location.state?.from, navigate, userRole, urlOrgSlug, profile?.organizations?.slug]);
 
   const showActionError = (msg) => {
     setActionError(msg);

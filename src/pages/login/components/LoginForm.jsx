@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 import { Checkbox } from '../../../components/ui/Checkbox';
@@ -8,6 +8,7 @@ import { useAuth, getDashboardPath } from '../../../contexts/AuthContext';
 
 const LoginForm = () => {
   const navigate = useNavigate();
+  const { orgSlug: urlOrgSlug } = useParams();
   const { signIn, user, profile } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
@@ -21,7 +22,8 @@ const LoginForm = () => {
   // Redirect if already authenticated
   useEffect(() => {
     if (user && profile) {
-      navigate(getDashboardPath(profile.role), { replace: true });
+      const userOrgSlug = profile?.organizations?.slug;
+      navigate(getDashboardPath(profile.role, userOrgSlug), { replace: true });
     }
   }, [user, profile, navigate]);
 
@@ -71,7 +73,18 @@ const LoginForm = () => {
       const result = await signIn(formData.email, formData.password);
       // signIn returns profile — navigate directly
       if (result.profile) {
-        navigate(getDashboardPath(result.profile.role), { replace: true });
+        const userOrgSlug = result.profile?.organizations?.slug;
+
+        // If URL has an org slug and it doesn't match user's org, show error
+        // (but still redirect to the correct org)
+        if (urlOrgSlug && userOrgSlug && urlOrgSlug !== userOrgSlug) {
+          // User logged into wrong org page - redirect to their actual org
+          navigate(getDashboardPath(result.profile.role, userOrgSlug), { replace: true });
+          return;
+        }
+
+        // Navigate to org-scoped dashboard
+        navigate(getDashboardPath(result.profile.role, userOrgSlug), { replace: true });
         return;
       }
       // Auth succeeded but no staff profile found

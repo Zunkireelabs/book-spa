@@ -1,10 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import { useAuth } from '../../../contexts/AuthContext';
 
 const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'dashboard', onViewChange }) => {
+  const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
+
+  // Get org slug from URL or profile
+  const orgSlug = urlOrgSlug || profile?.organizations?.slug;
+  const basePath = orgSlug ? `/${orgSlug}/dashboard` : '/branch-staff-dashboard';
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -47,7 +52,7 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
         <div className="flex items-center justify-between h-16">
           {/* Logo & Branch Info */}
           <div className="flex items-center space-x-4">
-            <Link to="/branch-staff-dashboard" className="flex items-center space-x-2">
+            <Link to={basePath} className="flex items-center space-x-2">
               <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
                 <svg 
                   width="24" 
