@@ -187,14 +187,16 @@ const BookingActionModal = ({
             </button>
           </div>
 
-          {/* Tabs - Horizontal scroll on mobile */}
+          {/* Tabs - Horizontal scroll on mobile with padding for last item visibility */}
           <div className="border-b border-border flex-shrink-0">
-            <nav className="flex overflow-x-auto scrollbar-hide px-4 sm:px-6 gap-1 sm:gap-6">
-              {tabs.map((tab) => (
+            <nav className="flex overflow-x-auto scrollbar-hide pl-4 sm:pl-6 gap-1 sm:gap-6">
+              {tabs.map((tab, index) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
+                    index === tabs.length - 1 ? 'mr-4 sm:mr-6' : ''
+                  } ${
                     activeTab === tab.id
                       ? 'border-primary text-primary bg-primary/5 sm:bg-transparent rounded-t-lg sm:rounded-none'
                       : 'border-transparent text-text-secondary hover:text-text-primary'
@@ -209,8 +211,8 @@ const BookingActionModal = ({
             </nav>
           </div>
 
-          {/* Content - Scrollable area takes remaining space */}
-          <div className="p-4 sm:p-6 overflow-y-auto flex-1">
+          {/* Content - Scrollable area takes remaining space, extra bottom padding on mobile for bottom nav */}
+          <div className="p-4 sm:p-6 pb-24 sm:pb-6 overflow-y-auto flex-1">
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className="space-y-4 sm:space-y-6">
@@ -590,8 +592,8 @@ const BookingActionModal = ({
             )}
           </div>
 
-          {/* Footer - Responsive */}
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 p-4 sm:p-6 border-t border-border flex-shrink-0">
+          {/* Footer - Responsive with safe area padding for iOS */}
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
             <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
               Close
             </Button>
