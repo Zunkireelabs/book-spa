@@ -302,6 +302,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [viewMode, setViewMode] = useState('day'); // day | 4day
   // Default to staff view if rooms are disabled
   const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
+  const [freezeUnassigned, setFreezeUnassigned] = useState(true);
 
   // Calendar data state
   const [calendarData, setCalendarData] = useState(null);
@@ -1050,6 +1051,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                   columnMode={columnMode}
                   activeDragId={activeDragId}
                   gridRef={gridRef}
+                  freezeUnassigned={freezeUnassigned}
+                  onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">

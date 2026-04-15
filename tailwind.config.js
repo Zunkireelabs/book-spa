@@ -82,6 +82,7 @@ module.exports = {
           'touch': '44px',
         },
         zIndex: {
+          'sticky-filter': '50',
           'header': '100',
           'customer-header': '100',
           'sidebar': '200',
