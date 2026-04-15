@@ -2,6 +2,15 @@ import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
+// Static status styles to avoid Tailwind dynamic class purging
+const STATUS_STYLES = {
+  available: { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: 'CheckCircle' },
+  busy: { bg: 'bg-red-100', text: 'text-red-700', icon: 'Clock' },
+  break: { bg: 'bg-amber-100', text: 'text-amber-700', icon: 'Coffee' },
+  upcoming: { bg: 'bg-blue-100', text: 'text-blue-700', icon: 'Calendar' },
+  'off-duty': { bg: 'bg-gray-100', text: 'text-gray-700', icon: 'Moon' },
+};
+
 const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignTherapist }) => {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState('current');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -28,28 +37,6 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isDropdownOpen]);
-
-  const getAvailabilityColor = (status) => {
-    const colors = {
-      available: 'emerald',
-      busy: 'red',
-      break: 'amber',
-      upcoming: 'blue',
-      'off-duty': 'gray'
-    };
-    return colors[status] || 'gray';
-  };
-
-  const getAvailabilityIcon = (status) => {
-    const icons = {
-      available: 'CheckCircle',
-      busy: 'Clock',
-      break: 'Coffee',
-      upcoming: 'Calendar',
-      'off-duty': 'Moon'
-    };
-    return icons[status] || 'Circle';
-  };
 
   const formatTime = (timeString) => {
     if (!timeString) return '';
@@ -140,7 +127,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
               <Icon name="ChevronDown" size={12} className={`text-gray-400 flex-shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
             {isDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+              <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1">
                 {timeSlots.map((slot) => (
                   <button
                     key={slot.value}
@@ -149,7 +136,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
                       setSelectedTimeSlot(slot.value);
                       setIsDropdownOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 min-h-[36px] ${
                       selectedTimeSlot === slot.value ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
                     }`}
                   >
@@ -163,8 +150,7 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
 
         <div className="divide-y divide-gray-100">
           {therapists.map((therapist) => {
-            const color = getAvailabilityColor(therapist.status);
-            const icon = getAvailabilityIcon(therapist.status);
+            const statusStyle = STATUS_STYLES[therapist.status] || STATUS_STYLES['off-duty'];
 
             return (
               <div
@@ -191,8 +177,8 @@ const TherapistAvailability = ({ therapists, pendingBookings = [], onAssignThera
                       </div>
                     </div>
                   </div>
-                  <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-${color}-100 text-${color}-700`}>
-                    <Icon name={icon} size={10} />
+                  <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}>
+                    <Icon name={statusStyle.icon} size={10} />
                     {therapist.status.replace('-', ' ')}
                   </span>
                 </div>

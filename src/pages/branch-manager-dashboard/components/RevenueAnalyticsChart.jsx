@@ -137,52 +137,55 @@ const RevenueAnalyticsChart = ({ branchId }) => {
     switch (activeTab) {
       case 'revenue':
         return (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {revenueData.length === 0 ? (
-              <div className="h-64 flex items-center justify-center">
-                <p className="text-sm text-gray-400">No paid bookings yet today</p>
+              <div className="h-48 sm:h-64 flex items-center justify-center">
+                <p className="text-xs sm:text-sm text-gray-400">No paid bookings yet today</p>
               </div>
             ) : (
-              <div className="h-64 w-full">
+              <div className="h-48 sm:h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={revenueData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <LineChart data={revenueData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="time"
-                      tick={{ fontSize: 12, fill: '#6b7280' }}
+                      tick={{ fontSize: 10, fill: '#6b7280' }}
                     />
                     <YAxis
-                      tick={{ fontSize: 12, fill: '#6b7280' }}
+                      tick={{ fontSize: 10, fill: '#6b7280' }}
+                      width={40}
                     />
                     <Tooltip content={<CustomTooltip />} />
                     <Line
                       type="monotone"
                       dataKey="revenue"
                       stroke="#3b82f6"
-                      strokeWidth={3}
-                      dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
+                      strokeWidth={2}
+                      dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
                       name="Revenue (NPR)"
                     />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             )}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-lg font-semibold text-gray-900">
-                  NPR {totalRevenue.toLocaleString('en-IN')}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+              <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm sm:text-lg font-semibold text-gray-900 truncate">
+                  <span className="sm:hidden">NPR {(totalRevenue / 1000).toFixed(0)}K</span>
+                  <span className="hidden sm:inline">NPR {totalRevenue.toLocaleString('en-IN')}</span>
                 </div>
-                <div className="text-xs text-gray-500">Current Revenue</div>
+                <div className="text-[10px] sm:text-xs text-gray-500">Revenue</div>
               </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-lg font-semibold text-gray-900">{paidCount}</div>
-                <div className="text-xs text-gray-500">Paid Bookings</div>
+              <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm sm:text-lg font-semibold text-gray-900">{paidCount}</div>
+                <div className="text-[10px] sm:text-xs text-gray-500">Paid</div>
               </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-lg font-semibold text-gray-900">
-                  NPR {avgPerBooking.toLocaleString('en-IN')}
+              <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm sm:text-lg font-semibold text-gray-900 truncate">
+                  <span className="sm:hidden">{(avgPerBooking / 1000).toFixed(1)}K</span>
+                  <span className="hidden sm:inline">NPR {avgPerBooking.toLocaleString('en-IN')}</span>
                 </div>
-                <div className="text-xs text-gray-500">Avg per Booking</div>
+                <div className="text-[10px] sm:text-xs text-gray-500">Avg</div>
               </div>
             </div>
           </div>
@@ -190,22 +193,22 @@ const RevenueAnalyticsChart = ({ branchId }) => {
 
       case 'services':
         return (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {serviceData.length === 0 ? (
-              <div className="h-64 flex items-center justify-center">
-                <p className="text-sm text-gray-400">No bookings yet today</p>
+              <div className="h-48 sm:h-64 flex items-center justify-center">
+                <p className="text-xs sm:text-sm text-gray-400">No bookings yet today</p>
               </div>
             ) : (
               <>
-                <div className="h-64 w-full flex items-center justify-center">
+                <div className="h-48 sm:h-64 w-full flex items-center justify-center">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={serviceData}
                         cx="50%"
                         cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
+                        innerRadius={45}
+                        outerRadius={75}
                         paddingAngle={5}
                         dataKey="value"
                       >
@@ -217,24 +220,21 @@ const RevenueAnalyticsChart = ({ branchId }) => {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1.5 sm:space-y-2">
                   {serviceData.map((service, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                      <div className="flex items-center space-x-3">
+                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg gap-2">
+                      <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
                         <div
-                          className="w-3 h-3 rounded-full"
+                          className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full flex-shrink-0"
                           style={{ backgroundColor: service.color }}
-                        ></div>
-                        <span className="text-sm font-medium text-gray-900">
+                        />
+                        <span className="text-xs sm:text-sm font-medium text-gray-900 truncate">
                           {service.name}
                         </span>
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm font-medium text-gray-900">
-                          {service.value}% ({service.count})
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          NPR {service.revenue.toLocaleString('en-IN')}
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-xs sm:text-sm font-medium text-gray-900">
+                          {service.value}% <span className="text-gray-500">({service.count})</span>
                         </div>
                       </div>
                     </div>
@@ -251,17 +251,17 @@ const RevenueAnalyticsChart = ({ branchId }) => {
   };
 
   return (
-    <div className="bg-white rounded-lg p-6 border border-gray-200">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
-            <Icon name="BarChart3" size={20} className="text-purple-600" />
+    <div className="bg-white rounded-lg p-4 sm:p-6 border border-gray-200">
+      <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
+        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Icon name="BarChart3" size={18} className="sm:w-5 sm:h-5 text-purple-600" />
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+          <div className="min-w-0">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
               Revenue Analytics
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500 hidden sm:block">
               Today's business insights
             </p>
           </div>
@@ -269,18 +269,18 @@ const RevenueAnalyticsChart = ({ branchId }) => {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-1 mb-6 bg-gray-100 rounded-lg p-1">
+      <div className="flex space-x-1 mb-4 sm:mb-6 bg-gray-100 rounded-lg p-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center justify-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-initial min-h-[36px] ${
               activeTab === tab.id
                 ? 'bg-white text-gray-900 shadow-sm'
                 : 'text-gray-500 hover:text-gray-900'
             }`}
           >
-            <Icon name={tab.icon} size={16} />
+            <Icon name={tab.icon} size={14} className="sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">{tab.label}</span>
           </button>
         ))}

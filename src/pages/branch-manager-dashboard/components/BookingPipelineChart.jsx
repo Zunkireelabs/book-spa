@@ -84,21 +84,21 @@ const BookingPipelineChart = ({ branchId }) => {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg p-6 border border-gray-200">
-        <div className="flex items-center space-x-3 mb-6">
-          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-            <Icon name="TrendingUp" size={20} className="text-blue-600" />
+      <div className="bg-white rounded-lg p-4 sm:p-6 border border-gray-200">
+        <div className="flex items-center space-x-3 mb-4 sm:mb-6">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Icon name="TrendingUp" size={18} className="sm:w-5 sm:h-5 text-blue-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">
               Booking Pipeline
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500">
               Loading...
             </p>
           </div>
         </div>
-        <div className="h-48 flex items-center justify-center">
+        <div className="h-40 sm:h-48 flex items-center justify-center">
           <div className="animate-pulse space-y-3 w-full">
             <div className="h-4 bg-gray-100 rounded w-full" />
             <div className="h-4 bg-gray-100 rounded w-3/4" />
@@ -130,34 +130,34 @@ const BookingPipelineChart = ({ branchId }) => {
   ];
 
   return (
-    <div className="bg-white rounded-lg p-6 border border-gray-200">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-            <Icon name="TrendingUp" size={20} className="text-blue-600" />
+    <div className="bg-white rounded-lg p-4 sm:p-6 border border-gray-200">
+      <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
+        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Icon name="TrendingUp" size={18} className="sm:w-5 sm:h-5 text-blue-600" />
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+          <div className="min-w-0">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
               Booking Pipeline
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500 hidden sm:block">
               Cumulative bookings for today
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
-          <button className="px-3 py-1 bg-blue-50 text-blue-600 rounded text-xs font-medium">
+        <div className="flex items-center flex-shrink-0">
+          <button className="px-2.5 sm:px-3 py-1 bg-blue-50 text-blue-600 rounded text-xs font-medium">
             Today
           </button>
         </div>
       </div>
 
       {pipelineData.length === 0 ? (
-        <div className="h-48 flex items-center justify-center mb-6">
-          <p className="text-sm text-gray-400">No bookings yet today</p>
+        <div className="h-40 sm:h-48 flex items-center justify-center mb-4 sm:mb-6">
+          <p className="text-xs sm:text-sm text-gray-400">No bookings yet today</p>
         </div>
       ) : (
-        <div className="h-48 w-full mb-6">
+        <div className="h-40 sm:h-48 w-full mb-4 sm:mb-6">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={pipelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <defs>
@@ -200,13 +200,13 @@ const BookingPipelineChart = ({ branchId }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         {conversionStats.map((stat, index) => (
-          <div key={index} className="text-center p-3 bg-gray-50 rounded-lg">
-            <div className="text-lg font-semibold text-gray-900">
+          <div key={index} className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
+            <div className="text-base sm:text-lg font-semibold text-gray-900">
               {stat.value}
             </div>
-            <div className="text-xs text-gray-500 mb-1">
+            <div className="text-[10px] sm:text-xs text-gray-500">
               {stat.label}
             </div>
           </div>
