@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import Button from './Button';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
@@ -153,7 +154,8 @@ const BookingActionModal = ({
   const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
   const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
 
-  return (
+  // Use Portal to render modal at document body level, escaping any stacking context
+  return createPortal(
     <>
       {/* Overlay */}
       <div
@@ -627,7 +629,8 @@ const BookingActionModal = ({
           isSubmitting={paymentSubmitting}
         />
       )}
-    </>
+    </>,
+    document.body
   );
 };
 
