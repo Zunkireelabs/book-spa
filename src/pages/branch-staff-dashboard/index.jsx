@@ -506,20 +506,22 @@ const BranchStaffDashboard = () => {
           </div>
         </header>
 
-        {/* Toast notifications */}
+        {/* Toast notifications - Responsive positioning */}
         {actionError && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-error text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
-            <span className="font-body font-body-medium text-sm">{actionError}</span>
-            <button onClick={() => setActionError(null)} className="ml-2 hover:opacity-80 text-white">✕</button>
+          <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-error text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
+            <span className="font-body font-body-medium text-sm flex-1">{actionError}</span>
+            <button onClick={() => setActionError(null)} className="ml-2 hover:opacity-80 text-white p-1">
+              <Icon name="X" size={16} />
+            </button>
           </div>
         )}
         {actionSuccess && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-toast bg-success text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
+          <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2">
             <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
           </div>
         )}
         {newBookingNotification && (
-          <div className="fixed top-20 right-6 z-toast bg-primary text-white px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in max-w-sm">
+          <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in sm:max-w-sm">
             <div className="flex items-start space-x-3">
               <div className="flex-shrink-0 mt-0.5">
                 <Icon name="CalendarPlus" size={20} />
@@ -536,13 +538,13 @@ const BranchStaffDashboard = () => {
               <div className="flex items-center space-x-2 flex-shrink-0">
                 <button
                   onClick={() => handleViewNewBooking(newBookingNotification.date)}
-                  className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-body font-body-medium transition-colors"
+                  className="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 rounded text-xs font-body font-body-medium transition-colors min-h-[32px]"
                 >
                   View
                 </button>
                 <button
                   onClick={() => setNewBookingNotification(null)}
-                  className="hover:opacity-80 text-white/80 hover:text-white"
+                  className="hover:opacity-80 text-white/80 hover:text-white p-1 min-h-[32px]"
                 >
                   <Icon name="X" size={16} />
                 </button>
@@ -552,27 +554,27 @@ const BranchStaffDashboard = () => {
         )}
 
         {/* Main Content Area - Consistent with Admin */}
-        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1] min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-[#f1f1f1] min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
           {viewMode === 'dashboard' ? (
-            <div className="flex flex-col gap-3 min-h-[calc(100vh-120px)]">
+            <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
               {/* Overview Stats */}
-              <h2 className="text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-xs font-medium text-gray-500 mb-1">Confirmed</div>
-                  <div className="text-2xl font-semibold text-emerald-600">{bookingCounts.confirmed}</div>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+                <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">Confirmed</div>
+                  <div className="text-xl sm:text-2xl font-semibold text-emerald-600">{bookingCounts.confirmed}</div>
                 </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-xs font-medium text-gray-500 mb-1">Pending</div>
-                  <div className="text-2xl font-semibold text-amber-500">{bookingCounts.pending}</div>
+                <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">Pending</div>
+                  <div className="text-xl sm:text-2xl font-semibold text-amber-500">{bookingCounts.pending}</div>
                 </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-xs font-medium text-gray-500 mb-1">In Progress</div>
-                  <div className="text-2xl font-semibold text-blue-600">{bookingCounts.inProgress}</div>
+                <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">In Progress</div>
+                  <div className="text-xl sm:text-2xl font-semibold text-blue-600">{bookingCounts.inProgress}</div>
                 </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-xs font-medium text-gray-500 mb-1">Completed</div>
-                  <div className="text-2xl font-semibold text-gray-400">{bookingCounts.completed}</div>
+                <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">Completed</div>
+                  <div className="text-xl sm:text-2xl font-semibold text-gray-400">{bookingCounts.completed}</div>
                 </div>
               </div>
 
@@ -582,35 +584,38 @@ const BranchStaffDashboard = () => {
                 bookingCounts={bookingCounts}
               />
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1">
-              <div className="lg:col-span-9">
-                {loading ? (
-                  <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-                    <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-                    <p className="text-sm text-gray-500">Loading bookings...</p>
-                  </div>
-                ) : (
-                  <BookingsList
-                    bookings={filteredBookings}
-                    therapists={therapists}
-                    onStatusUpdate={handleStatusUpdate}
-                    onAssignTherapist={handleAssignTherapist}
-                    onRecordPayment={handleRecordPayment}
-                    onApplyDiscount={handleApplyDiscount}
-                    userRole={profile?.role || 'staff'}
-                    onRefresh={loadData}
-                    dateRange={filters.dateRange}
-                  />
-                )}
-              </div>
+              {/* Main Grid - Responsive: stack on mobile, side-by-side on lg */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 sm:gap-3 flex-1">
+                {/* Bookings List - Full width on mobile/tablet, 9 cols on desktop */}
+                <div className="lg:col-span-9 order-1">
+                  {loading ? (
+                    <div className="bg-white rounded-lg border border-gray-200 p-8 sm:p-12 text-center">
+                      <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+                      <p className="text-sm text-gray-500">Loading bookings...</p>
+                    </div>
+                  ) : (
+                    <BookingsList
+                      bookings={filteredBookings}
+                      therapists={therapists}
+                      onStatusUpdate={handleStatusUpdate}
+                      onAssignTherapist={handleAssignTherapist}
+                      onRecordPayment={handleRecordPayment}
+                      onApplyDiscount={handleApplyDiscount}
+                      userRole={profile?.role || 'staff'}
+                      onRefresh={loadData}
+                      dateRange={filters.dateRange}
+                    />
+                  )}
+                </div>
 
-              <div className="lg:col-span-3">
-                <TherapistAvailability
-                  therapists={therapists}
-                  pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
-                  onAssignTherapist={handleAssignTherapist}
-                />
-              </div>
+                {/* Therapist Panel - Below bookings on mobile, sidebar on desktop */}
+                <div className="lg:col-span-3 order-2">
+                  <TherapistAvailability
+                    therapists={therapists}
+                    pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
+                    onAssignTherapist={handleAssignTherapist}
+                  />
+                </div>
               </div>
             </div>
           ) : viewMode === 'bookings' ? (
