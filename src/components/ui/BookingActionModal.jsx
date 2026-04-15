@@ -164,8 +164,8 @@ const BookingActionModal = ({
         aria-modal="true"
         aria-labelledby="booking-modal-title"
       >
-        {/* Modal Container - Full height on mobile, centered card on desktop */}
-        <div className="bg-surface w-full sm:max-w-2xl h-[95vh] sm:h-auto sm:max-h-[90vh] rounded-t-2xl sm:rounded-spa-lg spa-shadow-modal overflow-hidden animate-fade-in flex flex-col">
+        {/* Modal Container - Bottom sheet on mobile (85vh to clear iOS notch), centered card on desktop */}
+        <div className="bg-surface w-full sm:max-w-2xl h-[85vh] sm:h-auto sm:max-h-[90vh] rounded-t-2xl sm:rounded-spa-lg spa-shadow-modal overflow-hidden animate-fade-in flex flex-col">
           {/* Header - Responsive padding */}
           <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border flex-shrink-0">
             <div className="flex items-center space-x-3 min-w-0">
