@@ -333,7 +333,7 @@ const CustomerBookingFlow = () => {
               </p>
             )}
           </div>
-        )} (feat: Fix now-indicator line bleeding and calendar improvements)
+        )}
 
         {/* Step Content */}
         <div className="mb-8">
