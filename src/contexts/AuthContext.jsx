@@ -11,15 +11,27 @@ export const useAuth = () => {
   return context;
 };
 
-export const getDashboardPath = (role) => {
-  switch (role) {
-    case 'manager':
-    case 'admin':
-      return '/branch-manager-dashboard';
-    case 'staff':
-    default:
-      return '/branch-staff-dashboard';
+/**
+ * Get the dashboard path for a user based on their role and org.
+ * @param {string} role - User's role (staff, manager, admin)
+ * @param {string} orgSlug - Organization slug (e.g., 'nuad-thai-spa')
+ * @returns {string} - Dashboard path
+ */
+export const getDashboardPath = (role, orgSlug) => {
+  // If no orgSlug provided, fall back to legacy path (for backwards compatibility during transition)
+  if (!orgSlug) {
+    switch (role) {
+      case 'manager':
+      case 'admin':
+        return '/branch-manager-dashboard';
+      case 'staff':
+      default:
+        return '/branch-staff-dashboard';
+    }
   }
+
+  // New org-scoped path - role determines the view, not the URL
+  return `/${orgSlug}/dashboard`;
 };
 
 /**
@@ -36,7 +48,7 @@ async function fetchProfile(userId, accessToken) {
   try {
     if (accessToken) {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/users`
-        + `?select=*,branches(name),organizations(name,code,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
+        + `?select=*,branches(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
       const res = await fetch(url, {
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -55,7 +67,7 @@ async function fetchProfile(userId, accessToken) {
     // Fallback: use supabase client (session from localStorage)
     const { data, error } = await supabase
       .from('users')
-      .select('*, branches(name), organizations(name, code, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
+      .select('*, branches(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
       .eq('id', userId)
       .single();
 

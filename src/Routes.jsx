@@ -1,15 +1,17 @@
 import React, { useEffect } from "react";
-import { BrowserRouter, Routes as RouterRoutes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes as RouterRoutes, Route, useLocation, Navigate } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
 import { TenantProvider } from "contexts/TenantContext";
+import { useAuth } from "contexts/AuthContext";
 import CustomerBookingFlow from "pages/customer-booking-flow";
 import StaffLoginAuthentication from "pages/login";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingManagementPortal from "pages/booking-management-portal";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
+import OrgFinder from "pages/org-finder";
 import NotFound from "pages/NotFound";
 
 // External redirect component for root URL
@@ -35,6 +37,68 @@ const TenantWrapper = ({ children }) => (
   </TenantProvider>
 );
 
+// Loading component
+const LoadingScreen = () => (
+  <div className="min-h-screen bg-background flex items-center justify-center">
+    <div className="flex flex-col items-center space-y-4">
+      <div className="w-12 h-12 bg-primary rounded-spa-lg flex items-center justify-center animate-pulse">
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          className="text-primary-foreground"
+        >
+          <path
+            d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
+            fill="currentColor"
+          />
+          <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7" />
+        </svg>
+      </div>
+      <p className="font-body font-body-normal text-sm text-text-secondary">
+        Loading...
+      </p>
+    </div>
+  </div>
+);
+
+// Legacy dashboard redirect - redirects old URLs to org-scoped URLs
+const LegacyDashboardRedirect = () => {
+  const { user, profile, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  // Not logged in - redirect to org finder
+  if (!user || !profile) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Get org slug from profile
+  const orgSlug = profile?.organizations?.slug;
+  if (!orgSlug) {
+    // No org slug found - something is wrong, go to org finder
+    return <Navigate to="/login" replace />;
+  }
+
+  // Redirect to org-scoped dashboard
+  return <Navigate to={`/${orgSlug}/dashboard`} replace />;
+};
+
+// Unified Dashboard - renders appropriate dashboard based on role
+const UnifiedDashboard = () => {
+  const { profile } = useAuth();
+  const isManagerOrAdmin = ['manager', 'admin'].includes(profile?.role);
+
+  if (isManagerOrAdmin) {
+    return <BranchManagerDashboard />;
+  }
+
+  return <BranchStaffDashboard />;
+};
+
 const AppRoutes = () => {
   const location = useLocation();
   return (
@@ -44,45 +108,96 @@ const AppRoutes = () => {
         {/* Root redirects to Zunkireelabs product page */}
         <Route path="/" element={<ExternalRedirect to="https://www.zunkireelabs.com/products/ai-booking-engine/" />} />
 
-        {/* Staff authentication */}
-        <Route path="/login" element={<StaffLoginAuthentication />} />
+        {/* ==================== ORG-SCOPED STAFF ROUTES ==================== */}
 
-        {/* Tenant-specific customer booking routes */}
-        <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
+        {/* Org-scoped login */}
+        <Route path="/:orgSlug/login" element={
+          <TenantWrapper>
+            <StaffLoginAuthentication />
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped unified dashboard (role determines view) */}
+        <Route path="/:orgSlug/dashboard" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+              <UnifiedDashboard />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped booking details */}
+        <Route path="/:orgSlug/bookings/:bookingId" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+              <BookingDetailsAssignmentModal />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* ==================== LEGACY STAFF ROUTES (REDIRECTS) ==================== */}
+
+        {/* Legacy /login - shows org finder for non-logged-in, redirects logged-in users */}
+        <Route path="/login" element={<OrgFinder />} />
+
+        {/* Legacy staff dashboard - redirect to org-scoped URL */}
+        <Route path="/branch-staff-dashboard" element={<LegacyDashboardRedirect />} />
+
+        {/* Legacy manager dashboard - redirect to org-scoped URL */}
+        <Route path="/branch-manager-dashboard" element={<LegacyDashboardRedirect />} />
+
+        {/* Legacy booking details modal (no booking ID) - redirect to dashboard */}
+        <Route path="/booking-details-assignment-modal" element={<LegacyDashboardRedirect />} />
+
+        {/* Legacy booking details with ID - redirect to org-scoped URL */}
+        <Route path="/booking-details/:bookingId" element={<LegacyBookingRedirect />} />
+
+        {/* ==================== CUSTOMER-FACING ROUTES ==================== */}
+
+        {/* Customer booking flow */}
+        <Route path="/:orgSlug/book" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
         <Route path="/:orgSlug/manage" element={<TenantWrapper><BookingManagementPortal /></TenantWrapper>} />
 
-        {/* Legacy routes - redirect to default tenant for backwards compatibility */}
-        <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa" />} />
+        {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
+        <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
         <Route path="/booking-management-portal" element={<ExternalRedirect to="/nuad-thai-spa/manage" />} />
 
-        {/* Protected routes - staff, manager, admin */}
-        <Route path="/branch-staff-dashboard" element={
-          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
-            <BranchStaffDashboard />
-          </ProtectedRoute>
-        } />
-        <Route path="/booking-details-assignment-modal" element={
-          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
-            <BookingDetailsAssignmentModal />
-          </ProtectedRoute>
-        } />
-        <Route path="/booking-details/:bookingId" element={
-          <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
-            <BookingDetailsAssignmentModal />
-          </ProtectedRoute>
-        } />
+        {/* ==================== CATCH-ALL ==================== */}
 
-        {/* Protected routes - manager and admin only */}
-        <Route path="/branch-manager-dashboard" element={
-          <ProtectedRoute allowedRoles={['manager', 'admin']}>
-            <BranchManagerDashboard />
-          </ProtectedRoute>
-        } />
+        {/* Org slug without explicit path - treat as customer booking (existing behavior) */}
+        <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
 
         <Route path="*" element={<NotFound />} />
       </RouterRoutes>
       </ErrorBoundary>
   );
+};
+
+// Legacy booking redirect - redirects old /booking-details/:bookingId to org-scoped URL
+const LegacyBookingRedirect = () => {
+  const { user, profile, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  // Not logged in - redirect to org finder
+  if (!user || !profile) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Get org slug from profile
+  const orgSlug = profile?.organizations?.slug;
+  if (!orgSlug) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Extract booking ID from path
+  const bookingId = location.pathname.split('/').pop();
+
+  // Redirect to org-scoped booking details
+  return <Navigate to={`/${orgSlug}/bookings/${bookingId}`} replace />;
 };
 
 const Routes = () => (

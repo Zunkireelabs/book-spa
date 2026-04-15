@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
@@ -7,6 +7,7 @@ import { useIndustry } from '../../hooks/useIndustry';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
+  const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
   const { branchName: contextBranchName } = useBranch();
   const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
@@ -17,6 +18,12 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
   const isManagerOrAdmin = ['manager', 'admin'].includes(userRole);
+
+  // Get org slug from URL params or profile
+  const orgSlug = urlOrgSlug || profile?.organizations?.slug;
+
+  // Base path for navigation - uses org-scoped URL if available
+  const basePath = orgSlug ? `/${orgSlug}/dashboard` : (isManagerOrAdmin ? '/branch-manager-dashboard' : '/branch-staff-dashboard');
 
   const handleLogout = async () => {
     await signOut();
@@ -34,7 +41,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'dashboard',
       label: 'Dashboard',
       icon: 'LayoutDashboard',
-      path: isManagerOrAdmin ? '/branch-manager-dashboard' : '/branch-staff-dashboard',
+      path: basePath,
       roles: ['staff', 'manager', 'admin']
     },
     {
@@ -46,19 +53,19 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         {
           id: 'bookings',
           label: 'Bookings',
-          path: isManagerOrAdmin ? '/branch-manager-dashboard?view=bookings' : '/branch-staff-dashboard?view=bookings',
+          path: `${basePath}?view=bookings`,
           roles: ['staff', 'manager', 'admin']
         },
         {
           id: 'calendar',
           label: 'Calendar',
-          path: isManagerOrAdmin ? '/branch-manager-dashboard?view=calendar' : '/branch-staff-dashboard?view=calendar',
+          path: `${basePath}?view=calendar`,
           roles: ['staff', 'manager', 'admin']
         },
         {
           id: 'new-booking',
           label: 'New Booking',
-          path: isManagerOrAdmin ? '/branch-manager-dashboard?view=new-booking' : '/branch-staff-dashboard?view=new-booking',
+          path: `${basePath}?view=new-booking`,
           roles: ['staff', 'manager', 'admin']
         },
       ]
@@ -67,7 +74,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'customers',
       label: 'Customers',
       icon: 'Users',
-      path: '/branch-manager-dashboard?view=customers',
+      path: `${basePath}?view=customers`,
       roles: ['manager', 'admin']
     },
     {
@@ -79,13 +86,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         {
           id: 'reports',
           label: 'Reports',
-          path: '/branch-manager-dashboard?view=reports',
+          path: `${basePath}?view=reports`,
           roles: ['manager', 'admin']
         },
         {
           id: 'performance',
           label: 'Performance',
-          path: '/branch-manager-dashboard?view=performance',
+          path: `${basePath}?view=performance`,
           roles: ['manager', 'admin']
         },
       ]
@@ -99,13 +106,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         {
           id: 'therapists',
           label: staffLabelPlural,
-          path: '/branch-manager-dashboard?view=therapists',
+          path: `${basePath}?view=therapists`,
           roles: ['manager', 'admin']
         },
         {
           id: 'attendance',
           label: 'Attendance',
-          path: '/branch-manager-dashboard?view=attendance',
+          path: `${basePath}?view=attendance`,
           roles: ['manager', 'admin']
         },
       ]
@@ -120,25 +127,25 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         ...(enableRooms ? [{
           id: 'rooms',
           label: locationLabelPlural,
-          path: '/branch-manager-dashboard?view=rooms',
+          path: `${basePath}?view=rooms`,
           roles: ['manager', 'admin']
         }] : []),
         {
           id: 'services',
           label: 'Services',
-          path: '/branch-manager-dashboard?view=services',
+          path: `${basePath}?view=services`,
           roles: ['admin']
         },
         {
           id: 'categories',
           label: 'Categories',
-          path: '/branch-manager-dashboard?view=categories',
+          path: `${basePath}?view=categories`,
           roles: ['admin']
         },
         {
           id: 'audit',
           label: 'Audit Log',
-          path: '/branch-manager-dashboard?view=audit',
+          path: `${basePath}?view=audit`,
           roles: ['manager', 'admin']
         },
       ]
@@ -207,7 +214,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         {/* Header */}
         <div className="px-5 py-3 h-[52px] flex items-center justify-between">
           {!isCollapsed && (
-            <Link to="/branch-staff-dashboard" className="flex items-center gap-3">
+            <Link to={basePath} className="flex items-center gap-3">
               <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
                 <svg
                   width="18"

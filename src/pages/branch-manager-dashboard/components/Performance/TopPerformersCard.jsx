@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import { getTherapistPerformance } from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
 
 function getTier(score) {
   if (score >= 85) return { label: 'Top', color: 'bg-green-50 text-green-600' };
@@ -14,8 +15,14 @@ const RANK_COLORS = ['text-purple-600', 'text-gray-500', 'text-gray-400'];
 
 const TopPerformersCard = ({ branchId }) => {
   const navigate = useNavigate();
+  const { orgSlug: urlOrgSlug } = useParams();
+  const { profile } = useAuth();
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Get org slug from URL or profile
+  const orgSlug = urlOrgSlug || profile?.organizations?.slug;
+  const basePath = orgSlug ? `/${orgSlug}/dashboard` : '/branch-manager-dashboard';
 
   const loadData = useCallback(async () => {
     if (!branchId) return;
@@ -68,7 +75,7 @@ const TopPerformersCard = ({ branchId }) => {
           </div>
         </div>
         <button
-          onClick={() => navigate('/branch-manager-dashboard?view=performance')}
+          onClick={() => navigate(`${basePath}?view=performance`)}
           className="flex items-center space-x-2 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
         >
           <span className="text-sm font-medium">View All</span>
