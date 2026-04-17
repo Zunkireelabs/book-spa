@@ -19,6 +19,71 @@ function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// ── Overlap layout constants & helpers ─────────────────
+const MAX_VISIBLE_OVERLAP = 2;
+const OVERLAP_GAP = 2;       // px between side-by-side cards
+const OVERLAP_PADDING = 4;   // px from column edges
+
+/**
+ * Group overlapping bookings into clusters.
+ * Sweep algorithm: sort by startTime, extend running max endTime.
+ * Strict overlap (startTime < clusterEnd), back-to-back are separate clusters.
+ */
+function clusterOverlapping(bookings) {
+  const valid = bookings.filter(b => b.startTime && b.endTime);
+  if (valid.length === 0) return [];
+
+  const sorted = [...valid].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const clusters = [[sorted[0]]];
+  let clusterEnd = sorted[0].endTime;
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].startTime < clusterEnd) {
+      clusters[clusters.length - 1].push(sorted[i]);
+      if (sorted[i].endTime > clusterEnd) clusterEnd = sorted[i].endTime;
+    } else {
+      clusters.push([sorted[i]]);
+      clusterEnd = sorted[i].endTime;
+    }
+  }
+  return clusters;
+}
+
+/**
+ * Calculate positioning for cards within an overlap cluster.
+ * Returns { cards: [{left, width}|null], badge: {left, width, count}|null }
+ */
+function getOverlapLayout(clusterSize, columnWidth) {
+  if (clusterSize <= 1) {
+    return { cards: [null], badge: null };
+  }
+
+  const slots = clusterSize > MAX_VISIBLE_OVERLAP ? MAX_VISIBLE_OVERLAP + 1 : clusterSize;
+  const availableWidth = columnWidth - OVERLAP_PADDING * 2;
+  const totalGap = (slots - 1) * OVERLAP_GAP;
+  const slotWidth = Math.floor((availableWidth - totalGap) / slots);
+
+  const cards = [];
+  for (let i = 0; i < Math.min(clusterSize, MAX_VISIBLE_OVERLAP); i++) {
+    cards.push({
+      left: OVERLAP_PADDING + i * (slotWidth + OVERLAP_GAP),
+      width: slotWidth,
+    });
+  }
+
+  let badge = null;
+  if (clusterSize > MAX_VISIBLE_OVERLAP) {
+    const badgeIndex = MAX_VISIBLE_OVERLAP;
+    badge = {
+      left: OVERLAP_PADDING + badgeIndex * (slotWidth + OVERLAP_GAP),
+      width: slotWidth,
+      count: clusterSize - MAX_VISIBLE_OVERLAP,
+    };
+  }
+
+  return { cards, badge };
+}
+
 // Single droppable column component (replaces 144 tiny zones per column)
 // Note: This is a sibling to booking cards, not a parent, so pointerEvents doesn't block them
 const DroppableColumn = ({ id, data, height, isActive }) => {
@@ -42,6 +107,19 @@ const DroppableColumn = ({ id, data, height, isActive }) => {
   );
 };
 
+// Badge showing "+N more" for overflow in compact overlap layout
+const OverflowBadge = ({ count, style }) => (
+  <div
+    className="absolute border-2 border-dashed border-text-secondary/40 bg-background/80 rounded flex items-center justify-center cursor-pointer z-[1]"
+    style={style}
+    onClick={(e) => e.stopPropagation()}
+  >
+    <span className="font-data text-[10px] text-text-secondary whitespace-nowrap">
+      +{count} more
+    </span>
+  </div>
+);
+
 const CalendarGrid = ({
   therapists,
   rooms = [],
@@ -55,8 +133,11 @@ const CalendarGrid = ({
   columnMode = 'therapist',
   activeDragId = null,
   gridRef, // Ref to get grid position for time calculation
+  freezeUnassigned = true,
+  onToggleFreezeUnassigned,
 }) => {
   const scrollRef = useRef(null);
+  const headerScrollRef = useRef(null);
   const gridBodyRef = useRef(null);
 
   // Expose grid body ref to parent for position calculation
@@ -216,6 +297,17 @@ const CalendarGrid = ({
           <span className={`font-body text-sm whitespace-nowrap ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}>
             {col.name}
           </span>
+          {isUnassigned && onToggleFreezeUnassigned && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFreezeUnassigned(); }}
+              className={`p-0.5 rounded hover:bg-black/5 spa-transition-fast ${
+                freezeUnassigned ? 'text-primary' : 'text-text-secondary'
+              }`}
+              title={freezeUnassigned ? 'Unpin column' : 'Pin column'}
+            >
+              <Icon name={freezeUnassigned ? 'Pin' : 'PinOff'} size={13} />
+            </button>
+          )}
           {col.attendance === 'Absent' && (
             <span className="w-2 h-2 rounded-full bg-error flex-shrink-0" title="Absent" />
           )}
@@ -234,7 +326,7 @@ const CalendarGrid = ({
 
   // ── Shared renderers ──────────────────────────────────────
   const renderTimeLabels = () => (
-    <div className="flex-shrink-0 border-r border-border relative bg-surface" style={{ width: TIME_COL_WIDTH }}>
+    <div className="flex-shrink-0 border-r border-border relative bg-surface sticky left-0 z-header" style={{ width: TIME_COL_WIDTH }}>
       {hours.map((hour) => (
         <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * HOUR_HEIGHT }}>
           <span className="absolute -top-2.5 right-2 font-data text-[11px] text-text-secondary">
@@ -262,11 +354,8 @@ const CalendarGrid = ({
   const renderNowIndicator = (day) => {
     if (day !== todayStr || nowTop < 0 || nowTop > totalHeight) return null;
     return (
-      <div className="absolute left-0 right-0 z-dropdown pointer-events-none" style={{ top: nowTop }}>
-        <div className="flex items-center">
-          <div className="w-2.5 h-2.5 rounded-full bg-primary -ml-1" />
-          <div className="flex-1 h-0.5 bg-primary" />
-        </div>
+      <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nowTop }}>
+        <div className="h-0.5 bg-primary" />
       </div>
     );
   };
@@ -319,22 +408,49 @@ const CalendarGrid = ({
 
   // ── Single-day view ───────────────────────────────────────
   const columnsMinWidth = columns.length * minColWidth;
+  const unassignedCol = columns.find(c => c.type === 'unassigned');
+  const regularColumns = columns.filter(c => c.type !== 'unassigned');
+  const regularMinWidth = regularColumns.length * minColWidth;
 
   const renderDayView = () => (
     <div className="flex flex-col h-full overflow-hidden">
-      <div ref={scrollRef} className="flex-1 overflow-auto sidebar-scroll">
-        {/* Sticky header inside scroll container */}
-        <div className="sticky top-0 z-header bg-background border-b-2 border-border" style={{ minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
-          <div className="flex">
-            <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center" style={{ width: TIME_COL_WIDTH }}>
-              <Icon name="Clock" size={14} className="text-text-secondary" />
+      {/* Fixed header — outside scroll container */}
+      <div
+        ref={headerScrollRef}
+        className="flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
+      >
+        <div className="flex" style={{ minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
+          <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center sticky left-0 z-header bg-background" style={{ width: TIME_COL_WIDTH }}>
+            <Icon name="Clock" size={14} className="text-text-secondary" />
+          </div>
+          {unassignedCol && (
+            <div
+              className={`flex-shrink-0 border-r border-border bg-background ${
+                freezeUnassigned ? 'sticky z-header' : ''
+              }`}
+              style={freezeUnassigned
+                ? { left: TIME_COL_WIDTH, width: minColWidth }
+                : { minWidth: minColWidth }
+              }
+            >
+              {renderColumnHeader(unassignedCol)}
             </div>
-            <div className="flex" style={{ minWidth: columnsMinWidth }}>
-              {columns.map(col => renderColumnHeader(col))}
-            </div>
+          )}
+          <div className="flex" style={{ minWidth: regularMinWidth }}>
+            {regularColumns.map(col => renderColumnHeader(col))}
           </div>
         </div>
-        {/* Grid body */}
+      </div>
+      {/* Scrollable grid body */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-auto sidebar-scroll"
+        onScroll={(e) => {
+          if (headerScrollRef.current) {
+            headerScrollRef.current.scrollLeft = e.target.scrollLeft;
+          }
+        }}
+      >
         <div
           ref={gridBodyRef}
           className="flex relative"
@@ -343,10 +459,72 @@ const CalendarGrid = ({
           data-hour-height={HOUR_HEIGHT}
         >
           {renderTimeLabels()}
-          <div className="flex relative" style={{ minWidth: columnsMinWidth }}>
+          {unassignedCol && (() => {
+            const colBookings = (bookingsByDayAndCol[currentDate] || {})[unassignedCol.id] || [];
+            const droppableId = `drop-col-${currentDate}-${unassignedCol.id}`;
+            return (
+              <div
+                className={`flex-shrink-0 relative border-r border-border bg-surface overflow-hidden ${
+                  freezeUnassigned ? 'sticky z-header' : ''
+                }`}
+                style={freezeUnassigned
+                  ? { left: TIME_COL_WIDTH, width: minColWidth, height: totalHeight }
+                  : { minWidth: minColWidth, height: totalHeight }
+                }
+                onClick={(e) => handleColumnClick(e, currentDate, unassignedCol)}
+              >
+                {renderGridLines()}
+                {renderNowIndicator(currentDate)}
+                <DroppableColumn
+                  id={droppableId}
+                  data={{ day: currentDate, colId: unassignedCol.id, openHour, totalHeight }}
+                  height={totalHeight}
+                  isActive={!!activeDragId}
+                />
+                {/* Compact overlap rendering for unassigned column */}
+                {(() => {
+                  const clusters = clusterOverlapping(colBookings);
+                  return clusters.map((cluster) => {
+                    const layout = getOverlapLayout(cluster.length, minColWidth);
+                    return cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
+                      const pos = layout.cards[idx];
+                      return (
+                        <CalendarBookingCard
+                          key={booking.id}
+                          booking={booking}
+                          columnMode={columnMode}
+                          style={{
+                            top: timeToTop(booking.startTime),
+                            height: timeToHeight(booking.startTime, booking.endTime),
+                            ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
+                          }}
+                          onClick={onBookingClick}
+                        />
+                      );
+                    }).concat(
+                      layout.badge ? (
+                        <OverflowBadge
+                          key={`badge-${cluster[0].id}`}
+                          count={layout.badge.count}
+                          style={{
+                            top: timeToTop(cluster[0].startTime),
+                            height: timeToHeight(cluster[0].startTime, cluster[0].endTime),
+                            left: layout.badge.left,
+                            width: layout.badge.width,
+                            right: 'auto',
+                          }}
+                        />
+                      ) : []
+                    );
+                  });
+                })()}
+              </div>
+            );
+          })()}
+          <div className="flex relative overflow-hidden" style={{ minWidth: regularMinWidth }}>
             {renderGridLines()}
             {renderNowIndicator(currentDate)}
-            {columns.map(col => renderColumn(col, currentDate))}
+            {regularColumns.map(col => renderColumn(col, currentDate))}
           </div>
         </div>
       </div>
@@ -358,30 +536,41 @@ const CalendarGrid = ({
 
   const renderMultiDayView = () => (
     <div className="flex flex-col h-full overflow-hidden">
-      <div ref={scrollRef} className="flex-1 overflow-auto sidebar-scroll">
-        {/* Sticky header inside scroll container */}
-        <div className="sticky top-0 z-header bg-background border-b-2 border-border" style={{ minWidth: TIME_COL_WIDTH + daysMinWidth }}>
-          <div className="flex">
-            <div className="flex-shrink-0 border-r border-border" style={{ width: TIME_COL_WIDTH }} />
-            <div className="flex" style={{ minWidth: daysMinWidth }}>
-              {days.map(day => {
-                const isCurrentDay = day === todayStr;
-                return (
-                  <div
-                    key={day}
-                    className={`flex-1 text-center py-1.5 border-r border-border last:border-r-0 ${isCurrentDay ? 'bg-primary/5' : ''}`}
-                    style={{ minWidth: minColWidth }}
-                  >
-                    <span className={`font-heading text-xs font-semibold ${isCurrentDay ? 'text-primary' : 'text-text-secondary'}`}>
-                      {formatShortDate(day)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+      {/* Fixed header — outside scroll container */}
+      <div
+        ref={headerScrollRef}
+        className="flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
+      >
+        <div className="flex" style={{ minWidth: TIME_COL_WIDTH + daysMinWidth }}>
+          <div className="flex-shrink-0 border-r border-border sticky left-0 bg-background" style={{ width: TIME_COL_WIDTH }} />
+          <div className="flex" style={{ minWidth: daysMinWidth }}>
+            {days.map(day => {
+              const isCurrentDay = day === todayStr;
+              return (
+                <div
+                  key={day}
+                  className={`flex-1 text-center py-1.5 border-r border-border last:border-r-0 ${isCurrentDay ? 'bg-primary/5' : ''}`}
+                  style={{ minWidth: minColWidth }}
+                >
+                  <span className={`font-heading text-xs font-semibold ${isCurrentDay ? 'text-primary' : 'text-text-secondary'}`}>
+                    {formatShortDate(day)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
-        {/* Grid body */}
+      </div>
+      {/* Scrollable grid body */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-auto sidebar-scroll"
+        onScroll={(e) => {
+          if (headerScrollRef.current) {
+            headerScrollRef.current.scrollLeft = e.target.scrollLeft;
+          }
+        }}
+      >
         <div
           ref={gridBodyRef}
           className="flex relative"
@@ -424,11 +613,8 @@ const CalendarGrid = ({
 
                   {/* Now indicator */}
                   {isCurrentDay && nowTop >= 0 && nowTop <= totalHeight && (
-                    <div className="absolute left-0 right-0 z-dropdown pointer-events-none" style={{ top: nowTop }}>
-                      <div className="flex items-center">
-                        <div className="w-2.5 h-2.5 rounded-full bg-primary -ml-1" />
-                        <div className="flex-1 h-0.5 bg-primary" />
-                      </div>
+                    <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nowTop }}>
+                      <div className="h-0.5 bg-primary" />
                     </div>
                   )}
 

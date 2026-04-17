@@ -1,7 +1,18 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import Button from './Button';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
+
+// Status badge styles
+const STATUS_STYLES = {
+  pending: 'bg-warning/10 text-warning',
+  confirmed: 'bg-success/10 text-success',
+  'in-progress': 'bg-primary/10 text-primary',
+  completed: 'bg-gray-100 text-gray-500',
+  cancelled: 'bg-error/10 text-error',
+  'no show': 'bg-gray-100 text-gray-500',
+};
 
 const BookingActionModal = ({
   isOpen = false,
@@ -29,10 +40,10 @@ const BookingActionModal = ({
   const [discountSuccess, setDiscountSuccess] = useState(false);
 
   const tabs = [
-    { id: 'details', label: 'Booking Details', icon: 'FileText' },
-    { id: 'assign', label: 'Assign Therapist', icon: 'UserCheck' },
-    { id: 'discount', label: 'Discount', icon: 'Percent' },
-    { id: 'payment', label: 'Payment', icon: 'CreditCard' }
+    { id: 'details', label: 'Details', labelFull: 'Booking Details', icon: 'FileText' },
+    { id: 'assign', label: 'Assign', labelFull: 'Assign Therapist', icon: 'UserCheck' },
+    { id: 'discount', label: 'Discount', labelFull: 'Discount', icon: 'Percent' },
+    { id: 'payment', label: 'Payment', labelFull: 'Payment', icon: 'CreditCard' }
   ];
 
   // Valid next-status transitions (lowercase UI values)
@@ -138,77 +149,78 @@ const BookingActionModal = ({
   const isLocked = booking.isLocked || false;
   const isMutationBlocked = isTerminal || isLocked;
 
-  const getStatusColor = (status) => {
-    const colors = {
-      pending: 'warning',
-      confirmed: 'success',
-      'in-progress': 'primary',
-      completed: 'text-secondary',
-      cancelled: 'error',
-      'no show': 'error'
-    };
-    return colors[status] || 'text-secondary';
-  };
-
   const nextStatuses = getNextStatuses(booking.status);
   const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isMutationBlocked;
   const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
   const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
 
-  return (
+  // Use Portal to render modal at document body level, escaping any stacking context
+  return createPortal(
     <>
-      <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
-        <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-2xl max-h-[90vh] overflow-hidden animate-fade-in">
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-border">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                <Icon name="Calendar" size={20} className="text-primary" />
+      {/* Overlay */}
+      <div
+        className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-end sm:items-center justify-center sm:p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="booking-modal-title"
+      >
+        {/* Modal Container - Bottom sheet on mobile (85vh to clear iOS notch), centered card on desktop */}
+        <div className="bg-surface w-full sm:max-w-2xl h-[85vh] sm:h-auto sm:max-h-[90vh] rounded-t-2xl sm:rounded-spa-lg spa-shadow-modal overflow-hidden animate-fade-in flex flex-col">
+          {/* Header - Responsive padding */}
+          <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border flex-shrink-0">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Icon name="Calendar" size={18} className="text-primary sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <h2 id="booking-modal-title" className="font-heading font-heading-semibold text-lg text-text-primary">
+              <div className="min-w-0">
+                <h2 id="booking-modal-title" className="font-heading font-heading-semibold text-base sm:text-lg text-text-primary truncate">
                   Booking Management
                 </h2>
-                <p className="font-caption font-caption-normal text-sm text-text-secondary">
+                <p className="font-caption font-caption-normal text-xs sm:text-sm text-text-secondary truncate">
                   {booking.id} — {booking.customerName}
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-spa hover:bg-background spa-transition-fast"
+              className="p-2 rounded-spa hover:bg-background spa-transition-fast min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0"
             >
               <Icon name="X" size={20} className="text-text-secondary" />
             </button>
           </div>
 
-          {/* Tabs */}
-          <div className="border-b border-border">
-            <nav className="flex space-x-8 px-6">
-              {tabs.map((tab) => (
+          {/* Tabs - Horizontal scroll on mobile with padding for last item visibility */}
+          <div className="border-b border-border flex-shrink-0">
+            <nav className="flex overflow-x-auto scrollbar-hide pl-4 sm:pl-6 gap-1 sm:gap-6">
+              {tabs.map((tab, index) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 py-4 border-b-2 spa-transition-fast ${
+                  className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
+                    index === tabs.length - 1 ? 'mr-4 sm:mr-6' : ''
+                  } ${
                     activeTab === tab.id
-                      ? 'border-primary text-primary' :'border-transparent text-text-secondary hover:text-text-primary'
+                      ? 'border-primary text-primary bg-primary/5 sm:bg-transparent rounded-t-lg sm:rounded-none'
+                      : 'border-transparent text-text-secondary hover:text-text-primary'
                   }`}
                 >
                   <Icon name={tab.icon} size={16} />
-                  <span className="font-body font-body-medium text-sm">{tab.label}</span>
+                  {/* Short label on mobile, full on desktop */}
+                  <span className="font-body font-body-medium text-sm sm:hidden">{tab.label}</span>
+                  <span className="font-body font-body-medium text-sm hidden sm:inline">{tab.labelFull}</span>
                 </button>
               ))}
             </nav>
           </div>
 
-          {/* Content */}
-          <div className="p-6 overflow-y-auto max-h-96">
+          {/* Content - Scrollable area takes remaining space, extra bottom padding on mobile for bottom nav */}
+          <div className="p-4 sm:p-6 pb-24 sm:pb-6 overflow-y-auto flex-1">
             {/* Details Tab */}
             {activeTab === 'details' && (
-              <div className="space-y-6">
+              <div className="space-y-4 sm:space-y-6">
                 {/* Lock / Immutability Banner */}
                 {isMutationBlocked && (
-                  <div className={`flex items-center space-x-2 px-3 py-2 rounded-spa ${
+                  <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${
                     isLocked
                       ? 'bg-amber-50 border border-amber-200'
                       : 'bg-gray-50 border border-gray-200'
@@ -224,21 +236,22 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Status and Actions */}
-                <div className="flex items-center justify-between flex-wrap gap-2">
+                {/* Status and Actions - Stack on mobile */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center space-x-2">
                     <span className="font-body font-body-medium text-sm text-text-primary">Status:</span>
-                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-${getStatusColor(booking.status)}/10 text-${getStatusColor(booking.status)} capitalize`}>
+                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal capitalize ${STATUS_STYLES[booking.status] || 'bg-gray-100 text-gray-500'}`}>
                       {booking.status.replace('-', ' ')}
                     </span>
                   </div>
                   {!isMutationBlocked && nextStatuses.length > 0 && (
-                    <div className="flex items-center space-x-2 flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => (
                         <Button
                           key={status}
                           variant={status === 'cancelled' || status === 'no show' ? 'outline' : 'primary'}
-                          size="xs"
+                          size="sm"
+                          className="min-h-[40px] sm:min-h-0 sm:h-auto"
                           onClick={() => handleStatusUpdate(status)}
                           loading={isLoading}
                         >
@@ -249,55 +262,57 @@ const BookingActionModal = ({
                   )}
                 </div>
 
-                {/* Customer Information */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h3 className="font-heading font-heading-medium text-base text-text-primary">
+                {/* Customer & Service Information - Responsive grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  <div className="space-y-3 sm:space-y-4">
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                       Customer Information
                     </h3>
-                    <div className="space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3">
                       <div>
-                        <label className="font-body font-body-medium text-sm text-text-secondary">Name</label>
+                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Name</label>
                         <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerName}</p>
                       </div>
                       {booking.customerEmail && (
                         <div>
-                          <label className="font-body font-body-medium text-sm text-text-secondary">Email</label>
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerEmail}</p>
+                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Email</label>
+                          <p className="font-body font-body-normal text-sm text-text-primary break-all">{booking.customerEmail}</p>
                         </div>
                       )}
                       {booking.customerPhone && (
                         <div>
-                          <label className="font-body font-body-medium text-sm text-text-secondary">Phone</label>
+                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Phone</label>
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerPhone}</p>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <h3 className="font-heading font-heading-medium text-base text-text-primary">
+                  <div className="space-y-3 sm:space-y-4">
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                       Service Details
                     </h3>
-                    <div className="space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3">
                       <div>
-                        <label className="font-body font-body-medium text-sm text-text-secondary">Service</label>
+                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
                         <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
                       </div>
-                      <div>
-                        <label className="font-body font-body-medium text-sm text-text-secondary">Duration</label>
-                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.duration}</p>
+                      <div className="flex gap-4">
+                        <div>
+                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Duration</label>
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.duration}</p>
+                        </div>
+                        <div>
+                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Price</label>
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.price}</p>
+                        </div>
                       </div>
                       <div>
-                        <label className="font-body font-body-medium text-sm text-text-secondary">Date & Time</label>
+                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Date & Time</label>
                         <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {booking.time}</p>
                       </div>
                       <div>
-                        <label className="font-body font-body-medium text-sm text-text-secondary">Price</label>
-                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.price}</p>
-                      </div>
-                      <div>
-                        <label className="font-body font-body-medium text-sm text-text-secondary">Payment</label>
+                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Payment</label>
                         <p className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
                           {booking.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
                         </p>
@@ -308,8 +323,8 @@ const BookingActionModal = ({
 
                 {/* Therapist */}
                 {booking.therapist && (
-                  <div className="space-y-2">
-                    <label className="font-body font-body-medium text-sm text-text-secondary">Assigned Therapist</label>
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Assigned Therapist</label>
                     <p className="font-body font-body-normal text-sm text-text-primary">
                       {booking.therapist.name} ({booking.therapist.gender})
                     </p>
@@ -318,9 +333,9 @@ const BookingActionModal = ({
 
                 {/* Special Requests */}
                 {booking.specialRequests && (
-                  <div className="space-y-2">
-                    <label className="font-body font-body-medium text-sm text-text-secondary">Special Requests</label>
-                    <div className="p-3 bg-background rounded-spa">
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                    <div className="p-2.5 sm:p-3 bg-background rounded-spa">
                       <p className="font-body font-body-normal text-sm text-text-primary">{booking.specialRequests}</p>
                     </div>
                   </div>
@@ -330,29 +345,29 @@ const BookingActionModal = ({
 
             {/* Assign Tab */}
             {activeTab === 'assign' && (
-              <div className="space-y-6">
+              <div className="space-y-4 sm:space-y-6">
                 {isMutationBlocked && (
-                  <div className={`flex items-center space-x-2 px-3 py-2 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
+                  <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
                     <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
                     <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
                       Therapist assignment is disabled — {isLocked ? 'day is closed' : 'booking is immutable'}
                     </span>
                   </div>
                 )}
-                <h3 className="font-heading font-heading-medium text-base text-text-primary">
+                <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                   Available Therapists
                 </h3>
 
                 {therapists.length === 0 ? (
                   <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-2 sm:space-y-3">
                     {therapists.map((therapist) => (
                       <label
                         key={therapist.id}
-                        className={`flex items-center space-x-4 p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                        className={`flex items-center space-x-3 sm:space-x-4 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[56px] ${
                           selectedTherapist === therapist.id
-                            ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
+                            ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                         }`}
                       >
                         <input
@@ -361,19 +376,19 @@ const BookingActionModal = ({
                           value={therapist.id}
                           checked={selectedTherapist === therapist.id}
                           onChange={(e) => setSelectedTherapist(e.target.value)}
-                          className="text-primary focus:ring-primary"
+                          className="text-primary focus:ring-primary w-4 h-4"
                         />
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-body font-body-medium text-sm text-text-primary">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-body font-body-medium text-sm text-text-primary truncate">
                               {therapist.name}
                             </span>
-                            <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize">
+                            <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
                               {therapist.gender}
                             </span>
                           </div>
                           {therapist.specialties && therapist.specialties.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1">
+                            <div className="flex flex-wrap gap-1 mt-1.5">
                               {therapist.specialties.map((specialty) => (
                                 <span
                                   key={specialty}
@@ -390,8 +405,8 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label className="font-body font-body-medium text-sm text-text-primary">
+                <div className="space-y-1.5 sm:space-y-2">
+                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
                     Assignment Notes
                   </label>
                   <textarea
@@ -399,7 +414,7 @@ const BookingActionModal = ({
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Add any special instructions for the therapist..."
                     rows={3}
-                    className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
+                    className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                   />
                 </div>
               </div>
@@ -407,14 +422,14 @@ const BookingActionModal = ({
 
             {/* Discount Tab */}
             {activeTab === 'discount' && (
-              <div className="space-y-6">
-                <h3 className="font-heading font-heading-medium text-base text-text-primary">
+              <div className="space-y-4 sm:space-y-6">
+                <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                   Apply Discount
                 </h3>
 
                 {!canDiscount ? (
-                  <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-gray-50 border border-gray-200">
-                    <Icon name="Lock" size={16} className="text-gray-500" />
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-gray-50 border border-gray-200">
+                    <Icon name="Lock" size={16} className="text-gray-500 flex-shrink-0" />
                     <span className="font-body font-body-medium text-xs text-gray-600">
                       {booking.paymentStatus === 'paid'
                         ? 'Cannot modify discount on a paid booking.'
@@ -424,37 +439,37 @@ const BookingActionModal = ({
                 ) : (
                   <>
                     {/* Current pricing */}
-                    <div className="bg-background rounded-spa p-4 space-y-2">
+                    <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-body font-body-normal text-sm text-text-secondary">Base Amount</span>
+                        <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Base Amount</span>
                         <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
                       </div>
                       {booking.discountAmount > 0 && (
                         <div className="flex items-center justify-between">
-                          <span className="font-body font-body-normal text-sm text-text-secondary">Current Discount</span>
+                          <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Current Discount</span>
                           <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
                         </div>
                       )}
                       <div className="flex items-center justify-between border-t border-border pt-2">
-                        <span className="font-body font-body-medium text-sm text-text-primary">Final Amount</span>
+                        <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
                         <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                       </div>
                     </div>
 
                     {/* Role limit info */}
-                    <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-accent/5 border border-accent/20">
-                      <Icon name="Info" size={14} className="text-accent" />
+                    <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-accent/5 border border-accent/20">
+                      <Icon name="Info" size={14} className="text-accent flex-shrink-0" />
                       <span className="font-caption font-caption-normal text-xs text-accent">
                         Your role ({userRole}) allows up to {discountLimitLabel} discount.
                       </span>
                     </div>
 
                     {/* Discount type */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
                       {['percentage', 'fixed'].map(type => (
                         <label
                           key={type}
-                          className={`flex items-center space-x-2 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                          className={`flex items-center space-x-2 p-2.5 sm:p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[48px] ${
                             discountType === type ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                           }`}
                         >
@@ -464,18 +479,18 @@ const BookingActionModal = ({
                             value={type}
                             checked={discountType === type}
                             onChange={() => setDiscountType(type)}
-                            className="text-primary focus:ring-primary"
+                            className="text-primary focus:ring-primary w-4 h-4"
                           />
-                          <span className="font-body font-body-medium text-sm text-text-primary capitalize">
-                            {type === 'percentage' ? 'Percentage (%)' : 'Fixed (NPR)'}
+                          <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
+                            {type === 'percentage' ? '% Percent' : 'NPR Fixed'}
                           </span>
                         </label>
                       ))}
                     </div>
 
                     {/* Discount value */}
-                    <div className="space-y-2">
-                      <label className="font-body font-body-medium text-sm text-text-primary">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
                         {discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount (NPR)'}
                       </label>
                       <input
@@ -486,13 +501,13 @@ const BookingActionModal = ({
                         value={discountValue}
                         onChange={(e) => setDiscountValue(e.target.value)}
                         placeholder={discountType === 'percentage' ? 'e.g. 5' : 'e.g. 200'}
-                        className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                        className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
                       />
                     </div>
 
                     {/* Reason */}
-                    <div className="space-y-2">
-                      <label className="font-body font-body-medium text-sm text-text-primary">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
                         Reason <span className="text-error">*</span>
                       </label>
                       <textarea
@@ -500,26 +515,26 @@ const BookingActionModal = ({
                         onChange={(e) => setDiscountReason(e.target.value)}
                         placeholder="Why is this discount being applied? (required)"
                         rows={2}
-                        className="w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
+                        className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                       />
                     </div>
 
                     {/* Error / Success */}
                     {discountError && (
-                      <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
-                        <Icon name="AlertTriangle" size={14} className="text-error" />
+                      <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                        <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs text-error">{discountError}</span>
                       </div>
                     )}
                     {discountSuccess === 'approved' && (
-                      <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-success/10 border border-success/20">
-                        <Icon name="CheckCircle" size={14} className="text-success" />
+                      <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
+                        <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs text-success">Discount applied successfully.</span>
                       </div>
                     )}
                     {discountSuccess === 'pending' && (
-                      <div className="flex items-center space-x-2 px-3 py-2 rounded-spa bg-amber-50 border border-amber-200">
-                        <Icon name="Clock" size={14} className="text-amber-600" />
+                      <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-amber-50 border border-amber-200">
+                        <Icon name="Clock" size={14} className="text-amber-600 flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs text-amber-700">Discount exceeds your limit — sent for manager approval.</span>
                       </div>
                     )}
@@ -531,6 +546,7 @@ const BookingActionModal = ({
                       disabled={!discountValue || !discountReason.trim()}
                       iconName="Percent"
                       iconPosition="left"
+                      className="w-full sm:w-auto min-h-[44px]"
                     >
                       Apply Discount
                     </Button>
@@ -541,17 +557,17 @@ const BookingActionModal = ({
 
             {/* Payment Tab */}
             {activeTab === 'payment' && (
-              <div className="space-y-6">
-                <h3 className="font-heading font-heading-medium text-base text-text-primary">
+              <div className="space-y-4 sm:space-y-6">
+                <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                   Payment Status
                 </h3>
-                <div className="bg-background rounded-spa p-4 space-y-3">
+                <div className="bg-background rounded-spa p-3 sm:p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Amount</span>
+                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Amount</span>
                     <span className="font-body font-body-medium text-sm text-text-primary">{booking.price}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-sm text-text-secondary">Status</span>
+                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Status</span>
                     <span className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
                       {booking.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
                     </span>
@@ -563,20 +579,24 @@ const BookingActionModal = ({
                     onClick={() => setShowPaymentModal(true)}
                     iconName="CreditCard"
                     iconPosition="left"
+                    className="w-full sm:w-auto min-h-[44px]"
                   >
                     Record Payment
                   </Button>
                 )}
                 {booking.paymentStatus === 'paid' && (
-                  <p className="font-body font-body-normal text-sm text-success">Payment has been recorded.</p>
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
+                    <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                  </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-end space-x-3 p-6 border-t border-border">
-            <Button variant="outline" onClick={onClose}>
+          {/* Footer - Responsive with safe area padding for iOS */}
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
+            <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
               Close
             </Button>
             {activeTab === 'assign' && !isMutationBlocked && (
@@ -585,6 +605,7 @@ const BookingActionModal = ({
                 onClick={handleAssignTherapist}
                 loading={isLoading}
                 disabled={!selectedTherapist}
+                className="min-h-[44px] sm:min-h-0"
               >
                 Assign Therapist
               </Button>
@@ -608,7 +629,8 @@ const BookingActionModal = ({
           isSubmitting={paymentSubmitting}
         />
       )}
-    </>
+    </>,
+    document.body
   );
 };
 

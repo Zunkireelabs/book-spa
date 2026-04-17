@@ -1,8 +1,9 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
 
@@ -38,6 +39,12 @@ function formatNPR(amount) {
 
 const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoading }) => {
   const navigate = useNavigate();
+  const { orgSlug: urlOrgSlug } = useParams();
+  const { profile } = useAuth();
+
+  // Get org slug from URL or profile
+  const orgSlug = urlOrgSlug || profile?.organizations?.slug;
+  const basePath = orgSlug ? `/${orgSlug}/dashboard` : '/branch-manager-dashboard';
 
   const isTerminal = TERMINAL_STATUSES.includes(booking.status);
   const isLocked = booking.isLocked || booking.is_locked || false;
@@ -66,7 +73,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
 
   const handleViewAudit = () => {
     const recordId = booking.bookingId || booking.id;
-    navigate(`/branch-manager-dashboard?view=audit&recordId=${recordId}`);
+    navigate(`${basePath}?view=audit&recordId=${recordId}`);
   };
 
   return (

@@ -225,7 +225,7 @@ const BranchManagerDashboard = () => {
   };
 
   const renderDashboardView = () => (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-4 lg:space-y-6">
       {/* Revenue Intelligence Cards */}
       <RevenueCards branchId={branchId} />
 
@@ -238,12 +238,12 @@ const BranchManagerDashboard = () => {
       {/* Pending Discount Approvals */}
       <PendingDiscountsPanel branchId={branchId} />
 
-      {/* Key Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Key Metrics Row - Responsive grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
         {loading ? (
-          <div className="col-span-4 text-center py-8">
-            <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-3" />
-            <p className="text-gray-500">Loading metrics...</p>
+          <div className="col-span-2 lg:col-span-4 text-center py-6 sm:py-8">
+            <div className="animate-spin w-6 h-6 sm:w-8 sm:h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2 sm:mb-3" />
+            <p className="text-xs sm:text-sm text-gray-500">Loading metrics...</p>
           </div>
         ) : (
           metricsData.map((metric, index) => (
@@ -260,13 +260,13 @@ const BranchManagerDashboard = () => {
         )}
       </div>
 
-      {/* Status Legend */}
-      <div className="bg-white border border-gray-200 rounded-lg px-4 py-2.5">
+      {/* Status Legend - Hide on mobile, show on sm+ */}
+      <div className="hidden sm:block bg-white border border-gray-200 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5">
         <StatusLegend showPayment />
       </div>
 
-      {/* Main Dashboard Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
         <TherapistUtilizationChart branchId={branchId} />
         <BookingPipelineChart branchId={branchId} />
         <TopPerformersCard branchId={branchId} />
@@ -277,8 +277,8 @@ const BranchManagerDashboard = () => {
         />
       </div>
 
-      {/* Analytics and Controls Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Analytics and Controls Row - Stack on mobile, 3 cols on desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
         <DateRangePicker
           onDateRangeChange={handleDateRangeChange}
           onExport={handleExport}
@@ -480,9 +480,9 @@ const BranchManagerDashboard = () => {
             </div>
           )}
 
-          {/* New Booking Notification Toast */}
+          {/* New Booking Notification Toast - Responsive positioning */}
           {newBookingNotification && (
-            <div className="fixed top-20 right-6 z-toast bg-primary text-white px-5 py-3 rounded-lg shadow-lg animate-fade-in max-w-sm">
+            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Icon name="CalendarPlus" size={20} />
@@ -499,13 +499,13 @@ const BranchManagerDashboard = () => {
                 <div className="flex items-center space-x-2 flex-shrink-0">
                   <button
                     onClick={handleViewNewBooking}
-                    className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-body font-body-medium transition-colors"
+                    className="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 rounded text-xs font-body font-body-medium transition-colors min-h-[32px]"
                   >
                     View
                   </button>
                   <button
                     onClick={() => setNewBookingNotification(null)}
-                    className="hover:opacity-80 text-white/80 hover:text-white"
+                    className="hover:opacity-80 text-white/80 hover:text-white p-1 min-h-[32px]"
                   >
                     <Icon name="X" size={16} />
                   </button>
@@ -515,8 +515,8 @@ const BranchManagerDashboard = () => {
           )}
 
           {/* Main Content Area with AI Assistant */}
-          <div className="relative z-0 flex gap-3 min-h-[calc(100vh-52px)]">
-            <main className={`flex-1 min-w-0 ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-4 sm:px-6 lg:px-8 py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+          <div className="relative z-0 flex gap-2 sm:gap-3 min-h-[calc(100vh-52px)]">
+            <main className={`flex-1 min-w-0 ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
               {viewMode === 'dashboard' && renderDashboardView()}
               {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
               {viewMode === 'calendar' && renderCalendarView()}

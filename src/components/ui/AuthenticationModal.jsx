@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Button from './Button';
 import Input from './Input';
 import Icon from '../AppIcon';
 import CustomSelect from './CustomSelect';
+import { useAuth } from '../../contexts/AuthContext';
 
 const AuthenticationModal = ({ isOpen = true, onClose }) => {
   const navigate = useNavigate();
+  const { orgSlug: urlOrgSlug } = useParams();
+  const { profile } = useAuth();
+
+  // Get org slug from URL or profile
+  const orgSlug = urlOrgSlug || profile?.organizations?.slug;
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -72,8 +78,10 @@ const AuthenticationModal = ({ isOpen = true, onClose }) => {
       // Simulate authentication
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // Navigate based on role
-      if (formData.role === 'manager') {
+      // Navigate based on role - use org-scoped path if available
+      if (orgSlug) {
+        navigate(`/${orgSlug}/dashboard`);
+      } else if (formData.role === 'manager') {
         navigate('/branch-manager-dashboard');
       } else {
         navigate('/branch-staff-dashboard');

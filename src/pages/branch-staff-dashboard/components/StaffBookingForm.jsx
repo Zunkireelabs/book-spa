@@ -125,8 +125,8 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   // ========== SUCCESS SCREEN ==========
   if (step === 5 && createdBooking) {
     return (
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg border border-emerald-200 p-8 text-center">
+      <div className="max-w-2xl mx-auto px-3 sm:px-0">
+        <div className="bg-white rounded-lg border border-emerald-200 p-5 sm:p-8 text-center">
           <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Icon name="CheckCircle" size={32} className="text-emerald-600" />
           </div>
@@ -151,19 +151,19 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   }
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col gap-4">
+    <div className="max-w-3xl mx-auto flex flex-col gap-3 sm:gap-4 px-3 sm:px-0">
       {/* Header */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-            <Icon name="CalendarPlus" size={20} className="text-primary" />
+      <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
+        <div className="flex items-center gap-3 mb-3 sm:mb-4">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Icon name="CalendarPlus" size={18} className="sm:w-5 sm:h-5 text-primary" />
           </div>
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900">
               New Booking
             </h2>
-            <p className="text-xs text-gray-500">
-              Step {step} of 4 — {['Select Service', 'Date & Time', 'Customer Info', 'Review & Confirm'][step - 1]}
+            <p className="text-xs text-gray-500 truncate">
+              Step {step}/4 — {['Service', 'Date & Time', 'Customer', 'Review'][step - 1]}
             </p>
           </div>
         </div>
@@ -181,7 +181,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       </div>
 
       {/* Step Content */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
 
         {/* STEP 1: Service */}
         {step === 1 && (
@@ -236,9 +236,9 @@ const StaffBookingForm = ({ onBookingCreated }) => {
 
         {/* STEP 2: Date & Time */}
         {step === 2 && (
-          <div className="space-y-6">
+          <div className="space-y-5 sm:space-y-6">
             <div>
-              <h3 className="text-base font-medium text-gray-900 mb-3">
+              <h3 className="text-sm sm:text-base font-medium text-gray-900 mb-3">
                 Select Date
               </h3>
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
@@ -246,7 +246,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   <button
                     key={d.value}
                     onClick={() => { setSelectedDate(d.value); setSelectedTime(''); }}
-                    className={`p-2 rounded-md text-sm transition-colors text-center ${
+                    className={`p-2 rounded-md text-xs sm:text-sm transition-colors text-center min-h-[44px] ${
                       selectedDate === d.value
                         ? 'bg-primary text-white'
                         : d.isToday
@@ -262,15 +262,15 @@ const StaffBookingForm = ({ onBookingCreated }) => {
 
             {selectedDate && (
               <div>
-                <h3 className="text-base font-medium text-gray-900 mb-3">
+                <h3 className="text-sm sm:text-base font-medium text-gray-900 mb-3">
                   Select Time
                 </h3>
-                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                   {timeSlots.map(s => (
                     <button
                       key={s.time24}
                       onClick={() => setSelectedTime(s.time24)}
-                      className={`p-2 rounded-md text-sm transition-colors ${
+                      className={`p-2 rounded-md text-xs sm:text-sm transition-colors min-h-[40px] ${
                         selectedTime === s.time24
                           ? 'bg-primary text-white'
                           : 'bg-gray-50 hover:bg-gray-100 text-gray-900'
@@ -443,19 +443,27 @@ const StaffBookingForm = ({ onBookingCreated }) => {
         )}
       </div>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between">
-        <div>
-          {step > 1 && (
-            <Button variant="outline" onClick={() => setStep(step - 1)} iconName="ArrowLeft" iconPosition="left">
+      {/* Navigation - Stack on mobile */}
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center justify-between sm:justify-start">
+          {step > 1 ? (
+            <Button variant="outline" onClick={() => setStep(step - 1)} iconName="ArrowLeft" iconPosition="left" className="min-h-[44px]">
               Back
             </Button>
+          ) : (
+            <div />
           )}
+          <button
+            onClick={resetForm}
+            className="text-sm text-gray-500 hover:text-gray-700 transition-colors sm:hidden px-3 py-2"
+          >
+            Cancel
+          </button>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={resetForm}
-            className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            className="hidden sm:block text-sm text-gray-500 hover:text-gray-700 transition-colors"
           >
             Cancel
           </button>
@@ -466,6 +474,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               disabled={!canProceed()}
               iconName="ArrowRight"
               iconPosition="right"
+              className="flex-1 sm:flex-initial min-h-[44px]"
             >
               Next
             </Button>
@@ -477,6 +486,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               disabled={!canProceed()}
               iconName="Check"
               iconPosition="left"
+              className="flex-1 sm:flex-initial min-h-[44px]"
             >
               Create Booking
             </Button>

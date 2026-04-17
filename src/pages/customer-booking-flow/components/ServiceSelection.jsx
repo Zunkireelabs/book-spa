@@ -76,8 +76,25 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     }).format(price);
   };
 
+  const showStickyBlock = !loading && !error && services.length > 0;
+
   return (
     <div className="space-y-4">
+      {/* Static heading for loading/error/empty states */}
+      {!showStickyBlock && (
+        <div className="text-center mb-4">
+          <div className="flex items-center justify-center space-x-2 mb-2">
+            <Icon name="Sparkles" size={20} className="text-primary" />
+            <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+              Choose Service
+            </h1>
+          </div>
+          <p className="font-body font-body-normal text-text-secondary">
+            Step 2 of 5 - Complete your spa booking journey
+          </p>
+        </div>
+      )}
+
       {loading && (
         <div className="flex items-center justify-center py-12">
           <Icon name="Loader2" size={24} className="text-primary animate-spin" />
@@ -99,11 +116,22 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
         </div>
       )}
 
-      {!loading && !error && services.length > 0 && (
+      {showStickyBlock && (
         <>
-          {/* Search & Category Filter */}
-          <div className="space-y-3">
-            <div className="relative">
+          {/* Unified sticky block: heading + search + category pills */}
+          <div className="sticky top-[116px] z-sticky-filter bg-background pt-7 pb-2">
+            <div className="text-center mb-3">
+              <div className="flex items-center justify-center space-x-2 mb-1">
+                <Icon name="Sparkles" size={20} className="text-primary" />
+                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                  Choose Service
+                </h1>
+              </div>
+              <p className="font-body font-body-normal text-text-secondary">
+                Step 2 of 5 - Complete your spa booking journey
+              </p>
+            </div>
+            <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input
                 type="text"
