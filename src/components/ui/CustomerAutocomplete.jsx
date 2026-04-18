@@ -25,7 +25,11 @@ const CustomerAutocomplete = ({
     if (!branchId) return;
     let cancelled = false;
     (async () => {
-      const { data } = await fetchCustomersLightweight(branchId);
+      const { data, error } = await fetchCustomersLightweight(branchId);
+      if (error) {
+        console.error('[CustomerAutocomplete] Failed to load customers:', error.message || error);
+        return;
+      }
       if (!cancelled && data) setCustomers(data);
     })();
     return () => { cancelled = true; };

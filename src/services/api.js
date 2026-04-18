@@ -468,25 +468,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       }
     }
 
-    // 7. Check room/therapist conflicts if date or time changed
-    if ((dateChanged || timeChanged) && updatePayload.end_time) {
-      const effectiveDate = updatePayload.date || booking.date;
-      const effectiveStart = updatePayload.start_time || booking.start_time;
-      const effectiveEnd = updatePayload.end_time;
-
-      const { data: conflicts } = await supabase
-        .from('bookings')
-        .select('id')
-        .eq('branch_id', booking.branch_id)
-        .eq('date', effectiveDate)
-        .not('status', 'in', '("Cancelled","No Show")')
-        .neq('id', bookingId)
-        .lt('start_time', effectiveEnd)
-        .gt('end_time', effectiveStart);
-
-      // Filter for room or therapist conflicts with current booking's assignments
-      // (full conflict checking is handled by DB constraints)
-    }
+    // Note: Scheduling conflicts are enforced by DB constraints (error 23P01 handled below)
 
     // 8. Only update if there are changes
     if (Object.keys(updatePayload).length === 0) {

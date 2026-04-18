@@ -59,7 +59,8 @@ const CustomSelect = ({
         setTimeout(() => searchInputRef.current?.focus(), 0);
       }
     }
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, value, searchable]);
 
   // Reset focused index when filtered options change
   useEffect(() => {
