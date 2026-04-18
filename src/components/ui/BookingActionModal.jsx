@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import PaymentModal from './PaymentModal';
@@ -19,18 +19,27 @@ const BookingActionModal = ({
   onClose,
   booking = null,
   therapists = [],
+  rooms = [],
+  services = [],
   onAssignTherapist,
   onUpdateStatus,
   onRecordPayment,
   onApplyDiscount,
+  onEditBooking,
   userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
   const [selectedTherapist, setSelectedTherapist] = useState('');
+  const [selectedRoom, setSelectedRoom] = useState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [editError, setEditError] = useState(null);
 
   // Discount state
   const [discountType, setDiscountType] = useState('percentage');
@@ -39,9 +48,23 @@ const BookingActionModal = ({
   const [discountError, setDiscountError] = useState(null);
   const [discountSuccess, setDiscountSuccess] = useState(false);
 
+  // Pre-select current therapist/room when booking changes or assign tab opens
+  useEffect(() => {
+    if (booking) {
+      setSelectedTherapist(booking.therapist?.id || '');
+      setSelectedRoom(booking.roomId || '');
+    }
+  }, [booking?.bookingId]);
+
+  // Reset edit state when booking changes
+  useEffect(() => {
+    setIsEditing(false);
+    setEditError(null);
+  }, [booking?.bookingId]);
+
   const tabs = [
     { id: 'details', label: 'Details', labelFull: 'Booking Details', icon: 'FileText' },
-    { id: 'assign', label: 'Assign', labelFull: 'Assign Therapist', icon: 'UserCheck' },
+    { id: 'assign', label: 'Assigned', labelFull: 'Assigned', icon: 'UserCheck' },
     { id: 'discount', label: 'Discount', labelFull: 'Discount', icon: 'Percent' },
     { id: 'payment', label: 'Payment', labelFull: 'Payment', icon: 'CreditCard' }
   ];
@@ -56,16 +79,69 @@ const BookingActionModal = ({
     return transitions[currentStatus] || [];
   };
 
+  // Service preview when editing
+  const selectedService = useMemo(() => {
+    if (!isEditing || !editForm.serviceId || !services?.length) return null;
+    return services.find(s => s.id === editForm.serviceId);
+  }, [isEditing, editForm.serviceId, services]);
+
+  const startEditing = () => {
+    setEditForm({
+      customerName: booking.customerName || '',
+      customerPhone: booking.customerPhone || '',
+      serviceId: booking.serviceId || '',
+      date: booking.date || '',
+      startTime: booking.startTime ? booking.startTime.slice(0, 5) : booking.time || '',
+      specialRequests: booking.specialRequests || '',
+    });
+    setEditError(null);
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+    setEditError(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!booking || !onEditBooking) return;
+    setEditError(null);
+
+    if (!editForm.customerName.trim()) {
+      setEditError('Customer name is required.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await onEditBooking(booking.bookingId, {
+        customerName: editForm.customerName.trim(),
+        customerPhone: editForm.customerPhone.trim() || null,
+        serviceId: editForm.serviceId || undefined,
+        date: editForm.date || undefined,
+        startTime: editForm.startTime ? editForm.startTime + ':00' : undefined,
+        specialRequests: editForm.specialRequests.trim() || null,
+      });
+      if (result?.error) {
+        setEditError(result.error.message || 'Failed to update booking.');
+      } else {
+        setIsEditing(false);
+      }
+    } catch (error) {
+      setEditError('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleAssignTherapist = async () => {
-    if (!selectedTherapist || !booking) return;
+    if (!booking) return;
 
     setIsLoading(true);
     try {
       if (onAssignTherapist) {
-        await onAssignTherapist(booking.bookingId, selectedTherapist, notes);
+        await onAssignTherapist(booking.bookingId, selectedTherapist || null, notes, selectedRoom || null);
       }
-      setSelectedTherapist('');
-      setNotes('');
       onClose();
     } catch (error) {
       console.error('Assignment failed:', error);
@@ -154,6 +230,8 @@ const BookingActionModal = ({
   const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
   const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
 
+  const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
+
   // Use Portal to render modal at document body level, escaping any stacking context
   return createPortal(
     <>
@@ -195,7 +273,10 @@ const BookingActionModal = ({
               {tabs.map((tab, index) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    if (tab.id !== 'details') setIsEditing(false);
+                  }}
                   className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
                     index === tabs.length - 1 ? 'mr-4 sm:mr-6' : ''
                   } ${
@@ -265,26 +346,58 @@ const BookingActionModal = ({
                 {/* Customer & Service Information - Responsive grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div className="space-y-3 sm:space-y-4">
-                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                      Customer Information
-                    </h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                        Customer Information
+                      </h3>
+                      {!isMutationBlocked && !isEditing && onEditBooking && (
+                        <button
+                          onClick={startEditing}
+                          className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-primary"
+                          title="Edit booking details"
+                        >
+                          <Icon name="Pencil" size={14} />
+                        </button>
+                      )}
+                    </div>
                     <div className="space-y-2.5 sm:space-y-3">
                       <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Name</label>
-                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerName}</p>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editForm.customerName}
+                            onChange={(e) => setEditForm(f => ({ ...f, customerName: e.target.value }))}
+                            className={inputClasses}
+                          />
+                        ) : (
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerName}</p>
+                        )}
                       </div>
-                      {booking.customerEmail && (
+                      {(booking.customerEmail && !isEditing) && (
                         <div>
                           <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Email</label>
                           <p className="font-body font-body-normal text-sm text-text-primary break-all">{booking.customerEmail}</p>
                         </div>
                       )}
-                      {booking.customerPhone && (
-                        <div>
-                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Phone</label>
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerPhone}</p>
-                        </div>
-                      )}
+                      <div>
+                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Phone</label>
+                        {isEditing ? (
+                          <input
+                            type="tel"
+                            value={editForm.customerPhone}
+                            onChange={(e) => setEditForm(f => ({ ...f, customerPhone: e.target.value }))}
+                            className={inputClasses}
+                            placeholder="Phone number"
+                          />
+                        ) : (
+                          booking.customerPhone ? (
+                            <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerPhone}</p>
+                          ) : (
+                            <p className="font-body font-body-normal text-sm text-text-secondary italic">Not provided</p>
+                          )
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -295,21 +408,60 @@ const BookingActionModal = ({
                     <div className="space-y-2.5 sm:space-y-3">
                       <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
-                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
+                        {isEditing && services?.length > 0 ? (
+                          <>
+                            <select
+                              value={editForm.serviceId}
+                              onChange={(e) => setEditForm(f => ({ ...f, serviceId: e.target.value }))}
+                              className={inputClasses}
+                            >
+                              <option value="">Select service</option>
+                              {services.map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                              ))}
+                            </select>
+                            {selectedService && (
+                              <p className="font-caption text-xs text-text-secondary mt-1">
+                                {selectedService.duration_minutes} min — NPR {selectedService.price_npr?.toLocaleString('en-IN')}
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.service}</p>
+                        )}
                       </div>
-                      <div className="flex gap-4">
-                        <div>
-                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Duration</label>
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.duration}</p>
+                      {!isEditing && (
+                        <div className="flex gap-4">
+                          <div>
+                            <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Duration</label>
+                            <p className="font-body font-body-normal text-sm text-text-primary">{booking.duration}</p>
+                          </div>
+                          <div>
+                            <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Price</label>
+                            <p className="font-body font-body-normal text-sm text-text-primary">{booking.price}</p>
+                          </div>
                         </div>
-                        <div>
-                          <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Price</label>
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.price}</p>
-                        </div>
-                      </div>
+                      )}
                       <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Date & Time</label>
-                        <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {booking.time}</p>
+                        {isEditing ? (
+                          <div className="flex gap-2">
+                            <input
+                              type="date"
+                              value={editForm.date}
+                              onChange={(e) => setEditForm(f => ({ ...f, date: e.target.value }))}
+                              className={inputClasses}
+                            />
+                            <input
+                              type="time"
+                              value={editForm.startTime}
+                              onChange={(e) => setEditForm(f => ({ ...f, startTime: e.target.value }))}
+                              className={inputClasses}
+                            />
+                          </div>
+                        ) : (
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {booking.time}</p>
+                        )}
                       </div>
                       <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Payment</label>
@@ -322,7 +474,7 @@ const BookingActionModal = ({
                 </div>
 
                 {/* Therapist */}
-                {booking.therapist && (
+                {booking.therapist && !isEditing && (
                   <div className="space-y-1.5 sm:space-y-2">
                     <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Assigned Therapist</label>
                     <p className="font-body font-body-normal text-sm text-text-primary">
@@ -332,76 +484,149 @@ const BookingActionModal = ({
                 )}
 
                 {/* Special Requests */}
-                {booking.specialRequests && (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
+                  {isEditing ? (
+                    <textarea
+                      value={editForm.specialRequests}
+                      onChange={(e) => setEditForm(f => ({ ...f, specialRequests: e.target.value }))}
+                      rows={2}
+                      placeholder="Any special requests or notes..."
+                      className={`${inputClasses} resize-none`}
+                    />
+                  ) : booking.specialRequests ? (
                     <div className="p-2.5 sm:p-3 bg-background rounded-spa">
                       <p className="font-body font-body-normal text-sm text-text-primary">{booking.specialRequests}</p>
                     </div>
+                  ) : (
+                    <p className="font-body font-body-normal text-sm text-text-secondary italic">None</p>
+                  )}
+                </div>
+
+                {/* Edit error */}
+                {editError && (
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs text-error">{editError}</span>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Assign Tab */}
+            {/* Assigned Tab */}
             {activeTab === 'assign' && (
               <div className="space-y-4 sm:space-y-6">
                 {isMutationBlocked && (
                   <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
                     <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
                     <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
-                      Therapist assignment is disabled — {isLocked ? 'day is closed' : 'booking is immutable'}
+                      Assignment is disabled — {isLocked ? 'day is closed' : 'booking is immutable'}
                     </span>
                   </div>
                 )}
-                <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                  Available Therapists
-                </h3>
 
-                {therapists.length === 0 ? (
-                  <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
-                ) : (
-                  <div className="space-y-2 sm:space-y-3">
-                    {therapists.map((therapist) => (
+                {/* Section 1: Therapist */}
+                <div className="space-y-3">
+                  <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                    Therapist
+                  </h3>
+                  {therapists.length === 0 ? (
+                    <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-[240px] overflow-y-auto">
+                      {therapists.map((therapist) => (
+                        <label
+                          key={therapist.id}
+                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[52px] ${
+                            selectedTherapist === therapist.id
+                              ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="therapist"
+                            value={therapist.id}
+                            checked={selectedTherapist === therapist.id}
+                            onChange={(e) => setSelectedTherapist(e.target.value)}
+                            className="text-primary focus:ring-primary w-4 h-4"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-body font-body-medium text-sm text-text-primary truncate">
+                                {therapist.name}
+                              </span>
+                              <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
+                                {therapist.gender}
+                              </span>
+                            </div>
+                            {therapist.specialties && therapist.specialties.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {therapist.specialties.map((specialty) => (
+                                  <span
+                                    key={specialty}
+                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
+                                  >
+                                    {specialty}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section 2: Room */}
+                {rooms.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                      Room
+                    </h3>
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {/* Unassign room option */}
                       <label
-                        key={therapist.id}
-                        className={`flex items-center space-x-3 sm:space-x-4 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[56px] ${
-                          selectedTherapist === therapist.id
+                        className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[44px] ${
+                          selectedRoom === ''
                             ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                         }`}
                       >
                         <input
                           type="radio"
-                          name="therapist"
-                          value={therapist.id}
-                          checked={selectedTherapist === therapist.id}
-                          onChange={(e) => setSelectedTherapist(e.target.value)}
+                          name="room"
+                          value=""
+                          checked={selectedRoom === ''}
+                          onChange={() => setSelectedRoom('')}
                           className="text-primary focus:ring-primary w-4 h-4"
                         />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-body font-body-medium text-sm text-text-primary truncate">
-                              {therapist.name}
-                            </span>
-                            <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
-                              {therapist.gender}
+                        <span className="font-body font-body-normal text-sm text-text-secondary italic">No room assigned</span>
+                      </label>
+                      {rooms.map((room) => (
+                        <label
+                          key={room.id}
+                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[44px] ${
+                            selectedRoom === room.id
+                              ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="room"
+                            value={room.id}
+                            checked={selectedRoom === room.id}
+                            onChange={(e) => setSelectedRoom(e.target.value)}
+                            className="text-primary focus:ring-primary w-4 h-4"
+                          />
+                          <div className="flex items-center gap-2">
+                            <Icon name="DoorOpen" size={14} className="text-text-secondary" />
+                            <span className="font-body font-body-medium text-sm text-text-primary">
+                              {room.name}
                             </span>
                           </div>
-                          {therapist.specialties && therapist.specialties.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {therapist.specialties.map((specialty) => (
-                                <span
-                                  key={specialty}
-                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
-                                >
-                                  {specialty}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    ))}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -596,19 +821,37 @@ const BookingActionModal = ({
 
           {/* Footer - Responsive with safe area padding for iOS */}
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
-            <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
-              Close
-            </Button>
-            {activeTab === 'assign' && !isMutationBlocked && (
-              <Button
-                variant="primary"
-                onClick={handleAssignTherapist}
-                loading={isLoading}
-                disabled={!selectedTherapist}
-                className="min-h-[44px] sm:min-h-0"
-              >
-                Assign Therapist
-              </Button>
+            {isEditing && activeTab === 'details' ? (
+              <>
+                <Button variant="outline" onClick={cancelEditing} className="min-h-[44px] sm:min-h-0">
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveEdit}
+                  loading={isLoading}
+                  className="min-h-[44px] sm:min-h-0"
+                >
+                  Save Changes
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
+                  Close
+                </Button>
+                {activeTab === 'assign' && !isMutationBlocked && (
+                  <Button
+                    variant="primary"
+                    onClick={handleAssignTherapist}
+                    loading={isLoading}
+                    disabled={!selectedTherapist}
+                    className="min-h-[44px] sm:min-h-0"
+                  >
+                    Save Assignment
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -291,7 +291,7 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
   }
 }
 
-export async function assignTherapist({ bookingId, therapistId }) {
+export async function assignTherapist({ bookingId, therapistId, roomId }) {
   try {
     // 1. Fetch booking (include room_id for snapshot)
     const { data: booking, error: fetchError } = await supabase
@@ -330,26 +330,46 @@ export async function assignTherapist({ bookingId, therapistId }) {
       therapistNameSnapshot = therapist?.name || null;
     }
 
-    let roomNameSnapshot = null;
-    if (booking.room_id) {
-      const { data: room } = await supabase
-        .from('rooms')
-        .select('name')
-        .eq('id', booking.room_id)
-        .single();
-      roomNameSnapshot = room?.name || null;
+    // 5. Build update payload
+    const updatePayload = {
+      therapist_id: therapistId || null,
+      therapist_name_snapshot: therapistNameSnapshot,
+    };
+
+    // 6. Room assignment (if roomId provided)
+    if (roomId !== undefined) {
+      if (roomId === null) {
+        // Clear room assignment
+        updatePayload.room_id = null;
+        updatePayload.room_name_snapshot = null;
+      } else {
+        // Assign new room
+        const { data: room } = await supabase
+          .from('rooms')
+          .select('name')
+          .eq('id', roomId)
+          .single();
+        updatePayload.room_id = roomId;
+        updatePayload.room_name_snapshot = room?.name || null;
+      }
+    } else {
+      // Room unchanged — still resolve snapshot for existing room
+      if (booking.room_id) {
+        const { data: room } = await supabase
+          .from('rooms')
+          .select('name')
+          .eq('id', booking.room_id)
+          .single();
+        updatePayload.room_name_snapshot = room?.name || null;
+      }
     }
 
-    // 5. Update — null therapistId means unassign
+    // 7. Update
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
-      .update({
-        therapist_id: therapistId || null,
-        therapist_name_snapshot: therapistNameSnapshot,
-        room_name_snapshot: roomNameSnapshot,
-      })
+      .update(updatePayload)
       .eq('id', bookingId)
-      .select('id, therapist_id')
+      .select('id, therapist_id, room_id')
       .single();
 
     if (updateError) {
@@ -360,9 +380,119 @@ export async function assignTherapist({ bookingId, therapistId }) {
       throw updateError;
     }
 
-    return { data: { success: true, bookingId, therapistId: updated.therapist_id }, error: null };
+    return { data: { success: true, bookingId, therapistId: updated.therapist_id, roomId: updated.room_id }, error: null };
   } catch (error) {
     console.error('[API] assignTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests }) {
+  try {
+    // 1. Fetch current booking
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, service:services(duration_minutes)')
+      .eq('id', bookingId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+
+    // 2. Lifecycle checks
+    const mutationError = validateBookingMutation(booking);
+    if (mutationError) return { data: null, error: mutationError };
+
+    // 3. Auth
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    // 4. Build update payload with only changed fields
+    const updatePayload = {};
+
+    if (customerName !== undefined && customerName !== null) {
+      updatePayload.customer_name = customerName;
+    }
+    if (customerPhone !== undefined) {
+      updatePayload.customer_phone = customerPhone || null;
+    }
+    if (specialRequests !== undefined) {
+      updatePayload.special_requests = specialRequests || null;
+    }
+
+    // 5. If service changed, recalculate financials and duration
+    const effectiveServiceId = serviceId !== undefined ? serviceId : booking.service_id;
+    if (serviceId && serviceId !== booking.service_id) {
+      const { data: newService, error: svcError } = await supabase
+        .from('services')
+        .select('id, name, duration_minutes, price_npr')
+        .eq('id', serviceId)
+        .single();
+
+      if (svcError || !newService) {
+        return { data: null, error: { code: 'SERVICE_NOT_FOUND', message: 'Selected service not found.' } };
+      }
+
+      updatePayload.service_id = serviceId;
+      updatePayload.service_name_snapshot = newService.name;
+      updatePayload.base_amount = newService.price_npr;
+      // Preserve existing discount amount
+      const discountAmt = Number(booking.discount_amount || 0);
+      updatePayload.final_amount = Math.max(0, newService.price_npr - discountAmt);
+
+      // Recalculate end_time based on new duration
+      const effectiveStartTime = startTime || booking.start_time;
+      updatePayload.end_time = addMinutesToTime(effectiveStartTime.slice(0, 5), newService.duration_minutes);
+    }
+
+    // 6. If date or time changed, recalculate end_time and check conflicts
+    const dateChanged = date && date !== booking.date;
+    const timeChanged = startTime && startTime !== booking.start_time;
+
+    if (dateChanged) {
+      updatePayload.date = date;
+    }
+    if (timeChanged) {
+      updatePayload.start_time = startTime;
+    }
+
+    // Recalculate end_time if time changed but service didn't (service change already handled above)
+    if (timeChanged && !updatePayload.end_time) {
+      const durationMinutes = booking.service?.duration_minutes;
+      if (durationMinutes) {
+        updatePayload.end_time = addMinutesToTime(startTime.slice(0, 5), durationMinutes);
+      }
+    }
+
+    // Note: Scheduling conflicts are enforced by DB constraints (error 23P01 handled below)
+
+    // 8. Only update if there are changes
+    if (Object.keys(updatePayload).length === 0) {
+      return { data: { success: true, bookingId, noChanges: true }, error: null };
+    }
+
+    // 9. Update
+    const { data: updated, error: updateError } = await supabase
+      .from('bookings')
+      .update(updatePayload)
+      .eq('id', bookingId)
+      .select('id')
+      .single();
+
+    if (updateError) {
+      if (updateError.code === '23P01') {
+        return { data: null, error: { code: 'SCHEDULING_CONFLICT', message: 'The new date/time conflicts with an existing booking.' } };
+      }
+      throw updateError;
+    }
+
+    return { data: { success: true, bookingId }, error: null };
+  } catch (error) {
+    console.error('[API] updateBookingDetails error:', error.message);
     return { data: null, error };
   }
 }
@@ -2830,6 +2960,30 @@ export async function fetchCustomers(branchId) {
     return { data: enriched, error: null };
   } catch (error) {
     console.error('[API] fetchCustomers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchCustomersLightweight(branchId) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, full_name, phone')
+      .eq('branch_id', resolvedBranchId)
+      .eq('is_active', true)
+      .order('full_name');
+
+    if (error) throw error;
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomersLightweight error:', error.message);
     return { data: null, error };
   }
 }
