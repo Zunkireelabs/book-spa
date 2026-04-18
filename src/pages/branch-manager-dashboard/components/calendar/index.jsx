@@ -15,9 +15,11 @@ import {
   rescheduleBooking,
   fetchServices,
   createBooking,
+  updateBookingDetails,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useAuth } from '../../../../contexts/AuthContext';
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -79,7 +81,7 @@ function formatTimeDisplay(time) {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubmit }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubmit, branchId }) => {
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -87,6 +89,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const nameRef = useRef(null);
+
+  const handleCustomerSelect = useCallback((customer) => {
+    setCustomerName(customer.full_name);
+    setCustomerPhone(customer.phone || '');
+  }, []);
 
   // Reset form when slot changes
   useEffect(() => {
@@ -199,6 +206,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
                   ]}
                   placeholder="Select a service"
                   size="md"
+                  searchable
                 />
               )}
             </div>
@@ -208,14 +216,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
               <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
                 Customer Name <span className="text-error">*</span>
               </label>
-              <input
-                ref={nameRef}
-                type="text"
+              <CustomerAutocomplete
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                required
-                placeholder="Enter customer name"
-                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                onChange={setCustomerName}
+                onSelect={handleCustomerSelect}
+                branchId={branchId}
+                inputRef={nameRef}
               />
             </div>
 
@@ -228,12 +234,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
                 <span className="inline-flex items-center px-3 py-2 text-sm border border-r-0 border-border rounded-l-spa bg-background text-text-secondary">
                   +977
                 </span>
-                <input
-                  type="tel"
+                <CustomerAutocomplete
                   value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="98XXXXXXXX"
-                  className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  onChange={setCustomerPhone}
+                  onSelect={handleCustomerSelect}
+                  branchId={branchId}
+                  searchBy="phone"
+                  inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
               </div>
             </div>
@@ -781,13 +788,29 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistId) => {
-    const result = await assignTherapist({ bookingId, therapistId });
+  const handleAssignTherapist = async (bookingId, therapistId, notes, roomId) => {
+    const result = await assignTherapist({ bookingId, therapistId, roomId: roomId !== undefined ? (roomId || null) : undefined });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
     }
-    showToast(`${staffLabel} assigned successfully`);
+    showToast('Assignment saved successfully');
+  };
+
+  const handleEditBooking = async (bookingId, updates) => {
+    const result = await updateBookingDetails({ bookingId, ...updates });
+    if (result.error) {
+      showToast(result.error.message || 'Failed to update booking.', 'error');
+      return { error: result.error };
+    }
+    showToast('Booking updated successfully');
+    // Re-fetch the booking to update modal data
+    const refreshed = await fetchBookingById(bookingId);
+    if (!refreshed.error) {
+      setSelectedBooking(transformBooking(refreshed.data));
+    }
+    refreshCalendar();
+    return { error: null };
   };
 
   const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
@@ -1131,9 +1154,12 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onClose={handleModalClose}
         booking={selectedBooking}
         therapists={therapistsForModal}
+        rooms={calendarData?.rooms || []}
+        services={servicesCache || []}
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        onEditBooking={handleEditBooking}
       />
 
       {/* Toast */}
@@ -1155,6 +1181,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         servicesLoading={servicesLoading}
         onClose={handleQuickCreateClose}
         onSubmit={handleQuickCreateSubmit}
+        branchId={branchId}
       />
 
       {/* Reassignment Confirmation Dialog */}
