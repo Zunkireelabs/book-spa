@@ -1821,6 +1821,8 @@ export async function createBooking({
   customerPhone,
   customerGender,
   specialRequests,
+  therapistId,
+  roomId,
 }) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -1862,37 +1864,48 @@ export async function createBooking({
     let availableRoom = null;
 
     if (enableRooms) {
-      // 3. Fetch active rooms for branch
-      const { data: rooms, error: roomsError } = await supabase
-        .from('rooms')
-        .select('id, name')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name');
+      if (roomId) {
+        // Room explicitly selected — look up its name for snapshot
+        const { data: selectedRoom, error: roomLookupError } = await supabase
+          .from('rooms')
+          .select('id, name')
+          .eq('id', roomId)
+          .single();
+        if (roomLookupError) throw roomLookupError;
+        availableRoom = selectedRoom;
+      } else {
+        // 3. Fetch active rooms for branch
+        const { data: rooms, error: roomsError } = await supabase
+          .from('rooms')
+          .select('id, name')
+          .eq('branch_id', resolvedBranchId)
+          .eq('is_active', true)
+          .order('name');
 
-      if (roomsError) throw roomsError;
-      if (!rooms || rooms.length === 0) {
-        return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
-      }
+        if (roomsError) throw roomsError;
+        if (!rooms || rooms.length === 0) {
+          return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
+        }
 
-      // 4. Find rooms with overlapping non-cancelled/no-show bookings
-      const { data: overlapping, error: overlapError } = await supabase
-        .from('bookings')
-        .select('room_id')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', date)
-        .not('status', 'in', '("Cancelled","No Show")')
-        .lt('start_time', endTime)
-        .gt('end_time', startTime);
+        // 4. Find rooms with overlapping non-cancelled/no-show bookings
+        const { data: overlapping, error: overlapError } = await supabase
+          .from('bookings')
+          .select('room_id')
+          .eq('branch_id', resolvedBranchId)
+          .eq('date', date)
+          .not('status', 'in', '("Cancelled","No Show")')
+          .lt('start_time', endTime)
+          .gt('end_time', startTime);
 
-      if (overlapError) throw overlapError;
+        if (overlapError) throw overlapError;
 
-      // 5. Pick first available room
-      const occupiedRoomIds = new Set((overlapping || []).map(b => b.room_id));
-      availableRoom = rooms.find(r => !occupiedRoomIds.has(r.id));
+        // 5. Pick first available room
+        const occupiedRoomIds = new Set((overlapping || []).map(b => b.room_id));
+        availableRoom = rooms.find(r => !occupiedRoomIds.has(r.id));
 
-      if (!availableRoom) {
-        return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
+        if (!availableRoom) {
+          return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
+        }
       }
     }
     // End of room handling - industries without rooms skip the above block
@@ -1952,6 +1965,17 @@ export async function createBooking({
       console.warn('[API] Customer lookup/create failed:', custErr.message);
     }
 
+    // 7a. If therapist selected, fetch name for snapshot
+    let therapistNameSnapshot = null;
+    if (therapistId) {
+      const { data: therapistData } = await supabase
+        .from('staff')
+        .select('full_name')
+        .eq('id', therapistId)
+        .single();
+      therapistNameSnapshot = therapistData?.full_name || null;
+    }
+
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
     const { data: booking, error: insertError } = await supabase
       .from('bookings')
@@ -1959,7 +1983,7 @@ export async function createBooking({
         branch_id: resolvedBranchId,
         room_id: availableRoom?.id || null,
         service_id: serviceId,
-        therapist_id: null,
+        therapist_id: therapistId || null,
         customer_id: customerId,
         customer_name: customerName,
         customer_email: customerEmail || null,
@@ -1976,6 +2000,7 @@ export async function createBooking({
         service_duration_snapshot: service.duration_minutes,
         service_price_snapshot: Number(service.price_npr),
         room_name_snapshot: availableRoom?.name || null,
+        therapist_name_snapshot: therapistNameSnapshot,
       })
       .select()
       .single();
@@ -2245,8 +2270,9 @@ export async function fetchTherapistsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties, branch_id, is_active, created_at')
+      .select('id, name, gender, specialties, branch_id, is_active, created_at, display_order')
       .eq('branch_id', effectiveBranchId)
+      .order('display_order')
       .order('name');
 
     if (error) throw error;
@@ -2283,6 +2309,17 @@ export async function createTherapist({ name, gender, specialties, branchId }) {
       return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A therapist with this name already exists in this branch.' } };
     }
 
+    // Get max display_order for this branch to place new therapist at end
+    const { data: maxRow } = await supabase
+      .from('therapists')
+      .select('display_order')
+      .eq('branch_id', effectiveBranchId)
+      .order('display_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextOrder = (maxRow?.display_order ?? 0) + 1;
+
     const { data, error } = await supabase
       .from('therapists')
       .insert({
@@ -2291,8 +2328,9 @@ export async function createTherapist({ name, gender, specialties, branchId }) {
         specialties: specialties || [],
         branch_id: effectiveBranchId,
         is_active: true,
+        display_order: nextOrder,
       })
-      .select('id, name, gender, specialties, branch_id, is_active, created_at')
+      .select('id, name, gender, specialties, branch_id, is_active, created_at, display_order')
       .single();
 
     if (error) throw error;
@@ -2481,6 +2519,39 @@ export async function deleteTherapist({ therapistId }) {
     return { data: { deleted: true, therapistId, therapistName: therapist.name }, error: null };
   } catch (error) {
     console.error('[API] deleteTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateTherapistOrder({ branchId, orderedIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const effectiveBranchId = profile.role === 'manager' ? profile.branch_id : branchId;
+    if (!effectiveBranchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+
+    const updates = orderedIds.map((id, index) =>
+      supabase
+        .from('therapists')
+        .update({ display_order: index + 1 })
+        .eq('id', id)
+        .eq('branch_id', effectiveBranchId)
+    );
+
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] updateTherapistOrder error:', error.message);
     return { data: null, error };
   }
 }

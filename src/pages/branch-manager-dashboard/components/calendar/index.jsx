@@ -81,11 +81,13 @@ function formatTimeDisplay(time) {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubmit, branchId }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, onClose, onSubmit, branchId }) => {
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
+  const [therapistId, setTherapistId] = useState('');
+  const [roomId, setRoomId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const nameRef = useRef(null);
@@ -95,12 +97,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
     setCustomerPhone(customer.phone || '');
   }, []);
 
-  // Reset form when slot changes
+  // Reset form when slot changes + pre-select therapist/room from column
   useEffect(() => {
     setServiceId('');
     setCustomerName('');
     setCustomerPhone('');
     setSpecialRequests('');
+    setTherapistId(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
+    setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setError(null);
     setSubmitting(false);
   }, [slotInfo]);
@@ -123,6 +127,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
       customerName: customerName.trim(),
       customerPhone: customerPhone.replace(/\D/g, '') || null,
       specialRequests: specialRequests.trim() || null,
+      therapistId: therapistId || null,
+      roomId: roomId || null,
     });
     if (err) {
       setError(err);
@@ -210,6 +216,50 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, onClose, onSubm
                 />
               )}
             </div>
+
+            {/* Therapist */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Therapist
+              </label>
+              <CustomSelect
+                value={therapistId}
+                onChange={(val) => setTherapistId(val)}
+                options={[
+                  { value: '', label: 'No therapist' },
+                  ...(therapists || []).map((t) => ({
+                    value: t.id,
+                    label: t.full_name || t.name,
+                  })),
+                ]}
+                placeholder="No therapist"
+                size="md"
+                searchable
+              />
+            </div>
+
+            {/* Room */}
+            {rooms && rooms.length > 0 && (
+              <div>
+                <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                  Room
+                </label>
+                <CustomSelect
+                  value={roomId}
+                  onChange={(val) => setRoomId(val)}
+                  options={[
+                    { value: '', label: 'No room' },
+                    ...(rooms || []).map((r) => ({
+                      value: r.id,
+                      label: r.name,
+                    })),
+                  ]}
+                  placeholder="No room"
+                  size="md"
+                  searchable
+                />
+              </div>
+            )}
 
             {/* Customer name */}
             <div>
@@ -733,6 +783,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       customerName: formData.customerName,
       customerPhone: formData.customerPhone,
       specialRequests: formData.specialRequests,
+      therapistId: formData.therapistId,
+      roomId: formData.roomId,
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
@@ -1179,6 +1231,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         slotInfo={quickCreateSlot}
         services={servicesCache}
         servicesLoading={servicesLoading}
+        therapists={calendarData?.therapists || []}
+        rooms={calendarData?.rooms || []}
         onClose={handleQuickCreateClose}
         onSubmit={handleQuickCreateSubmit}
         branchId={branchId}
