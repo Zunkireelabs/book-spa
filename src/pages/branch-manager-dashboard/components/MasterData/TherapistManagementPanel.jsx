@@ -1,4 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
@@ -10,12 +24,105 @@ import {
   updateTherapist,
   toggleTherapistActive,
   deleteTherapist,
+  updateTherapistOrder,
 } from '../../../../services/api';
 
 const GENDER_OPTIONS = [
   { value: 'Male', label: 'Male' },
   { value: 'Female', label: 'Female' },
 ];
+
+const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: therapist.id, disabled });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <tr
+      ref={setNodeRef}
+      style={style}
+      className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast"
+    >
+      {/* Drag handle */}
+      <td className="px-2 py-3 w-8">
+        {!disabled && (
+          <button
+            {...attributes}
+            {...listeners}
+            className="p-1 rounded cursor-grab active:cursor-grabbing text-text-secondary hover:text-text-primary hover:bg-background spa-transition-fast"
+            title="Drag to reorder"
+          >
+            <Icon name="GripVertical" size={16} />
+          </button>
+        )}
+      </td>
+      <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{therapist.name}</td>
+      <td className="px-4 py-3 font-body text-sm text-text-secondary">{therapist.gender}</td>
+      <td className="px-4 py-3 hidden sm:table-cell">
+        <div className="flex flex-wrap gap-1">
+          {(therapist.specialties || []).length > 0 ? (
+            therapist.specialties.map((s, i) => (
+              <span key={i} className="inline-flex px-2 py-0.5 rounded text-xs font-caption bg-primary/10 text-primary">
+                {s}
+              </span>
+            ))
+          ) : (
+            <span className="text-xs text-text-secondary">—</span>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption ${
+          therapist.is_active
+            ? 'bg-success/10 text-success'
+            : 'bg-text-secondary/10 text-text-secondary'
+        }`}>
+          {therapist.is_active ? 'Active' : 'Inactive'}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={() => onEdit(therapist)}
+            className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+            title="Edit"
+          >
+            <Icon name="Pencil" size={16} />
+          </button>
+          <button
+            onClick={() => onDelete(therapist)}
+            className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
+            title="Delete"
+          >
+            <Icon name="Trash2" size={16} />
+          </button>
+          <button
+            onClick={() => onToggle(therapist)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+              therapist.is_active ? 'bg-success' : 'bg-border'
+            }`}
+            title={therapist.is_active ? 'Deactivate' : 'Activate'}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+              therapist.is_active ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+};
 
 const TherapistManagementPanel = ({ branchId }) => {
   const { staffLabel, staffLabelPlural } = useIndustry();
@@ -30,6 +137,19 @@ const TherapistManagementPanel = ({ branchId }) => {
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const isSearching = searchQuery.trim().length > 0;
+
+  const filteredTherapists = useMemo(() => {
+    if (!isSearching) return therapists;
+    const q = searchQuery.toLowerCase().trim();
+    return therapists.filter(t => t.name.toLowerCase().includes(q));
+  }, [therapists, searchQuery, isSearching]);
 
   const loadTherapists = useCallback(async () => {
     setLoading(true);
@@ -44,6 +164,28 @@ const TherapistManagementPanel = ({ branchId }) => {
   }, [branchId]);
 
   useEffect(() => { loadTherapists(); }, [loadTherapists]);
+
+  const handleDragEnd = async (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = therapists.findIndex(t => t.id === active.id);
+    const newIndex = therapists.findIndex(t => t.id === over.id);
+    const reordered = arrayMove(therapists, oldIndex, newIndex);
+
+    // Optimistic update
+    setTherapists(reordered);
+
+    const result = await updateTherapistOrder({
+      branchId,
+      orderedIds: reordered.map(t => t.id),
+    });
+
+    if (result.error) {
+      setError('Failed to save order. Reverting...');
+      await loadTherapists();
+    }
+  };
 
   const handleOpenCreate = () => {
     setEditingTherapist(null);
@@ -152,17 +294,43 @@ const TherapistManagementPanel = ({ branchId }) => {
     );
   }
 
+  const countLabel = isSearching
+    ? `${filteredTherapists.length} of ${therapists.length} ${therapists.length !== 1 ? staffLabelPlural.toLowerCase() : staffLabel.toLowerCase()}`
+    : `${therapists.length} ${therapists.length !== 1 ? staffLabelPlural.toLowerCase() : staffLabel.toLowerCase()} configured`;
+
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{staffLabel} Management</h3>
-          <p className="font-body text-sm text-text-secondary">{therapists.length} {therapists.length !== 1 ? staffLabelPlural.toLowerCase() : staffLabel.toLowerCase()} configured</p>
+          <p className="font-body text-sm text-text-secondary">{countLabel}</p>
         </div>
         <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
           Add {staffLabel}
         </Button>
+      </div>
+
+      {/* Search Bar */}
+      <div className="relative">
+        <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+          <Icon name="Search" size={16} className="text-text-secondary" />
+        </div>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={`Search ${staffLabelPlural.toLowerCase()}...`}
+          className="w-full pl-9 pr-9 py-2 bg-surface border border-border rounded-spa font-body text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary spa-transition-fast"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute inset-y-0 right-3 flex items-center text-text-secondary hover:text-text-primary"
+          >
+            <Icon name="X" size={16} />
+          </button>
+        )}
       </div>
 
       {/* Error Banner */}
@@ -176,84 +344,45 @@ const TherapistManagementPanel = ({ branchId }) => {
 
       {/* Table */}
       <div className="bg-surface border border-border rounded-spa overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="bg-background border-b border-border">
-              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Name</th>
-              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Gender</th>
-              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Specialties</th>
-              <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
-              <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {therapists.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
-                  No {staffLabelPlural.toLowerCase()} found. Add your first {staffLabel.toLowerCase()}.
-                </td>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <table className="w-full">
+            <thead>
+              <tr className="bg-background border-b border-border">
+                <th className="w-8 px-2 py-3" />
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Name</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Gender</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Specialties</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
+                <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Actions</th>
               </tr>
-            ) : (
-              therapists.map((t) => (
-                <tr key={t.id} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
-                  <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{t.name}</td>
-                  <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.gender}</td>
-                  <td className="px-4 py-3 hidden sm:table-cell">
-                    <div className="flex flex-wrap gap-1">
-                      {(t.specialties || []).length > 0 ? (
-                        t.specialties.map((s, i) => (
-                          <span key={i} className="inline-flex px-2 py-0.5 rounded text-xs font-caption bg-primary/10 text-primary">
-                            {s}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-text-secondary">—</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption ${
-                      t.is_active
-                        ? 'bg-success/10 text-success'
-                        : 'bg-text-secondary/10 text-text-secondary'
-                    }`}>
-                      {t.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleOpenEdit(t)}
-                        className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
-                        title="Edit"
-                      >
-                        <Icon name="Pencil" size={16} />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDelete(t)}
-                        className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
-                        title="Delete"
-                      >
-                        <Icon name="Trash2" size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleToggle(t)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-                          t.is_active ? 'bg-success' : 'bg-border'
-                        }`}
-                        title={t.is_active ? 'Deactivate' : 'Activate'}
-                      >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                          t.is_active ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
-                      </button>
-                    </div>
+            </thead>
+            <tbody>
+              {filteredTherapists.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
+                    {isSearching
+                      ? `No ${staffLabelPlural.toLowerCase()} match "${searchQuery}"`
+                      : `No ${staffLabelPlural.toLowerCase()} found. Add your first ${staffLabel.toLowerCase()}.`
+                    }
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                <SortableContext items={filteredTherapists.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                  {filteredTherapists.map((t) => (
+                    <SortableRow
+                      key={t.id}
+                      therapist={t}
+                      disabled={isSearching}
+                      onEdit={handleOpenEdit}
+                      onDelete={setConfirmDelete}
+                      onToggle={handleToggle}
+                    />
+                  ))}
+                </SortableContext>
+              )}
+            </tbody>
+          </table>
+        </DndContext>
       </div>
 
       {/* Create/Edit Modal */}
