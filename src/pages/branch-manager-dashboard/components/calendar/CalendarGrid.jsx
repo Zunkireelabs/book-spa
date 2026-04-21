@@ -131,13 +131,17 @@ const SortableColumnHeader = ({ id, children, minWidth }) => {
     transition,
     opacity: isDragging ? 0.4 : 1,
     cursor: isDragging ? 'grabbing' : 'grab',
-    position: 'relative',
-    zIndex: isDragging ? 10 : undefined,
     flex: 1,
     minWidth,
   };
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div
+      ref={setNodeRef}
+      className={`relative ${isDragging ? 'z-dropdown' : ''}`}
+      style={style}
+      {...attributes}
+      {...listeners}
+    >
       {children}
     </div>
   );

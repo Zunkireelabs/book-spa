@@ -1867,13 +1867,20 @@ export async function createBooking({
 
     if (enableRooms) {
       if (roomId) {
-        // Room explicitly selected — look up its name for snapshot
+        // Room explicitly selected — verify it belongs to this branch and is active
         const { data: selectedRoom, error: roomLookupError } = await supabase
           .from('rooms')
-          .select('id, name')
+          .select('id, name, is_active')
           .eq('id', roomId)
-          .single();
+          .eq('branch_id', resolvedBranchId)
+          .maybeSingle();
         if (roomLookupError) throw roomLookupError;
+        if (!selectedRoom) {
+          return { data: null, error: { code: 'INVALID_ROOM', message: 'Selected room is not available in this branch.' } };
+        }
+        if (!selectedRoom.is_active) {
+          return { data: null, error: { code: 'ROOM_INACTIVE', message: 'Selected room is not active.' } };
+        }
         availableRoom = selectedRoom;
       } else {
         // 3. Fetch active rooms for branch
@@ -1967,15 +1974,23 @@ export async function createBooking({
       console.warn('[API] Customer lookup/create failed:', custErr.message);
     }
 
-    // 7a. If therapist selected, fetch name for snapshot
+    // 7a. If therapist selected, verify branch + active status and capture name snapshot
     let therapistNameSnapshot = null;
     if (therapistId) {
-      const { data: therapistData } = await supabase
-        .from('staff')
-        .select('full_name')
+      const { data: therapistData, error: therapistLookupError } = await supabase
+        .from('therapists')
+        .select('name, is_active')
         .eq('id', therapistId)
-        .single();
-      therapistNameSnapshot = therapistData?.full_name || null;
+        .eq('branch_id', resolvedBranchId)
+        .maybeSingle();
+      if (therapistLookupError) throw therapistLookupError;
+      if (!therapistData) {
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: 'Selected therapist is not available in this branch.' } };
+      }
+      if (!therapistData.is_active) {
+        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Selected therapist is not active.' } };
+      }
+      therapistNameSnapshot = therapistData.name;
     }
 
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
