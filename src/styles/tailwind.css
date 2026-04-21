@@ -365,6 +365,7 @@
 
 .sidebar-scroll::-webkit-scrollbar {
   width: 4px;
+  height: 6px;
 }
 
 .sidebar-scroll::-webkit-scrollbar-thumb {

@@ -1757,15 +1757,17 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const [therapistsResult, roomsResult] = await Promise.all([
       supabase
         .from('therapists')
-        .select('id, name, gender, specialties')
+        .select('id, name, gender, specialties, display_order')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
+        .order('display_order')
         .order('name'),
       supabase
         .from('rooms')
-        .select('id, name, is_active')
+        .select('id, name, is_active, display_order')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
+        .order('display_order')
         .order('name'),
     ]);
 
@@ -2552,6 +2554,39 @@ export async function updateTherapistOrder({ branchId, orderedIds }) {
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] updateTherapistOrder error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateRoomOrder({ branchId, orderedIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const effectiveBranchId = profile.role === 'manager' ? profile.branch_id : branchId;
+    if (!effectiveBranchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+
+    const updates = orderedIds.map((id, index) =>
+      supabase
+        .from('rooms')
+        .update({ display_order: index + 1 })
+        .eq('id', id)
+        .eq('branch_id', effectiveBranchId)
+    );
+
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] updateRoomOrder error:', error.message);
     return { data: null, error };
   }
 }

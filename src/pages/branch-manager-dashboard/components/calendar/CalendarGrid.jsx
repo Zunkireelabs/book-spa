@@ -1,4 +1,7 @@
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useDroppable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
@@ -120,6 +123,26 @@ const OverflowBadge = ({ count, style }) => (
   </div>
 );
 
+// Sortable wrapper for draggable column headers
+const SortableColumnHeader = ({ id, children, minWidth }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: transform ? CSS.Transform.toString({ ...transform, y: 0 }) : undefined,
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    cursor: isDragging ? 'grabbing' : 'grab',
+    position: 'relative',
+    zIndex: isDragging ? 10 : undefined,
+    flex: 1,
+    minWidth,
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+};
+
 const CalendarGrid = ({
   therapists,
   rooms = [],
@@ -135,6 +158,8 @@ const CalendarGrid = ({
   gridRef, // Ref to get grid position for time calculation
   freezeUnassigned = true,
   onToggleFreezeUnassigned,
+  onTherapistReorder,
+  onRoomReorder,
 }) => {
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
@@ -281,11 +306,18 @@ const CalendarGrid = ({
 
   // ── Column header tooltip (fixed-position to escape overflow-hidden) ──
   const [headerTooltip, setHeaderTooltip] = useState(null);
+  const [isHeaderDragging, setIsHeaderDragging] = useState(false);
   const showHeaderTooltip = useCallback((e, name) => {
+    if (isHeaderDragging) return;
     const rect = e.currentTarget.getBoundingClientRect();
     setHeaderTooltip({ name, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
-  }, []);
+  }, [isHeaderDragging]);
   const hideHeaderTooltip = useCallback(() => setHeaderTooltip(null), []);
+
+  // ── Header drag-to-reorder (nested DndContext) ────────────
+  const headerSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
   // ── Column header renderer ────────────────────────────────
   const renderColumnHeader = (col) => {
@@ -460,6 +492,26 @@ const CalendarGrid = ({
   const unassignedCol = columns.find(c => c.type === 'unassigned');
   const regularColumns = columns.filter(c => c.type !== 'unassigned');
   const regularMinWidth = regularColumns.length * minColWidth;
+  const canSortHeaders = (columnMode === 'therapist' && !!onTherapistReorder)
+    || (columnMode === 'room' && !!onRoomReorder);
+  const regularColumnIds = useMemo(() => regularColumns.map(c => c.id), [regularColumns]);
+
+  const handleHeaderDragStart = useCallback(() => {
+    setIsHeaderDragging(true);
+    setHeaderTooltip(null);
+  }, []);
+
+  const handleHeaderDragEnd = useCallback((event) => {
+    setIsHeaderDragging(false);
+    const { active, over } = event;
+    const reorderFn = columnMode === 'room' ? onRoomReorder : onTherapistReorder;
+    if (!over || active.id === over.id || !reorderFn) return;
+    const oldIndex = regularColumns.findIndex(c => c.id === active.id);
+    const newIndex = regularColumns.findIndex(c => c.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(regularColumns, oldIndex, newIndex);
+    reorderFn(reordered.map(c => c.id));
+  }, [regularColumns, columnMode, onTherapistReorder, onRoomReorder]);
 
   const renderDayView = () => (
     <div className="flex flex-col h-full overflow-hidden">
@@ -485,9 +537,23 @@ const CalendarGrid = ({
               {renderColumnHeader(unassignedCol)}
             </div>
           )}
-          <div className="flex" style={{ minWidth: regularMinWidth }}>
-            {regularColumns.map(col => renderColumnHeader(col))}
-          </div>
+          {canSortHeaders ? (
+            <DndContext sensors={headerSensors} collisionDetection={closestCenter} onDragStart={handleHeaderDragStart} onDragEnd={handleHeaderDragEnd}>
+              <SortableContext items={regularColumnIds} strategy={horizontalListSortingStrategy}>
+                <div className="flex" style={{ minWidth: regularMinWidth }}>
+                  {regularColumns.map(col => (
+                    <SortableColumnHeader key={col.id} id={col.id} minWidth={minColWidth}>
+                      {renderColumnHeader(col)}
+                    </SortableColumnHeader>
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          ) : (
+            <div className="flex" style={{ minWidth: regularMinWidth }}>
+              {regularColumns.map(col => renderColumnHeader(col))}
+            </div>
+          )}
         </div>
       </div>
       {/* Scrollable grid body */}

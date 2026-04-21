@@ -16,6 +16,8 @@ import {
   fetchServices,
   createBooking,
   updateBookingDetails,
+  updateTherapistOrder,
+  updateRoomOrder,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -81,16 +83,21 @@ function formatTimeDisplay(time) {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, onClose, onSubmit, branchId }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, onClose, onSubmit, branchId, branchHours }) => {
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
   const [therapistId, setTherapistId] = useState('');
   const [roomId, setRoomId] = useState('');
+  const [bookingDate, setBookingDate] = useState('');
+  const [bookingTime, setBookingTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
+  const timeDropdownRef = useRef(null);
+  const timeListRef = useRef(null);
 
   const handleCustomerSelect = useCallback((customer) => {
     setCustomerName(customer.full_name);
@@ -105,6 +112,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setSpecialRequests('');
     setTherapistId(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
+    setBookingDate(slotInfo?.day || '');
+    setBookingTime(slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '');
     setError(null);
     setSubmitting(false);
   }, [slotInfo]);
@@ -116,6 +125,52 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       return () => clearTimeout(timer);
     }
   }, [slotInfo]);
+
+  const timeOptions = useMemo(() => {
+    const [openH] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
+    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
+    const opts = [];
+    for (let h = openH; h <= closeH; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === closeH && m > closeM) break;
+        const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        opts.push(val);
+      }
+    }
+    // Include current bookingTime if it doesn't match a 15-min slot
+    if (bookingTime && !opts.includes(bookingTime)) {
+      opts.push(bookingTime);
+      opts.sort();
+    }
+    return opts;
+  }, [branchHours, bookingTime]);
+
+  const format12h = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const suffix = h >= 12 ? 'pm' : 'am';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+  };
+
+  // Close time dropdown on outside click
+  useEffect(() => {
+    if (!timeDropdownOpen) return;
+    const handleClick = (e) => {
+      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
+        setTimeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [timeDropdownOpen]);
+
+  // Auto-scroll to selected time when dropdown opens
+  useEffect(() => {
+    if (timeDropdownOpen && timeListRef.current) {
+      const selected = timeListRef.current.querySelector('[data-selected="true"]');
+      if (selected) selected.scrollIntoView({ block: 'center' });
+    }
+  }, [timeDropdownOpen]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -129,6 +184,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       specialRequests: specialRequests.trim() || null,
       therapistId: therapistId || null,
       roomId: roomId || null,
+      bookingDate,
+      bookingTime,
     });
     if (err) {
       setError(err);
@@ -137,12 +194,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   };
 
   const isOpen = !!slotInfo;
-  const timeStr = slotInfo
-    ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
-    : '';
-  const dateDisplay = slotInfo
-    ? new Date(slotInfo.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-    : '';
 
   return (
     <>
@@ -172,11 +223,40 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-1.5">
                 <Icon name="Calendar" size={14} className="text-primary" />
-                <span className="font-body font-body-medium text-text-primary">{dateDisplay}</span>
+                <input
+                  type="date"
+                  value={bookingDate}
+                  onChange={(e) => setBookingDate(e.target.value)}
+                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="relative flex items-center gap-1.5" ref={timeDropdownRef}>
                 <Icon name="Clock" size={14} className="text-primary" />
-                <span className="font-body font-body-medium text-text-primary">{timeStr}</span>
+                <button
+                  type="button"
+                  onClick={() => setTimeDropdownOpen((v) => !v)}
+                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 hover:bg-background focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                >
+                  {bookingTime ? format12h(bookingTime) : '--:--'}
+                </button>
+                {timeDropdownOpen && (
+                  <div
+                    ref={timeListRef}
+                    className="absolute top-full left-0 mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown"
+                  >
+                    {timeOptions.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        data-selected={t === bookingTime}
+                        onClick={() => { setBookingTime(t); setTimeDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${t === bookingTime ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'}`}
+                      >
+                        {format12h(t)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-1.5 mt-1.5">
@@ -772,9 +852,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   }, []);
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
-    if (!quickCreateSlot || !branchId) return 'Missing slot or branch info.';
-    const date = quickCreateSlot.day;
-    const startTime = `${String(quickCreateSlot.hour).padStart(2, '0')}:${String(quickCreateSlot.minute).padStart(2, '0')}`;
+    if (!branchId) return 'Missing branch info.';
+    const date = formData.bookingDate;
+    const startTime = formData.bookingTime;
+    if (!date || !startTime) return 'Date and time are required.';
     const result = await createBooking({
       branchId,
       serviceId: formData.serviceId,
@@ -793,7 +874,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
-  }, [quickCreateSlot, branchId, refreshCalendar]);
+  }, [branchId, refreshCalendar]);
 
   // ── Event click → modal ────────────────────────────────────
 
@@ -873,6 +954,60 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     showToast('Payment recorded successfully');
     return { error: null };
   };
+
+  // ── Therapist column reorder ─────────────────────────────────
+  const canReorderTherapists = ['manager', 'admin'].includes(profile?.role);
+
+  const handleTherapistReorder = useCallback(async (orderedIds) => {
+    if (!branchId) return;
+    // Optimistic: reorder therapists array in local state
+    setCalendarData(prev => {
+      if (!prev) return prev;
+      const therapistMap = {};
+      prev.therapists.forEach(t => { therapistMap[t.id] = t; });
+      const reordered = orderedIds
+        .map(id => therapistMap[id])
+        .filter(Boolean);
+      // Append any therapists not in orderedIds (safety)
+      prev.therapists.forEach(t => {
+        if (!orderedIds.includes(t.id)) reordered.push(t);
+      });
+      return { ...prev, therapists: reordered };
+    });
+
+    // Persist to DB
+    const { error } = await updateTherapistOrder({ branchId, orderedIds });
+    if (error) {
+      console.error('[Calendar] Failed to persist therapist order:', error.message);
+      refreshCalendar();
+    }
+  }, [branchId, refreshCalendar]);
+
+  // ── Room column reorder ───────────────────────────────────
+  const handleRoomReorder = useCallback(async (orderedIds) => {
+    if (!branchId) return;
+    // Optimistic: reorder rooms array in local state
+    setCalendarData(prev => {
+      if (!prev) return prev;
+      const roomMap = {};
+      prev.rooms.forEach(r => { roomMap[r.id] = r; });
+      const reordered = orderedIds
+        .map(id => roomMap[id])
+        .filter(Boolean);
+      // Append any rooms not in orderedIds (safety)
+      prev.rooms.forEach(r => {
+        if (!orderedIds.includes(r.id)) reordered.push(r);
+      });
+      return { ...prev, rooms: reordered };
+    });
+
+    // Persist to DB
+    const { error } = await updateRoomOrder({ branchId, orderedIds });
+    if (error) {
+      console.error('[Calendar] Failed to persist room order:', error.message);
+      refreshCalendar();
+    }
+  }, [branchId, refreshCalendar]);
 
   // ── Derived data ───────────────────────────────────────────
 
@@ -1128,6 +1263,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                   gridRef={gridRef}
                   freezeUnassigned={freezeUnassigned}
                   onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
+                  onTherapistReorder={canReorderTherapists ? handleTherapistReorder : undefined}
+                  onRoomReorder={canReorderTherapists ? handleRoomReorder : undefined}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
@@ -1236,6 +1373,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onClose={handleQuickCreateClose}
         onSubmit={handleQuickCreateSubmit}
         branchId={branchId}
+        branchHours={calendarData?.branchHours}
       />
 
       {/* Reassignment Confirmation Dialog */}
