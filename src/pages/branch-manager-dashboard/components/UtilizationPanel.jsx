@@ -130,7 +130,7 @@ const UtilizationPanel = ({ branchId }) => {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[400px] overflow-y-auto">
           {roomUtilization.length > 0 ? (
             roomUtilization.map(r => (
               <BarRow
@@ -168,7 +168,7 @@ const UtilizationPanel = ({ branchId }) => {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[400px] overflow-y-auto">
           {therapistUtilization.length > 0 ? (
             therapistUtilization.map(t => (
               <BarRow

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -46,7 +47,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
 
   const cardRef = useRef(null);
   const [showPopover, setShowPopover] = useState(false);
-  const [popoverSide, setPopoverSide] = useState('right');
+  const [popoverPos, setPopoverPos] = useState(null);
   const hoverTimer = useRef(null);
 
   // Setup draggable
@@ -88,8 +89,12 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     hoverTimer.current = setTimeout(() => {
       if (cardRef.current) {
         const rect = cardRef.current.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        setPopoverSide(rect.right > viewportWidth * 0.6 ? 'left' : 'right');
+        const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
+        setPopoverPos({
+          side,
+          top: rect.top,
+          left: side === 'right' ? rect.right + 8 : rect.left - 288,
+        });
       }
       setShowPopover(true);
     }, 200);
@@ -98,6 +103,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const handleMouseLeave = useCallback(() => {
     clearTimeout(hoverTimer.current);
     setShowPopover(false);
+    setPopoverPos(null);
   }, []);
 
   useEffect(() => {
@@ -183,15 +189,15 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         )}
       </div>
 
-      {/* Rich hover popover */}
-      {showPopover && !isDragging && (
+      {/* Rich hover popover — rendered via portal to escape overflow clipping */}
+      {showPopover && !isDragging && popoverPos && createPortal(
         <div
-          className={`absolute z-[9999] pointer-events-none ${
-            popoverSide === 'right'
-              ? 'left-full ml-2 top-0'
-              : 'right-full mr-2 top-0'
-          }`}
-          style={{ width: 280 }}
+          className="fixed z-[9999] pointer-events-none"
+          style={{
+            top: popoverPos.top,
+            left: popoverPos.left,
+            width: 280,
+          }}
         >
           <div className="bg-surface rounded-lg border border-border spa-shadow-elevated overflow-hidden animate-fade-in">
             {/* Status banner */}
@@ -287,7 +293,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

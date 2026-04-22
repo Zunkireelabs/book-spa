@@ -1,4 +1,7 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useDroppable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
@@ -120,6 +123,30 @@ const OverflowBadge = ({ count, style }) => (
   </div>
 );
 
+// Sortable wrapper for draggable column headers
+const SortableColumnHeader = ({ id, children, minWidth }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: transform ? CSS.Transform.toString({ ...transform, y: 0 }) : undefined,
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    cursor: isDragging ? 'grabbing' : 'grab',
+    flex: 1,
+    minWidth,
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      className={`relative ${isDragging ? 'z-dropdown' : ''}`}
+      style={style}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+};
+
 const CalendarGrid = ({
   therapists,
   rooms = [],
@@ -135,6 +162,8 @@ const CalendarGrid = ({
   gridRef, // Ref to get grid position for time calculation
   freezeUnassigned = true,
   onToggleFreezeUnassigned,
+  onTherapistReorder,
+  onRoomReorder,
 }) => {
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
@@ -277,7 +306,22 @@ const CalendarGrid = ({
     }
   }, [days, todayStr, nowTop]);
 
-  const minColWidth = isMultiDay ? 100 : 160;
+  const minColWidth = isMultiDay ? 80 : 120;
+
+  // ── Column header tooltip (fixed-position to escape overflow-hidden) ──
+  const [headerTooltip, setHeaderTooltip] = useState(null);
+  const [isHeaderDragging, setIsHeaderDragging] = useState(false);
+  const showHeaderTooltip = useCallback((e, name) => {
+    if (isHeaderDragging) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHeaderTooltip({ name, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
+  }, [isHeaderDragging]);
+  const hideHeaderTooltip = useCallback(() => setHeaderTooltip(null), []);
+
+  // ── Header drag-to-reorder (nested DndContext) ────────────
+  const headerSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
   // ── Column header renderer ────────────────────────────────
   const renderColumnHeader = (col) => {
@@ -285,16 +329,20 @@ const CalendarGrid = ({
     return (
       <div
         key={col.id}
-        className="flex-1 border-r border-border last:border-r-0 px-2 py-2.5 text-center"
+        className="relative flex-1 border-r border-border last:border-r-0 px-1 py-2 text-center"
         style={{ minWidth: minColWidth }}
+        onMouseEnter={(e) => showHeaderTooltip(e, col.name)}
+        onMouseLeave={hideHeaderTooltip}
       >
-        <div className={`flex items-center justify-center gap-1.5 ${isUnassigned ? 'text-warning' : 'text-text-primary'}`}>
+        <div className={`flex items-center justify-center gap-1 overflow-hidden min-w-0 ${isUnassigned ? 'text-warning' : 'text-text-primary'}`}>
           <Icon
             name={isUnassigned ? 'AlertCircle' : col.icon}
-            size={14}
-            className={isUnassigned ? 'text-warning' : 'text-text-secondary'}
+            size={12}
+            className={`flex-shrink-0 ${isUnassigned ? 'text-warning' : 'text-text-secondary'}`}
           />
-          <span className={`font-body text-sm whitespace-nowrap ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}>
+          <span
+            className={`font-body text-[10px] truncate max-w-full block ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}
+          >
             {col.name}
           </span>
           {isUnassigned && onToggleFreezeUnassigned && (
@@ -337,6 +385,7 @@ const CalendarGrid = ({
     </div>
   );
 
+  // Solid lines only — rendered once per container, spans all columns
   const renderGridLines = () => (
     <>
       {hours.map((hour) => {
@@ -350,6 +399,39 @@ const CalendarGrid = ({
       })}
     </>
   );
+
+  // Dashed interval lines with hover tooltips — rendered per-column
+  const renderIntervalLines = () => {
+    const TEN_MIN = HOUR_HEIGHT / 6;
+    const renderIntervalLine = (hour, minuteOffset, topPos) => {
+      const label = `${String(hour).padStart(2, '0')}:${String(minuteOffset).padStart(2, '0')}`;
+      return (
+        <div key={`${hour}-${minuteOffset}`} className="absolute left-0 right-0 group/line" style={{ top: topPos }}>
+          <div className="absolute inset-x-0 top-0" style={{ borderTop: '1px dashed rgba(180, 180, 180, 0.35)' }} />
+          <div className="absolute inset-x-0 -top-[6px] h-3 cursor-default" />
+          <span className="absolute left-2 -top-5 hidden group-hover/line:block text-[10px] text-text-secondary bg-surface border border-border/50 px-1.5 py-0.5 rounded shadow-sm pointer-events-none font-data z-20">
+            {label}
+          </span>
+        </div>
+      );
+    };
+
+    return (
+      <>
+        {hours.map((hour) => {
+          const top = (hour - openHour) * HOUR_HEIGHT;
+          return (
+            <React.Fragment key={`interval-${hour}`}>
+              {renderIntervalLine(hour, 10, top + TEN_MIN)}
+              {renderIntervalLine(hour, 20, top + TEN_MIN * 2)}
+              {renderIntervalLine(hour, 40, top + TEN_MIN * 4)}
+              {renderIntervalLine(hour, 50, top + TEN_MIN * 5)}
+            </React.Fragment>
+          );
+        })}
+      </>
+    );
+  };
 
   const renderNowIndicator = (day) => {
     if (day !== todayStr || nowTop < 0 || nowTop > totalHeight) return null;
@@ -381,6 +463,9 @@ const CalendarGrid = ({
         style={{ minWidth: minColWidth, height: totalHeight }}
         onClick={(e) => handleColumnClick(e, day, col)}
       >
+        {/* Dashed interval lines with hover tooltips — per-column so hover works */}
+        {renderIntervalLines()}
+
         {/* Single droppable zone for the entire column (sibling to booking cards) */}
         <DroppableColumn
           id={droppableId}
@@ -411,6 +496,26 @@ const CalendarGrid = ({
   const unassignedCol = columns.find(c => c.type === 'unassigned');
   const regularColumns = columns.filter(c => c.type !== 'unassigned');
   const regularMinWidth = regularColumns.length * minColWidth;
+  const canSortHeaders = (columnMode === 'therapist' && !!onTherapistReorder)
+    || (columnMode === 'room' && !!onRoomReorder);
+  const regularColumnIds = useMemo(() => regularColumns.map(c => c.id), [regularColumns]);
+
+  const handleHeaderDragStart = useCallback(() => {
+    setIsHeaderDragging(true);
+    setHeaderTooltip(null);
+  }, []);
+
+  const handleHeaderDragEnd = useCallback((event) => {
+    setIsHeaderDragging(false);
+    const { active, over } = event;
+    const reorderFn = columnMode === 'room' ? onRoomReorder : onTherapistReorder;
+    if (!over || active.id === over.id || !reorderFn) return;
+    const oldIndex = regularColumns.findIndex(c => c.id === active.id);
+    const newIndex = regularColumns.findIndex(c => c.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(regularColumns, oldIndex, newIndex);
+    reorderFn(reordered.map(c => c.id));
+  }, [regularColumns, columnMode, onTherapistReorder, onRoomReorder]);
 
   const renderDayView = () => (
     <div className="flex flex-col h-full overflow-hidden">
@@ -436,9 +541,23 @@ const CalendarGrid = ({
               {renderColumnHeader(unassignedCol)}
             </div>
           )}
-          <div className="flex" style={{ minWidth: regularMinWidth }}>
-            {regularColumns.map(col => renderColumnHeader(col))}
-          </div>
+          {canSortHeaders ? (
+            <DndContext sensors={headerSensors} collisionDetection={closestCenter} onDragStart={handleHeaderDragStart} onDragEnd={handleHeaderDragEnd}>
+              <SortableContext items={regularColumnIds} strategy={horizontalListSortingStrategy}>
+                <div className="flex" style={{ minWidth: regularMinWidth }}>
+                  {regularColumns.map(col => (
+                    <SortableColumnHeader key={col.id} id={col.id} minWidth={minColWidth}>
+                      {renderColumnHeader(col)}
+                    </SortableColumnHeader>
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          ) : (
+            <div className="flex" style={{ minWidth: regularMinWidth }}>
+              {regularColumns.map(col => renderColumnHeader(col))}
+            </div>
+          )}
         </div>
       </div>
       {/* Scrollable grid body */}
@@ -474,6 +593,7 @@ const CalendarGrid = ({
                 onClick={(e) => handleColumnClick(e, currentDate, unassignedCol)}
               >
                 {renderGridLines()}
+                {renderIntervalLines()}
                 {renderNowIndicator(currentDate)}
                 <DroppableColumn
                   id={droppableId}
@@ -603,6 +723,9 @@ const CalendarGrid = ({
                     onEmptySlotClick({ day, colId: 'all', colName: formatShortDate(day), colType: 'day', hour, minute });
                   }}
                 >
+                  {/* Dashed interval lines with hover tooltips — per-column so hover works */}
+                  {renderIntervalLines()}
+
                   {/* Single droppable zone for the entire day column (sibling to booking cards) */}
                   <DroppableColumn
                     id={droppableId}
@@ -640,7 +763,19 @@ const CalendarGrid = ({
     </div>
   );
 
-  return isMultiDay ? renderMultiDayView() : renderDayView();
+  return (
+    <>
+      {isMultiDay ? renderMultiDayView() : renderDayView()}
+      {headerTooltip && (
+        <div
+          className="fixed px-2 py-1 bg-text-primary text-white text-[10px] font-body rounded whitespace-nowrap z-dropdown pointer-events-none"
+          style={{ left: headerTooltip.x, top: headerTooltip.y, transform: 'translateX(-50%)' }}
+        >
+          {headerTooltip.name}
+        </div>
+      )}
+    </>
+  );
 };
 
 export default CalendarGrid;
