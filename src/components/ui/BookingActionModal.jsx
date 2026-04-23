@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
+import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 
@@ -501,16 +502,14 @@ const BookingActionModal = ({
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
                         {isEditing && services?.length > 0 ? (
                           <>
-                            <select
+                            <CustomSelect
                               value={editForm.serviceId}
-                              onChange={(e) => setEditForm(f => ({ ...f, serviceId: e.target.value }))}
-                              className={inputClasses}
-                            >
-                              <option value="">Select service</option>
-                              {services.map(s => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                              ))}
-                            </select>
+                              onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))}
+                              options={services.map(s => ({ value: s.id, label: s.name }))}
+                              placeholder="Select service"
+                              searchable
+                              size="sm"
+                            />
                             {selectedService && (
                               <p className="font-caption text-xs text-text-secondary mt-1">
                                 {selectedService.duration_minutes} min — NPR {selectedService.price_npr?.toLocaleString('en-IN')}
@@ -951,18 +950,14 @@ const BookingActionModal = ({
                   {newBookingMode === 'add-service' && (
                     <div className="sm:col-span-2">
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
-                      <select
+                      <CustomSelect
                         value={newBookingForm.serviceId}
-                        onChange={e => setNewBookingForm(f => ({ ...f, serviceId: e.target.value }))}
-                        className={inputClasses}
-                      >
-                        <option value="">Select service...</option>
-                        {services.map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} — {s.duration_minutes}min — NPR {s.price_npr}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))}
+                        options={services.map(s => ({ value: s.id, label: `${s.name} — ${s.duration_minutes}min — NPR ${s.price_npr}` }))}
+                        placeholder="Select service..."
+                        searchable
+                        size="sm"
+                      />
                     </div>
                   )}
 
@@ -981,46 +976,38 @@ const BookingActionModal = ({
                   {/* Time */}
                   <div>
                     <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Time *</label>
-                    <select
+                    <CustomSelect
                       value={newBookingForm.startTime}
-                      onChange={e => setNewBookingForm(f => ({ ...f, startTime: e.target.value }))}
-                      className={inputClasses}
-                    >
-                      <option value="">Select time...</option>
-                      {timeOptions.map(t => (
-                        <option key={t} value={t}>{format12h(t)}</option>
-                      ))}
-                    </select>
+                      onChange={(val) => setNewBookingForm(f => ({ ...f, startTime: val }))}
+                      options={timeOptions.map(t => ({ value: t, label: format12h(t) }))}
+                      placeholder="Select time..."
+                      searchable
+                      size="sm"
+                    />
                   </div>
 
                   {/* Therapist */}
                   <div>
                     <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Therapist</label>
-                    <select
+                    <CustomSelect
                       value={newBookingForm.therapistId}
-                      onChange={e => setNewBookingForm(f => ({ ...f, therapistId: e.target.value }))}
-                      className={inputClasses}
-                    >
-                      <option value="">Any available</option>
-                      {therapists.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                      onChange={(val) => setNewBookingForm(f => ({ ...f, therapistId: val }))}
+                      options={[{ value: '', label: 'Any available' }, ...therapists.map(t => ({ value: t.id, label: t.name }))]}
+                      placeholder="Any available"
+                      size="sm"
+                    />
                   </div>
 
                   {/* Room */}
                   <div>
                     <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
-                    <select
+                    <CustomSelect
                       value={newBookingForm.roomId}
-                      onChange={e => setNewBookingForm(f => ({ ...f, roomId: e.target.value }))}
-                      className={inputClasses}
-                    >
-                      <option value="">Any available</option>
-                      {rooms.map(r => (
-                        <option key={r.id} value={r.id}>{r.name}</option>
-                      ))}
-                    </select>
+                      onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
+                      options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                      placeholder="Any available"
+                      size="sm"
+                    />
                   </div>
                 </div>
 

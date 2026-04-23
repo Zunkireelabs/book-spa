@@ -904,24 +904,29 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
     // Rebook mode — place booking at clicked slot
     if (rebookSource) {
+      // Capture and immediately clear to prevent double-click duplicates
+      const source = rebookSource;
+      setRebookSource(null);
+
       const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
       const result = await createBooking({
         branchId,
-        serviceId: rebookSource.serviceId,
+        serviceId: source.serviceId,
         date: slotInfo.day,
         startTime,
-        customerName: rebookSource.customerName,
-        customerPhone: rebookSource.customerPhone,
+        customerName: source.customerName,
+        customerPhone: source.customerPhone,
         therapistId,
         roomId,
       });
       if (result.error) {
         showToast(result.error.message || 'Failed to rebook.', 'error');
+        // Restore rebook mode on failure so user can retry
+        setRebookSource(source);
       } else {
         showToast('Booking rebooked successfully');
-        setRebookSource(null);
         refreshCalendar();
       }
       return;
@@ -1003,7 +1008,15 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
     setSelectedBooking(transformBooking(result.data));
     setModalLoading(false);
-  }, []);
+
+    // Pre-fetch services for "Add Another Service" / edit mode
+    if (!servicesCache && !servicesLoading) {
+      setServicesLoading(true);
+      const svcResult = await fetchServices();
+      if (svcResult.data) setServicesCache(svcResult.data);
+      setServicesLoading(false);
+    }
+  }, [servicesCache, servicesLoading]);
 
   const handleModalClose = useCallback(() => {
     setModalOpen(false);
