@@ -737,8 +737,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         timeChanged: oldTime !== newStartTime || oldDate !== newDate,
       });
     } else {
-      // Same column — time-only reschedule (existing behavior, no confirmation)
-      executeReschedule({ booking, bookingId, newDate, newStartTime, newEndTime, durationMinutes });
+      // Same column — time-only reschedule, show confirmation dialog
+      setPendingReassign({
+        booking,
+        bookingId,
+        newDate,
+        newStartTime,
+        newEndTime,
+        durationMinutes,
+        targetColId: effectiveTargetColId,
+        sourceColId,
+        targetColName: colNameMap[effectiveTargetColId] || effectiveTargetColId,
+        sourceColName: colNameMap[sourceColId] || sourceColId,
+        type: columnMode,
+        timeChanged: true,
+        timeOnly: true,
+      });
     }
   }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap]);
 
@@ -779,20 +793,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleConfirmReassign = useCallback(async () => {
     if (!pendingReassign) return;
 
-    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName } = pendingReassign;
+    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName, timeOnly } = pendingReassign;
 
     // Build API params
     const apiParams = { bookingId, newDate, newStartTime };
     const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
 
-    if (type === 'therapist') {
-      const therapistVal = targetColId === 'unassigned' ? null : targetColId;
-      apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-      optimisticFields.therapist_id = therapistVal;
-    } else {
-      const roomVal = targetColId === 'unassigned' ? null : targetColId;
-      apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-      optimisticFields.room_id = roomVal;
+    if (!timeOnly) {
+      if (type === 'therapist') {
+        const therapistVal = targetColId === 'unassigned' ? null : targetColId;
+        apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+        optimisticFields.therapist_id = therapistVal;
+      } else {
+        const roomVal = targetColId === 'unassigned' ? null : targetColId;
+        apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+        optimisticFields.room_id = roomVal;
+      }
     }
 
     // Optimistic UI update
@@ -818,7 +834,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         showToast(result.error.message || 'Failed to reassign booking.', 'error');
         refreshCalendar();
       } else {
-        showToast(`Reassigned to ${targetColName}`, 'success');
+        showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
       }
     } catch (err) {
       showToast('An error occurred while reassigning.', 'error');
@@ -1349,6 +1365,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
         onEditBooking={handleEditBooking}
+        onCreateBooking={handleQuickCreateSubmit}
+        branchHours={calendarData?.branchHours}
       />
 
       {/* Toast */}
@@ -1381,22 +1399,24 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
             <div className="flex items-center gap-2 mb-4">
-              <Icon name={pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen'} size={20} className="text-primary" />
+              <Icon name={pendingReassign.timeOnly ? 'Clock' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className="text-primary" />
               <h3 className="font-heading font-heading-semibold text-base text-text-primary">
-                Reassign {pendingReassign.type === 'therapist' ? staffLabel : locationLabel}
+                {pendingReassign.timeOnly ? 'Reschedule Booking' : `Reassign ${pendingReassign.type === 'therapist' ? staffLabel : locationLabel}`}
               </h3>
             </div>
             <p className="font-body text-sm text-text-secondary mb-1">
-              Move <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
+              {pendingReassign.timeOnly ? 'Reschedule' : 'Move'} <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
             </p>
-            <p className="font-body text-sm text-text-secondary mb-3">
-              from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
-              {' '}&rarr;{' '}
-              <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span>
-            </p>
+            {!pendingReassign.timeOnly && (
+              <p className="font-body text-sm text-text-secondary mb-3">
+                from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
+                {' '}&rarr;{' '}
+                <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span>
+              </p>
+            )}
             {pendingReassign.timeChanged && (
               <p className="font-body text-xs text-text-secondary mb-3">
-                Time: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
+                {pendingReassign.timeOnly ? 'New time' : 'Time'}: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
                 {pendingReassign.newDate !== pendingReassign.booking.date && (
                   <span> on {pendingReassign.newDate}</span>
                 )}

@@ -26,6 +26,8 @@ const BookingActionModal = ({
   onRecordPayment,
   onApplyDiscount,
   onEditBooking,
+  onCreateBooking,
+  branchHours,
   userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
@@ -48,6 +50,12 @@ const BookingActionModal = ({
   const [discountError, setDiscountError] = useState(null);
   const [discountSuccess, setDiscountSuccess] = useState(false);
 
+  // Add another service / Rebook state
+  const [newBookingMode, setNewBookingMode] = useState(null); // 'add-service' | 'rebook' | null
+  const [newBookingForm, setNewBookingForm] = useState({});
+  const [newBookingError, setNewBookingError] = useState(null);
+  const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
+
   // Pre-select current therapist/room when booking changes or assign tab opens
   useEffect(() => {
     if (booking) {
@@ -60,6 +68,8 @@ const BookingActionModal = ({
   useEffect(() => {
     setIsEditing(false);
     setEditError(null);
+    setNewBookingMode(null);
+    setNewBookingError(null);
   }, [booking?.bookingId]);
 
   const tabs = [
@@ -131,6 +141,78 @@ const BookingActionModal = ({
       setEditError('An unexpected error occurred.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // ── Time options for new booking forms ──
+  const timeOptions = useMemo(() => {
+    const [openH] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
+    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
+    const opts = [];
+    for (let h = openH; h <= closeH; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === closeH && m > closeM) break;
+        opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+    return opts;
+  }, [branchHours]);
+
+  const format12h = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const suffix = h >= 12 ? 'pm' : 'am';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+  };
+
+  const openNewBookingForm = (mode) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setNewBookingForm({
+      serviceId: mode === 'rebook' ? (booking.serviceId || '') : '',
+      date: mode === 'rebook' ? '' : (booking.date || today),
+      startTime: '',
+      therapistId: '',
+      roomId: '',
+    });
+    setNewBookingError(null);
+    setNewBookingSubmitting(false);
+    setNewBookingMode(mode);
+  };
+
+  const handleNewBookingSubmit = async () => {
+    if (!booking || !onCreateBooking) return;
+    if (!newBookingForm.serviceId) {
+      setNewBookingError('Please select a service.');
+      return;
+    }
+    if (!newBookingForm.date) {
+      setNewBookingError('Please select a date.');
+      return;
+    }
+    if (!newBookingForm.startTime) {
+      setNewBookingError('Please select a time.');
+      return;
+    }
+
+    setNewBookingSubmitting(true);
+    setNewBookingError(null);
+
+    const result = await onCreateBooking({
+      serviceId: newBookingForm.serviceId,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone || null,
+      bookingDate: newBookingForm.date,
+      bookingTime: newBookingForm.startTime,
+      therapistId: newBookingForm.therapistId || null,
+      roomId: newBookingForm.roomId || null,
+    });
+
+    if (result) {
+      setNewBookingError(result);
+      setNewBookingSubmitting(false);
+    } else {
+      setNewBookingMode(null);
+      onClose();
     }
   };
 
@@ -817,42 +899,196 @@ const BookingActionModal = ({
                 )}
               </div>
             )}
+
+            {/* Add Another Service / Rebook Form */}
+            {newBookingMode && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Icon name={newBookingMode === 'rebook' ? 'CalendarClock' : 'PlusCircle'} size={18} className="text-primary" />
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                      {newBookingMode === 'rebook' ? 'Rebook Service' : 'Add Another Service'}
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setNewBookingMode(null)}
+                    className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+                  >
+                    <Icon name="X" size={16} />
+                  </button>
+                </div>
+
+                <div className="bg-background/50 rounded-spa p-3 border border-border/50">
+                  <p className="font-body text-xs text-text-secondary">
+                    Customer: <span className="font-semibold text-text-primary">{booking.customerName}</span>
+                    {booking.customerPhone && <span className="ml-2">({booking.customerPhone})</span>}
+                  </p>
+                  {newBookingMode === 'rebook' && (
+                    <p className="font-body text-xs text-text-secondary mt-1">
+                      Same service: <span className="font-semibold text-text-primary">{booking.service}</span>
+                    </p>
+                  )}
+                </div>
+
+                {newBookingError && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body text-xs text-error">{newBookingError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Service — editable only for "add another service" */}
+                  {newBookingMode === 'add-service' && (
+                    <div className="sm:col-span-2">
+                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
+                      <select
+                        value={newBookingForm.serviceId}
+                        onChange={e => setNewBookingForm(f => ({ ...f, serviceId: e.target.value }))}
+                        className={inputClasses}
+                      >
+                        <option value="">Select service...</option>
+                        {services.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} — {s.duration_minutes}min — NPR {s.price_npr}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Date */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Date *</label>
+                    <input
+                      type="date"
+                      value={newBookingForm.date}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={e => setNewBookingForm(f => ({ ...f, date: e.target.value }))}
+                      className={inputClasses}
+                    />
+                  </div>
+
+                  {/* Time */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Time *</label>
+                    <select
+                      value={newBookingForm.startTime}
+                      onChange={e => setNewBookingForm(f => ({ ...f, startTime: e.target.value }))}
+                      className={inputClasses}
+                    >
+                      <option value="">Select time...</option>
+                      {timeOptions.map(t => (
+                        <option key={t} value={t}>{format12h(t)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Therapist */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Therapist</label>
+                    <select
+                      value={newBookingForm.therapistId}
+                      onChange={e => setNewBookingForm(f => ({ ...f, therapistId: e.target.value }))}
+                      className={inputClasses}
+                    >
+                      <option value="">Any available</option>
+                      {therapists.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Room */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
+                    <select
+                      value={newBookingForm.roomId}
+                      onChange={e => setNewBookingForm(f => ({ ...f, roomId: e.target.value }))}
+                      className={inputClasses}
+                    >
+                      <option value="">Any available</option>
+                      {rooms.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setNewBookingMode(null)} className="min-h-[44px] sm:min-h-0">
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={handleNewBookingSubmit}
+                    loading={newBookingSubmitting}
+                    className="min-h-[44px] sm:min-h-0"
+                  >
+                    {newBookingMode === 'rebook' ? 'Rebook' : 'Create Booking'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer - Responsive with safe area padding for iOS */}
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
-            {isEditing && activeTab === 'details' ? (
-              <>
-                <Button variant="outline" onClick={cancelEditing} className="min-h-[44px] sm:min-h-0">
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleSaveEdit}
-                  loading={isLoading}
-                  className="min-h-[44px] sm:min-h-0"
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
+            {/* Left side — Add another service / Rebook */}
+            {!isEditing && !newBookingMode && onCreateBooking ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openNewBookingForm('add-service')}
+                  className="px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
                 >
-                  Save Changes
-                </Button>
-              </>
+                  Add another service
+                </button>
+                <button
+                  onClick={() => openNewBookingForm('rebook')}
+                  className="px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
+                >
+                  Rebook
+                </button>
+              </div>
             ) : (
-              <>
-                <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
-                  Close
-                </Button>
-                {activeTab === 'assign' && !isMutationBlocked && (
+              <div />
+            )}
+
+            {/* Right side — action buttons */}
+            <div className="flex items-center gap-2">
+              {isEditing && activeTab === 'details' ? (
+                <>
+                  <Button variant="outline" onClick={cancelEditing} className="min-h-[44px] sm:min-h-0">
+                    Cancel
+                  </Button>
                   <Button
                     variant="primary"
-                    onClick={handleAssignTherapist}
+                    onClick={handleSaveEdit}
                     loading={isLoading}
-                    disabled={!selectedTherapist}
                     className="min-h-[44px] sm:min-h-0"
                   >
-                    Save Assignment
+                    Save Changes
                   </Button>
-                )}
-              </>
-            )}
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
+                    Close
+                  </Button>
+                  {activeTab === 'assign' && !isMutationBlocked && (
+                    <Button
+                      variant="primary"
+                      onClick={handleAssignTherapist}
+                      loading={isLoading}
+                      disabled={!selectedTherapist}
+                      className="min-h-[44px] sm:min-h-0"
+                    >
+                      Save Assignment
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
