@@ -73,6 +73,8 @@ const BookingActionModal = ({
     setEditError(null);
     setNewBookingMode(null);
     setNewBookingError(null);
+    setNewBookingForm({});
+    setNewBookingSubmitting(false);
   }, [booking?.bookingId]);
 
   // Auto-open rebook form when triggered via Escape fallback
@@ -207,22 +209,27 @@ const BookingActionModal = ({
     setNewBookingSubmitting(true);
     setNewBookingError(null);
 
-    const result = await onCreateBooking({
-      serviceId: newBookingForm.serviceId,
-      customerName: booking.customerName,
-      customerPhone: booking.customerPhone || null,
-      bookingDate: newBookingForm.date,
-      bookingTime: newBookingForm.startTime,
-      therapistId: newBookingForm.therapistId || null,
-      roomId: newBookingForm.roomId || null,
-    });
+    try {
+      const result = await onCreateBooking({
+        serviceId: newBookingForm.serviceId,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone || null,
+        bookingDate: newBookingForm.date,
+        bookingTime: newBookingForm.startTime,
+        therapistId: newBookingForm.therapistId || null,
+        roomId: newBookingForm.roomId || null,
+      });
 
-    if (result) {
-      setNewBookingError(result);
+      if (result) {
+        setNewBookingError(result);
+      } else {
+        setNewBookingMode(null);
+        onClose();
+      }
+    } catch (err) {
+      setNewBookingError(err?.message || 'Unexpected error. Please try again.');
+    } finally {
       setNewBookingSubmitting(false);
-    } else {
-      setNewBookingMode(null);
-      onClose();
     }
   };
 
@@ -316,6 +323,8 @@ const BookingActionModal = ({
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
   const isLocked = booking.isLocked || false;
   const isMutationBlocked = isTerminal || isLocked;
+  // "Rebook" reads as booking-again-after on terminal states; on active bookings "Book Another" is clearer
+  const rebookLabel = isTerminal ? 'Rebook' : 'Book Another';
 
   const nextStatuses = getNextStatuses(booking.status);
   const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isMutationBlocked;
@@ -915,7 +924,7 @@ const BookingActionModal = ({
                   <div className="flex items-center gap-2">
                     <Icon name={newBookingMode === 'rebook' ? 'CalendarClock' : 'PlusCircle'} size={18} className="text-primary" />
                     <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                      {newBookingMode === 'rebook' ? 'Rebook Service' : 'Add Another Service'}
+                      {newBookingMode === 'rebook' ? `${rebookLabel} Service` : 'Add Another Service'}
                     </h3>
                   </div>
                   <button
@@ -1021,7 +1030,7 @@ const BookingActionModal = ({
                     loading={newBookingSubmitting}
                     className="min-h-[44px] sm:min-h-0"
                   >
-                    {newBookingMode === 'rebook' ? 'Rebook' : 'Create Booking'}
+                    {newBookingMode === 'rebook' ? rebookLabel : 'Create Booking'}
                   </Button>
                 </div>
               </div>
@@ -1043,7 +1052,7 @@ const BookingActionModal = ({
                   onClick={() => onRebookStart?.(booking)}
                   className="px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
                 >
-                  Rebook
+                  {rebookLabel}
                 </button>
               </div>
             ) : (

@@ -926,7 +926,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         // Restore rebook mode on failure so user can retry
         setRebookSource(source);
       } else {
-        showToast('Booking rebooked successfully');
+        showToast('Rebooked successfully — payment will be collected at the new appointment.');
         refreshCalendar();
       }
       return;
@@ -1452,6 +1452,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       {rebookSource && (
         <div
           ref={rebookCardRef}
+          role="status"
+          aria-live="polite"
+          aria-label={`Rebook mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
           className="fixed pointer-events-none z-notification"
           style={{ left: -9999, top: -9999, opacity: 0 }}
         >
