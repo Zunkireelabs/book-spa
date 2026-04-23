@@ -226,7 +226,9 @@ const BookingActionModal = ({
   const isMutationBlocked = isTerminal || isLocked;
 
   const nextStatuses = getNextStatuses(booking.status);
-  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isMutationBlocked;
+  // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
+  // Only day-lock and already-paid block it — not terminal status.
+  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
   const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
   const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
 
@@ -299,23 +301,24 @@ const BookingActionModal = ({
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className="space-y-4 sm:space-y-6">
-                {/* Lock / Immutability Banner */}
-                {isMutationBlocked && (
-                  <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${
-                    isLocked
-                      ? 'bg-amber-50 border border-amber-200'
-                      : 'bg-gray-50 border border-gray-200'
-                  }`}>
-                    <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
-                    <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
-                      {isLocked
-                        ? 'Day Closed — Locked'
-                        : booking.status === 'completed'
-                          ? 'Completed — Financially Locked'
-                          : `${booking.status.replace('-', ' ')} — Immutable`}
-                    </span>
-                  </div>
-                )}
+                {/* Lock / Immutability Banner — payment-aware on Completed so it complements the Record Payment button */}
+                {isMutationBlocked && (() => {
+                  const banner = isLocked
+                    ? { bg: 'bg-amber-50', border: 'border-amber-200', iconColor: 'text-amber-600', textColor: 'text-amber-700', icon: 'Lock', label: 'Day Closed — Locked' }
+                    : booking.status === 'completed'
+                      ? booking.paymentStatus === 'paid'
+                        ? { bg: 'bg-success/5', border: 'border-success/20', iconColor: 'text-success', textColor: 'text-success', icon: 'ShieldCheck', label: 'Completed — Settled' }
+                        : { bg: 'bg-warning/5', border: 'border-warning/20', iconColor: 'text-warning', textColor: 'text-warning', icon: 'Clock', label: 'Service Completed — Payment Pending' }
+                      : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' };
+                  return (
+                    <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
+                      <Icon name={banner.icon} size={16} className={banner.iconColor} />
+                      <span className={`font-body font-body-medium text-xs ${banner.textColor}`}>
+                        {banner.label}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {/* Status and Actions - Stack on mobile */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
