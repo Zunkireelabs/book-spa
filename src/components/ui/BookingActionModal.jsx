@@ -27,7 +27,9 @@ const BookingActionModal = ({
   onApplyDiscount,
   onEditBooking,
   onCreateBooking,
+  onRebookStart,
   branchHours,
+  defaultNewBookingMode,
   userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
@@ -71,6 +73,13 @@ const BookingActionModal = ({
     setNewBookingMode(null);
     setNewBookingError(null);
   }, [booking?.bookingId]);
+
+  // Auto-open rebook form when triggered via Escape fallback
+  useEffect(() => {
+    if (defaultNewBookingMode && booking) {
+      openNewBookingForm(defaultNewBookingMode);
+    }
+  }, [defaultNewBookingMode, booking?.bookingId]);
 
   const tabs = [
     { id: 'details', label: 'Details', labelFull: 'Booking Details', icon: 'FileText' },
@@ -1044,7 +1053,7 @@ const BookingActionModal = ({
                   Add another service
                 </button>
                 <button
-                  onClick={() => openNewBookingForm('rebook')}
+                  onClick={() => onRebookStart?.(booking)}
                   className="px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
                 >
                   Rebook

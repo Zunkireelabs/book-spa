@@ -471,8 +471,56 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
+  // Rebook "pick and place" mode
+  // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
+  const [rebookSource, setRebookSource] = useState(null);
+  const [rebookFallback, setRebookFallback] = useState(false);
+
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
+
+  // Rebook floating card — mouse tracking
+  const rebookCardRef = useRef(null);
+  const rebookOverGrid = useRef(false);
+
+  useEffect(() => {
+    if (!rebookSource) return;
+
+    const handleMouseMove = (e) => {
+      const card = rebookCardRef.current;
+      if (!card) return;
+
+      // Check if cursor is over the calendar grid
+      const grid = gridRef.current;
+      if (grid) {
+        const rect = grid.getBoundingClientRect();
+        const isOver = e.clientX >= rect.left && e.clientX <= rect.right &&
+                       e.clientY >= rect.top && e.clientY <= rect.bottom;
+        rebookOverGrid.current = isOver;
+        card.style.opacity = isOver ? '0.95' : '0.5';
+      }
+
+      card.style.left = `${e.clientX + 12}px`;
+      card.style.top = `${e.clientY - 20}px`;
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && rebookSource) {
+        // Reopen modal with rebook inline form
+        setSelectedBooking(rebookSource.booking);
+        setModalOpen(true);
+        setRebookFallback(true);
+        setRebookSource(null);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [rebookSource]);
 
   // Configure drag sensors with activation constraints
   const sensors = useSensors(
@@ -854,6 +902,32 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   // ── Quick-create handlers ──────────────────────────────────
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    // Rebook mode — place booking at clicked slot
+    if (rebookSource) {
+      const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
+      const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
+      const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
+      const result = await createBooking({
+        branchId,
+        serviceId: rebookSource.serviceId,
+        date: slotInfo.day,
+        startTime,
+        customerName: rebookSource.customerName,
+        customerPhone: rebookSource.customerPhone,
+        therapistId,
+        roomId,
+      });
+      if (result.error) {
+        showToast(result.error.message || 'Failed to rebook.', 'error');
+      } else {
+        showToast('Booking rebooked successfully');
+        setRebookSource(null);
+        refreshCalendar();
+      }
+      return;
+    }
+
+    // Normal flow — open QuickCreatePanel
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
       setServicesLoading(true);
@@ -861,7 +935,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
-  }, [servicesCache, servicesLoading]);
+  }, [servicesCache, servicesLoading, rebookSource, branchId, refreshCalendar]);
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
@@ -892,6 +966,23 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     return null;
   }, [branchId, refreshCalendar]);
 
+  // ── Rebook "pick and place" handlers ───────────────────────
+
+  const handleRebookStart = useCallback((booking) => {
+    setRebookSource({
+      booking,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      serviceId: booking.serviceId,
+      serviceName: booking.service,
+      duration: booking.duration,
+    });
+    setModalOpen(false);
+    setSelectedBooking(null);
+  }, []);
+
+  const handleRebookCancel = useCallback(() => setRebookSource(null), []);
+
   // ── Event click → modal ────────────────────────────────────
 
   const handleBookingClick = useCallback(async (booking) => {
@@ -917,6 +1008,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleModalClose = useCallback(() => {
     setModalOpen(false);
     setSelectedBooking(null);
+    setRebookFallback(false);
     refreshCalendar();
   }, [refreshCalendar]);
 
@@ -1343,6 +1435,32 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         </DragOverlay>
       </DndContext>
 
+      {/* Rebook floating cursor card */}
+      {rebookSource && (
+        <div
+          ref={rebookCardRef}
+          className="fixed pointer-events-none z-notification"
+          style={{ left: -9999, top: -9999, opacity: 0 }}
+        >
+          <div className="bg-white rounded-md border-2 border-primary shadow-lg px-3 py-2 min-w-[140px]">
+            <div className="font-body font-semibold text-xs text-text-primary">
+              {rebookSource.customerName}
+            </div>
+            <div className="font-body text-[11px] text-text-secondary">
+              {rebookSource.serviceName}
+            </div>
+            <div className="flex items-center justify-between mt-1">
+              <span className="font-caption text-[10px] text-text-secondary">
+                {rebookSource.duration}
+              </span>
+              <span className="font-caption text-[10px] text-primary font-medium">
+                Click to place
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal loading overlay */}
       {modalOpen && modalLoading && (
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
@@ -1366,7 +1484,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onRecordPayment={handleRecordPayment}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
+        onRebookStart={handleRebookStart}
         branchHours={calendarData?.branchHours}
+        defaultNewBookingMode={rebookFallback ? 'rebook' : null}
       />
 
       {/* Toast */}
