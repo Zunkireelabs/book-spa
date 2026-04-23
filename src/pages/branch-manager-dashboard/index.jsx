@@ -158,7 +158,7 @@ const BranchManagerDashboard = () => {
   const dailyRevenue = paidBookings.reduce((sum, b) => sum + b.finalAmount, 0);
   const cancelledCount = bookings.filter(b => b.status === 'cancelled').length;
   const cancellationRate = totalBookings > 0 ? ((cancelledCount / totalBookings) * 100).toFixed(1) : '0.0';
-  const unpaidCount = bookings.filter(b => b.paymentStatus === 'unpaid' && ['confirmed', 'completed'].includes(b.status)).length;
+  const unpaidCount = bookings.filter(b => b.paymentStatus === 'unpaid' && ['confirmed', 'in-progress', 'completed'].includes(b.status)).length;
 
   const metricsData = [
     {

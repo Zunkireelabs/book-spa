@@ -87,14 +87,22 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
           </span>
         </div>
       )}
-      {isTerminal && !isLocked && (
-        <div className="flex items-center space-x-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-spa">
-          <Icon name="ShieldCheck" size={16} className="text-gray-500 flex-shrink-0" />
-          <span className="font-body font-body-medium text-xs text-gray-600">
-            {booking.status === 'completed' ? 'Completed — Financially Locked' : `${booking.status.replace('-', ' ')} — Immutable`}
-          </span>
-        </div>
-      )}
+      {isTerminal && !isLocked && (() => {
+        const banner = booking.status === 'completed'
+          ? booking.paymentStatus === 'paid'
+            ? { bg: 'bg-success/5', border: 'border-success/20', color: 'text-success', icon: 'ShieldCheck', label: 'Completed — Settled' }
+            : { bg: 'bg-warning/5', border: 'border-warning/20', color: 'text-warning', icon: 'Clock', label: 'Service Completed — Payment Pending' }
+          : { bg: 'bg-gray-50', border: 'border-gray-200', color: 'text-gray-600', iconColor: 'text-gray-500', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' };
+        const iconColor = banner.iconColor || banner.color;
+        return (
+          <div className={`flex items-center space-x-2 px-3 py-2 ${banner.bg} border ${banner.border} rounded-spa`}>
+            <Icon name={banner.icon} size={16} className={`${iconColor} flex-shrink-0`} />
+            <span className={`font-body font-body-medium text-xs ${banner.color}`}>
+              {banner.label}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Booking Header */}
       <div className="flex items-center space-x-3">
@@ -310,9 +318,9 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
             )}
           </div>
 
-          {/* Record Payment button — only when allowed */}
+          {/* Record Payment button — allowed on Confirmed, In-Progress, and Completed (pay-after-service is standard). */}
           {booking.paymentStatus !== 'paid'
-            && ['confirmed', 'completed'].includes(booking.status)
+            && ['confirmed', 'in-progress', 'completed'].includes(booking.status)
             && !isLocked
             && onRecordPayment && (
             <Button
