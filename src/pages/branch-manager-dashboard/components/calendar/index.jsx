@@ -471,8 +471,56 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
+  // Rebook "pick and place" mode
+  // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
+  const [rebookSource, setRebookSource] = useState(null);
+  const [rebookFallback, setRebookFallback] = useState(false);
+
   // Ref to the grid body for calculating time from cursor position
   const gridRef = useRef(null);
+
+  // Rebook floating card — mouse tracking
+  const rebookCardRef = useRef(null);
+  const rebookOverGrid = useRef(false);
+
+  useEffect(() => {
+    if (!rebookSource) return;
+
+    const handleMouseMove = (e) => {
+      const card = rebookCardRef.current;
+      if (!card) return;
+
+      // Check if cursor is over the calendar grid
+      const grid = gridRef.current;
+      if (grid) {
+        const rect = grid.getBoundingClientRect();
+        const isOver = e.clientX >= rect.left && e.clientX <= rect.right &&
+                       e.clientY >= rect.top && e.clientY <= rect.bottom;
+        rebookOverGrid.current = isOver;
+        card.style.opacity = isOver ? '0.95' : '0.5';
+      }
+
+      card.style.left = `${e.clientX + 12}px`;
+      card.style.top = `${e.clientY - 20}px`;
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && rebookSource) {
+        // Reopen modal with rebook inline form
+        setSelectedBooking(rebookSource.booking);
+        setModalOpen(true);
+        setRebookFallback(true);
+        setRebookSource(null);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [rebookSource]);
 
   // Configure drag sensors with activation constraints
   const sensors = useSensors(
@@ -737,8 +785,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         timeChanged: oldTime !== newStartTime || oldDate !== newDate,
       });
     } else {
-      // Same column — time-only reschedule (existing behavior, no confirmation)
-      executeReschedule({ booking, bookingId, newDate, newStartTime, newEndTime, durationMinutes });
+      // Same column — time-only reschedule, show confirmation dialog
+      setPendingReassign({
+        booking,
+        bookingId,
+        newDate,
+        newStartTime,
+        newEndTime,
+        durationMinutes,
+        targetColId: effectiveTargetColId,
+        sourceColId,
+        targetColName: colNameMap[effectiveTargetColId] || effectiveTargetColId,
+        sourceColName: colNameMap[sourceColId] || sourceColId,
+        type: columnMode,
+        timeChanged: true,
+        timeOnly: true,
+      });
     }
   }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap]);
 
@@ -779,20 +841,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleConfirmReassign = useCallback(async () => {
     if (!pendingReassign) return;
 
-    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName } = pendingReassign;
+    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName, timeOnly } = pendingReassign;
 
     // Build API params
     const apiParams = { bookingId, newDate, newStartTime };
     const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
 
-    if (type === 'therapist') {
-      const therapistVal = targetColId === 'unassigned' ? null : targetColId;
-      apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-      optimisticFields.therapist_id = therapistVal;
-    } else {
-      const roomVal = targetColId === 'unassigned' ? null : targetColId;
-      apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-      optimisticFields.room_id = roomVal;
+    if (!timeOnly) {
+      if (type === 'therapist') {
+        const therapistVal = targetColId === 'unassigned' ? null : targetColId;
+        apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+        optimisticFields.therapist_id = therapistVal;
+      } else {
+        const roomVal = targetColId === 'unassigned' ? null : targetColId;
+        apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+        optimisticFields.room_id = roomVal;
+      }
     }
 
     // Optimistic UI update
@@ -818,7 +882,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         showToast(result.error.message || 'Failed to reassign booking.', 'error');
         refreshCalendar();
       } else {
-        showToast(`Reassigned to ${targetColName}`, 'success');
+        showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
       }
     } catch (err) {
       showToast('An error occurred while reassigning.', 'error');
@@ -838,6 +902,37 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   // ── Quick-create handlers ──────────────────────────────────
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    // Rebook mode — place booking at clicked slot
+    if (rebookSource) {
+      // Capture and immediately clear to prevent double-click duplicates
+      const source = rebookSource;
+      setRebookSource(null);
+
+      const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
+      const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
+      const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
+      const result = await createBooking({
+        branchId,
+        serviceId: source.serviceId,
+        date: slotInfo.day,
+        startTime,
+        customerName: source.customerName,
+        customerPhone: source.customerPhone,
+        therapistId,
+        roomId,
+      });
+      if (result.error) {
+        showToast(result.error.message || 'Failed to rebook.', 'error');
+        // Restore rebook mode on failure so user can retry
+        setRebookSource(source);
+      } else {
+        showToast('Rebooked successfully — payment will be collected at the new appointment.');
+        refreshCalendar();
+      }
+      return;
+    }
+
+    // Normal flow — open QuickCreatePanel
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
       setServicesLoading(true);
@@ -845,7 +940,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
-  }, [servicesCache, servicesLoading]);
+  }, [servicesCache, servicesLoading, rebookSource, branchId, refreshCalendar]);
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
@@ -876,6 +971,23 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     return null;
   }, [branchId, refreshCalendar]);
 
+  // ── Rebook "pick and place" handlers ───────────────────────
+
+  const handleRebookStart = useCallback((booking) => {
+    setRebookSource({
+      booking,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      serviceId: booking.serviceId,
+      serviceName: booking.service,
+      duration: booking.duration,
+    });
+    setModalOpen(false);
+    setSelectedBooking(null);
+  }, []);
+
+  const handleRebookCancel = useCallback(() => setRebookSource(null), []);
+
   // ── Event click → modal ────────────────────────────────────
 
   const handleBookingClick = useCallback(async (booking) => {
@@ -896,11 +1008,20 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
     setSelectedBooking(transformBooking(result.data));
     setModalLoading(false);
-  }, []);
+
+    // Pre-fetch services for "Add Another Service" / edit mode
+    if (!servicesCache && !servicesLoading) {
+      setServicesLoading(true);
+      const svcResult = await fetchServices();
+      if (svcResult.data) setServicesCache(svcResult.data);
+      setServicesLoading(false);
+    }
+  }, [servicesCache, servicesLoading]);
 
   const handleModalClose = useCallback(() => {
     setModalOpen(false);
     setSelectedBooking(null);
+    setRebookFallback(false);
     refreshCalendar();
   }, [refreshCalendar]);
 
@@ -1327,6 +1448,35 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         </DragOverlay>
       </DndContext>
 
+      {/* Rebook floating cursor card */}
+      {rebookSource && (
+        <div
+          ref={rebookCardRef}
+          role="status"
+          aria-live="polite"
+          aria-label={`Rebook mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
+          className="fixed pointer-events-none z-notification"
+          style={{ left: -9999, top: -9999, opacity: 0 }}
+        >
+          <div className="bg-white rounded-md border-2 border-primary shadow-lg px-3 py-2 min-w-[140px]">
+            <div className="font-body font-semibold text-xs text-text-primary">
+              {rebookSource.customerName}
+            </div>
+            <div className="font-body text-[11px] text-text-secondary">
+              {rebookSource.serviceName}
+            </div>
+            <div className="flex items-center justify-between mt-1">
+              <span className="font-caption text-[10px] text-text-secondary">
+                {rebookSource.duration}
+              </span>
+              <span className="font-caption text-[10px] text-primary font-medium">
+                Click to place
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal loading overlay */}
       {modalOpen && modalLoading && (
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
@@ -1349,6 +1499,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
         onEditBooking={handleEditBooking}
+        onCreateBooking={handleQuickCreateSubmit}
+        onRebookStart={handleRebookStart}
+        branchHours={calendarData?.branchHours}
+        defaultNewBookingMode={rebookFallback ? 'rebook' : null}
       />
 
       {/* Toast */}
@@ -1381,22 +1535,24 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
             <div className="flex items-center gap-2 mb-4">
-              <Icon name={pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen'} size={20} className="text-primary" />
+              <Icon name={pendingReassign.timeOnly ? 'Clock' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className="text-primary" />
               <h3 className="font-heading font-heading-semibold text-base text-text-primary">
-                Reassign {pendingReassign.type === 'therapist' ? staffLabel : locationLabel}
+                {pendingReassign.timeOnly ? 'Reschedule Booking' : `Reassign ${pendingReassign.type === 'therapist' ? staffLabel : locationLabel}`}
               </h3>
             </div>
             <p className="font-body text-sm text-text-secondary mb-1">
-              Move <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
+              {pendingReassign.timeOnly ? 'Reschedule' : 'Move'} <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
             </p>
-            <p className="font-body text-sm text-text-secondary mb-3">
-              from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
-              {' '}&rarr;{' '}
-              <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span>
-            </p>
+            {!pendingReassign.timeOnly && (
+              <p className="font-body text-sm text-text-secondary mb-3">
+                from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
+                {' '}&rarr;{' '}
+                <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span>
+              </p>
+            )}
             {pendingReassign.timeChanged && (
               <p className="font-body text-xs text-text-secondary mb-3">
-                Time: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
+                {pendingReassign.timeOnly ? 'New time' : 'Time'}: {formatTimeDisplay(pendingReassign.newStartTime)} – {formatTimeDisplay(pendingReassign.newEndTime)}
                 {pendingReassign.newDate !== pendingReassign.booking.date && (
                   <span> on {pendingReassign.newDate}</span>
                 )}

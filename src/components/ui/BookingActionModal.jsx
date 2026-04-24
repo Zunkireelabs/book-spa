@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
+import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 
@@ -26,6 +27,10 @@ const BookingActionModal = ({
   onRecordPayment,
   onApplyDiscount,
   onEditBooking,
+  onCreateBooking,
+  onRebookStart,
+  branchHours,
+  defaultNewBookingMode,
   userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
@@ -48,6 +53,12 @@ const BookingActionModal = ({
   const [discountError, setDiscountError] = useState(null);
   const [discountSuccess, setDiscountSuccess] = useState(false);
 
+  // Add another service / Rebook state
+  const [newBookingMode, setNewBookingMode] = useState(null); // 'add-service' | 'rebook' | null
+  const [newBookingForm, setNewBookingForm] = useState({});
+  const [newBookingError, setNewBookingError] = useState(null);
+  const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
+
   // Pre-select current therapist/room when booking changes or assign tab opens
   useEffect(() => {
     if (booking) {
@@ -60,7 +71,18 @@ const BookingActionModal = ({
   useEffect(() => {
     setIsEditing(false);
     setEditError(null);
+    setNewBookingMode(null);
+    setNewBookingError(null);
+    setNewBookingForm({});
+    setNewBookingSubmitting(false);
   }, [booking?.bookingId]);
+
+  // Auto-open rebook form when triggered via Escape fallback
+  useEffect(() => {
+    if (defaultNewBookingMode && booking) {
+      openNewBookingForm(defaultNewBookingMode);
+    }
+  }, [defaultNewBookingMode, booking?.bookingId]);
 
   const tabs = [
     { id: 'details', label: 'Details', labelFull: 'Booking Details', icon: 'FileText' },
@@ -131,6 +153,83 @@ const BookingActionModal = ({
       setEditError('An unexpected error occurred.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // ── Time options for new booking forms ──
+  const timeOptions = useMemo(() => {
+    const [openH] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
+    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
+    const opts = [];
+    for (let h = openH; h <= closeH; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === closeH && m > closeM) break;
+        opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+    return opts;
+  }, [branchHours]);
+
+  const format12h = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const suffix = h >= 12 ? 'pm' : 'am';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+  };
+
+  const openNewBookingForm = (mode) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setNewBookingForm({
+      serviceId: mode === 'rebook' ? (booking.serviceId || '') : '',
+      date: mode === 'rebook' ? '' : (booking.date || today),
+      startTime: '',
+      therapistId: '',
+      roomId: '',
+    });
+    setNewBookingError(null);
+    setNewBookingSubmitting(false);
+    setNewBookingMode(mode);
+  };
+
+  const handleNewBookingSubmit = async () => {
+    if (!booking || !onCreateBooking) return;
+    if (!newBookingForm.serviceId) {
+      setNewBookingError('Please select a service.');
+      return;
+    }
+    if (!newBookingForm.date) {
+      setNewBookingError('Please select a date.');
+      return;
+    }
+    if (!newBookingForm.startTime) {
+      setNewBookingError('Please select a time.');
+      return;
+    }
+
+    setNewBookingSubmitting(true);
+    setNewBookingError(null);
+
+    try {
+      const result = await onCreateBooking({
+        serviceId: newBookingForm.serviceId,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone || null,
+        bookingDate: newBookingForm.date,
+        bookingTime: newBookingForm.startTime,
+        therapistId: newBookingForm.therapistId || null,
+        roomId: newBookingForm.roomId || null,
+      });
+
+      if (result) {
+        setNewBookingError(result);
+      } else {
+        setNewBookingMode(null);
+        onClose();
+      }
+    } catch (err) {
+      setNewBookingError(err?.message || 'Unexpected error. Please try again.');
+    } finally {
+      setNewBookingSubmitting(false);
     }
   };
 
@@ -224,9 +323,13 @@ const BookingActionModal = ({
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
   const isLocked = booking.isLocked || false;
   const isMutationBlocked = isTerminal || isLocked;
+  // "Rebook" reads as booking-again-after on terminal states; on active bookings "Book Another" is clearer
+  const rebookLabel = isTerminal ? 'Rebook' : 'Book Another';
 
   const nextStatuses = getNextStatuses(booking.status);
-  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isMutationBlocked;
+  // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
+  // Only day-lock and already-paid block it — not terminal status.
+  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
   const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
   const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
 
@@ -299,23 +402,24 @@ const BookingActionModal = ({
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className="space-y-4 sm:space-y-6">
-                {/* Lock / Immutability Banner */}
-                {isMutationBlocked && (
-                  <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${
-                    isLocked
-                      ? 'bg-amber-50 border border-amber-200'
-                      : 'bg-gray-50 border border-gray-200'
-                  }`}>
-                    <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
-                    <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
-                      {isLocked
-                        ? 'Day Closed — Locked'
-                        : booking.status === 'completed'
-                          ? 'Completed — Financially Locked'
-                          : `${booking.status.replace('-', ' ')} — Immutable`}
-                    </span>
-                  </div>
-                )}
+                {/* Lock / Immutability Banner — payment-aware on Completed so it complements the Record Payment button */}
+                {isMutationBlocked && (() => {
+                  const banner = isLocked
+                    ? { bg: 'bg-amber-50', border: 'border-amber-200', iconColor: 'text-amber-600', textColor: 'text-amber-700', icon: 'Lock', label: 'Day Closed — Locked' }
+                    : booking.status === 'completed'
+                      ? booking.paymentStatus === 'paid'
+                        ? { bg: 'bg-success/5', border: 'border-success/20', iconColor: 'text-success', textColor: 'text-success', icon: 'ShieldCheck', label: 'Completed — Settled' }
+                        : { bg: 'bg-warning/5', border: 'border-warning/20', iconColor: 'text-warning', textColor: 'text-warning', icon: 'Clock', label: 'Service Completed — Payment Pending' }
+                      : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' };
+                  return (
+                    <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
+                      <Icon name={banner.icon} size={16} className={banner.iconColor} />
+                      <span className={`font-body font-body-medium text-xs ${banner.textColor}`}>
+                        {banner.label}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {/* Status and Actions - Stack on mobile */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -410,16 +514,14 @@ const BookingActionModal = ({
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Service</label>
                         {isEditing && services?.length > 0 ? (
                           <>
-                            <select
+                            <CustomSelect
                               value={editForm.serviceId}
-                              onChange={(e) => setEditForm(f => ({ ...f, serviceId: e.target.value }))}
-                              className={inputClasses}
-                            >
-                              <option value="">Select service</option>
-                              {services.map(s => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                              ))}
-                            </select>
+                              onChange={(val) => setEditForm(f => ({ ...f, serviceId: val }))}
+                              options={services.map(s => ({ value: s.id, label: s.name }))}
+                              placeholder="Select service"
+                              searchable
+                              size="sm"
+                            />
                             {selectedService && (
                               <p className="font-caption text-xs text-text-secondary mt-1">
                                 {selectedService.duration_minutes} min — NPR {selectedService.price_npr?.toLocaleString('en-IN')}
@@ -817,42 +919,184 @@ const BookingActionModal = ({
                 )}
               </div>
             )}
+
+            {/* Add Another Service / Rebook Form */}
+            {newBookingMode && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Icon name={newBookingMode === 'rebook' ? 'CalendarClock' : 'PlusCircle'} size={18} className="text-primary" />
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                      {newBookingMode === 'rebook' ? `${rebookLabel} Service` : 'Add Another Service'}
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setNewBookingMode(null)}
+                    className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+                  >
+                    <Icon name="X" size={16} />
+                  </button>
+                </div>
+
+                <div className="bg-background/50 rounded-spa p-3 border border-border/50">
+                  <p className="font-body text-xs text-text-secondary">
+                    Customer: <span className="font-semibold text-text-primary">{booking.customerName}</span>
+                    {booking.customerPhone && <span className="ml-2">({booking.customerPhone})</span>}
+                  </p>
+                  {newBookingMode === 'rebook' && (
+                    <p className="font-body text-xs text-text-secondary mt-1">
+                      Same service: <span className="font-semibold text-text-primary">{booking.service}</span>
+                    </p>
+                  )}
+                </div>
+
+                {newBookingError && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body text-xs text-error">{newBookingError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Service — editable only for "add another service" */}
+                  {newBookingMode === 'add-service' && (
+                    <div className="sm:col-span-2">
+                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Service *</label>
+                      <CustomSelect
+                        value={newBookingForm.serviceId}
+                        onChange={(val) => setNewBookingForm(f => ({ ...f, serviceId: val }))}
+                        options={services.map(s => ({ value: s.id, label: `${s.name} — ${s.duration_minutes}min — NPR ${s.price_npr}` }))}
+                        placeholder="Select service..."
+                        searchable
+                        size="sm"
+                      />
+                    </div>
+                  )}
+
+                  {/* Date */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Date *</label>
+                    <input
+                      type="date"
+                      value={newBookingForm.date}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={e => setNewBookingForm(f => ({ ...f, date: e.target.value }))}
+                      className={inputClasses}
+                    />
+                  </div>
+
+                  {/* Time */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Time *</label>
+                    <CustomSelect
+                      value={newBookingForm.startTime}
+                      onChange={(val) => setNewBookingForm(f => ({ ...f, startTime: val }))}
+                      options={timeOptions.map(t => ({ value: t, label: format12h(t) }))}
+                      placeholder="Select time..."
+                      searchable
+                      size="sm"
+                    />
+                  </div>
+
+                  {/* Therapist */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Therapist</label>
+                    <CustomSelect
+                      value={newBookingForm.therapistId}
+                      onChange={(val) => setNewBookingForm(f => ({ ...f, therapistId: val }))}
+                      options={[{ value: '', label: 'Any available' }, ...therapists.map(t => ({ value: t.id, label: t.name }))]}
+                      placeholder="Any available"
+                      size="sm"
+                    />
+                  </div>
+
+                  {/* Room */}
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
+                    <CustomSelect
+                      value={newBookingForm.roomId}
+                      onChange={(val) => setNewBookingForm(f => ({ ...f, roomId: val }))}
+                      options={[{ value: '', label: 'Any available' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                      placeholder="Any available"
+                      size="sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setNewBookingMode(null)} className="min-h-[44px] sm:min-h-0">
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={handleNewBookingSubmit}
+                    loading={newBookingSubmitting}
+                    className="min-h-[44px] sm:min-h-0"
+                  >
+                    {newBookingMode === 'rebook' ? rebookLabel : 'Create Booking'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer - Responsive with safe area padding for iOS */}
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
-            {isEditing && activeTab === 'details' ? (
-              <>
-                <Button variant="outline" onClick={cancelEditing} className="min-h-[44px] sm:min-h-0">
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleSaveEdit}
-                  loading={isLoading}
-                  className="min-h-[44px] sm:min-h-0"
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
+            {/* Left side — Add another service / Rebook */}
+            {!isEditing && !newBookingMode && onCreateBooking ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openNewBookingForm('add-service')}
+                  className="px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
                 >
-                  Save Changes
-                </Button>
-              </>
+                  Add another service
+                </button>
+                <button
+                  onClick={() => onRebookStart?.(booking)}
+                  className="px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
+                >
+                  {rebookLabel}
+                </button>
+              </div>
             ) : (
-              <>
-                <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
-                  Close
-                </Button>
-                {activeTab === 'assign' && !isMutationBlocked && (
+              <div />
+            )}
+
+            {/* Right side — action buttons */}
+            <div className="flex items-center gap-2">
+              {isEditing && activeTab === 'details' ? (
+                <>
+                  <Button variant="outline" onClick={cancelEditing} className="min-h-[44px] sm:min-h-0">
+                    Cancel
+                  </Button>
                   <Button
                     variant="primary"
-                    onClick={handleAssignTherapist}
+                    onClick={handleSaveEdit}
                     loading={isLoading}
-                    disabled={!selectedTherapist}
                     className="min-h-[44px] sm:min-h-0"
                   >
-                    Save Assignment
+                    Save Changes
                   </Button>
-                )}
-              </>
-            )}
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
+                    Close
+                  </Button>
+                  {activeTab === 'assign' && !isMutationBlocked && (
+                    <Button
+                      variant="primary"
+                      onClick={handleAssignTherapist}
+                      loading={isLoading}
+                      disabled={!selectedTherapist}
+                      className="min-h-[44px] sm:min-h-0"
+                    >
+                      Save Assignment
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
