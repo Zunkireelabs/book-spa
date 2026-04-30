@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_SUPABASE_URL: https://pmbvogiphelmpjdalmtv.supabase.co
-        VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBtYnZvZ2lwaGVsbXBqZGFsbXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4ODEzODcsImV4cCI6MjA4NjQ1NzM4N30.gB-ry-pn0-mOHBqj0MbTVLg5RBjp6MrgX1s_czsSBc4
+        VITE_SUPABASE_URL: https://snzcckzfmpboeqkktmwy.supabase.co
+        VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuemNja3pmbXBib2Vxa2t0bXd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjMzNjcsImV4cCI6MjA5Mjk5OTM2N30.AUyPbLIajgf6iYLPdaiLsrFTY0-Xp5EqudlXB3ZuuTQ
     container_name: nuad-thai-dev
     restart: unless-stopped
     healthcheck:
