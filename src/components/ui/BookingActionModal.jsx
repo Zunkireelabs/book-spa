@@ -5,6 +5,15 @@ import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 
+// Convert "HH:MM" or "HH:MM:SS" to 12h format
+function to12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 // Status badge styles
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -562,7 +571,7 @@ const BookingActionModal = ({
                             />
                           </div>
                         ) : (
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {booking.time}</p>
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
                         )}
                       </div>
                       <div>

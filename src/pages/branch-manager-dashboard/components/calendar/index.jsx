@@ -83,10 +83,12 @@ function formatTimeDisplay(time) {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, onClose, onSubmit, branchId, branchHours }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
   const [therapistId, setTherapistId] = useState('');
   const [roomId, setRoomId] = useState('');
@@ -102,6 +104,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const handleCustomerSelect = useCallback((customer) => {
     setCustomerName(customer.full_name);
     setCustomerPhone(customer.phone || '');
+    setCustomerEmail(customer.email || '');
+    setCustomerGender(customer.gender || '');
   }, []);
 
   // Reset form when slot changes + pre-select therapist/room from column
@@ -109,6 +113,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setServiceId('');
     setCustomerName('');
     setCustomerPhone('');
+    setCustomerEmail('');
+    setCustomerGender('');
     setSpecialRequests('');
     setTherapistId(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
@@ -117,6 +123,50 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setError(null);
     setSubmitting(false);
   }, [slotInfo]);
+
+  // Compute which therapists & rooms are busy during the selected time slot
+  const selectedService = (services || []).find((s) => s.id === serviceId);
+  const busyResources = useMemo(() => {
+    if (!bookingDate || !bookingTime) return { therapistIds: new Set(), roomIds: new Set() };
+    const durationMin = selectedService?.duration_minutes || 60;
+    const [sh, sm] = bookingTime.split(':').map(Number);
+    const slotStart = sh * 60 + sm;
+    const slotEnd = slotStart + durationMin;
+
+    const busyTherapists = new Set();
+    const busyRooms = new Set();
+
+    for (const b of bookings) {
+      // calendarData.bookings uses raw DB format (snake_case)
+      const status = (b.status || '').toLowerCase();
+      if (['cancelled', 'no show', 'completed'].includes(status)) continue;
+      if (b.date !== bookingDate) continue;
+
+      // Raw DB: start_time = "HH:MM:SS", end_time = "HH:MM:SS"
+      const startStr = b.start_time || '00:00:00';
+      const endStr = b.end_time;
+      const [bh, bm] = startStr.split(':').map(Number);
+      const bStart = bh * 60 + bm;
+
+      let bEnd;
+      if (endStr) {
+        const [eh, em] = endStr.split(':').map(Number);
+        bEnd = eh * 60 + em;
+      } else {
+        // Fallback: use service duration
+        const svc = (services || []).find((s) => s.id === b.service_id);
+        bEnd = bStart + (svc?.duration_minutes || 60);
+      }
+
+      // Check time overlap: new booking [slotStart, slotEnd) overlaps [bStart, bEnd)
+      if (slotStart < bEnd && slotEnd > bStart) {
+        if (b.therapist_id) busyTherapists.add(b.therapist_id);
+        if (b.room_id) busyRooms.add(b.room_id);
+      }
+    }
+
+    return { therapistIds: busyTherapists, roomIds: busyRooms };
+  }, [bookings, bookingDate, bookingTime, selectedService, services]);
 
   // Autofocus name field when panel opens
   useEffect(() => {
@@ -181,6 +231,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       serviceId,
       customerName: customerName.trim(),
       customerPhone: customerPhone.replace(/\D/g, '') || null,
+      customerEmail: customerEmail.trim() || null,
+      customerGender: customerGender || null,
       specialRequests: specialRequests.trim() || null,
       therapistId: therapistId || null,
       roomId: roomId || null,
@@ -232,12 +284,41 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
               <div className="relative flex items-center gap-1.5" ref={timeDropdownRef}>
                 <Icon name="Clock" size={14} className="text-primary" />
+                <input
+                  type="text"
+                  value={bookingTime ? format12h(bookingTime) : ''}
+                  onChange={(e) => {
+                    // Parse manual time input (HH:MM, H:MM AM/PM formats)
+                    const raw = e.target.value;
+                    const match24 = raw.match(/^(\d{1,2}):(\d{2})$/);
+                    const matchAmPm = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+                    if (match24) {
+                      const h = parseInt(match24[1]), m = parseInt(match24[2]);
+                      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                        setBookingTime(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+                      }
+                    } else if (matchAmPm) {
+                      let h = parseInt(matchAmPm[1]);
+                      const m = parseInt(matchAmPm[2]);
+                      const pm = matchAmPm[3].toLowerCase() === 'pm';
+                      if (pm && h < 12) h += 12;
+                      if (!pm && h === 12) h = 0;
+                      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                        setBookingTime(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+                      }
+                    }
+                  }}
+                  onFocus={(e) => { e.target.select(); setTimeDropdownOpen(true); }}
+                  placeholder="--:--"
+                  autoComplete="off"
+                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 w-20 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
                 <button
                   type="button"
                   onClick={() => setTimeDropdownOpen((v) => !v)}
-                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 hover:bg-background focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  className="text-text-secondary hover:text-primary transition-colors"
                 >
-                  {bookingTime ? format12h(bookingTime) : '--:--'}
+                  <Icon name="ChevronDown" size={14} />
                 </button>
                 {timeDropdownOpen && (
                   <div
@@ -304,13 +385,19 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </label>
               <CustomSelect
                 value={therapistId}
-                onChange={(val) => setTherapistId(val)}
+                onChange={(val) => {
+                  if (!busyResources.therapistIds.has(val)) setTherapistId(val);
+                }}
                 options={[
                   { value: '', label: 'No therapist' },
-                  ...(therapists || []).map((t) => ({
-                    value: t.id,
-                    label: t.full_name || t.name,
-                  })),
+                  ...(therapists || []).map((t) => {
+                    const isBusy = busyResources.therapistIds.has(t.id);
+                    return {
+                      value: t.id,
+                      label: isBusy ? `${t.full_name || t.name} — Unavailable` : (t.full_name || t.name),
+                      disabled: isBusy,
+                    };
+                  }),
                 ]}
                 placeholder="No therapist"
                 size="md"
@@ -326,13 +413,19 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 </label>
                 <CustomSelect
                   value={roomId}
-                  onChange={(val) => setRoomId(val)}
+                  onChange={(val) => {
+                    if (!busyResources.roomIds.has(val)) setRoomId(val);
+                  }}
                   options={[
                     { value: '', label: 'No room' },
-                    ...(rooms || []).map((r) => ({
-                      value: r.id,
-                      label: r.name,
-                    })),
+                    ...(rooms || []).map((r) => {
+                      const isBusy = busyResources.roomIds.has(r.id);
+                      return {
+                        value: r.id,
+                        label: isBusy ? `${r.name} — Unavailable` : r.name,
+                        disabled: isBusy,
+                      };
+                    }),
                   ]}
                   placeholder="No room"
                   size="md"
@@ -372,6 +465,43 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   searchBy="phone"
                   inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
+              </div>
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Email
+              </label>
+              <input
+                type="email"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                placeholder="customer@email.com"
+                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+            </div>
+
+            {/* Gender */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Gender
+              </label>
+              <div className="flex gap-2">
+                {['Male', 'Female'].map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setCustomerGender(customerGender === g.toLowerCase() ? '' : g.toLowerCase())}
+                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                      customerGender === g.toLowerCase()
+                        ? 'border-primary bg-primary/10 text-primary font-medium'
+                        : 'border-border bg-surface text-text-secondary hover:bg-background'
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -958,6 +1088,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       startTime,
       customerName: formData.customerName,
       customerPhone: formData.customerPhone,
+      customerEmail: formData.customerEmail,
+      customerGender: formData.customerGender,
       specialRequests: formData.specialRequests,
       therapistId: formData.therapistId,
       roomId: formData.roomId,
@@ -1524,6 +1656,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         servicesLoading={servicesLoading}
         therapists={calendarData?.therapists || []}
         rooms={calendarData?.rooms || []}
+        bookings={calendarData?.bookings || []}
         onClose={handleQuickCreateClose}
         onSubmit={handleQuickCreateSubmit}
         branchId={branchId}

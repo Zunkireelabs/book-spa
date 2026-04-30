@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
+import { to12h } from '../../../services/bookingTransformers';
 import { useAuth } from '../../../contexts/AuthContext';
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
@@ -114,7 +115,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
             Booking #{booking.id || booking.booking_number}
           </h3>
           <p className="font-caption font-caption-normal text-sm text-text-secondary">
-            {booking.date} at {booking.time}
+            {booking.date} at {to12h(booking.time)}
           </p>
         </div>
       </div>

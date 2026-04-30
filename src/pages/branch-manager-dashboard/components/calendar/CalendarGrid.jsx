@@ -176,21 +176,15 @@ const CalendarGrid = ({
     }
   }, [gridRef]);
 
-  const openHour = useMemo(() => {
-    const [h] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
-    return h;
-  }, [branchHours]);
+  const openHour = 0;  // Full 24-hour view
 
-  const closeHour = useMemo(() => {
-    const [h, m] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
-    return m > 0 ? h + 1 : h;
-  }, [branchHours]);
+  const closeHour = 24;
 
   const hours = useMemo(() => {
     const result = [];
     for (let h = openHour; h < closeHour; h++) result.push(h);
     return result;
-  }, [openHour, closeHour]);
+  }, []);
 
   const totalHeight = hours.length * HOUR_HEIGHT;
 
@@ -302,7 +296,8 @@ const CalendarGrid = ({
 
   useEffect(() => {
     if (scrollRef.current && days.includes(todayStr)) {
-      scrollRef.current.scrollTop = Math.max(0, (nowTop || 0) - 200);
+      const containerHeight = scrollRef.current.clientHeight;
+      scrollRef.current.scrollTop = Math.max(0, (nowTop || 0) - containerHeight / 2);
     }
   }, [days, todayStr, nowTop]);
 
@@ -378,7 +373,7 @@ const CalendarGrid = ({
       {hours.map((hour) => (
         <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * HOUR_HEIGHT }}>
           <span className="absolute -top-2.5 right-2 font-data text-[11px] text-text-secondary">
-            {String(hour).padStart(2, '0')}:00
+            {hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`}
           </span>
         </div>
       ))}
@@ -404,7 +399,9 @@ const CalendarGrid = ({
   const renderIntervalLines = () => {
     const TEN_MIN = HOUR_HEIGHT / 6;
     const renderIntervalLine = (hour, minuteOffset, topPos) => {
-      const label = `${String(hour).padStart(2, '0')}:${String(minuteOffset).padStart(2, '0')}`;
+      const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+      const ampm = hour < 12 ? 'am' : 'pm';
+      const label = `${h12}:${String(minuteOffset).padStart(2, '0')}${ampm}`;
       return (
         <div key={`${hour}-${minuteOffset}`} className="absolute left-0 right-0 group/line" style={{ top: topPos }}>
           <div className="absolute inset-x-0 top-0" style={{ borderTop: '1px dashed rgba(180, 180, 180, 0.35)' }} />

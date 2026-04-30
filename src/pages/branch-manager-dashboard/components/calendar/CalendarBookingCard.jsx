@@ -13,6 +13,15 @@ const STATUS_COLORS = {
 
 const UNPAID_BORDER = '#facc15';
 
+// Convert "HH:MM" or "HH:MM:SS" to 12h format
+function to12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')}${period}`;
+}
+
 // Statuses that cannot be dragged (terminal states)
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
@@ -81,7 +90,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   })();
 
   const timeLabel = booking.startTime && booking.endTime
-    ? `${booking.startTime.slice(0, 5)} – ${booking.endTime.slice(0, 5)}`
+    ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
     : '';
 
   const handleMouseEnter = useCallback(() => {
