@@ -43,7 +43,8 @@ const BookingActionModal = ({
   userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
-  const [selectedTherapist, setSelectedTherapist] = useState('');
+  const [selectedTherapists, setSelectedTherapists] = useState([]);
+  const [therapistSearch, setTherapistSearch] = useState('');
   const [selectedRoom, setSelectedRoom] = useState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -68,10 +69,13 @@ const BookingActionModal = ({
   const [newBookingError, setNewBookingError] = useState(null);
   const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
 
-  // Pre-select current therapist/room when booking changes or assign tab opens
+  // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
     if (booking) {
-      setSelectedTherapist(booking.therapist?.id || '');
+      const ids = booking.therapists?.length > 0
+        ? booking.therapists.map(t => t.id)
+        : (booking.therapist?.id ? [booking.therapist.id] : []);
+      setSelectedTherapists(ids);
       setSelectedRoom(booking.roomId || '');
     }
   }, [booking?.bookingId]);
@@ -80,6 +84,7 @@ const BookingActionModal = ({
   useEffect(() => {
     setIsEditing(false);
     setEditError(null);
+    setTherapistSearch('');
     setNewBookingMode(null);
     setNewBookingError(null);
     setNewBookingForm({});
@@ -248,7 +253,7 @@ const BookingActionModal = ({
     setIsLoading(true);
     try {
       if (onAssignTherapist) {
-        await onAssignTherapist(booking.bookingId, selectedTherapist || null, notes, selectedRoom || null);
+        await onAssignTherapist(booking.bookingId, selectedTherapists, notes, selectedRoom || null);
       }
       onClose();
     } catch (error) {
@@ -584,13 +589,20 @@ const BookingActionModal = ({
                   </div>
                 </div>
 
-                {/* Therapist */}
-                {booking.therapist && !isEditing && (
+                {/* Therapist(s) */}
+                {(booking.therapists?.length > 0 || booking.therapist) && !isEditing && (
                   <div className="space-y-1.5 sm:space-y-2">
-                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Assigned Therapist</label>
-                    <p className="font-body font-body-normal text-sm text-text-primary">
-                      {booking.therapist.name} ({booking.therapist.gender})
-                    </p>
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                      Assigned Therapist{(booking.therapists?.length || 0) > 1 ? 's' : ''}
+                    </label>
+                    <div className="font-body font-body-normal text-sm text-text-primary">
+                      {(booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean).map((t, i) => (
+                        <span key={t.id}>
+                          {i > 0 && ', '}
+                          {t.name}{t.gender ? ` (${t.gender})` : ''}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -644,47 +656,74 @@ const BookingActionModal = ({
                   {therapists.length === 0 ? (
                     <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
                   ) : (
-                    <div className="space-y-2 max-h-[240px] overflow-y-auto">
-                      {therapists.map((therapist) => (
-                        <label
-                          key={therapist.id}
-                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[52px] ${
-                            selectedTherapist === therapist.id
-                              ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="therapist"
-                            value={therapist.id}
-                            checked={selectedTherapist === therapist.id}
-                            onChange={(e) => setSelectedTherapist(e.target.value)}
-                            className="text-primary focus:ring-primary w-4 h-4"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-body font-body-medium text-sm text-text-primary truncate">
-                                {therapist.name}
-                              </span>
-                              <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
-                                {therapist.gender}
-                              </span>
-                            </div>
-                            {therapist.specialties && therapist.specialties.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {therapist.specialties.map((specialty) => (
-                                  <span
-                                    key={specialty}
-                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
-                                  >
-                                    {specialty}
-                                  </span>
-                                ))}
+                    <div>
+                      <div className="relative mb-2">
+                        <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                        <input
+                          type="text"
+                          value={therapistSearch}
+                          onChange={(e) => setTherapistSearch(e.target.value)}
+                          placeholder="Search therapists..."
+                          className="w-full pl-8 pr-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                        />
+                      </div>
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {therapists
+                        .filter(t => !therapistSearch.trim() || t.name.toLowerCase().includes(therapistSearch.toLowerCase()))
+                        .map((therapist) => {
+                        const isSelected = selectedTherapists.includes(therapist.id);
+                        const isCurrentlyAssigned = booking?.therapists?.some(t => t.id === therapist.id)
+                          || booking?.therapist?.id === therapist.id;
+                        return (
+                          <label
+                            key={therapist.id}
+                            className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[52px] ${
+                              isSelected
+                                ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              value={therapist.id}
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedTherapists(prev => [...prev, therapist.id]);
+                                } else {
+                                  setSelectedTherapists(prev => prev.filter(id => id !== therapist.id));
+                                }
+                              }}
+                              className="text-primary focus:ring-primary w-4 h-4 rounded"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-body font-body-medium text-sm text-text-primary truncate">
+                                  {therapist.name}
+                                  {isCurrentlyAssigned && (
+                                    <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success">Assigned</span>
+                                  )}
+                                </span>
+                                <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
+                                  {therapist.gender}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        </label>
-                      ))}
+                              {therapist.specialties && therapist.specialties.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {therapist.specialties.map((specialty) => (
+                                    <span
+                                      key={specialty}
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
+                                    >
+                                      {specialty}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
                     </div>
                   )}
                 </div>
@@ -733,6 +772,9 @@ const BookingActionModal = ({
                             <Icon name="DoorOpen" size={14} className="text-text-secondary" />
                             <span className="font-body font-body-medium text-sm text-text-primary">
                               {room.name}
+                              {booking?.roomId === room.id && (
+                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-primary/10 text-primary">Allocated</span>
+                              )}
                             </span>
                           </div>
                         </label>
@@ -1097,7 +1139,7 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleAssignTherapist}
                       loading={isLoading}
-                      disabled={!selectedTherapist}
+                      disabled={selectedTherapists.length === 0}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment

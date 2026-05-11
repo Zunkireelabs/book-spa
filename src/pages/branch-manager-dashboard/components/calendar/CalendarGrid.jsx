@@ -263,7 +263,9 @@ const CalendarGrid = ({
         date: bookingDate,
         therapistId: b.therapist_id,
         roomId: b.room_id,
-        therapistName: therapistMap[b.therapist_id] || null,
+        therapistName: b.booking_therapists?.length > 0
+          ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
+          : (therapistMap[b.therapist_id] || null),
         roomName: b.room?.name || roomMap[b.room_id] || null,
         baseAmount: b.base_amount,
         discountAmount: b.discount_amount,

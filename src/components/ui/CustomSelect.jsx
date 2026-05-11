@@ -32,7 +32,7 @@ const CustomSelect = ({
   const filteredOptions = useMemo(() => {
     if (!searchable || !searchTerm.trim()) return options;
     const term = searchTerm.toLowerCase();
-    return options.filter((opt) => opt.label.toLowerCase().includes(term));
+    return options.filter((opt) => (opt.searchLabel || opt.label).toLowerCase().includes(term));
   }, [options, searchTerm, searchable]);
 
   // Close on click outside

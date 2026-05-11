@@ -90,12 +90,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
-  const [therapistId, setTherapistId] = useState('');
+  const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
   const [roomId, setRoomId] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [therapistSearch, setTherapistSearch] = useState('');
   const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
   const timeDropdownRef = useRef(null);
@@ -116,7 +117,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
-    setTherapistId(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
+    setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
+    setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setBookingDate(slotInfo?.day || '');
     setBookingTime(slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '');
@@ -126,15 +128,22 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Compute which therapists & rooms are busy during the selected time slot
   const selectedService = (services || []).find((s) => s.id === serviceId);
+  // Parse room capacity from amenities (e.g., "3 Chair" → 3, "1 Bed" → 1)
+  const getRoomCapacity = (room) => {
+    if (!room.amenities || room.amenities.length === 0) return 1;
+    const match = room.amenities[0].match(/^(\d+)/);
+    return match ? parseInt(match[1], 10) : 1;
+  };
+
   const busyResources = useMemo(() => {
-    if (!bookingDate || !bookingTime) return { therapistIds: new Set(), roomIds: new Set() };
+    if (!bookingDate || !bookingTime) return { therapistIds: new Set(), roomBookingCounts: new Map() };
     const durationMin = selectedService?.duration_minutes || 60;
     const [sh, sm] = bookingTime.split(':').map(Number);
     const slotStart = sh * 60 + sm;
     const slotEnd = slotStart + durationMin;
 
     const busyTherapists = new Set();
-    const busyRooms = new Set();
+    const roomBookingCounts = new Map();
 
     for (const b of bookings) {
       // calendarData.bookings uses raw DB format (snake_case)
@@ -160,12 +169,17 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
       // Check time overlap: new booking [slotStart, slotEnd) overlaps [bStart, bEnd)
       if (slotStart < bEnd && slotEnd > bStart) {
-        if (b.therapist_id) busyTherapists.add(b.therapist_id);
-        if (b.room_id) busyRooms.add(b.room_id);
+        // Mark all therapists (from junction table or primary) as busy
+        if (b.booking_therapists?.length > 0) {
+          b.booking_therapists.forEach(bt => busyTherapists.add(bt.therapist_id));
+        } else if (b.therapist_id) {
+          busyTherapists.add(b.therapist_id);
+        }
+        if (b.room_id) roomBookingCounts.set(b.room_id, (roomBookingCounts.get(b.room_id) || 0) + 1);
       }
     }
 
-    return { therapistIds: busyTherapists, roomIds: busyRooms };
+    return { therapistIds: busyTherapists, roomBookingCounts };
   }, [bookings, bookingDate, bookingTime, selectedService, services]);
 
   // Autofocus name field when panel opens
@@ -234,7 +248,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       customerEmail: customerEmail.trim() || null,
       customerGender: customerGender || null,
       specialRequests: specialRequests.trim() || null,
-      therapistId: therapistId || null,
+      therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
       roomId: roomId || null,
       bookingDate,
       bookingTime,
@@ -378,31 +392,59 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               )}
             </div>
 
-            {/* Therapist */}
+            {/* Therapist(s) */}
             <div>
               <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
-                Therapist
+                Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
+                {selectedTherapistIds.length > 0 && (
+                  <span className="ml-2 text-xs text-text-secondary font-normal">({selectedTherapistIds.length} selected)</span>
+                )}
               </label>
-              <CustomSelect
-                value={therapistId}
-                onChange={(val) => {
-                  if (!busyResources.therapistIds.has(val)) setTherapistId(val);
-                }}
-                options={[
-                  { value: '', label: 'No therapist' },
-                  ...(therapists || []).map((t) => {
-                    const isBusy = busyResources.therapistIds.has(t.id);
-                    return {
-                      value: t.id,
-                      label: isBusy ? `${t.full_name || t.name} — Unavailable` : (t.full_name || t.name),
-                      disabled: isBusy,
-                    };
-                  }),
-                ]}
-                placeholder="No therapist"
-                size="md"
-                searchable
-              />
+              <div className="border border-border rounded-spa bg-background overflow-hidden">
+                <div className="relative px-2 pt-2">
+                  <Icon name="Search" size={14} className="absolute left-4 top-1/2 mt-1 -translate-y-1/2 text-text-secondary" />
+                  <input
+                    type="text"
+                    value={therapistSearch}
+                    onChange={(e) => setTherapistSearch(e.target.value)}
+                    placeholder="Search therapists..."
+                    className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+                <div className="space-y-1 max-h-[140px] overflow-y-auto p-2">
+                  {(therapists || [])
+                    .filter(t => {
+                      if (!therapistSearch.trim()) return true;
+                      const name = (t.full_name || t.name).toLowerCase();
+                      return name.includes(therapistSearch.toLowerCase());
+                    })
+                    .map((t) => {
+                      const isBusy = busyResources.therapistIds.has(t.id);
+                      const isChecked = selectedTherapistIds.includes(t.id);
+                      const name = t.full_name || t.name;
+                      return (
+                        <label key={t.id} className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${isChecked ? 'bg-primary/5' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTherapistIds(prev => [...prev, t.id]);
+                              } else {
+                                setSelectedTherapistIds(prev => prev.filter(id => id !== t.id));
+                              }
+                            }}
+                            className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                          />
+                          <span className="font-body text-sm text-text-primary truncate">
+                            {name}
+                            {isBusy && <span className="text-warning font-bold"> — Assigned</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
             </div>
 
             {/* Room */}
@@ -414,16 +456,43 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <CustomSelect
                   value={roomId}
                   onChange={(val) => {
-                    if (!busyResources.roomIds.has(val)) setRoomId(val);
+                    const room = (rooms || []).find(r => r.id === val);
+                    if (room) {
+                      const capacity = getRoomCapacity(room);
+                      const used = busyResources.roomBookingCounts.get(val) || 0;
+                      if (used >= capacity) return; // fully packed, block selection
+                    }
+                    setRoomId(val);
                   }}
                   options={[
                     { value: '', label: 'No room' },
                     ...(rooms || []).map((r) => {
-                      const isBusy = busyResources.roomIds.has(r.id);
+                      const capacity = getRoomCapacity(r);
+                      const used = busyResources.roomBookingCounts.get(r.id) || 0;
+                      const remaining = capacity - used;
+                      const amenityStr = r.amenities?.join(', ') || '';
+                      const isFull = used >= capacity;
+
+                      let statusLabel;
+                      if (isFull) {
+                        statusLabel = <span className="text-error font-bold">— Unavailable</span>;
+                      } else if (used > 0 && capacity > 1) {
+                        statusLabel = <span className="text-warning font-bold">— {remaining} left</span>;
+                      } else if (used > 0) {
+                        statusLabel = <span className="text-warning font-bold">— Allocated</span>;
+                      }
+
                       return {
                         value: r.id,
-                        label: isBusy ? `${r.name} — Unavailable` : r.name,
-                        disabled: isBusy,
+                        label: (
+                          <>
+                            {r.name}
+                            {amenityStr && <span className="text-text-secondary"> ({amenityStr})</span>}
+                            {statusLabel && <> {statusLabel}</>}
+                          </>
+                        ),
+                        searchLabel: r.name,
+                        disabled: isFull,
                       };
                     }),
                   ]}
@@ -1174,8 +1243,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistId, notes, roomId) => {
-    const result = await assignTherapist({ bookingId, therapistId, roomId: roomId !== undefined ? (roomId || null) : undefined });
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
+    const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
+    const result = await assignTherapist({ bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
