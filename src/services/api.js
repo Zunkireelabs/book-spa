@@ -117,7 +117,7 @@ export async function fetchRooms(branchId) {
   try {
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name')
+      .select('id, name, amenities, floor')
       .eq('branch_id', branchId)
       .eq('is_active', true)
       .order('name');
@@ -2057,7 +2057,7 @@ export async function fetchRoomsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name, branch_id, is_active, created_at')
+      .select('id, name, branch_id, is_active, amenities, floor, created_at')
       .eq('branch_id', effectiveBranchId)
       .order('name');
 
@@ -2069,7 +2069,7 @@ export async function fetchRoomsForManagement(branchId) {
   }
 }
 
-export async function createRoom({ name, branchId }) {
+export async function createRoom({ name, branchId, amenities = [], floor = null }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2097,8 +2097,8 @@ export async function createRoom({ name, branchId }) {
 
     const { data, error } = await supabase
       .from('rooms')
-      .insert({ name: name.trim(), branch_id: effectiveBranchId, is_active: true })
-      .select('id, name, branch_id, is_active, created_at')
+      .insert({ name: name.trim(), branch_id: effectiveBranchId, is_active: true, amenities: amenities || [], floor: floor || null })
+      .select('id, name, branch_id, is_active, amenities, floor, created_at')
       .single();
 
     if (error) throw error;
@@ -2109,7 +2109,7 @@ export async function createRoom({ name, branchId }) {
   }
 }
 
-export async function updateRoom({ roomId, name }) {
+export async function updateRoom({ roomId, name, amenities, floor }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2150,11 +2150,15 @@ export async function updateRoom({ roomId, name }) {
       return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A room with this name already exists in this branch.' } };
     }
 
+    const updatePayload = { name: name.trim() };
+    if (amenities !== undefined) updatePayload.amenities = amenities;
+    if (floor !== undefined) updatePayload.floor = floor;
+
     const { data, error } = await supabase
       .from('rooms')
-      .update({ name: name.trim() })
+      .update(updatePayload)
       .eq('id', roomId)
-      .select('id, name, branch_id, is_active, created_at')
+      .select('id, name, branch_id, is_active, amenities, floor, created_at')
       .single();
 
     if (error) throw error;
