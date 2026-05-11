@@ -392,61 +392,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               )}
             </div>
 
-            {/* Therapist(s) */}
-            <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
-                Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
-                {selectedTherapistIds.length > 0 && (
-                  <span className="ml-2 text-xs text-text-secondary font-normal">({selectedTherapistIds.length} selected)</span>
-                )}
-              </label>
-              <div className="border border-border rounded-spa bg-background overflow-hidden">
-                <div className="relative px-2 pt-2">
-                  <Icon name="Search" size={14} className="absolute left-4 top-1/2 mt-1 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    type="text"
-                    value={therapistSearch}
-                    onChange={(e) => setTherapistSearch(e.target.value)}
-                    placeholder="Search therapists..."
-                    className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                  />
-                </div>
-                <div className="space-y-1 max-h-[140px] overflow-y-auto p-2">
-                  {(therapists || [])
-                    .filter(t => {
-                      if (!therapistSearch.trim()) return true;
-                      const name = (t.full_name || t.name).toLowerCase();
-                      return name.includes(therapistSearch.toLowerCase());
-                    })
-                    .map((t) => {
-                      const isBusy = busyResources.therapistIds.has(t.id);
-                      const isChecked = selectedTherapistIds.includes(t.id);
-                      const name = t.full_name || t.name;
-                      return (
-                        <label key={t.id} className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${isChecked ? 'bg-primary/5' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedTherapistIds(prev => [...prev, t.id]);
-                              } else {
-                                setSelectedTherapistIds(prev => prev.filter(id => id !== t.id));
-                              }
-                            }}
-                            className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
-                          />
-                          <span className="font-body text-sm text-text-primary truncate">
-                            {name}
-                            {isBusy && <span className="text-warning font-bold"> — Assigned</span>}
-                          </span>
-                        </label>
-                      );
-                    })}
-                </div>
-              </div>
-            </div>
-
             {/* Room */}
             {rooms && rooms.length > 0 && (
               <div>
@@ -502,6 +447,61 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 />
               </div>
             )}
+
+            {/* Therapist(s) */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
+                {selectedTherapistIds.length > 0 && (
+                  <span className="ml-2 text-xs text-text-secondary font-normal">({selectedTherapistIds.length} selected)</span>
+                )}
+              </label>
+              <div className="border border-border rounded-spa bg-background overflow-hidden">
+                <div className="relative px-2 pt-2">
+                  <Icon name="Search" size={14} className="absolute left-4 top-1/2 mt-1 -translate-y-1/2 text-text-secondary" />
+                  <input
+                    type="text"
+                    value={therapistSearch}
+                    onChange={(e) => setTherapistSearch(e.target.value)}
+                    placeholder="Search therapists..."
+                    className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+                <div className="space-y-1 max-h-[140px] overflow-y-auto p-2">
+                  {(therapists || [])
+                    .filter(t => {
+                      if (!therapistSearch.trim()) return true;
+                      const name = (t.full_name || t.name).toLowerCase();
+                      return name.includes(therapistSearch.toLowerCase());
+                    })
+                    .map((t) => {
+                      const isBusy = busyResources.therapistIds.has(t.id);
+                      const isChecked = selectedTherapistIds.includes(t.id);
+                      const name = t.full_name || t.name;
+                      return (
+                        <label key={t.id} className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${isChecked ? 'bg-primary/5' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTherapistIds(prev => [...prev, t.id]);
+                              } else {
+                                setSelectedTherapistIds(prev => prev.filter(id => id !== t.id));
+                              }
+                            }}
+                            className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                          />
+                          <span className="font-body text-sm text-text-primary truncate">
+                            {name}
+                            {isBusy && <span className="text-warning font-bold"> — Assigned</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
 
             {/* Customer name */}
             <div>
