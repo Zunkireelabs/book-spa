@@ -69,7 +69,16 @@ const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle }) => {
         )}
       </td>
       <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{therapist.name}</td>
-      <td className="px-4 py-3 font-body text-sm text-text-secondary">{therapist.position || '—'}</td>
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="font-body text-sm text-text-secondary">{therapist.position || '—'}</span>
+          <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+            therapist.is_service_staff !== false ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-500'
+          }`}>
+            {therapist.is_service_staff !== false ? 'Service' : 'Support'}
+          </span>
+        </div>
+      </td>
       <td className="px-4 py-3 font-body text-sm text-text-secondary hidden sm:table-cell">{therapist.gender}</td>
       <td className="px-4 py-3 hidden md:table-cell">
         <div className="flex flex-wrap gap-1">
@@ -133,7 +142,7 @@ const TherapistManagementPanel = ({ branchId }) => {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingTherapist, setEditingTherapist] = useState(null);
-  const [formData, setFormData] = useState({ name: '', gender: 'Male', positions: [], specialties: '' });
+  const [formData, setFormData] = useState({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -141,6 +150,7 @@ const TherapistManagementPanel = ({ branchId }) => {
   const [deleting, setDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPosition, setSelectedPosition] = useState('all');
+  const [selectedStaffType, setSelectedStaffType] = useState('all');
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [newPosition, setNewPosition] = useState('');
   const [positionError, setPositionError] = useState(null);
@@ -172,15 +182,18 @@ const TherapistManagementPanel = ({ branchId }) => {
     ];
   }, [therapists, customPositions]);
 
-  const hasActiveFilters = searchQuery.trim().length > 0 || selectedPosition !== 'all';
+  const hasActiveFilters = searchQuery.trim().length > 0 || selectedPosition !== 'all' || selectedStaffType !== 'all';
 
   const filteredTherapists = useMemo(() => {
     return therapists.filter(t => {
       const matchesSearch = !searchQuery.trim() || t.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
       const matchesPosition = selectedPosition === 'all' || t.position === selectedPosition;
-      return matchesSearch && matchesPosition;
+      const matchesType = selectedStaffType === 'all'
+        || (selectedStaffType === 'service' && t.is_service_staff !== false)
+        || (selectedStaffType === 'support' && t.is_service_staff === false);
+      return matchesSearch && matchesPosition && matchesType;
     });
-  }, [therapists, searchQuery, selectedPosition]);
+  }, [therapists, searchQuery, selectedPosition, selectedStaffType]);
 
   const isSearching = hasActiveFilters;
 
@@ -222,7 +235,7 @@ const TherapistManagementPanel = ({ branchId }) => {
 
   const handleOpenCreate = () => {
     setEditingTherapist(null);
-    setFormData({ name: '', gender: 'Male', positions: [], specialties: '' });
+    setFormData({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true });
     setFormError(null);
     setShowModal(true);
   };
@@ -234,6 +247,7 @@ const TherapistManagementPanel = ({ branchId }) => {
       gender: t.gender || 'Male',
       positions: t.position ? t.position.split('/').map(p => p.trim()) : [],
       specialties: (t.specialties || []).join(', '),
+      isServiceStaff: t.is_service_staff !== false,
     });
     setFormError(null);
     setShowModal(true);
@@ -261,6 +275,7 @@ const TherapistManagementPanel = ({ branchId }) => {
         gender: formData.gender,
         position: formData.positions.length > 0 ? formData.positions.join('/') : null,
         specialties: specialtiesArr,
+        isServiceStaff: formData.isServiceStaff,
       });
     } else {
       result = await createTherapist({
@@ -268,6 +283,7 @@ const TherapistManagementPanel = ({ branchId }) => {
         gender: formData.gender,
         position: formData.positions.length > 0 ? formData.positions.join('/') : null,
         specialties: specialtiesArr,
+        isServiceStaff: formData.isServiceStaff,
         branchId,
       });
     }
@@ -399,9 +415,18 @@ const TherapistManagementPanel = ({ branchId }) => {
             onChange: setSelectedPosition,
             options: positionOptions,
           },
+          {
+            value: selectedStaffType,
+            onChange: setSelectedStaffType,
+            options: [
+              { value: 'all', label: 'All Types' },
+              { value: 'service', label: 'Service Staff' },
+              { value: 'support', label: 'Support Staff' },
+            ],
+          },
         ]}
         hasActiveFilters={hasActiveFilters}
-        onClear={() => { setSearchQuery(''); setSelectedPosition('all'); }}
+        onClear={() => { setSearchQuery(''); setSelectedPosition('all'); setSelectedStaffType('all'); }}
       />
 
       {/* Error Banner */}
@@ -533,6 +558,24 @@ const TherapistManagementPanel = ({ branchId }) => {
                 />
                 <p className="font-caption text-xs text-text-secondary">Separate multiple specialties with commas</p>
               </div>
+
+              <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background">
+                <div>
+                  <span className="font-body font-body-medium text-sm text-text-primary">Service Staff</span>
+                  <p className="font-caption text-xs text-text-secondary">Can be assigned to bookings</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormData(f => ({ ...f, isServiceStaff: !f.isServiceStaff }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                    formData.isServiceStaff ? 'bg-success' : 'bg-border'
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                    formData.isServiceStaff ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
+                </button>
+              </label>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

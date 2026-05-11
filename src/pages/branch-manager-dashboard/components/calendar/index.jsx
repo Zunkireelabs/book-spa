@@ -639,11 +639,50 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   // Default to staff view if rooms are disabled
   const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
+  const [showServiceOnly, setShowServiceOnly] = useState(true);
+  const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
+  const [positionDropdownOpen, setPositionDropdownOpen] = useState(false);
+  const positionDropdownRef = useRef(null);
 
   // Calendar data state
   const [calendarData, setCalendarData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Available position options for filter (from service staff only)
+  const calendarPositionOptions = useMemo(() => {
+    if (!calendarData?.therapists) return [];
+    const positions = new Set();
+    calendarData.therapists.forEach(t => {
+      if (t.is_service_staff !== false && t.position) {
+        t.position.split('/').forEach(p => positions.add(p.trim()));
+      }
+    });
+    return Array.from(positions).sort();
+  }, [calendarData?.therapists]);
+
+  // Filter therapists for calendar display
+  const filteredTherapists = useMemo(() => {
+    if (!calendarData?.therapists) return [];
+    let list = calendarData.therapists;
+    if (showServiceOnly) {
+      list = list.filter(t => t.is_service_staff !== false);
+    }
+    if (selectedPositions.length > 0) {
+      list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
+    }
+    return list;
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions]);
+
+  // Close position dropdown on outside click
+  useEffect(() => {
+    if (!positionDropdownOpen) return;
+    const handle = (e) => {
+      if (positionDropdownRef.current && !positionDropdownRef.current.contains(e.target)) setPositionDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [positionDropdownOpen]);
 
   // Attendance indicators
   const [attendanceMap, setAttendanceMap] = useState({});
@@ -1336,7 +1375,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
   const therapistsForModal = useMemo(() =>
     calendarData
-      ? calendarData.therapists.map(t => ({
+      ? calendarData.therapists.filter(t => t.is_service_staff !== false).map(t => ({
           id: t.id,
           name: t.name,
           gender: t.gender,
@@ -1432,12 +1471,57 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
               </button>
             </div>
 
-            {/* Right: View toggle + loading */}
+            {/* Right: Position filter + View toggle + loading */}
             <div className="flex items-center space-x-3">
               {(loading || isRescheduling) && (
                 <div className="flex items-center space-x-1.5 text-text-secondary">
                   <div className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />
                   <span className="font-caption text-xs">{isRescheduling ? 'Updating...' : 'Loading...'}</span>
+                </div>
+              )}
+              {columnMode === 'therapist' && calendarPositionOptions.length > 0 && (
+                <div className="relative" ref={positionDropdownRef}>
+                  <button
+                    onClick={() => setPositionDropdownOpen(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-spa spa-transition-fast ${
+                      selectedPositions.length > 0 ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-surface text-text-primary'
+                    }`}
+                  >
+                    <Icon name="Filter" size={14} />
+                    <span>{selectedPositions.length === 0 ? 'All Positions' : `${selectedPositions.length} selected`}</span>
+                    <Icon name="ChevronDown" size={14} className={`spa-transition-fast ${positionDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {positionDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-spa shadow-lg z-dropdown">
+                      <div className="p-1.5 border-b border-border">
+                        <button
+                          onClick={() => setSelectedPositions([])}
+                          className="w-full text-left px-2 py-1 text-xs text-primary hover:bg-primary/5 rounded"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      <div className="max-h-[200px] overflow-y-auto p-1.5 space-y-0.5">
+                        {calendarPositionOptions.map(pos => (
+                          <label key={pos} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${selectedPositions.includes(pos) ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={selectedPositions.includes(pos)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedPositions(prev => [...prev, pos]);
+                                } else {
+                                  setSelectedPositions(prev => prev.filter(p => p !== pos));
+                                }
+                              }}
+                              className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                            />
+                            <span className="text-sm text-text-primary">{pos}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="flex items-center border border-border rounded-spa overflow-hidden">
@@ -1535,8 +1619,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                       </div>
                       <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
                         <Icon name="Users" size={14} className="text-text-secondary" />
-                        <span>{calendarData.therapists.length} active</span>
+                        <span>{filteredTherapists.length} active</span>
                       </div>
+                      <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                        <button
+                          type="button"
+                          onClick={() => setShowServiceOnly(prev => !prev)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full spa-transition-fast ${
+                            showServiceOnly ? 'bg-primary' : 'bg-border'
+                          }`}
+                        >
+                          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white spa-transition-fast transform ${
+                            showServiceOnly ? 'translate-x-4' : 'translate-x-0.5'
+                          }`} />
+                        </button>
+                        <span className="font-caption text-xs text-text-secondary">Service staff only</span>
+                      </label>
                       {Object.keys(attendanceMap).length > 0 && (
                         <div className="mt-1.5 space-y-1">
                           {Object.entries(attendanceMap).map(([tid, status]) => {
@@ -1572,7 +1670,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
             <div className="flex-1 overflow-hidden">
               {calendarData ? (
                 <CalendarGrid
-                  therapists={calendarData.therapists}
+                  therapists={filteredTherapists}
                   rooms={calendarData.rooms || []}
                   bookings={calendarData.bookings}
                   branchHours={calendarData.branchHours}
@@ -1725,7 +1823,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         slotInfo={quickCreateSlot}
         services={servicesCache}
         servicesLoading={servicesLoading}
-        therapists={calendarData?.therapists || []}
+        therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false)}
         rooms={calendarData?.rooms || []}
         bookings={calendarData?.bookings || []}
         onClose={handleQuickCreateClose}

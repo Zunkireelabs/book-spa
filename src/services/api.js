@@ -134,9 +134,10 @@ export async function fetchTherapists(branchId) {
   try {
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties, position')
+      .select('id, name, gender, specialties, position, is_service_staff')
       .eq('branch_id', branchId)
       .eq('is_active', true)
+      .eq('is_service_staff', true)
       .order('name');
 
     if (error) throw error;
@@ -1771,7 +1772,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const [therapistsResult, roomsResult] = await Promise.all([
       supabase
         .from('therapists')
-        .select('id, name, gender, specialties, position, display_order')
+        .select('id, name, gender, specialties, position, is_service_staff, display_order')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('display_order')
@@ -2319,7 +2320,7 @@ export async function fetchTherapistsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties, position, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
       .eq('branch_id', effectiveBranchId)
       .order('display_order')
       .order('name');
@@ -2332,7 +2333,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, position, branchId }) {
+export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2376,11 +2377,12 @@ export async function createTherapist({ name, gender, specialties, position, bra
         gender: gender || 'Male',
         specialties: specialties || [],
         position: position || null,
+        is_service_staff: isServiceStaff,
         branch_id: effectiveBranchId,
         is_active: true,
         display_order: nextOrder,
       })
-      .select('id, name, gender, specialties, position, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
       .single();
 
     if (error) throw error;
@@ -2391,7 +2393,7 @@ export async function createTherapist({ name, gender, specialties, position, bra
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties, position }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2438,12 +2440,13 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     if (gender !== undefined) updatePayload.gender = gender;
     if (specialties !== undefined) updatePayload.specialties = specialties;
     if (position !== undefined) updatePayload.position = position;
+    if (isServiceStaff !== undefined) updatePayload.is_service_staff = isServiceStaff;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, position, branch_id, is_active, created_at')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at')
       .single();
 
     if (error) throw error;
