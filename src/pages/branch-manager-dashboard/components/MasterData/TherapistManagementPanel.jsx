@@ -68,8 +68,9 @@ const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle }) => {
         )}
       </td>
       <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{therapist.name}</td>
-      <td className="px-4 py-3 font-body text-sm text-text-secondary">{therapist.gender}</td>
-      <td className="px-4 py-3 hidden sm:table-cell">
+      <td className="px-4 py-3 font-body text-sm text-text-secondary">{therapist.position || '—'}</td>
+      <td className="px-4 py-3 font-body text-sm text-text-secondary hidden sm:table-cell">{therapist.gender}</td>
+      <td className="px-4 py-3 hidden md:table-cell">
         <div className="flex flex-wrap gap-1">
           {(therapist.specialties || []).length > 0 ? (
             therapist.specialties.map((s, i) => (
@@ -131,7 +132,7 @@ const TherapistManagementPanel = ({ branchId }) => {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingTherapist, setEditingTherapist] = useState(null);
-  const [formData, setFormData] = useState({ name: '', gender: 'Male', specialties: '' });
+  const [formData, setFormData] = useState({ name: '', gender: 'Male', position: '', specialties: '' });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -189,7 +190,7 @@ const TherapistManagementPanel = ({ branchId }) => {
 
   const handleOpenCreate = () => {
     setEditingTherapist(null);
-    setFormData({ name: '', gender: 'Male', specialties: '' });
+    setFormData({ name: '', gender: 'Male', position: '', specialties: '' });
     setFormError(null);
     setShowModal(true);
   };
@@ -199,6 +200,7 @@ const TherapistManagementPanel = ({ branchId }) => {
     setFormData({
       name: t.name,
       gender: t.gender || 'Male',
+      position: t.position || '',
       specialties: (t.specialties || []).join(', '),
     });
     setFormError(null);
@@ -225,12 +227,14 @@ const TherapistManagementPanel = ({ branchId }) => {
         therapistId: editingTherapist.id,
         name: formData.name.trim(),
         gender: formData.gender,
+        position: formData.position.trim() || null,
         specialties: specialtiesArr,
       });
     } else {
       result = await createTherapist({
         name: formData.name.trim(),
         gender: formData.gender,
+        position: formData.position.trim() || null,
         specialties: specialtiesArr,
         branchId,
       });
@@ -350,8 +354,9 @@ const TherapistManagementPanel = ({ branchId }) => {
               <tr className="bg-background border-b border-border">
                 <th className="w-8 px-2 py-3" />
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Name</th>
-                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Gender</th>
-                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Specialties</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Position</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Gender</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden md:table-cell">Specialties</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
                 <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Actions</th>
               </tr>
@@ -359,7 +364,7 @@ const TherapistManagementPanel = ({ branchId }) => {
             <tbody>
               {filteredTherapists.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
+                  <td colSpan={7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
                     {isSearching
                       ? `No ${staffLabelPlural.toLowerCase()} match "${searchQuery}"`
                       : `No ${staffLabelPlural.toLowerCase()} found. Add your first ${staffLabel.toLowerCase()}.`
@@ -422,6 +427,15 @@ const TherapistManagementPanel = ({ branchId }) => {
                 value={formData.gender}
                 onChange={(val) => setFormData({ ...formData, gender: val })}
               />
+
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Position</label>
+                <Input
+                  value={formData.position}
+                  onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                  placeholder="e.g. Therapist, Hairdresser, Beautician"
+                />
+              </div>
 
               <div className="space-y-1">
                 <label className="block font-body font-body-medium text-sm text-text-primary">Specialties</label>

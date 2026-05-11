@@ -32,9 +32,9 @@ const VALID_TRANSITIONS = {
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 const DISCOUNT_LIMITS = {
-  staff:   0.05, // 5%
-  manager: 0.30, // 30%
-  admin:   Infinity,
+  staff:   0.15, // 15%
+  manager: 0.25, // 25%
+  admin:   0.30, // 30%
 };
 
 /**
@@ -134,7 +134,7 @@ export async function fetchTherapists(branchId) {
   try {
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties')
+      .select('id, name, gender, specialties, position')
       .eq('branch_id', branchId)
       .eq('is_active', true)
       .order('name');
@@ -527,11 +527,13 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       throw fetchError;
     }
 
-    // 2. Lifecycle checks
-    const mutationError = validateBookingMutation(booking);
-    if (mutationError) return { data: null, error: mutationError };
-
-    // 3. Cannot change discount on paid bookings
+    // 2. Lifecycle checks — allow discounts on completed-but-unpaid (standard cash-spa flow)
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    }
+    if (['Cancelled', 'No Show'].includes(booking.status)) {
+      return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: `${booking.status} bookings cannot be modified.` } };
+    }
     if (booking.payment_status === 'paid') {
       return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot modify discount on a paid booking.' } };
     }
@@ -562,10 +564,7 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     // 6. Role-based limit check (exceeding sends to pending approval)
     const maxPercent = DISCOUNT_LIMITS[profile.role];
 
-    // 7. Discount reason required
-    if (!discountReason || !discountReason.trim()) {
-      return { data: null, error: { code: 'DISCOUNT_REASON_REQUIRED', message: 'A reason is required when applying a discount.' } };
-    }
+    // 7. Discount reason is optional
 
     // 8. If staff exceeds limit, set to pending instead of blocking
     const isWithinLimit = effectivePercent <= maxPercent;
@@ -1772,7 +1771,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const [therapistsResult, roomsResult] = await Promise.all([
       supabase
         .from('therapists')
-        .select('id, name, gender, specialties, display_order')
+        .select('id, name, gender, specialties, position, display_order')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('display_order')
@@ -2320,7 +2319,7 @@ export async function fetchTherapistsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, branch_id, is_active, created_at, display_order')
       .eq('branch_id', effectiveBranchId)
       .order('display_order')
       .order('name');
@@ -2333,7 +2332,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, branchId }) {
+export async function createTherapist({ name, gender, specialties, position, branchId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2376,11 +2375,12 @@ export async function createTherapist({ name, gender, specialties, branchId }) {
         name: name.trim(),
         gender: gender || 'Male',
         specialties: specialties || [],
+        position: position || null,
         branch_id: effectiveBranchId,
         is_active: true,
         display_order: nextOrder,
       })
-      .select('id, name, gender, specialties, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, branch_id, is_active, created_at, display_order')
       .single();
 
     if (error) throw error;
@@ -2391,7 +2391,7 @@ export async function createTherapist({ name, gender, specialties, branchId }) {
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2437,12 +2437,13 @@ export async function updateTherapist({ therapistId, name, gender, specialties }
     if (name !== undefined) updatePayload.name = name.trim();
     if (gender !== undefined) updatePayload.gender = gender;
     if (specialties !== undefined) updatePayload.specialties = specialties;
+    if (position !== undefined) updatePayload.position = position;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, branch_id, is_active, created_at')
+      .select('id, name, gender, specialties, position, branch_id, is_active, created_at')
       .single();
 
     if (error) throw error;

@@ -1705,6 +1705,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onRebookStart={handleRebookStart}
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
+        userRole={profile?.role || 'staff'}
       />
 
       {/* Toast */}

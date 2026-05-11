@@ -302,10 +302,6 @@ const BookingActionModal = ({
       setDiscountError('Please enter a valid discount value.');
       return;
     }
-    if (!discountReason.trim()) {
-      setDiscountError('A reason is required for the discount.');
-      return;
-    }
 
     setIsLoading(true);
     try {
@@ -344,8 +340,10 @@ const BookingActionModal = ({
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
   const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
-  const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
-  const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
+  // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
+  const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
+    && !['cancelled', 'no show'].includes(booking.status);
+  const discountLimitLabel = userRole === 'admin' ? '30%' : userRole === 'manager' ? '25%' : '15%';
 
   const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
 
@@ -886,12 +884,12 @@ const BookingActionModal = ({
                     {/* Reason */}
                     <div className="space-y-1.5 sm:space-y-2">
                       <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
-                        Reason <span className="text-error">*</span>
+                        Reason
                       </label>
                       <textarea
                         value={discountReason}
                         onChange={(e) => setDiscountReason(e.target.value)}
-                        placeholder="Why is this discount being applied? (required)"
+                        placeholder="Why is this discount being applied? (optional)"
                         rows={2}
                         className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                       />

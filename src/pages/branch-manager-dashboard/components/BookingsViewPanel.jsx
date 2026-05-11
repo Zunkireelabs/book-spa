@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../../../contexts/AuthContext';
 import QuickFilters from '../../branch-staff-dashboard/components/QuickFilters';
 import BookingsList from '../../branch-staff-dashboard/components/BookingsList';
 import TherapistAvailability from '../../branch-staff-dashboard/components/TherapistAvailability';
@@ -6,6 +7,7 @@ import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, r
 import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
 
 const BookingsViewPanel = ({ branchId }) => {
+  const { profile } = useAuth();
   const [filters, setFilters] = useState({
     dateRange: 'today',
     serviceType: 'all',
@@ -213,6 +215,7 @@ const BookingsViewPanel = ({ branchId }) => {
                 onRecordPayment={handleRecordPayment}
                 onRefresh={loadData}
                 dateRange={filters.dateRange}
+                userRole={profile?.role || 'staff'}
               />
             )}
           </div>
