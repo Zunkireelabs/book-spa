@@ -1065,11 +1065,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
           refreshCalendar();
         });
       } else {
-        // Default: reschedule the entire booking (moves all therapists together)
-        rescheduleBooking({ bookingId, newDate, newStartTime }).then(result => {
-          if (result.error) showToast(result.error.message || 'Failed to reschedule.', 'error');
-          else showToast(`Rescheduled to ${newStartTime}`, 'success');
-          refreshCalendar();
+        // Default: show confirmation dialog to reschedule entire booking (moves all therapists)
+        setPendingReassign({
+          booking,
+          bookingId,
+          newDate,
+          newStartTime,
+          newEndTime,
+          durationMinutes,
+          targetColId: effectiveTargetColId,
+          sourceColId,
+          targetColName: colNameMap[effectiveTargetColId] || effectiveTargetColId,
+          sourceColName: colNameMap[sourceColId] || sourceColId,
+          type: columnMode,
+          timeChanged: true,
+          timeOnly: true,
+          isSharedReschedule: true,
         });
       }
       return;
@@ -1130,13 +1141,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleConfirmReassign = useCallback(async () => {
     if (!pendingReassign) return;
 
-    const { bookingId, newDate, newStartTime, newEndTime, targetColId, sourceColId, type, targetColName, timeOnly, isSharedReassign } = pendingReassign;
+    const { bookingId, newDate, newStartTime, newEndTime, targetColId, sourceColId, type, targetColName, timeOnly, isSharedReassign, isSharedReschedule } = pendingReassign;
 
     setPendingReassign(null);
     setIsRescheduling(true);
 
     try {
-      if (isSharedReassign) {
+      if (isSharedReschedule) {
+        // Shared booking time-only reschedule: moves all therapists together
+        const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
+        if (result.error) {
+          showToast(result.error.message || 'Failed to reschedule.', 'error');
+        } else {
+          showToast(`Rescheduled to ${newStartTime}`, 'success');
+        }
+        refreshCalendar();
+      } else if (isSharedReassign) {
         // Shared booking: swap therapist in junction table
         // Get current therapist IDs from the booking_therapists
         const currentBooking = calendarData?.bookings?.find(b => b.id === bookingId);

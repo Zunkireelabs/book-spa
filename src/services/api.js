@@ -592,7 +592,10 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     // 6. Role-based limit check (exceeding sends to pending approval)
     const maxPercent = DISCOUNT_LIMITS[profile.role];
 
-    // 7. Discount reason is optional
+    // 7. Discount reason required
+    if (!discountReason || !discountReason.trim()) {
+      return { data: null, error: { code: 'DISCOUNT_REASON_REQUIRED', message: 'A reason is required when applying a discount.' } };
+    }
 
     // 8. If staff exceeds limit, set to pending instead of blocking
     const isWithinLimit = effectivePercent <= maxPercent;

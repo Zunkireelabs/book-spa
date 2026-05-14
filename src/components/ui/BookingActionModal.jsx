@@ -302,6 +302,22 @@ const BookingActionModal = ({
       setDiscountError('Please enter a valid discount value.');
       return;
     }
+    if (!discountReason.trim()) {
+      setDiscountError('Reason is required.');
+      return;
+    }
+
+    // Client-side discount limit check
+    const maxPercent = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+    const baseAmount = booking.baseAmount || 0;
+    const effectivePercent = discountType === 'percentage'
+      ? Number(discountValue)
+      : baseAmount > 0 ? (Number(discountValue) / baseAmount) * 100 : 0;
+
+    if (effectivePercent > maxPercent) {
+      setDiscountError(`Discount exceeds your ${maxPercent}% limit. Maximum: ${discountType === 'percentage' ? maxPercent + '%' : 'NPR ' + Math.floor(baseAmount * maxPercent / 100)}`);
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -872,24 +888,40 @@ const BookingActionModal = ({
                       <input
                         type="number"
                         min="0"
-                        max={discountType === 'percentage' ? 100 : booking.baseAmount}
+                        max={discountType === 'percentage' ? (userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15) : Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.25 : 0.15))}
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
-                        onChange={(e) => setDiscountValue(e.target.value)}
-                        placeholder={discountType === 'percentage' ? 'e.g. 5' : 'e.g. 200'}
-                        className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                        onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.25 : 0.15))}`}
+                        className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
+                          discountValue && (() => {
+                            const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+                            const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
+                            return eff > maxP;
+                          })() ? 'border-error' : 'border-border'
+                        }`}
                       />
+                      {discountValue && (() => {
+                        const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+                        const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
+                        return eff > maxP ? (
+                          <p className="text-xs text-error mt-1 flex items-center gap-1">
+                            <Icon name="AlertTriangle" size={12} />
+                            Exceeds your {maxP}% discount limit
+                          </p>
+                        ) : null;
+                      })()}
                     </div>
 
                     {/* Reason */}
                     <div className="space-y-1.5 sm:space-y-2">
                       <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
-                        Reason
+                        Reason <span className="text-error">*</span>
                       </label>
                       <textarea
                         value={discountReason}
                         onChange={(e) => setDiscountReason(e.target.value)}
-                        placeholder="Why is this discount being applied? (optional)"
+                        placeholder="Why is this discount being applied?"
                         rows={2}
                         className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                       />
