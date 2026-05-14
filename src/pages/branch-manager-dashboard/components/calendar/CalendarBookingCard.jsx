@@ -62,7 +62,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const [resizeDir, setResizeDir] = useState(null); // 'top' or 'bottom'
   const [resizeDelta, setResizeDelta] = useState(0);
   const resizeStartY = useRef(null);
-  const canResize = booking.isShared && isDraggable && onResize;
+  const canResize = false; // Disabled: resize handles temporarily turned off
 
   const handleResizeStart = useCallback((e, direction) => {
     if (!canResize) return;
