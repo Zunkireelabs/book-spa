@@ -33,9 +33,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
 
       case 'email':
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!value.trim()) {
-          newErrors.email = 'Email is required';
-        } else if (!emailRegex.test(value)) {
+        if (value.trim() && !emailRegex.test(value)) {
           newErrors.email = 'Please enter a valid email address';
         } else {
           delete newErrors.email;
@@ -44,9 +42,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
 
       case 'phone':
         const phoneRegex = /^(\+977)?[0-9]{10}$/;
-        if (!value.trim()) {
-          newErrors.phone = 'Phone number is required';
-        } else if (!phoneRegex.test(value.replace(/\s+/g, ''))) {
+        if (value.trim() && !phoneRegex.test(value.replace(/\s+/g, ''))) {
           newErrors.phone = 'Please enter a valid Nepali phone number';
         } else {
           delete newErrors.phone;
@@ -97,7 +93,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
 
   const validateAllFields = () => {
     setIsValidating(true);
-    const fields = ['firstName', 'lastName', 'email', 'phone', 'gender'];
+    const fields = ['firstName', 'lastName', 'gender'];
     let isValid = true;
 
     fields.forEach(field => {
@@ -233,7 +229,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Email */}
           <div className="space-y-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Email Address *
+              Email Address
             </label>
             <Input
               type="email"
@@ -255,7 +251,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Phone */}
           <div className="space-y-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Phone Number *
+              Phone Number
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">

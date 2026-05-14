@@ -209,10 +209,10 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Icon name="User" size={14} className="text-gray-400" />
-                      {booking.therapist ? (
+                      {(booking.therapists?.length > 0 || booking.therapist) ? (
                         <span>
-                          {booking.therapist.name}
-                          {booking.therapist.room && <span className="text-gray-400"> · Room {booking.therapist.room}</span>}
+                          {(booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean).map(t => t.name).join(', ')}
+                          {booking.therapist?.room && <span className="text-gray-400"> · Room {booking.therapist.room}</span>}
                         </span>
                       ) : (
                         <span className="text-amber-600 font-medium">Unassigned</span>
@@ -299,13 +299,13 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
 
                       {/* Therapist Assignment */}
                       <div className="text-right min-w-[120px] flex-shrink-0">
-                        {booking.therapist ? (
+                        {(booking.therapists?.length > 0 || booking.therapist) ? (
                           <div>
                             <div className="text-sm font-medium text-gray-900">
-                              {booking.therapist.name}
+                              {(booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean).map(t => t.name).join(', ')}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {booking.therapist.gender}{booking.therapist.room ? ` · Room ${booking.therapist.room}` : ''}
+                              {booking.therapist?.room ? `Room ${booking.therapist.room}` : ''}
                             </div>
                           </div>
                         ) : (

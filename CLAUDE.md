@@ -162,9 +162,9 @@ Cancelled  Cancelled / No Show (terminal)
 
 | Role | Max Discount |
 |------|-------------|
-| staff | 5% |
-| manager | 30% |
-| admin | Unlimited |
+| staff | 15% |
+| manager | 25% |
+| admin | 30% |
 
 ### Transformers (`services/bookingTransformers.js`)
 

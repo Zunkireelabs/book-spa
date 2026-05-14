@@ -351,9 +351,10 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: assignTherapist
-  const handleAssignTherapist = async (bookingId, therapistId, notes) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes) => {
     setActionError(null);
-    const result = await assignTherapist({ bookingId, therapistId });
+    const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
+    const result = await assignTherapist({ bookingId, therapistIds: ids });
 
     if (result.error) {
       showError(result.error.message || 'Failed to assign therapist.');
@@ -387,7 +388,7 @@ const BranchStaffDashboard = () => {
     }
     showSuccess('Discount applied successfully');
     await loadData();
-    return { error: null };
+    return { data: result.data };
   };
 
   // Close profile dropdown on outside click

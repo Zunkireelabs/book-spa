@@ -4,6 +4,25 @@ import Icon from '../../../components/AppIcon';
 import { useAuth, getDashboardPath } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 
+// Helper: get saved emails for an org from localStorage
+function getSavedEmails(orgSlug) {
+  try {
+    const key = `zenly_saved_emails_${orgSlug || 'default'}`;
+    return JSON.parse(localStorage.getItem(key) || '[]');
+  } catch { return []; }
+}
+
+// Helper: save email for an org to localStorage
+function saveEmail(orgSlug, email) {
+  const key = `zenly_saved_emails_${orgSlug || 'default'}`;
+  const emails = getSavedEmails(orgSlug);
+  if (!emails.includes(email)) {
+    emails.unshift(email);
+    // Keep max 5 saved emails
+    localStorage.setItem(key, JSON.stringify(emails.slice(0, 5)));
+  }
+}
+
 const LoginForm = () => {
   const navigate = useNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
@@ -15,6 +34,13 @@ const LoginForm = () => {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(null);
+  const [savedEmails, setSavedEmails] = useState([]);
+  const [showSavedEmails, setShowSavedEmails] = useState(false);
+
+  // Load saved emails on mount
+  useEffect(() => {
+    setSavedEmails(getSavedEmails(urlOrgSlug));
+  }, [urlOrgSlug]);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -52,13 +78,60 @@ const LoginForm = () => {
     }
 
     if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
+      newErrors.password = 'Password or PIN is required';
+    } else if (password.length < 4) {
+      newErrors.password = 'Must be at least 4 characters';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const handlePinLogin = async (userEmail, pin) => {
+    // Step 1: Verify PIN via RPC
+    const { data, error } = await supabase.rpc('login_with_pin', {
+      p_email: userEmail,
+      p_pin: pin,
+      p_org_slug: urlOrgSlug || null,
+    });
+
+    if (error || !data?.success) {
+      return { success: false, error: data?.error || error?.message || 'Invalid PIN' };
+    }
+
+    // Step 2: Generate magic link OTP via admin API
+    const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
+    if (!serviceKey) {
+      return { success: false, error: 'PIN login not configured. Use your password.' };
+    }
+
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/admin/generate_link`, {
+      method: 'POST',
+      headers: {
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'magiclink', email: userEmail }),
+    });
+
+    const linkData = await res.json();
+    if (!linkData.email_otp) {
+      return { success: false, error: 'Failed to generate login token.' };
+    }
+
+    // Step 3: Verify OTP to get a real session
+    const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
+      email: userEmail,
+      token: linkData.email_otp,
+      type: 'email',
+    });
+
+    if (otpError || !otpData?.session) {
+      return { success: false, error: otpError?.message || 'Session creation failed.' };
+    }
+
+    return { success: true, session: otpData.session, user: otpData.user };
   };
 
   const handleSubmit = async (e) => {
@@ -70,11 +143,33 @@ const LoginForm = () => {
     setErrors({});
 
     try {
-      const result = await signIn(email, password);
+      const inputValue = password.trim();
+      const isPin = /^\d{4}$/.test(inputValue);
+
+      if (isPin) {
+        // PIN login flow
+        const pinResult = await handlePinLogin(email, inputValue);
+        if (!pinResult.success) {
+          setErrors({ submit: pinResult.error });
+          setIsLoading(false);
+          return;
+        }
+
+        // PIN login successful — session is set, fetch profile
+        saveEmail(urlOrgSlug, email);
+        // Reload to let AuthContext pick up the session
+        window.location.href = getDashboardPath(null, urlOrgSlug || 'nuad-thai-spa');
+        return;
+      }
+
+      // Standard password login
+      const result = await signIn(email, inputValue);
       if (result.profile) {
+        // Save email on successful login
+        saveEmail(urlOrgSlug, email);
+
         const userOrgSlug = result.profile?.organizations?.slug;
 
-        // If URL has an org slug and it doesn't match user's org, redirect to correct org
         if (urlOrgSlug && userOrgSlug && urlOrgSlug !== userOrgSlug) {
           navigate(getDashboardPath(result.profile.role, userOrgSlug), { replace: true });
           return;
@@ -89,7 +184,7 @@ const LoginForm = () => {
     } catch (error) {
       setErrors({
         submit: error.message === 'Invalid login credentials'
-          ? 'Invalid email or password. Please try again.'
+          ? 'Invalid email or password/PIN. Please try again.'
           : error.message || 'An unexpected error occurred. Please try again.'
       });
     } finally {
@@ -97,11 +192,26 @@ const LoginForm = () => {
     }
   };
 
+  const handleSelectSavedEmail = (savedEmail) => {
+    setEmail(savedEmail);
+    setShowSavedEmails(false);
+    // Focus password field
+    setTimeout(() => document.getElementById('password-field')?.focus(), 100);
+  };
+
+  const handleRemoveSavedEmail = (e, emailToRemove) => {
+    e.stopPropagation();
+    const key = `zenly_saved_emails_${urlOrgSlug || 'default'}`;
+    const updated = savedEmails.filter(e => e !== emailToRemove);
+    localStorage.setItem(key, JSON.stringify(updated));
+    setSavedEmails(updated);
+  };
+
   const isDisabled = isLoading || oauthLoading;
 
   return (
     <div className="w-full">
-      {/* Org Confirmation Badge - shows when orgSlug is in URL */}
+      {/* Org Confirmation Badge */}
       {urlOrgSlug && (
         <div className="mb-5 flex items-center justify-between p-3 bg-success/10 border border-success/20 rounded-[10px]">
           <div className="flex items-center gap-2">
@@ -176,21 +286,54 @@ const LoginForm = () => {
       </div>
 
       {/* Email/Password Form */}
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} autoComplete="off">
         <div className="mb-3">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              if (errors.email) setErrors(prev => ({ ...prev, email: '' }));
-            }}
-            placeholder="Enter your email address"
-            disabled={isDisabled}
-            className={`w-full px-3.5 py-3 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-              errors.email ? 'border-error' : 'border-border'
-            }`}
-          />
+          <div className="relative">
+            <input
+              type="text"
+              autoComplete="off"
+              name="login-email-field"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setShowSavedEmails(true);
+                if (errors.email) setErrors(prev => ({ ...prev, email: '' }));
+              }}
+              onFocus={() => setShowSavedEmails(true)}
+              onBlur={() => setTimeout(() => setShowSavedEmails(false), 200)}
+              onKeyDown={(e) => {
+                // Tab to autocomplete first matching saved email
+                if (e.key === 'Tab' && showSavedEmails) {
+                  const matches = savedEmails.filter(se => se.toLowerCase().includes(email.toLowerCase()) && se !== email);
+                  if (matches.length > 0) {
+                    e.preventDefault();
+                    handleSelectSavedEmail(matches[0]);
+                  }
+                }
+              }}
+              placeholder="Enter your email address"
+              disabled={isDisabled}
+              className={`w-full px-3.5 py-3 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
+                errors.email ? 'border-error' : 'border-border'
+              }`}
+            />
+            {/* Autocomplete dropdown for saved emails */}
+            {showSavedEmails && savedEmails.filter(se => (!email || se.toLowerCase().includes(email.toLowerCase())) && se !== email).length > 0 && (
+              <div className="absolute z-10 mt-1 w-full bg-surface border border-border rounded-[10px] shadow-spa-elevated overflow-hidden">
+                {savedEmails.filter(se => (!email || se.toLowerCase().includes(email.toLowerCase())) && se !== email).map((savedEmail) => (
+                  <button
+                    key={savedEmail}
+                    type="button"
+                    onMouseDown={() => handleSelectSavedEmail(savedEmail)}
+                    className="w-full text-left px-3.5 py-2.5 text-sm text-text-primary hover:bg-background transition-colors flex items-center gap-2"
+                  >
+                    <Icon name="User" size={14} className="text-text-secondary" />
+                    {savedEmail}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {errors.email && (
             <p className="mt-1.5 text-xs text-error">{errors.email}</p>
           )}
@@ -199,13 +342,14 @@ const LoginForm = () => {
         <div className="mb-4">
           <div className="relative">
             <input
+              id="password-field"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
                 if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
               }}
-              placeholder="Enter your password"
+              placeholder="Enter your password/PIN"
               disabled={isDisabled}
               className={`w-full px-3.5 py-3 pr-11 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
                 errors.password ? 'border-error' : 'border-border'

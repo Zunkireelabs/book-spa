@@ -42,7 +42,7 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
   const { profile, signOut } = useAuth();
-  const { branchId, branchName } = useBranch();
+  const { branchId, branchName } = useBranch(); console.log("[DEBUG] Dashboard Profile:", profile);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

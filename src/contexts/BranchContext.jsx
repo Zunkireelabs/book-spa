@@ -43,7 +43,7 @@ export const BranchProvider = ({ children }) => {
       loadAdminBranches();
     } else {
       // Manager/Staff: fixed to their assigned branch
-      setBranchId(profile.branch_id);
+      console.log("[DEBUG] BranchProvider: setting branchId from profile:", profile.branch_id); setBranchId(profile.branch_id);
       setBranchName(profile.branches?.name || null);
       setBranches([]);
       setLoading(false);
@@ -53,7 +53,7 @@ export const BranchProvider = ({ children }) => {
   const loadAdminBranches = async () => {
     setLoading(true);
     const result = await fetchAllBranches();
-    const allBranches = result.data || [];
+    const allBranches = result.data || []; console.log("[DEBUG] BranchProvider: allBranches fetched:", allBranches.length);
     setBranches(allBranches);
 
     if (allBranches.length === 0) {
@@ -79,7 +79,7 @@ export const BranchProvider = ({ children }) => {
       setBranchName(savedBranch.name);
     } else {
       // Default to first branch of this org
-      setBranchId(allBranches[0].id);
+      console.log("[DEBUG] BranchProvider: defaulting to first branch:", allBranches[0].id); setBranchId(allBranches[0].id);
       setBranchName(allBranches[0].name);
       localStorage.setItem(storageKey, allBranches[0].id);
     }
