@@ -5,10 +5,11 @@ import Select from './Select';
 
 const PAYMENT_MODES = [
   { value: 'Cash', label: 'Cash' },
-  { value: 'Nabil', label: 'Nabil (Card)' },
-  { value: 'GlobalIME', label: 'GlobalIME (Card)' },
-  { value: 'NICAsia', label: 'NIC Asia (Card)' },
-  { value: 'Fonepay', label: 'Fonepay' },
+  { value: 'Card', label: 'Card' },
+  { value: 'MobileBanking', label: 'Mobile Banking' },
+  { value: 'Cheque', label: 'Cheque' },
+  { value: 'Esewa', label: 'Esewa' },
+  { value: 'Khalti', label: 'Khalti' },
 ];
 
 function formatNPR(amount) {

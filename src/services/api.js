@@ -1919,7 +1919,10 @@ export async function createBooking({
     let availableRoom = null;
 
     if (enableRooms) {
-      if (roomId) {
+      if (roomId === 'none') {
+        // Explicitly no room selected — skip auto-assignment
+        availableRoom = null;
+      } else if (roomId) {
         // Room explicitly selected — verify it belongs to this branch and is active
         const { data: selectedRoom, error: roomLookupError } = await supabase
           .from('rooms')

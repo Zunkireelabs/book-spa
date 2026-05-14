@@ -388,7 +388,7 @@ const BranchStaffDashboard = () => {
     }
     showSuccess('Discount applied successfully');
     await loadData();
-    return { error: null };
+    return { data: result.data };
   };
 
   // Close profile dropdown on outside click

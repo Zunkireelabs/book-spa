@@ -19,6 +19,7 @@ import {
   updateTherapistOrder,
   updateRoomOrder,
   updateTherapistTime,
+  applyDiscount,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -1294,8 +1295,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       customerEmail: formData.customerEmail,
       customerGender: formData.customerGender,
       specialRequests: formData.specialRequests,
-      therapistId: formData.therapistId,
-      roomId: formData.roomId,
+      therapistIds: formData.therapistIds,
+      roomId: formData.roomId || 'none',
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
@@ -1443,6 +1444,17 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     }
     refreshCalendar();
     return { error: null };
+  };
+
+  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason }) => {
+    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason });
+    if (result.error) return { error: result.error };
+    showToast('Discount applied successfully');
+    // Refresh booking in modal
+    const refreshed = await fetchBookingById(bookingId);
+    if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    refreshCalendar();
+    return { data: result.data };
   };
 
   const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
@@ -1937,6 +1949,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
         onRebookStart={handleRebookStart}

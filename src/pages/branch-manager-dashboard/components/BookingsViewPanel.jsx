@@ -3,7 +3,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import QuickFilters from '../../branch-staff-dashboard/components/QuickFilters';
 import BookingsList from '../../branch-staff-dashboard/components/BookingsList';
 import TherapistAvailability from '../../branch-staff-dashboard/components/TherapistAvailability';
-import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment } from '../../../services/api';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../../services/api';
 import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
 
 const BookingsViewPanel = ({ branchId }) => {
@@ -150,6 +150,14 @@ const BookingsViewPanel = ({ branchId }) => {
     return { error: null };
   };
 
+  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason }) => {
+    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason });
+    if (result.error) return { error: result.error };
+    showToast('Discount applied successfully');
+    await loadData();
+    return { data: result.data };
+  };
+
   const getOverviewTitle = () => {
     switch (filters.dateRange) {
       case 'today': return "Today's Overview";
@@ -213,6 +221,7 @@ const BookingsViewPanel = ({ branchId }) => {
                 onStatusUpdate={handleStatusUpdate}
                 onAssignTherapist={handleAssignTherapist}
                 onRecordPayment={handleRecordPayment}
+                onApplyDiscount={handleApplyDiscount}
                 onRefresh={loadData}
                 dateRange={filters.dateRange}
                 userRole={profile?.role || 'staff'}

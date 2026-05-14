@@ -355,7 +355,7 @@ const BookingActionModal = ({
   const nextStatuses = getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
-  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
+  const canPay = ['pending', 'confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
   const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
@@ -837,15 +837,45 @@ const BookingActionModal = ({
                         <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
                       </div>
                       {booking.discountAmount > 0 && (
-                        <div className="flex items-center justify-between">
-                          <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Current Discount</span>
-                          <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
-                        </div>
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount Applied</span>
+                            <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount %</span>
+                            <span className="font-data font-data-medium text-sm text-error">{booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%</span>
+                          </div>
+                        </>
                       )}
                       <div className="flex items-center justify-between border-t border-border pt-2">
                         <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
                         <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                       </div>
+                      {booking.discountAmount > 0 && (
+                        <button
+                          onClick={async () => {
+                            if (!onApplyDiscount) return;
+                            setIsLoading(true);
+                            setDiscountError(null);
+                            const result = await onApplyDiscount(booking.bookingId, {
+                              discountType: 'fixed',
+                              discountValue: 0,
+                              discountReason: 'Discount cancelled',
+                            });
+                            if (result?.error) {
+                              setDiscountError(result.error.message || 'Failed to cancel discount.');
+                            } else {
+                              setDiscountSuccess('approved');
+                            }
+                            setIsLoading(false);
+                          }}
+                          disabled={isLoading}
+                          className="w-full text-center py-2 text-xs font-body font-body-medium text-error border border-error/30 rounded-spa hover:bg-error/5 spa-transition-fast"
+                        >
+                          Cancel Discount
+                        </button>
+                      )}
                     </div>
 
                     {/* Role limit info */}
@@ -971,8 +1001,20 @@ const BookingActionModal = ({
                 </h3>
                 <div className="bg-background rounded-spa p-3 sm:p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Amount</span>
-                    <span className="font-body font-body-medium text-sm text-text-primary">{booking.price}</span>
+                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Base Amount</span>
+                    <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
+                  </div>
+                  {booking.discountAmount > 0 && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount</span>
+                        <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')} ({booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%)</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between border-t border-border pt-2">
+                    <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
+                    <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Status</span>
