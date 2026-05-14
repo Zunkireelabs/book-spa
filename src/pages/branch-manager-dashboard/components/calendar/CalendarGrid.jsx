@@ -6,6 +6,104 @@ import { useDroppable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
 
+// SVG overlay: inverted-U bracket connectors between shared booking cards
+const SharedBookingLines = ({ containerRef, bookings }) => {
+  const [brackets, setBrackets] = useState([]);
+
+  const drawBrackets = useCallback(() => {
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const sharedCards = container.querySelectorAll('[data-shared="true"]');
+    if (sharedCards.length === 0) { setBrackets([]); return; }
+
+    const groups = {};
+    sharedCards.forEach(card => {
+      const bid = card.dataset.bookingId;
+      if (!groups[bid]) groups[bid] = [];
+      groups[bid].push(card);
+    });
+
+    const containerRect = container.getBoundingClientRect();
+    const newBrackets = [];
+
+    Object.entries(groups).forEach(([bid, cards]) => {
+      if (cards.length < 2) return;
+      const sorted = [...cards].sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+      const rects = sorted.map(c => c.getBoundingClientRect());
+
+      // Find the topmost card position
+      const minTop = Math.min(...rects.map(r => r.top - containerRect.top));
+      // Bridge line sits 20px above the topmost card
+      const bridgeY = Math.max(minTop - 20, 2);
+
+      // Build path: for each card, go up from top-center to bridgeY, then horizontal across
+      const points = rects.map(r => ({
+        cx: r.left + r.width / 2 - containerRect.left,
+        cardTop: r.top - containerRect.top,
+      }));
+
+      // SVG path: vertical lines up + horizontal bridge
+      let path = '';
+      points.forEach((p, i) => {
+        // Vertical line from card top to bridge
+        path += `M ${p.cx} ${p.cardTop} L ${p.cx} ${bridgeY} `;
+      });
+      // Horizontal bridge connecting leftmost to rightmost
+      path += `M ${points[0].cx} ${bridgeY} L ${points[points.length - 1].cx} ${bridgeY} `;
+
+      newBrackets.push({ key: bid, path });
+    });
+
+    setBrackets(newBrackets);
+  }, [containerRef]);
+
+  useEffect(() => {
+    drawBrackets();
+    // Multiple delayed redraws to catch DOM settling after data refresh
+    const t1 = setTimeout(drawBrackets, 50);
+    const t2 = setTimeout(drawBrackets, 200);
+    const t3 = setTimeout(drawBrackets, 500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [drawBrackets, bookings]);
+
+  // Redraw on scroll
+  useEffect(() => {
+    const scrollEl = containerRef.current?.closest('.overflow-auto, [class*="overflow-x"]');
+    if (!scrollEl) return;
+    const handler = () => drawBrackets();
+    scrollEl.addEventListener('scroll', handler);
+    return () => scrollEl.removeEventListener('scroll', handler);
+  }, [containerRef, drawBrackets]);
+
+  // Redraw when DOM changes (cards move/appear/disappear)
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new MutationObserver(() => {
+      requestAnimationFrame(drawBrackets);
+    });
+    observer.observe(containerRef.current, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+    return () => observer.disconnect();
+  }, [containerRef, drawBrackets]);
+
+  if (brackets.length === 0) return null;
+
+  return (
+    <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 5, overflow: 'visible' }}>
+      {brackets.map(b => (
+        <path
+          key={b.key}
+          d={b.path}
+          fill="none"
+          stroke="#dc2626"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          opacity={0.7}
+        />
+      ))}
+    </svg>
+  );
+};
+
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 60; // px per 30-min slot (120px per hour) - for visual grid lines
 export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 120px per hour
@@ -154,6 +252,8 @@ const CalendarGrid = ({
   branchHours,
   attendanceMap,
   onBookingClick,
+  onBookingResize,
+  onMultiDrag,
   onEmptySlotClick,
   currentDate,
   viewMode = 'day',
@@ -168,6 +268,38 @@ const CalendarGrid = ({
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
   const gridBodyRef = useRef(null);
+
+  // Multi-select for shared booking cards (Cmd/Ctrl + click)
+  const [selectedCardIds, setSelectedCardIds] = useState(new Set());
+
+  const handleCardSelect = useCallback((booking, e) => {
+    if (!booking.isShared) return false; // only shared cards are multi-selectable
+    const cardKey = `${booking.id}__${booking._colTherapistId}`;
+    if (e.metaKey || e.ctrlKey) {
+      // Toggle selection
+      setSelectedCardIds(prev => {
+        const next = new Set(prev);
+        if (next.has(cardKey)) next.delete(cardKey);
+        else next.add(cardKey);
+        return next;
+      });
+      return true; // consumed the click
+    }
+    // Normal click — clear selection
+    if (selectedCardIds.size > 0) {
+      setSelectedCardIds(new Set());
+    }
+    return false;
+  }, [selectedCardIds]);
+
+  // Clear selection when clicking empty grid area
+  const handleGridClick = useCallback((e) => {
+    if (selectedCardIds.size > 0 && !e.metaKey && !e.ctrlKey) {
+      setSelectedCardIds(new Set());
+    }
+  }, [selectedCardIds]);
+
+  // getSelectedBookings and onMultiDrag effect are below bookingsByDayAndCol
 
   // Expose grid body ref to parent for position calculation
   useEffect(() => {
@@ -237,17 +369,17 @@ const CalendarGrid = ({
     rooms.forEach(r => { roomMap[r.id] = r.name; });
 
     bookings.forEach(b => {
-      const colId = columnMode === 'room'
-        ? (b.room_id || 'unassigned')
-        : (b.therapist_id || 'unassigned');
       const bookingDate = b.date || (b.start_datetime ? b.start_datetime.split('T')[0] : null);
       if (!bookingDate || !map[bookingDate]) return;
-      if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
 
       const startTime = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
       const endTime = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
+      const therapistName = b.booking_therapists?.length > 0
+        ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
+        : (therapistMap[b.therapist_id] || null);
+      const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
 
-      map[bookingDate][colId].push({
+      const baseEntry = {
         id: b.id,
         bookingId: b.id,
         bookingNumber: b.booking_number,
@@ -263,19 +395,66 @@ const CalendarGrid = ({
         date: bookingDate,
         therapistId: b.therapist_id,
         roomId: b.room_id,
-        therapistName: b.booking_therapists?.length > 0
-          ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
-          : (therapistMap[b.therapist_id] || null),
+        therapistName,
         roomName: b.room?.name || roomMap[b.room_id] || null,
         baseAmount: b.base_amount,
         discountAmount: b.discount_amount,
         finalAmount: b.final_amount,
         specialRequests: b.special_requests || null,
-      });
+        isShared,
+        sharedCount: isShared ? b.booking_therapists.length : 0,
+      };
+
+      if (isShared) {
+        // Place booking in each assigned therapist's column with per-therapist times
+        // Leftmost column in current visual order = primary (unfaded), rest = faded
+        const columnOrder = columns.map(c => c.id);
+        const assignedIds = b.booking_therapists.map(bt => bt.therapist_id);
+        const leftmostId = columnOrder.find(cid => assignedIds.includes(cid));
+
+        b.booking_therapists.forEach(bt => {
+          const colId = bt.therapist_id;
+          if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
+          map[bookingDate][colId].push({
+            ...baseEntry,
+            _colTherapistId: colId,
+            _isFaded: colId !== leftmostId,
+            startTime: bt.start_time || startTime,
+            endTime: bt.end_time || endTime,
+            _bookingStartTime: startTime,
+            _bookingEndTime: endTime,
+          });
+        });
+      } else {
+        const colId = columnMode === 'room'
+          ? (b.room_id || 'unassigned')
+          : (b.therapist_id || 'unassigned');
+        if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
+        map[bookingDate][colId].push(baseEntry);
+      }
     });
 
     return map;
   }, [bookings, columns, days, columnMode, therapists, rooms]);
+
+  // Expose selected bookings to parent for multi-drag
+  const getSelectedBookings = useCallback(() => {
+    if (selectedCardIds.size === 0) return [];
+    const allBookings = [];
+    Object.values(bookingsByDayAndCol).forEach(cols => {
+      Object.values(cols).forEach(bks => {
+        bks.forEach(b => {
+          const key = b._colTherapistId ? `${b.id}__${b._colTherapistId}` : b.id;
+          if (selectedCardIds.has(key)) allBookings.push(b);
+        });
+      });
+    });
+    return allBookings;
+  }, [selectedCardIds, bookingsByDayAndCol]);
+
+  useEffect(() => {
+    if (onMultiDrag) onMultiDrag(getSelectedBookings);
+  }, [getSelectedBookings, onMultiDrag]);
 
   // ── Position helpers ──────────────────────────────────────
   const timeToTop = (timeStr) => {
@@ -441,6 +620,14 @@ const CalendarGrid = ({
     );
   };
 
+  const handleBookingResize = useCallback((booking, pixelDelta, direction) => {
+    if (!onBookingResize) return;
+    // Convert pixel delta to minutes (HOUR_HEIGHT px = 60 min)
+    const deltaMinutes = Math.round((pixelDelta / HOUR_HEIGHT) * 60 / 5) * 5; // snap to 5-min
+    if (deltaMinutes === 0) return;
+    onBookingResize(booking, deltaMinutes, direction);
+  }, [onBookingResize]);
+
   const handleColumnClick = (e, day, col) => {
     if (activeDragId || !onEmptySlotClick) return;
     const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top;
@@ -474,9 +661,11 @@ const CalendarGrid = ({
         />
 
         {/* Booking cards rendered as siblings to droppable, not children */}
-        {colBookings.map(booking => (
+        {colBookings.map(booking => {
+          const cardKey = booking._colTherapistId ? `${booking.id}__${booking._colTherapistId}` : booking.id;
+          return (
           <CalendarBookingCard
-            key={booking.id}
+            key={cardKey}
             booking={booking}
             columnMode={columnMode}
             style={{
@@ -484,8 +673,12 @@ const CalendarGrid = ({
               height: timeToHeight(booking.startTime, booking.endTime),
             }}
             onClick={onBookingClick}
+            onResize={handleBookingResize}
+            isSelected={selectedCardIds.has(cardKey)}
+            onSelect={handleCardSelect}
           />
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -576,6 +769,7 @@ const CalendarGrid = ({
           data-open-hour={openHour}
           data-hour-height={HOUR_HEIGHT}
         >
+          <SharedBookingLines containerRef={gridBodyRef} bookings={bookings} />
           {renderTimeLabels()}
           {unassignedCol && (() => {
             const colBookings = (bookingsByDayAndCol[currentDate] || {})[unassignedCol.id] || [];

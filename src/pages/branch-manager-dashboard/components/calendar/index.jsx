@@ -18,6 +18,7 @@ import {
   updateBookingDetails,
   updateTherapistOrder,
   updateRoomOrder,
+  updateTherapistTime,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -700,8 +701,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
 
+  // Multi-drag: ref to get selected bookings from CalendarGrid
+  const getSelectedBookingsRef = useRef(() => []);
+
   // Cross-column reassignment confirmation
-  // Shape: { booking, bookingId, newDate, newStartTime, newEndTime, targetColId, targetColName, sourceColName, type: 'therapist'|'room', durationMinutes }
   const [pendingReassign, setPendingReassign] = useState(null);
 
   // Quick-create panel state
@@ -945,10 +948,13 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const { active, over } = event;
 
     // Capture final position before clearing state
-    const finalTimeData = over?.data?.current ? calculateTimeFromPointer(over.data.current) : null;
+    // Fallback to last overSlotData if over is null (same-column drag may not trigger new over)
+    const finalTimeData = over?.data?.current
+      ? calculateTimeFromPointer(over.data.current)
+      : overSlotData;
 
     // If not dropped on a valid target, just clear state
-    if (!over || !active.data.current?.booking || !finalTimeData) {
+    if (!active.data.current?.booking || !finalTimeData) {
       setActiveDragId(null);
       setActiveDragBooking(null);
       setOverSlotData(null);
@@ -971,8 +977,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const bookingId = booking.bookingId || booking.id;
 
     // Determine source column based on column mode
+    // For shared bookings, use the column-specific therapist ID
     const sourceColId = columnMode === 'therapist'
-      ? (booking.therapistId || 'unassigned')
+      ? (booking._colTherapistId || booking.therapistId || 'unassigned')
       : (booking.roomId || 'unassigned');
     const effectiveTargetColId = targetColId || 'unassigned';
 
@@ -981,11 +988,13 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     // Check if anything actually changed
     const oldTime = booking.startTime?.slice(0, 5);
     const oldDate = booking.date;
+    console.log('[DragEnd]', { oldTime, newStartTime, oldDate, newDate, isCrossColumn, isShared: booking.isShared, colTherapist: booking._colTherapistId, sourceColId, targetColId: effectiveTargetColId });
     if (oldTime === newStartTime && oldDate === newDate && !isCrossColumn) {
       setActiveDragId(null);
       setActiveDragBooking(null);
       setOverSlotData(null);
       setDragGrabOffset(0);
+      console.log('[DragEnd] No change detected, skipping');
       return; // No change
     }
 
@@ -1021,7 +1030,49 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         sourceColName: colNameMap[sourceColId] || sourceColId,
         type: columnMode,
         timeChanged: oldTime !== newStartTime || oldDate !== newDate,
+        isSharedReassign: booking.isShared && columnMode === 'therapist',
       });
+    } else if (booking.isShared && booking._colTherapistId) {
+      // Shared booking, same column — default: move ALL therapists together (reschedule whole booking)
+      console.log('[DragEnd] Shared booking time change', { bookingId, newStartTime, newEndTime });
+      // Cmd/Ctrl selected = move only selected ones independently
+      const selectedBookings = getSelectedBookingsRef.current();
+      const draggedKey = `${booking.id}__${booking._colTherapistId}`;
+      const isPartOfSelection = selectedBookings.length > 0 && selectedBookings.some(b => `${b.id}__${b._colTherapistId}` === draggedKey);
+
+      if (isPartOfSelection) {
+        // Cmd/Ctrl selected: move only selected cards independently
+        const [oldH, oldM] = (booking.startTime || '').split(':').map(Number);
+        const [newH, newM] = newStartTime.split(':').map(Number);
+        const deltaMins = (newH * 60 + newM) - (oldH * 60 + oldM);
+
+        const updates = selectedBookings.map(b => {
+          const [sh, sm] = (b.startTime || '').split(':').map(Number);
+          const [eh, em] = (b.endTime || '').split(':').map(Number);
+          const ns = sh * 60 + sm + deltaMins;
+          const ne = eh * 60 + em + deltaMins;
+          return updateTherapistTime({
+            bookingId: b.bookingId || b.id,
+            therapistId: b._colTherapistId,
+            startTime: `${String(Math.floor(ns / 60)).padStart(2, '0')}:${String(ns % 60).padStart(2, '0')}`,
+            endTime: `${String(Math.floor(ne / 60)).padStart(2, '0')}:${String(ne % 60).padStart(2, '0')}`,
+          });
+        });
+        Promise.all(updates).then(results => {
+          const failed = results.find(r => r.error);
+          if (failed) showToast(failed.error.message || 'Failed to update.', 'error');
+          else showToast(`Moved ${selectedBookings.length} selected`, 'success');
+          refreshCalendar();
+        });
+      } else {
+        // Default: reschedule the entire booking (moves all therapists together)
+        rescheduleBooking({ bookingId, newDate, newStartTime }).then(result => {
+          if (result.error) showToast(result.error.message || 'Failed to reschedule.', 'error');
+          else showToast(`Rescheduled to ${newStartTime}`, 'success');
+          refreshCalendar();
+        });
+      }
+      return;
     } else {
       // Same column — time-only reschedule, show confirmation dialog
       setPendingReassign({
@@ -1079,48 +1130,72 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleConfirmReassign = useCallback(async () => {
     if (!pendingReassign) return;
 
-    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName, timeOnly } = pendingReassign;
-
-    // Build API params
-    const apiParams = { bookingId, newDate, newStartTime };
-    const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
-
-    if (!timeOnly) {
-      if (type === 'therapist') {
-        const therapistVal = targetColId === 'unassigned' ? null : targetColId;
-        apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-        optimisticFields.therapist_id = therapistVal;
-      } else {
-        const roomVal = targetColId === 'unassigned' ? null : targetColId;
-        apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-        optimisticFields.room_id = roomVal;
-      }
-    }
-
-    // Optimistic UI update
-    setCalendarData(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        bookings: prev.bookings.map(b => {
-          if (b.id === bookingId) {
-            return { ...b, ...optimisticFields };
-          }
-          return b;
-        }),
-      };
-    });
+    const { bookingId, newDate, newStartTime, newEndTime, targetColId, sourceColId, type, targetColName, timeOnly, isSharedReassign } = pendingReassign;
 
     setPendingReassign(null);
     setIsRescheduling(true);
 
     try {
-      const result = await rescheduleBooking(apiParams);
-      if (result.error) {
-        showToast(result.error.message || 'Failed to reassign booking.', 'error');
+      if (isSharedReassign) {
+        // Shared booking: swap therapist in junction table
+        // Get current therapist IDs from the booking_therapists
+        const currentBooking = calendarData?.bookings?.find(b => b.id === bookingId);
+        const currentTherapistIds = currentBooking?.booking_therapists?.map(bt => bt.therapist_id) || [];
+
+        if (currentTherapistIds.includes(targetColId) && targetColId !== sourceColId) {
+          // Dragged to a therapist who already has this booking → consolidate (remove source)
+          const newIds = currentTherapistIds.filter(id => id !== sourceColId);
+          const result = await assignTherapist({ bookingId, therapistIds: newIds });
+          if (result.error) {
+            showToast(result.error.message || 'Failed to consolidate assignment.', 'error');
+          } else {
+            showToast(`Consolidated to ${targetColName}`, 'success');
+          }
+        } else {
+          // Dragged to a new therapist → replace source with target
+          const newIds = currentTherapistIds.map(id => id === sourceColId ? targetColId : id);
+          const result = await assignTherapist({ bookingId, therapistIds: newIds });
+          if (result.error) {
+            showToast(result.error.message || 'Failed to reassign therapist.', 'error');
+          } else {
+            showToast(`Reassigned from ${colNameMap[sourceColId] || 'therapist'} to ${targetColName}`, 'success');
+          }
+        }
         refreshCalendar();
       } else {
-        showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
+        // Standard reassignment (non-shared)
+        const apiParams = { bookingId, newDate, newStartTime };
+        const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
+
+        if (!timeOnly) {
+          if (type === 'therapist') {
+            apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+            optimisticFields.therapist_id = targetColId === 'unassigned' ? null : targetColId;
+          } else {
+            apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+            optimisticFields.room_id = targetColId === 'unassigned' ? null : targetColId;
+          }
+        }
+
+        // Optimistic UI update
+        setCalendarData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            bookings: prev.bookings.map(b => {
+              if (b.id === bookingId) return { ...b, ...optimisticFields };
+              return b;
+            }),
+          };
+        });
+
+        const result = await rescheduleBooking(apiParams);
+        if (result.error) {
+          showToast(result.error.message || 'Failed to reassign booking.', 'error');
+          refreshCalendar();
+        } else {
+          showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
+        }
       }
     } catch (err) {
       showToast('An error occurred while reassigning.', 'error');
@@ -1128,7 +1203,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     } finally {
       setIsRescheduling(false);
     }
-  }, [pendingReassign, refreshCalendar]);
+  }, [pendingReassign, refreshCalendar, calendarData, colNameMap]);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragId(null);
@@ -1291,6 +1366,48 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     }
     showToast('Assignment saved successfully');
   };
+
+  const handleBookingResize = useCallback(async (booking, deltaMinutes, direction) => {
+    if (!booking.isShared || !booking._colTherapistId) return;
+
+    const [sh, sm] = (booking.startTime || '').split(':').map(Number);
+    const [eh, em] = (booking.endTime || '').split(':').map(Number);
+    if (isNaN(sh) || isNaN(eh)) return;
+
+    const startMins = sh * 60 + sm;
+    const endMins = eh * 60 + em;
+    let newStartMins = startMins;
+    let newEndMins = endMins;
+
+    if (direction === 'top') {
+      newStartMins = Math.max(startMins + deltaMinutes, 0);
+    } else {
+      newEndMins = Math.max(endMins + deltaMinutes, 0);
+    }
+
+    // Ensure minimum 5 min duration
+    if (newEndMins - newStartMins < 5) {
+      showToast('Minimum duration is 5 minutes.', 'error');
+      return;
+    }
+
+    const newStartTime = `${String(Math.floor(newStartMins / 60)).padStart(2, '0')}:${String(newStartMins % 60).padStart(2, '0')}`;
+    const newEndTime = `${String(Math.floor(newEndMins / 60)).padStart(2, '0')}:${String(newEndMins % 60).padStart(2, '0')}`;
+
+    const result = await updateTherapistTime({
+      bookingId: booking.bookingId || booking.id,
+      therapistId: booking._colTherapistId,
+      startTime: newStartTime,
+      endTime: newEndTime,
+    });
+
+    if (result.error) {
+      showToast(result.error.message || 'Failed to resize.', 'error');
+    } else {
+      showToast(`Updated to ${newStartTime} – ${newEndTime}`, 'success');
+    }
+    refreshCalendar();
+  }, [refreshCalendar]);
 
   const handleEditBooking = async (bookingId, updates) => {
     const result = await updateBookingDetails({ bookingId, ...updates });
@@ -1676,6 +1793,8 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   onBookingClick={handleBookingClick}
+                  onBookingResize={handleBookingResize}
+                  onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
                   onEmptySlotClick={handleEmptySlotClick}
                   currentDate={currentDate}
                   viewMode={viewMode}
@@ -1837,15 +1956,24 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
             <div className="flex items-center gap-2 mb-4">
-              <Icon name={pendingReassign.timeOnly ? 'Clock' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className="text-primary" />
+              <Icon name={pendingReassign.timeOnly ? 'Clock' : pendingReassign.isSharedReassign ? 'Users' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className={pendingReassign.isSharedReassign ? 'text-violet-500' : 'text-primary'} />
               <h3 className="font-heading font-heading-semibold text-base text-text-primary">
-                {pendingReassign.timeOnly ? 'Reschedule Booking' : `Reassign ${pendingReassign.type === 'therapist' ? staffLabel : locationLabel}`}
+                {pendingReassign.timeOnly ? 'Reschedule Booking'
+                  : pendingReassign.isSharedReassign
+                    ? (pendingReassign.sourceColId !== pendingReassign.targetColId && calendarData?.bookings?.find(b => b.id === pendingReassign.bookingId)?.booking_therapists?.some(bt => bt.therapist_id === pendingReassign.targetColId)
+                      ? 'Consolidate Assignment'
+                      : 'Reassign Shared Booking')
+                    : `Reassign ${pendingReassign.type === 'therapist' ? staffLabel : locationLabel}`}
               </h3>
             </div>
             <p className="font-body text-sm text-text-secondary mb-1">
-              {pendingReassign.timeOnly ? 'Reschedule' : 'Move'} <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
+              {pendingReassign.isSharedReassign
+                ? (calendarData?.bookings?.find(b => b.id === pendingReassign.bookingId)?.booking_therapists?.some(bt => bt.therapist_id === pendingReassign.targetColId)
+                  ? <>Remove <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span> from</>
+                  : <>Replace <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span> with <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span> for</>)
+                : <>{pendingReassign.timeOnly ? 'Reschedule' : 'Move'}</>} <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
             </p>
-            {!pendingReassign.timeOnly && (
+            {!pendingReassign.timeOnly && !pendingReassign.isSharedReassign && (
               <p className="font-body text-sm text-text-secondary mb-3">
                 from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
                 {' '}&rarr;{' '}

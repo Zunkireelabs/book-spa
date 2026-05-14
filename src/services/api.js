@@ -384,11 +384,22 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       throw updateError;
     }
 
-    // 8. Sync junction table: delete old, insert new
+    // 8. Sync junction table: preserve per-therapist times where possible
+    const { data: existingBt } = await supabase.from('booking_therapists').select('therapist_id, start_time, end_time').eq('booking_id', bookingId);
+    const existingTimeMap = {};
+    (existingBt || []).forEach(bt => { existingTimeMap[bt.therapist_id] = { start_time: bt.start_time, end_time: bt.end_time }; });
+
     await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
 
     if (ids.length > 0) {
-      const rows = ids.map(tid => ({ booking_id: bookingId, therapist_id: tid }));
+      // Fetch booking times for default
+      const { data: bk } = await supabase.from('bookings').select('start_time, end_time').eq('id', bookingId).single();
+      const rows = ids.map(tid => ({
+        booking_id: bookingId,
+        therapist_id: tid,
+        start_time: existingTimeMap[tid]?.start_time || bk?.start_time || null,
+        end_time: existingTimeMap[tid]?.end_time || bk?.end_time || null,
+      }));
       const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
       if (junctionError) {
         console.warn('[API] booking_therapists insert warning:', junctionError.message);
@@ -398,6 +409,22 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
     return { data: { success: true, bookingId, therapistIds: ids, roomId: updated.room_id }, error: null };
   } catch (error) {
     console.error('[API] assignTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateTherapistTime({ bookingId, therapistId, startTime, endTime }) {
+  try {
+    const { error } = await supabase
+      .from('booking_therapists')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('booking_id', bookingId)
+      .eq('therapist_id', therapistId);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] updateTherapistTime error:', error.message);
     return { data: null, error };
   }
 }
@@ -903,6 +930,12 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       }
       throw updateError;
     }
+
+    // 9. Sync booking_therapists times to match the rescheduled booking
+    await supabase
+      .from('booking_therapists')
+      .update({ start_time: updated.start_time, end_time: updated.end_time })
+      .eq('booking_id', bookingId);
 
     return {
       data: {
@@ -1733,7 +1766,7 @@ export async function fetchBookingById(bookingId) {
         service:services(id, name, duration_minutes, price_npr),
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
-        booking_therapists(therapist_id, therapist:therapists(id, name, gender))
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name, gender))
       `)
       .eq('id', bookingId)
       .single();
@@ -1800,7 +1833,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         service:services(name, duration_minutes),
         therapist:therapists(id, name),
         room:rooms(id, name),
-        booking_therapists(therapist_id, therapist:therapists(id, name))
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name))
       `)
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
