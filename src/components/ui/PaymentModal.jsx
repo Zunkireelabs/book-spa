@@ -13,7 +13,7 @@ const PAYMENT_MODES = [
 ];
 
 function formatNPR(amount) {
-  return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
 const PaymentModal = ({ booking, onConfirm, onClose, isSubmitting }) => {

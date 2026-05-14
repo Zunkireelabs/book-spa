@@ -50,6 +50,7 @@ const BookingActionModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -84,6 +85,7 @@ const BookingActionModal = ({
   useEffect(() => {
     setIsEditing(false);
     setEditError(null);
+    setActionError(null);
     setTherapistSearch('');
     setNewBookingMode(null);
     setNewBookingError(null);
@@ -251,13 +253,14 @@ const BookingActionModal = ({
     if (!booking) return;
 
     setIsLoading(true);
+    setActionError(null);
     try {
       if (onAssignTherapist) {
         await onAssignTherapist(booking.bookingId, selectedTherapists, notes, selectedRoom || null);
       }
       onClose();
     } catch (error) {
-      console.error('Assignment failed:', error);
+      setActionError(error?.message || 'Assignment failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -266,13 +269,14 @@ const BookingActionModal = ({
   const handleStatusUpdate = async (newStatus) => {
     if (!booking) return;
     setIsLoading(true);
+    setActionError(null);
     try {
       if (onUpdateStatus) {
         await onUpdateStatus(booking.bookingId, newStatus);
       }
       onClose();
     } catch (error) {
-      console.error('Status update failed:', error);
+      setActionError(error?.message || 'Status update failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -355,7 +359,7 @@ const BookingActionModal = ({
   const nextStatuses = getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
-  const canPay = ['pending', 'confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
+  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
   const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
@@ -406,6 +410,7 @@ const BookingActionModal = ({
                   key={tab.id}
                   onClick={() => {
                     setActiveTab(tab.id);
+                    setActionError(null);
                     if (tab.id !== 'details') setIsEditing(false);
                   }}
                   className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
@@ -640,6 +645,14 @@ const BookingActionModal = ({
                   )}
                 </div>
 
+                {/* Action error (status update failures) */}
+                {actionError && !editError && (
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
+                  </div>
+                )}
+
                 {/* Edit error */}
                 {editError && (
                   <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
@@ -809,6 +822,13 @@ const BookingActionModal = ({
                     className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                   />
                 </div>
+
+                {actionError && (
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
+                  </div>
+                )}
               </div>
             )}
 
