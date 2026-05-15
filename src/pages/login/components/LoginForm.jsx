@@ -88,42 +88,40 @@ const LoginForm = () => {
   };
 
   const handlePinLogin = async (userEmail, pin) => {
-    // Step 1: Verify PIN via RPC
-    const { data, error } = await supabase.rpc('login_with_pin', {
-      p_email: userEmail,
-      p_pin: pin,
-      p_org_slug: urlOrgSlug || null,
-    });
+    // Steps 1+2 run inside the pin-login Edge Function so the service-role key
+    // stays on the server. Function verifies the PIN, mints a magic-link OTP,
+    // and returns it. Client then exchanges the OTP for a real session below.
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    if (error || !data?.success) {
-      return { success: false, error: data?.error || error?.message || 'Invalid PIN' };
+    let pinResp;
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/pin-login`, {
+        method: 'POST',
+        headers: {
+          'apikey': anonKey,
+          'Authorization': `Bearer ${anonKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: userEmail,
+          pin,
+          org_slug: urlOrgSlug || null,
+        }),
+      });
+      pinResp = await res.json();
+    } catch (err) {
+      return { success: false, error: 'Could not reach login service.' };
     }
 
-    // Step 2: Generate magic link OTP via admin API
-    const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
-    if (!serviceKey) {
-      return { success: false, error: 'PIN login not configured. Use your password.' };
+    if (!pinResp?.success || !pinResp.otp) {
+      return { success: false, error: pinResp?.error || 'Invalid PIN' };
     }
 
-    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/admin/generate_link`, {
-      method: 'POST',
-      headers: {
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ type: 'magiclink', email: userEmail }),
-    });
-
-    const linkData = await res.json();
-    if (!linkData.email_otp) {
-      return { success: false, error: 'Failed to generate login token.' };
-    }
-
-    // Step 3: Verify OTP to get a real session
+    // Step 3: Exchange the magic-link OTP for a real session
     const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
       email: userEmail,
-      token: linkData.email_otp,
+      token: pinResp.otp,
       type: 'email',
     });
 
