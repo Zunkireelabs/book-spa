@@ -2127,6 +2127,11 @@ export async function createBooking({
 
     if (insertError) {
       if (insertError.code === '23P01') {
+        // GIST exclusion: could be therapist overlap
+        const msg = insertError.message || '';
+        if (msg.includes('therapist')) {
+          return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
+        }
         return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
       }
       throw insertError;
