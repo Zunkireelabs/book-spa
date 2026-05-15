@@ -136,9 +136,13 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       if (cardRef.current) {
         const rect = cardRef.current.getBoundingClientRect();
         const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
+        // Clamp top so popover stays within viewport (estimate ~280px popover height)
+        const popoverHeight = 280;
+        const maxTop = window.innerHeight - popoverHeight - 10;
+        const clampedTop = Math.min(rect.top, maxTop);
         setPopoverPos({
           side,
-          top: rect.top,
+          top: Math.max(10, clampedTop),
           left: side === 'right' ? rect.right + 8 : rect.left - 288,
         });
       }
