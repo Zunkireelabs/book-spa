@@ -1934,6 +1934,7 @@ export async function createBooking({
     // Room handling - only required for industries that use rooms
     let availableRoom = null;
 
+    console.log('[createBooking] roomId:', roomId, 'enableRooms:', enableRooms);
     if (enableRooms) {
       if (roomId === 'none') {
         // Explicitly no room selected — skip auto-assignment
