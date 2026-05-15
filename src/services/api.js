@@ -2127,13 +2127,13 @@ export async function createBooking({
       .single();
 
     if (insertError) {
+      console.error('[createBooking] INSERT ERROR:', insertError.code, insertError.message, insertError.details, insertError.hint);
       if (insertError.code === '23P01') {
-        // GIST exclusion: could be therapist overlap
-        const msg = insertError.message || '';
+        const msg = (insertError.message || '') + (insertError.details || '');
         if (msg.includes('therapist')) {
           return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
         }
-        return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
+        return { data: null, error: { code: 'ROOMS_FULL', message: `Scheduling conflict: ${insertError.message}` } };
       }
       throw insertError;
     }
