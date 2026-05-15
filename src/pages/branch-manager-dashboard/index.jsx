@@ -42,7 +42,7 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
   const { profile, signOut } = useAuth();
-  const { branchId, branchName } = useBranch(); console.log("[DEBUG] Dashboard Profile:", profile);
+  const { branchId, branchName } = useBranch();
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -315,7 +315,7 @@ const BranchManagerDashboard = () => {
         <meta name="description" content="Comprehensive branch management dashboard for Zenly managers with analytics, staff oversight, and operational controls." />
       </Helmet>
 
-      <div className="min-h-screen bg-[#ebebeb]">
+      <div className="min-h-screen bg-surface-sidebar">
         <StaffSidebar
           userRole="manager"
           userName={managerData.name}
@@ -325,7 +325,7 @@ const BranchManagerDashboard = () => {
 
         <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200`}>
           {/* Header */}
-          <header className="bg-[#ebebeb] sticky top-0 z-header">
+          <header className="bg-surface-sidebar sticky top-0 z-header">
             <div className="px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex items-center justify-between">
                 {/* Left: Branch name + date/time */}
@@ -516,7 +516,7 @@ const BranchManagerDashboard = () => {
 
           {/* Main Content Area with AI Assistant */}
           <div className="relative z-0 flex gap-2 sm:gap-3 min-h-[calc(100vh-52px)]">
-            <main className={`flex-1 min-w-0 ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-[#f1f1f1]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+            <main className={`flex-1 min-w-0 ${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-surface-dim`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
               {viewMode === 'dashboard' && renderDashboardView()}
               {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
               {viewMode === 'calendar' && renderCalendarView()}

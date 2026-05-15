@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../AppIcon';
-import { useBranch } from '../../contexts/BranchContext';
+import { useBranch } from 'contexts/BranchContext';
 
 const BranchSwitcher = () => {
   const { branchId, branchName, branches, isAdmin, switchBranch } = useBranch();

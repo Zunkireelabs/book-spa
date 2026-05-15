@@ -40,6 +40,8 @@ module.exports = {
           // Border Colors
           'border': '#E1E3E5', // soft gray (Shopify-style)
           'border-muted': 'rgba(225, 227, 229, 0.5)', // soft gray with opacity
+          'surface-sidebar': '#EBEBEB',   // sidebar shell background
+          'surface-dim': '#F1F1F1',       // main content area background
         },
         fontFamily: {
           'heading': ['Inter', 'sans-serif'],

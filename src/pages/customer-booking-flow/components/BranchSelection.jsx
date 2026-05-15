@@ -20,7 +20,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   const [roomsByBranch, setRoomsByBranch] = useState({});
 
   useEffect(() => {
-    async function loadBranches() { console.log("[DEBUG] orgId:", orgId, "tenantLoading:", tenantLoading);
+    async function loadBranches() {
       if (tenantLoading) return;
       if (!orgId) {
         setLoading(false);
@@ -51,7 +51,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
         // Fetch rooms for each branch to show amenities
         const roomsMap = {};
         for (const branch of activeBranches) {
-          const { data: rooms } = await fetchRooms(branch.id); console.log("[DEBUG] branchId:", branch.id, "rooms fetched:", rooms);
+          const { data: rooms } = await fetchRooms(branch.id);
           if (rooms) {
             roomsMap[branch.id] = rooms;
           }
@@ -91,7 +91,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {branches.map((branch) => {
         const rooms = roomsByBranch[branch.id] || [];
-        const allAmenities = [...new Set(rooms.flatMap(r => r.amenities || []))].slice(0, 4); console.log("[DEBUG] branchId:", branch.id, "allAmenities:", allAmenities);
+        const allAmenities = [...new Set(rooms.flatMap(r => r.amenities || []))].slice(0, 4);
 
         return (
           <div

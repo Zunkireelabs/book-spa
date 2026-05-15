@@ -989,13 +989,11 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     // Check if anything actually changed
     const oldTime = booking.startTime?.slice(0, 5);
     const oldDate = booking.date;
-    console.log('[DragEnd]', { oldTime, newStartTime, oldDate, newDate, isCrossColumn, isShared: booking.isShared, colTherapist: booking._colTherapistId, sourceColId, targetColId: effectiveTargetColId });
     if (oldTime === newStartTime && oldDate === newDate && !isCrossColumn) {
       setActiveDragId(null);
       setActiveDragBooking(null);
       setOverSlotData(null);
       setDragGrabOffset(0);
-      console.log('[DragEnd] No change detected, skipping');
       return; // No change
     }
 
@@ -1035,7 +1033,6 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       });
     } else if (booking.isShared && booking._colTherapistId) {
       // Shared booking, same column — default: move ALL therapists together (reschedule whole booking)
-      console.log('[DragEnd] Shared booking time change', { bookingId, newStartTime, newEndTime });
       // Cmd/Ctrl selected = move only selected ones independently
       const selectedBookings = getSelectedBookingsRef.current();
       const draggedKey = `${booking.id}__${booking._colTherapistId}`;

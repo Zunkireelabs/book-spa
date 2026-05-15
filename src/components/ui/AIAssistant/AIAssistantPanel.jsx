@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../AppIcon';
-import { useAIAssistant } from '../../../contexts/AIAssistantContext';
+import { useAIAssistant } from 'contexts/AIAssistantContext';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import TypingIndicator from './TypingIndicator';

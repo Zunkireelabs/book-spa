@@ -4,7 +4,7 @@ import Button from './Button';
 import Input from './Input';
 import Icon from '../AppIcon';
 import CustomSelect from './CustomSelect';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from 'contexts/AuthContext';
 
 const AuthenticationModal = ({ isOpen = true, onClose }) => {
   const navigate = useNavigate();

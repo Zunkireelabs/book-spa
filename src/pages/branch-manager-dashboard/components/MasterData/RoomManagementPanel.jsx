@@ -29,8 +29,6 @@ const RoomManagementPanel = ({ branchId }) => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  console.log('[DEBUG] RoomManagementPanel branchId:', branchId);
-
   const allUniqueAmenities = useMemo(() => {
     const amenities = new Set();
     rooms.forEach(r => {
@@ -54,9 +52,7 @@ const RoomManagementPanel = ({ branchId }) => {
     if (!branchId) return;
     setLoading(true);
     setError(null);
-    console.log('[DEBUG] fetchRoomsForManagement for branch:', branchId);
     const result = await fetchRoomsForManagement(branchId);
-    console.log('[DEBUG] fetchRoomsForManagement returned:', result.data?.length, 'rooms', 'Error:', result.error);
     
     if (result.error) {
       setError(result.error.message || 'Failed to load rooms.');
@@ -66,7 +62,7 @@ const RoomManagementPanel = ({ branchId }) => {
     setLoading(false);
   }, [branchId]);
 
-  useEffect(() => { console.log('[DEBUG] RoomManagementPanel mounted with branchId:', branchId); loadRooms(); }, [loadRooms, branchId]);
+  useEffect(() => { loadRooms(); }, [loadRooms, branchId]);
 
   const handleOpenCreate = () => {
     setEditingRoom(null);
