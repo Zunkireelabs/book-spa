@@ -1934,7 +1934,6 @@ export async function createBooking({
     // Room handling - only required for industries that use rooms
     let availableRoom = null;
 
-    console.log('[createBooking] roomId:', roomId, 'enableRooms:', enableRooms);
     if (enableRooms) {
       if (roomId === 'none') {
         // Explicitly no room selected — skip auto-assignment
@@ -2127,13 +2126,12 @@ export async function createBooking({
       .single();
 
     if (insertError) {
-      console.error('[createBooking] INSERT ERROR:', insertError.code, insertError.message, insertError.details, insertError.hint);
       if (insertError.code === '23P01') {
         const msg = (insertError.message || '') + (insertError.details || '');
         if (msg.includes('therapist')) {
           return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
         }
-        return { data: null, error: { code: 'ROOMS_FULL', message: `Scheduling conflict: ${insertError.message}` } };
+        return { data: null, error: { code: 'ROOMS_FULL', message: 'Scheduling conflict. Please try a different time or room.' } };
       }
       throw insertError;
     }
