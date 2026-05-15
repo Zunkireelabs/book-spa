@@ -1295,7 +1295,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       customerEmail: formData.customerEmail,
       customerGender: formData.customerGender,
       specialRequests: formData.specialRequests,
-      therapistIds: formData.therapistIds,
+      therapistIds: formData.therapistIds || (formData.therapistId ? [formData.therapistId] : null),
       roomId: formData.roomId || 'none',
     });
     if (result.error) {
