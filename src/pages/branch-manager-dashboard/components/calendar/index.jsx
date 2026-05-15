@@ -18,6 +18,8 @@ import {
   updateBookingDetails,
   updateTherapistOrder,
   updateRoomOrder,
+  updateTherapistTime,
+  applyDiscount,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -83,17 +85,20 @@ function formatTimeDisplay(time) {
 
 // ── Quick Create Panel ────────────────────────────────────────
 
-const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, onClose, onSubmit, branchId, branchHours }) => {
+const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
-  const [therapistId, setTherapistId] = useState('');
+  const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
   const [roomId, setRoomId] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [therapistSearch, setTherapistSearch] = useState('');
   const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const nameRef = useRef(null);
   const timeDropdownRef = useRef(null);
@@ -102,6 +107,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const handleCustomerSelect = useCallback((customer) => {
     setCustomerName(customer.full_name);
     setCustomerPhone(customer.phone || '');
+    setCustomerEmail(customer.email || '');
+    setCustomerGender(customer.gender || '');
   }, []);
 
   // Reset form when slot changes + pre-select therapist/room from column
@@ -109,14 +116,73 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setServiceId('');
     setCustomerName('');
     setCustomerPhone('');
+    setCustomerEmail('');
+    setCustomerGender('');
     setSpecialRequests('');
-    setTherapistId(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
+    setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
+    setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setBookingDate(slotInfo?.day || '');
     setBookingTime(slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '');
     setError(null);
     setSubmitting(false);
   }, [slotInfo]);
+
+  // Compute which therapists & rooms are busy during the selected time slot
+  const selectedService = (services || []).find((s) => s.id === serviceId);
+  // Parse room capacity from amenities (e.g., "3 Chair" → 3, "1 Bed" → 1)
+  const getRoomCapacity = (room) => {
+    if (!room.amenities || room.amenities.length === 0) return 1;
+    const match = room.amenities[0].match(/^(\d+)/);
+    return match ? parseInt(match[1], 10) : 1;
+  };
+
+  const busyResources = useMemo(() => {
+    if (!bookingDate || !bookingTime) return { therapistIds: new Set(), roomBookingCounts: new Map() };
+    const durationMin = selectedService?.duration_minutes || 60;
+    const [sh, sm] = bookingTime.split(':').map(Number);
+    const slotStart = sh * 60 + sm;
+    const slotEnd = slotStart + durationMin;
+
+    const busyTherapists = new Set();
+    const roomBookingCounts = new Map();
+
+    for (const b of bookings) {
+      // calendarData.bookings uses raw DB format (snake_case)
+      const status = (b.status || '').toLowerCase();
+      if (['cancelled', 'no show', 'completed'].includes(status)) continue;
+      if (b.date !== bookingDate) continue;
+
+      // Raw DB: start_time = "HH:MM:SS", end_time = "HH:MM:SS"
+      const startStr = b.start_time || '00:00:00';
+      const endStr = b.end_time;
+      const [bh, bm] = startStr.split(':').map(Number);
+      const bStart = bh * 60 + bm;
+
+      let bEnd;
+      if (endStr) {
+        const [eh, em] = endStr.split(':').map(Number);
+        bEnd = eh * 60 + em;
+      } else {
+        // Fallback: use service duration
+        const svc = (services || []).find((s) => s.id === b.service_id);
+        bEnd = bStart + (svc?.duration_minutes || 60);
+      }
+
+      // Check time overlap: new booking [slotStart, slotEnd) overlaps [bStart, bEnd)
+      if (slotStart < bEnd && slotEnd > bStart) {
+        // Mark all therapists (from junction table or primary) as busy
+        if (b.booking_therapists?.length > 0) {
+          b.booking_therapists.forEach(bt => busyTherapists.add(bt.therapist_id));
+        } else if (b.therapist_id) {
+          busyTherapists.add(b.therapist_id);
+        }
+        if (b.room_id) roomBookingCounts.set(b.room_id, (roomBookingCounts.get(b.room_id) || 0) + 1);
+      }
+    }
+
+    return { therapistIds: busyTherapists, roomBookingCounts };
+  }, [bookings, bookingDate, bookingTime, selectedService, services]);
 
   // Autofocus name field when panel opens
   useEffect(() => {
@@ -181,8 +247,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       serviceId,
       customerName: customerName.trim(),
       customerPhone: customerPhone.replace(/\D/g, '') || null,
+      customerEmail: customerEmail.trim() || null,
+      customerGender: customerGender || null,
       specialRequests: specialRequests.trim() || null,
-      therapistId: therapistId || null,
+      therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
       roomId: roomId || null,
       bookingDate,
       bookingTime,
@@ -232,12 +300,41 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
               <div className="relative flex items-center gap-1.5" ref={timeDropdownRef}>
                 <Icon name="Clock" size={14} className="text-primary" />
+                <input
+                  type="text"
+                  value={bookingTime ? format12h(bookingTime) : ''}
+                  onChange={(e) => {
+                    // Parse manual time input (HH:MM, H:MM AM/PM formats)
+                    const raw = e.target.value;
+                    const match24 = raw.match(/^(\d{1,2}):(\d{2})$/);
+                    const matchAmPm = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+                    if (match24) {
+                      const h = parseInt(match24[1]), m = parseInt(match24[2]);
+                      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                        setBookingTime(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+                      }
+                    } else if (matchAmPm) {
+                      let h = parseInt(matchAmPm[1]);
+                      const m = parseInt(matchAmPm[2]);
+                      const pm = matchAmPm[3].toLowerCase() === 'pm';
+                      if (pm && h < 12) h += 12;
+                      if (!pm && h === 12) h = 0;
+                      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                        setBookingTime(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+                      }
+                    }
+                  }}
+                  onFocus={(e) => { e.target.select(); setTimeDropdownOpen(true); }}
+                  placeholder="--:--"
+                  autoComplete="off"
+                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 w-20 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
                 <button
                   type="button"
                   onClick={() => setTimeDropdownOpen((v) => !v)}
-                  className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 hover:bg-background focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  className="text-text-secondary hover:text-primary transition-colors"
                 >
-                  {bookingTime ? format12h(bookingTime) : '--:--'}
+                  <Icon name="ChevronDown" size={14} />
                 </button>
                 {timeDropdownOpen && (
                   <div
@@ -297,27 +394,6 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               )}
             </div>
 
-            {/* Therapist */}
-            <div>
-              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
-                Therapist
-              </label>
-              <CustomSelect
-                value={therapistId}
-                onChange={(val) => setTherapistId(val)}
-                options={[
-                  { value: '', label: 'No therapist' },
-                  ...(therapists || []).map((t) => ({
-                    value: t.id,
-                    label: t.full_name || t.name,
-                  })),
-                ]}
-                placeholder="No therapist"
-                size="md"
-                searchable
-              />
-            </div>
-
             {/* Room */}
             {rooms && rooms.length > 0 && (
               <div>
@@ -326,13 +402,46 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 </label>
                 <CustomSelect
                   value={roomId}
-                  onChange={(val) => setRoomId(val)}
+                  onChange={(val) => {
+                    const room = (rooms || []).find(r => r.id === val);
+                    if (room) {
+                      const capacity = getRoomCapacity(room);
+                      const used = busyResources.roomBookingCounts.get(val) || 0;
+                      if (used >= capacity) return; // fully packed, block selection
+                    }
+                    setRoomId(val);
+                  }}
                   options={[
                     { value: '', label: 'No room' },
-                    ...(rooms || []).map((r) => ({
-                      value: r.id,
-                      label: r.name,
-                    })),
+                    ...(rooms || []).map((r) => {
+                      const capacity = getRoomCapacity(r);
+                      const used = busyResources.roomBookingCounts.get(r.id) || 0;
+                      const remaining = capacity - used;
+                      const amenityStr = r.amenities?.join(', ') || '';
+                      const isFull = used >= capacity;
+
+                      let statusLabel;
+                      if (isFull) {
+                        statusLabel = <span className="text-error font-bold">— Unavailable</span>;
+                      } else if (used > 0 && capacity > 1) {
+                        statusLabel = <span className="text-warning font-bold">— {remaining} left</span>;
+                      } else if (used > 0) {
+                        statusLabel = <span className="text-warning font-bold">— Allocated</span>;
+                      }
+
+                      return {
+                        value: r.id,
+                        label: (
+                          <>
+                            {r.name}
+                            {amenityStr && <span className="text-text-secondary"> ({amenityStr})</span>}
+                            {statusLabel && <> {statusLabel}</>}
+                          </>
+                        ),
+                        searchLabel: r.name,
+                        disabled: isFull,
+                      };
+                    }),
                   ]}
                   placeholder="No room"
                   size="md"
@@ -340,6 +449,61 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 />
               </div>
             )}
+
+            {/* Therapist(s) */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
+                {selectedTherapistIds.length > 0 && (
+                  <span className="ml-2 text-xs text-text-secondary font-normal">({selectedTherapistIds.length} selected)</span>
+                )}
+              </label>
+              <div className="border border-border rounded-spa bg-background overflow-hidden">
+                <div className="relative px-2 pt-2">
+                  <Icon name="Search" size={14} className="absolute left-4 top-1/2 mt-1 -translate-y-1/2 text-text-secondary" />
+                  <input
+                    type="text"
+                    value={therapistSearch}
+                    onChange={(e) => setTherapistSearch(e.target.value)}
+                    placeholder="Search therapists..."
+                    className="w-full pl-7 pr-3 py-1.5 bg-surface border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+                <div className="space-y-1 max-h-[140px] overflow-y-auto p-2">
+                  {(therapists || [])
+                    .filter(t => {
+                      if (!therapistSearch.trim()) return true;
+                      const name = (t.full_name || t.name).toLowerCase();
+                      return name.includes(therapistSearch.toLowerCase());
+                    })
+                    .map((t) => {
+                      const isBusy = busyResources.therapistIds.has(t.id);
+                      const isChecked = selectedTherapistIds.includes(t.id);
+                      const name = t.full_name || t.name;
+                      return (
+                        <label key={t.id} className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${isChecked ? 'bg-primary/5' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTherapistIds(prev => [...prev, t.id]);
+                              } else {
+                                setSelectedTherapistIds(prev => prev.filter(id => id !== t.id));
+                              }
+                            }}
+                            className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                          />
+                          <span className="font-body text-sm text-text-primary truncate">
+                            {name}
+                            {isBusy && <span className="text-warning font-bold"> — Assigned</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
 
             {/* Customer name */}
             <div>
@@ -372,6 +536,43 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   searchBy="phone"
                   inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
+              </div>
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Email
+              </label>
+              <input
+                type="email"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                placeholder="customer@email.com"
+                className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+            </div>
+
+            {/* Gender */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Gender
+              </label>
+              <div className="flex gap-2">
+                {['Male', 'Female'].map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setCustomerGender(customerGender === g.toLowerCase() ? '' : g.toLowerCase())}
+                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                      customerGender === g.toLowerCase()
+                        ? 'border-primary bg-primary/10 text-primary font-medium'
+                        : 'border-border bg-surface text-text-secondary hover:bg-background'
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -440,11 +641,50 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   // Default to staff view if rooms are disabled
   const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
+  const [showServiceOnly, setShowServiceOnly] = useState(true);
+  const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
+  const [positionDropdownOpen, setPositionDropdownOpen] = useState(false);
+  const positionDropdownRef = useRef(null);
 
   // Calendar data state
   const [calendarData, setCalendarData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Available position options for filter (from service staff only)
+  const calendarPositionOptions = useMemo(() => {
+    if (!calendarData?.therapists) return [];
+    const positions = new Set();
+    calendarData.therapists.forEach(t => {
+      if (t.is_service_staff !== false && t.position) {
+        t.position.split('/').forEach(p => positions.add(p.trim()));
+      }
+    });
+    return Array.from(positions).sort();
+  }, [calendarData?.therapists]);
+
+  // Filter therapists for calendar display
+  const filteredTherapists = useMemo(() => {
+    if (!calendarData?.therapists) return [];
+    let list = calendarData.therapists;
+    if (showServiceOnly) {
+      list = list.filter(t => t.is_service_staff !== false);
+    }
+    if (selectedPositions.length > 0) {
+      list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
+    }
+    return list;
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions]);
+
+  // Close position dropdown on outside click
+  useEffect(() => {
+    if (!positionDropdownOpen) return;
+    const handle = (e) => {
+      if (positionDropdownRef.current && !positionDropdownRef.current.contains(e.target)) setPositionDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [positionDropdownOpen]);
 
   // Attendance indicators
   const [attendanceMap, setAttendanceMap] = useState({});
@@ -462,8 +702,10 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
 
+  // Multi-drag: ref to get selected bookings from CalendarGrid
+  const getSelectedBookingsRef = useRef(() => []);
+
   // Cross-column reassignment confirmation
-  // Shape: { booking, bookingId, newDate, newStartTime, newEndTime, targetColId, targetColName, sourceColName, type: 'therapist'|'room', durationMinutes }
   const [pendingReassign, setPendingReassign] = useState(null);
 
   // Quick-create panel state
@@ -707,10 +949,13 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const { active, over } = event;
 
     // Capture final position before clearing state
-    const finalTimeData = over?.data?.current ? calculateTimeFromPointer(over.data.current) : null;
+    // Fallback to last overSlotData if over is null (same-column drag may not trigger new over)
+    const finalTimeData = over?.data?.current
+      ? calculateTimeFromPointer(over.data.current)
+      : overSlotData;
 
     // If not dropped on a valid target, just clear state
-    if (!over || !active.data.current?.booking || !finalTimeData) {
+    if (!active.data.current?.booking || !finalTimeData) {
       setActiveDragId(null);
       setActiveDragBooking(null);
       setOverSlotData(null);
@@ -733,8 +978,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     const bookingId = booking.bookingId || booking.id;
 
     // Determine source column based on column mode
+    // For shared bookings, use the column-specific therapist ID
     const sourceColId = columnMode === 'therapist'
-      ? (booking.therapistId || 'unassigned')
+      ? (booking._colTherapistId || booking.therapistId || 'unassigned')
       : (booking.roomId || 'unassigned');
     const effectiveTargetColId = targetColId || 'unassigned';
 
@@ -783,7 +1029,59 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         sourceColName: colNameMap[sourceColId] || sourceColId,
         type: columnMode,
         timeChanged: oldTime !== newStartTime || oldDate !== newDate,
+        isSharedReassign: booking.isShared && columnMode === 'therapist',
       });
+    } else if (booking.isShared && booking._colTherapistId) {
+      // Shared booking, same column — default: move ALL therapists together (reschedule whole booking)
+      // Cmd/Ctrl selected = move only selected ones independently
+      const selectedBookings = getSelectedBookingsRef.current();
+      const draggedKey = `${booking.id}__${booking._colTherapistId}`;
+      const isPartOfSelection = selectedBookings.length > 0 && selectedBookings.some(b => `${b.id}__${b._colTherapistId}` === draggedKey);
+
+      if (isPartOfSelection) {
+        // Cmd/Ctrl selected: move only selected cards independently
+        const [oldH, oldM] = (booking.startTime || '').split(':').map(Number);
+        const [newH, newM] = newStartTime.split(':').map(Number);
+        const deltaMins = (newH * 60 + newM) - (oldH * 60 + oldM);
+
+        const updates = selectedBookings.map(b => {
+          const [sh, sm] = (b.startTime || '').split(':').map(Number);
+          const [eh, em] = (b.endTime || '').split(':').map(Number);
+          const ns = sh * 60 + sm + deltaMins;
+          const ne = eh * 60 + em + deltaMins;
+          return updateTherapistTime({
+            bookingId: b.bookingId || b.id,
+            therapistId: b._colTherapistId,
+            startTime: `${String(Math.floor(ns / 60)).padStart(2, '0')}:${String(ns % 60).padStart(2, '0')}`,
+            endTime: `${String(Math.floor(ne / 60)).padStart(2, '0')}:${String(ne % 60).padStart(2, '0')}`,
+          });
+        });
+        Promise.all(updates).then(results => {
+          const failed = results.find(r => r.error);
+          if (failed) showToast(failed.error.message || 'Failed to update.', 'error');
+          else showToast(`Moved ${selectedBookings.length} selected`, 'success');
+          refreshCalendar();
+        });
+      } else {
+        // Default: show confirmation dialog to reschedule entire booking (moves all therapists)
+        setPendingReassign({
+          booking,
+          bookingId,
+          newDate,
+          newStartTime,
+          newEndTime,
+          durationMinutes,
+          targetColId: effectiveTargetColId,
+          sourceColId,
+          targetColName: colNameMap[effectiveTargetColId] || effectiveTargetColId,
+          sourceColName: colNameMap[sourceColId] || sourceColId,
+          type: columnMode,
+          timeChanged: true,
+          timeOnly: true,
+          isSharedReschedule: true,
+        });
+      }
+      return;
     } else {
       // Same column — time-only reschedule, show confirmation dialog
       setPendingReassign({
@@ -841,48 +1139,81 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const handleConfirmReassign = useCallback(async () => {
     if (!pendingReassign) return;
 
-    const { bookingId, newDate, newStartTime, newEndTime, targetColId, type, targetColName, timeOnly } = pendingReassign;
-
-    // Build API params
-    const apiParams = { bookingId, newDate, newStartTime };
-    const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
-
-    if (!timeOnly) {
-      if (type === 'therapist') {
-        const therapistVal = targetColId === 'unassigned' ? null : targetColId;
-        apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-        optimisticFields.therapist_id = therapistVal;
-      } else {
-        const roomVal = targetColId === 'unassigned' ? null : targetColId;
-        apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
-        optimisticFields.room_id = roomVal;
-      }
-    }
-
-    // Optimistic UI update
-    setCalendarData(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        bookings: prev.bookings.map(b => {
-          if (b.id === bookingId) {
-            return { ...b, ...optimisticFields };
-          }
-          return b;
-        }),
-      };
-    });
+    const { bookingId, newDate, newStartTime, newEndTime, targetColId, sourceColId, type, targetColName, timeOnly, isSharedReassign, isSharedReschedule } = pendingReassign;
 
     setPendingReassign(null);
     setIsRescheduling(true);
 
     try {
-      const result = await rescheduleBooking(apiParams);
-      if (result.error) {
-        showToast(result.error.message || 'Failed to reassign booking.', 'error');
+      if (isSharedReschedule) {
+        // Shared booking time-only reschedule: moves all therapists together
+        const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
+        if (result.error) {
+          showToast(result.error.message || 'Failed to reschedule.', 'error');
+        } else {
+          showToast(`Rescheduled to ${newStartTime}`, 'success');
+        }
+        refreshCalendar();
+      } else if (isSharedReassign) {
+        // Shared booking: swap therapist in junction table
+        // Get current therapist IDs from the booking_therapists
+        const currentBooking = calendarData?.bookings?.find(b => b.id === bookingId);
+        const currentTherapistIds = currentBooking?.booking_therapists?.map(bt => bt.therapist_id) || [];
+
+        if (currentTherapistIds.includes(targetColId) && targetColId !== sourceColId) {
+          // Dragged to a therapist who already has this booking → consolidate (remove source)
+          const newIds = currentTherapistIds.filter(id => id !== sourceColId);
+          const result = await assignTherapist({ bookingId, therapistIds: newIds });
+          if (result.error) {
+            showToast(result.error.message || 'Failed to consolidate assignment.', 'error');
+          } else {
+            showToast(`Consolidated to ${targetColName}`, 'success');
+          }
+        } else {
+          // Dragged to a new therapist → replace source with target
+          const newIds = currentTherapistIds.map(id => id === sourceColId ? targetColId : id);
+          const result = await assignTherapist({ bookingId, therapistIds: newIds });
+          if (result.error) {
+            showToast(result.error.message || 'Failed to reassign therapist.', 'error');
+          } else {
+            showToast(`Reassigned from ${colNameMap[sourceColId] || 'therapist'} to ${targetColName}`, 'success');
+          }
+        }
         refreshCalendar();
       } else {
-        showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
+        // Standard reassignment (non-shared)
+        const apiParams = { bookingId, newDate, newStartTime };
+        const optimisticFields = { date: newDate, start_time: newStartTime, end_time: newEndTime };
+
+        if (!timeOnly) {
+          if (type === 'therapist') {
+            apiParams.newTherapistId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+            optimisticFields.therapist_id = targetColId === 'unassigned' ? null : targetColId;
+          } else {
+            apiParams.newRoomId = targetColId === 'unassigned' ? 'unassigned' : targetColId;
+            optimisticFields.room_id = targetColId === 'unassigned' ? null : targetColId;
+          }
+        }
+
+        // Optimistic UI update
+        setCalendarData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            bookings: prev.bookings.map(b => {
+              if (b.id === bookingId) return { ...b, ...optimisticFields };
+              return b;
+            }),
+          };
+        });
+
+        const result = await rescheduleBooking(apiParams);
+        if (result.error) {
+          showToast(result.error.message || 'Failed to reassign booking.', 'error');
+          refreshCalendar();
+        } else {
+          showToast(timeOnly ? `Rescheduled to ${newStartTime}` : `Reassigned to ${targetColName}`, 'success');
+        }
       }
     } catch (err) {
       showToast('An error occurred while reassigning.', 'error');
@@ -890,7 +1221,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     } finally {
       setIsRescheduling(false);
     }
-  }, [pendingReassign, refreshCalendar]);
+  }, [pendingReassign, refreshCalendar, calendarData, colNameMap]);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragId(null);
@@ -958,9 +1289,11 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       startTime,
       customerName: formData.customerName,
       customerPhone: formData.customerPhone,
+      customerEmail: formData.customerEmail,
+      customerGender: formData.customerGender,
       specialRequests: formData.specialRequests,
-      therapistId: formData.therapistId,
-      roomId: formData.roomId,
+      therapistIds: formData.therapistIds,
+      roomId: formData.roomId || 'none',
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
@@ -1042,14 +1375,57 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistId, notes, roomId) => {
-    const result = await assignTherapist({ bookingId, therapistId, roomId: roomId !== undefined ? (roomId || null) : undefined });
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
+    const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
+    const result = await assignTherapist({ bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
     }
     showToast('Assignment saved successfully');
   };
+
+  const handleBookingResize = useCallback(async (booking, deltaMinutes, direction) => {
+    if (!booking.isShared || !booking._colTherapistId) return;
+
+    const [sh, sm] = (booking.startTime || '').split(':').map(Number);
+    const [eh, em] = (booking.endTime || '').split(':').map(Number);
+    if (isNaN(sh) || isNaN(eh)) return;
+
+    const startMins = sh * 60 + sm;
+    const endMins = eh * 60 + em;
+    let newStartMins = startMins;
+    let newEndMins = endMins;
+
+    if (direction === 'top') {
+      newStartMins = Math.max(startMins + deltaMinutes, 0);
+    } else {
+      newEndMins = Math.max(endMins + deltaMinutes, 0);
+    }
+
+    // Ensure minimum 5 min duration
+    if (newEndMins - newStartMins < 5) {
+      showToast('Minimum duration is 5 minutes.', 'error');
+      return;
+    }
+
+    const newStartTime = `${String(Math.floor(newStartMins / 60)).padStart(2, '0')}:${String(newStartMins % 60).padStart(2, '0')}`;
+    const newEndTime = `${String(Math.floor(newEndMins / 60)).padStart(2, '0')}:${String(newEndMins % 60).padStart(2, '0')}`;
+
+    const result = await updateTherapistTime({
+      bookingId: booking.bookingId || booking.id,
+      therapistId: booking._colTherapistId,
+      startTime: newStartTime,
+      endTime: newEndTime,
+    });
+
+    if (result.error) {
+      showToast(result.error.message || 'Failed to resize.', 'error');
+    } else {
+      showToast(`Updated to ${newStartTime} – ${newEndTime}`, 'success');
+    }
+    refreshCalendar();
+  }, [refreshCalendar]);
 
   const handleEditBooking = async (bookingId, updates) => {
     const result = await updateBookingDetails({ bookingId, ...updates });
@@ -1065,6 +1441,17 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     }
     refreshCalendar();
     return { error: null };
+  };
+
+  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason }) => {
+    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason });
+    if (result.error) return { error: result.error };
+    showToast('Discount applied successfully');
+    // Refresh booking in modal
+    const refreshed = await fetchBookingById(bookingId);
+    if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    refreshCalendar();
+    return { data: result.data };
   };
 
   const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
@@ -1134,7 +1521,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
   const therapistsForModal = useMemo(() =>
     calendarData
-      ? calendarData.therapists.map(t => ({
+      ? calendarData.therapists.filter(t => t.is_service_staff !== false).map(t => ({
           id: t.id,
           name: t.name,
           gender: t.gender,
@@ -1230,12 +1617,57 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
               </button>
             </div>
 
-            {/* Right: View toggle + loading */}
+            {/* Right: Position filter + View toggle + loading */}
             <div className="flex items-center space-x-3">
               {(loading || isRescheduling) && (
                 <div className="flex items-center space-x-1.5 text-text-secondary">
                   <div className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />
                   <span className="font-caption text-xs">{isRescheduling ? 'Updating...' : 'Loading...'}</span>
+                </div>
+              )}
+              {columnMode === 'therapist' && calendarPositionOptions.length > 0 && (
+                <div className="relative" ref={positionDropdownRef}>
+                  <button
+                    onClick={() => setPositionDropdownOpen(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-spa spa-transition-fast ${
+                      selectedPositions.length > 0 ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-surface text-text-primary'
+                    }`}
+                  >
+                    <Icon name="Filter" size={14} />
+                    <span>{selectedPositions.length === 0 ? 'All Positions' : `${selectedPositions.length} selected`}</span>
+                    <Icon name="ChevronDown" size={14} className={`spa-transition-fast ${positionDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {positionDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-spa shadow-lg z-dropdown">
+                      <div className="p-1.5 border-b border-border">
+                        <button
+                          onClick={() => setSelectedPositions([])}
+                          className="w-full text-left px-2 py-1 text-xs text-primary hover:bg-primary/5 rounded"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      <div className="max-h-[200px] overflow-y-auto p-1.5 space-y-0.5">
+                        {calendarPositionOptions.map(pos => (
+                          <label key={pos} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-primary/5 ${selectedPositions.includes(pos) ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={selectedPositions.includes(pos)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedPositions(prev => [...prev, pos]);
+                                } else {
+                                  setSelectedPositions(prev => prev.filter(p => p !== pos));
+                                }
+                              }}
+                              className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                            />
+                            <span className="text-sm text-text-primary">{pos}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="flex items-center border border-border rounded-spa overflow-hidden">
@@ -1333,8 +1765,22 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
                       </div>
                       <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
                         <Icon name="Users" size={14} className="text-text-secondary" />
-                        <span>{calendarData.therapists.length} active</span>
+                        <span>{filteredTherapists.length} active</span>
                       </div>
+                      <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                        <button
+                          type="button"
+                          onClick={() => setShowServiceOnly(prev => !prev)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full spa-transition-fast ${
+                            showServiceOnly ? 'bg-primary' : 'bg-border'
+                          }`}
+                        >
+                          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white spa-transition-fast transform ${
+                            showServiceOnly ? 'translate-x-4' : 'translate-x-0.5'
+                          }`} />
+                        </button>
+                        <span className="font-caption text-xs text-text-secondary">Service staff only</span>
+                      </label>
                       {Object.keys(attendanceMap).length > 0 && (
                         <div className="mt-1.5 space-y-1">
                           {Object.entries(attendanceMap).map(([tid, status]) => {
@@ -1370,12 +1816,14 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
             <div className="flex-1 overflow-hidden">
               {calendarData ? (
                 <CalendarGrid
-                  therapists={calendarData.therapists}
+                  therapists={filteredTherapists}
                   rooms={calendarData.rooms || []}
                   bookings={calendarData.bookings}
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   onBookingClick={handleBookingClick}
+                  onBookingResize={handleBookingResize}
+                  onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
                   onEmptySlotClick={handleEmptySlotClick}
                   currentDate={currentDate}
                   viewMode={viewMode}
@@ -1498,11 +1946,13 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
         onRebookStart={handleRebookStart}
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
+        userRole={profile?.role || 'staff'}
       />
 
       {/* Toast */}
@@ -1522,8 +1972,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         slotInfo={quickCreateSlot}
         services={servicesCache}
         servicesLoading={servicesLoading}
-        therapists={calendarData?.therapists || []}
+        therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false)}
         rooms={calendarData?.rooms || []}
+        bookings={calendarData?.bookings || []}
         onClose={handleQuickCreateClose}
         onSubmit={handleQuickCreateSubmit}
         branchId={branchId}
@@ -1535,15 +1986,24 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-surface rounded-spa-lg spa-shadow-modal p-6 max-w-sm w-full animate-fade-in">
             <div className="flex items-center gap-2 mb-4">
-              <Icon name={pendingReassign.timeOnly ? 'Clock' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className="text-primary" />
+              <Icon name={pendingReassign.timeOnly ? 'Clock' : pendingReassign.isSharedReassign ? 'Users' : (pendingReassign.type === 'therapist' ? 'UserCheck' : 'DoorOpen')} size={20} className={pendingReassign.isSharedReassign ? 'text-violet-500' : 'text-primary'} />
               <h3 className="font-heading font-heading-semibold text-base text-text-primary">
-                {pendingReassign.timeOnly ? 'Reschedule Booking' : `Reassign ${pendingReassign.type === 'therapist' ? staffLabel : locationLabel}`}
+                {pendingReassign.timeOnly ? 'Reschedule Booking'
+                  : pendingReassign.isSharedReassign
+                    ? (pendingReassign.sourceColId !== pendingReassign.targetColId && calendarData?.bookings?.find(b => b.id === pendingReassign.bookingId)?.booking_therapists?.some(bt => bt.therapist_id === pendingReassign.targetColId)
+                      ? 'Consolidate Assignment'
+                      : 'Reassign Shared Booking')
+                    : `Reassign ${pendingReassign.type === 'therapist' ? staffLabel : locationLabel}`}
               </h3>
             </div>
             <p className="font-body text-sm text-text-secondary mb-1">
-              {pendingReassign.timeOnly ? 'Reschedule' : 'Move'} <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
+              {pendingReassign.isSharedReassign
+                ? (calendarData?.bookings?.find(b => b.id === pendingReassign.bookingId)?.booking_therapists?.some(bt => bt.therapist_id === pendingReassign.targetColId)
+                  ? <>Remove <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span> from</>
+                  : <>Replace <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span> with <span className="font-semibold text-text-primary">{pendingReassign.targetColName}</span> for</>)
+                : <>{pendingReassign.timeOnly ? 'Reschedule' : 'Move'}</>} <span className="font-semibold text-text-primary">{pendingReassign.booking.customerName}</span>
             </p>
-            {!pendingReassign.timeOnly && (
+            {!pendingReassign.timeOnly && !pendingReassign.isSharedReassign && (
               <p className="font-body text-sm text-text-secondary mb-3">
                 from <span className="font-semibold text-text-primary">{pendingReassign.sourceColName}</span>
                 {' '}&rarr;{' '}

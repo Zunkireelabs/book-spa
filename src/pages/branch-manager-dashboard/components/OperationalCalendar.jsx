@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../../../contexts/AuthContext';
 import FullCalendar from '@fullcalendar/react';
 import resourceTimelinePlugin from '@fullcalendar/resource-timeline';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -43,6 +44,7 @@ function buildDatetime(date, time) {
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
+  const { profile } = useAuth();
   const calendarRef = useRef(null);
 
   // Calendar data state
@@ -424,6 +426,7 @@ const OperationalCalendar = ({ branchId }) => {
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        userRole={profile?.role || 'staff'}
       />
 
       {/* Toast notification */}

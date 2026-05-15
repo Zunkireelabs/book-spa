@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
-import { useTenant } from '../../contexts/TenantContext';
+import { useTenant } from 'contexts/TenantContext';
 
 const CustomerHeader = () => {
   const location = useLocation();

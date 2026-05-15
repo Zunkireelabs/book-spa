@@ -32,7 +32,7 @@ const CustomSelect = ({
   const filteredOptions = useMemo(() => {
     if (!searchable || !searchTerm.trim()) return options;
     const term = searchTerm.toLowerCase();
-    return options.filter((opt) => opt.label.toLowerCase().includes(term));
+    return options.filter((opt) => (opt.searchLabel || opt.label).toLowerCase().includes(term));
   }, [options, searchTerm, searchable]);
 
   // Close on click outside
@@ -209,23 +209,27 @@ const CustomSelect = ({
               filteredOptions.map((opt, index) => {
                 const isSelected = String(value) === String(opt.value);
                 const isFocused = focusedIndex === index;
+                const isOptionDisabled = opt.disabled;
                 return (
                   <button
                     key={opt.value}
                     type="button"
                     role="option"
                     aria-selected={isSelected}
-                    onClick={() => handleSelect(opt.value)}
-                    onMouseEnter={() => setFocusedIndex(index)}
+                    aria-disabled={isOptionDisabled}
+                    onClick={() => !isOptionDisabled && handleSelect(opt.value)}
+                    onMouseEnter={() => !isOptionDisabled && setFocusedIndex(index)}
                     className={`w-full text-left px-3 py-2 text-sm ${
-                      isFocused
-                        ? 'bg-gray-100'
-                        : isSelected
-                          ? 'bg-gray-50'
-                          : ''
+                      isOptionDisabled
+                        ? 'text-text-secondary/50 cursor-not-allowed bg-gray-50/50'
+                        : isFocused
+                          ? 'bg-gray-100'
+                          : isSelected
+                            ? 'bg-gray-50'
+                            : ''
                     } ${
-                      isSelected ? 'text-primary font-medium' : 'text-gray-700'
-                    } hover:bg-gray-50`}
+                      isOptionDisabled ? '' : isSelected ? 'text-primary font-medium' : 'text-gray-700'
+                    } ${isOptionDisabled ? '' : 'hover:bg-gray-50'}`}
                   >
                     {opt.label}
                   </button>

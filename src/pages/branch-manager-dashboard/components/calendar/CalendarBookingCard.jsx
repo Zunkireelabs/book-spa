@@ -13,6 +13,15 @@ const STATUS_COLORS = {
 
 const UNPAID_BORDER = '#facc15';
 
+// Convert "HH:MM" or "HH:MM:SS" to 12h format
+function to12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')}${period}`;
+}
+
 // Statuses that cannot be dragged (terminal states)
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
@@ -38,7 +47,7 @@ function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist' }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect }) => {
   const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isLocked = booking.isLocked;
@@ -49,6 +58,41 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const [showPopover, setShowPopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState(null);
   const hoverTimer = useRef(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeDir, setResizeDir] = useState(null); // 'top' or 'bottom'
+  const [resizeDelta, setResizeDelta] = useState(0);
+  const resizeStartY = useRef(null);
+  const canResize = false; // Disabled: resize handles temporarily turned off
+
+  const handleResizeStart = useCallback((e, direction) => {
+    if (!canResize) return;
+    e.stopPropagation();
+    e.preventDefault();
+    resizeStartY.current = e.clientY;
+    setIsResizing(true);
+    setResizeDir(direction);
+    setResizeDelta(0);
+
+    const handleMouseMove = (me) => {
+      setResizeDelta(me.clientY - resizeStartY.current);
+    };
+
+    const handleMouseUp = (me) => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      const finalDelta = me.clientY - resizeStartY.current;
+      setIsResizing(false);
+      setResizeDir(null);
+      setResizeDelta(0);
+      resizeStartY.current = null;
+      if (Math.abs(finalDelta) > 5 && onResize) {
+        onResize(booking, finalDelta, direction);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [canResize, booking, onResize]);
 
   // Setup draggable
   const {
@@ -58,7 +102,9 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     transform,
     isDragging,
   } = useDraggable({
-    id: booking.bookingId || booking.id,
+    id: booking._colTherapistId
+      ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
+      : (booking.bookingId || booking.id),
     data: {
       booking,
       type: 'booking',
@@ -81,7 +127,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   })();
 
   const timeLabel = booking.startTime && booking.endTime
-    ? `${booking.startTime.slice(0, 5)} – ${booking.endTime.slice(0, 5)}`
+    ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
     : '';
 
   const handleMouseEnter = useCallback(() => {
@@ -125,31 +171,40 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         setNodeRef(node);
       }}
       className={`absolute left-1 right-1 rounded-md overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown ${
-        isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-      }`}
+        isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      } ${isSelected ? 'ring-2 ring-violet-500 ring-offset-1' : ''}`}
+      data-booking-id={booking.isShared ? booking.bookingId : undefined}
+      data-shared={booking.isShared ? 'true' : undefined}
       style={{
         ...style,
-        ...dragStyle,
+        ...(isResizing ? {} : dragStyle),
+        ...(isResizing && resizeDir === 'bottom' ? { height: Math.max((style?.height || 60) + resizeDelta, 20), zIndex: 9999 } : {}),
+        ...(isResizing && resizeDir === 'top' ? { top: (style?.top || 0) + resizeDelta, height: Math.max((style?.height || 60) - resizeDelta, 20), zIndex: 9999 } : {}),
         backgroundColor: colors.light,
         borderLeft: `3px solid ${colors.bg}`,
         borderTop: isUnpaid ? `2px solid ${UNPAID_BORDER}` : 'none',
         borderRight: isUnpaid ? `1px solid ${UNPAID_BORDER}` : `1px solid ${colors.bg}20`,
         borderBottom: isUnpaid ? `1px solid ${UNPAID_BORDER}` : `1px solid ${colors.bg}20`,
-        // Hide original card when being dragged (DragOverlay shows the visual)
-        opacity: isDragging ? 0.3 : 1,
+        opacity: isDragging ? 0.3 : booking._isFaded ? 0.4 : 1,
       }}
       onClick={(e) => {
-        if (!isDragging) {
+        if (!isDragging && !isResizing) {
           e.stopPropagation();
-          onClick(booking);
+          if (onSelect && (e.metaKey || e.ctrlKey)) {
+            onSelect(booking, e);
+          } else {
+            onClick(booking);
+          }
         }
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      {...(isDraggable ? { ...listeners, ...attributes } : {})}
     >
-      {/* Card content */}
-      <div className="px-2 py-1.5 h-full flex flex-col overflow-hidden">
+      {/* Drag handle area — middle section of card, not edges */}
+      <div
+        className="px-2 py-1.5 h-full flex flex-col overflow-hidden"
+        {...(isDraggable && !isResizing ? { ...listeners, ...attributes } : {})}
+      >
         {timeLabel && (
           <div className="font-data text-[10px] text-text-secondary leading-none mb-0.5 flex-shrink-0">
             {timeLabel}
@@ -188,6 +243,26 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           </div>
         )}
       </div>
+
+      {/* Resize handles for shared booking cards */}
+      {canResize && (
+        <>
+          <div
+            className="absolute -top-1 left-0 right-0 h-3 cursor-n-resize z-10 group/resize-top"
+            onMouseDown={(e) => handleResizeStart(e, 'top')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="absolute top-1 left-1 right-1 h-1 rounded-full bg-violet-400/60 group-hover/resize-top:bg-violet-500 transition-colors" />
+          </div>
+          <div
+            className="absolute -bottom-1 left-0 right-0 h-3 cursor-s-resize z-10 group/resize-bottom"
+            onMouseDown={(e) => handleResizeStart(e, 'bottom')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="absolute bottom-1 left-1 right-1 h-1 rounded-full bg-violet-400/60 group-hover/resize-bottom:bg-violet-500 transition-colors" />
+          </div>
+        </>
+      )}
 
       {/* Rich hover popover — rendered via portal to escape overflow clipping */}
       {showPopover && !isDragging && popoverPos && createPortal(

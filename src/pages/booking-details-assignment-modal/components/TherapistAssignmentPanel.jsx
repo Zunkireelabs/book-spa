@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
+import { to12h } from '../../../services/bookingTransformers';
 
 const TherapistAssignmentPanel = ({ 
   booking, 
@@ -70,7 +71,7 @@ const TherapistAssignmentPanel = ({
             Therapist Assignment
           </h3>
           <p className="font-caption font-caption-normal text-sm text-text-secondary">
-            {booking.date} • {booking.time} • {booking.duration}
+            {booking.date} • {to12h(booking.time)} • {booking.duration}
           </p>
         </div>
         <Button

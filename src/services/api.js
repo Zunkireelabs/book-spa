@@ -32,9 +32,9 @@ const VALID_TRANSITIONS = {
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 const DISCOUNT_LIMITS = {
-  staff:   0.05, // 5%
-  manager: 0.30, // 30%
-  admin:   Infinity,
+  staff:   0.15, // 15%
+  manager: 0.25, // 25%
+  admin:   0.30, // 30%
 };
 
 /**
@@ -117,7 +117,7 @@ export async function fetchRooms(branchId) {
   try {
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name')
+      .select('id, name, amenities, floor')
       .eq('branch_id', branchId)
       .eq('is_active', true)
       .order('name');
@@ -134,9 +134,10 @@ export async function fetchTherapists(branchId) {
   try {
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties')
+      .select('id, name, gender, specialties, position, is_service_staff')
       .eq('branch_id', branchId)
       .eq('is_active', true)
+      .eq('is_service_staff', true)
       .order('name');
 
     if (error) throw error;
@@ -291,8 +292,11 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
   }
 }
 
-export async function assignTherapist({ bookingId, therapistId, roomId }) {
+export async function assignTherapist({ bookingId, therapistIds = [], roomId }) {
   try {
+    // Support legacy single therapistId param
+    const ids = Array.isArray(therapistIds) ? therapistIds.filter(Boolean) : (therapistIds ? [therapistIds] : []);
+
     // 1. Fetch booking (include room_id for snapshot)
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
@@ -315,35 +319,37 @@ export async function assignTherapist({ bookingId, therapistId, roomId }) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    // 4. Phase 9A: Resolve snapshot names + Phase 9B: Check active status
+    // 4. Validate all therapists are active
+    const primaryId = ids[0] || null;
     let therapistNameSnapshot = null;
-    if (therapistId) {
-      const { data: therapist } = await supabase
-        .from('therapists')
-        .select('name, is_active')
-        .eq('id', therapistId)
-        .single();
 
-      if (therapist && !therapist.is_active) {
-        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Cannot assign an inactive therapist.' } };
+    if (ids.length > 0) {
+      const { data: therapistsData } = await supabase
+        .from('therapists')
+        .select('id, name, is_active')
+        .in('id', ids);
+
+      const inactive = (therapistsData || []).find(t => !t.is_active);
+      if (inactive) {
+        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign inactive therapist: ${inactive.name}` } };
       }
-      therapistNameSnapshot = therapist?.name || null;
+
+      const primary = (therapistsData || []).find(t => t.id === primaryId);
+      therapistNameSnapshot = primary?.name || null;
     }
 
-    // 5. Build update payload
+    // 5. Build update payload (primary therapist on bookings table)
     const updatePayload = {
-      therapist_id: therapistId || null,
+      therapist_id: primaryId,
       therapist_name_snapshot: therapistNameSnapshot,
     };
 
     // 6. Room assignment (if roomId provided)
     if (roomId !== undefined) {
       if (roomId === null) {
-        // Clear room assignment
         updatePayload.room_id = null;
         updatePayload.room_name_snapshot = null;
       } else {
-        // Assign new room
         const { data: room } = await supabase
           .from('rooms')
           .select('name')
@@ -353,7 +359,6 @@ export async function assignTherapist({ bookingId, therapistId, roomId }) {
         updatePayload.room_name_snapshot = room?.name || null;
       }
     } else {
-      // Room unchanged — still resolve snapshot for existing room
       if (booking.room_id) {
         const { data: room } = await supabase
           .from('rooms')
@@ -364,7 +369,7 @@ export async function assignTherapist({ bookingId, therapistId, roomId }) {
       }
     }
 
-    // 7. Update
+    // 7. Update primary therapist on bookings table
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
       .update(updatePayload)
@@ -373,16 +378,53 @@ export async function assignTherapist({ bookingId, therapistId, roomId }) {
       .single();
 
     if (updateError) {
-      // GIST exclusion: therapist double-booking
       if (updateError.code === '23P01') {
         return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
       }
       throw updateError;
     }
 
-    return { data: { success: true, bookingId, therapistId: updated.therapist_id, roomId: updated.room_id }, error: null };
+    // 8. Sync junction table: preserve per-therapist times where possible
+    const { data: existingBt } = await supabase.from('booking_therapists').select('therapist_id, start_time, end_time').eq('booking_id', bookingId);
+    const existingTimeMap = {};
+    (existingBt || []).forEach(bt => { existingTimeMap[bt.therapist_id] = { start_time: bt.start_time, end_time: bt.end_time }; });
+
+    await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
+
+    if (ids.length > 0) {
+      // Fetch booking times for default
+      const { data: bk } = await supabase.from('bookings').select('start_time, end_time').eq('id', bookingId).single();
+      const rows = ids.map(tid => ({
+        booking_id: bookingId,
+        therapist_id: tid,
+        start_time: existingTimeMap[tid]?.start_time || bk?.start_time || null,
+        end_time: existingTimeMap[tid]?.end_time || bk?.end_time || null,
+      }));
+      const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
+      if (junctionError) {
+        console.warn('[API] booking_therapists insert warning:', junctionError.message);
+      }
+    }
+
+    return { data: { success: true, bookingId, therapistIds: ids, roomId: updated.room_id }, error: null };
   } catch (error) {
     console.error('[API] assignTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateTherapistTime({ bookingId, therapistId, startTime, endTime }) {
+  try {
+    const { error } = await supabase
+      .from('booking_therapists')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('booking_id', bookingId)
+      .eq('therapist_id', therapistId);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] updateTherapistTime error:', error.message);
     return { data: null, error };
   }
 }
@@ -513,11 +555,13 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       throw fetchError;
     }
 
-    // 2. Lifecycle checks
-    const mutationError = validateBookingMutation(booking);
-    if (mutationError) return { data: null, error: mutationError };
-
-    // 3. Cannot change discount on paid bookings
+    // 2. Lifecycle checks — allow discounts on completed-but-unpaid (standard cash-spa flow)
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    }
+    if (['Cancelled', 'No Show'].includes(booking.status)) {
+      return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: `${booking.status} bookings cannot be modified.` } };
+    }
     if (booking.payment_status === 'paid') {
       return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot modify discount on a paid booking.' } };
     }
@@ -889,6 +933,12 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       }
       throw updateError;
     }
+
+    // 9. Sync booking_therapists times to match the rescheduled booking
+    await supabase
+      .from('booking_therapists')
+      .update({ start_time: updated.start_time, end_time: updated.end_time })
+      .eq('booking_id', bookingId);
 
     return {
       data: {
@@ -1718,7 +1768,8 @@ export async function fetchBookingById(bookingId) {
         *,
         service:services(id, name, duration_minutes, price_npr),
         therapist:therapists(id, name, gender),
-        room:rooms(id, name)
+        room:rooms(id, name),
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name, gender))
       `)
       .eq('id', bookingId)
       .single();
@@ -1757,14 +1808,14 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const [therapistsResult, roomsResult] = await Promise.all([
       supabase
         .from('therapists')
-        .select('id, name, gender, specialties, display_order')
+        .select('id, name, gender, specialties, position, is_service_staff, display_order')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('display_order')
         .order('name'),
       supabase
         .from('rooms')
-        .select('id, name, is_active, display_order')
+        .select('id, name, is_active, display_order, amenities, floor')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('display_order')
@@ -1784,7 +1835,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         base_amount, discount_amount, final_amount, special_requests,
         service:services(name, duration_minutes),
         therapist:therapists(id, name),
-        room:rooms(id, name)
+        room:rooms(id, name),
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name))
       `)
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
@@ -1824,6 +1876,7 @@ export async function createBooking({
   customerGender,
   specialRequests,
   therapistId,
+  therapistIds,
   roomId,
 }) {
   try {
@@ -1866,7 +1919,10 @@ export async function createBooking({
     let availableRoom = null;
 
     if (enableRooms) {
-      if (roomId) {
+      if (roomId === 'none') {
+        // Explicitly no room selected — skip auto-assignment
+        availableRoom = null;
+      } else if (roomId) {
         // Room explicitly selected — verify it belongs to this branch and is active
         const { data: selectedRoom, error: roomLookupError } = await supabase
           .from('rooms')
@@ -1974,23 +2030,30 @@ export async function createBooking({
       console.warn('[API] Customer lookup/create failed:', custErr.message);
     }
 
-    // 7a. If therapist selected, verify branch + active status and capture name snapshot
+    // 7a. Resolve therapist IDs (support both single and multi)
+    const allTherapistIds = therapistIds
+      ? (Array.isArray(therapistIds) ? therapistIds.filter(Boolean) : [therapistIds])
+      : (therapistId ? [therapistId] : []);
+    const primaryTherapistId = allTherapistIds[0] || null;
+
     let therapistNameSnapshot = null;
-    if (therapistId) {
-      const { data: therapistData, error: therapistLookupError } = await supabase
+    if (allTherapistIds.length > 0) {
+      const { data: therapistsData, error: therapistLookupError } = await supabase
         .from('therapists')
-        .select('name, is_active')
-        .eq('id', therapistId)
-        .eq('branch_id', resolvedBranchId)
-        .maybeSingle();
+        .select('id, name, is_active')
+        .in('id', allTherapistIds)
+        .eq('branch_id', resolvedBranchId);
       if (therapistLookupError) throw therapistLookupError;
-      if (!therapistData) {
-        return { data: null, error: { code: 'INVALID_THERAPIST', message: 'Selected therapist is not available in this branch.' } };
+
+      if (!therapistsData || therapistsData.length !== allTherapistIds.length) {
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: 'One or more selected therapists are not available in this branch.' } };
       }
-      if (!therapistData.is_active) {
-        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Selected therapist is not active.' } };
+      const inactive = therapistsData.find(t => !t.is_active);
+      if (inactive) {
+        return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Therapist ${inactive.name} is not active.` } };
       }
-      therapistNameSnapshot = therapistData.name;
+      const primary = therapistsData.find(t => t.id === primaryTherapistId);
+      therapistNameSnapshot = primary?.name || null;
     }
 
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
@@ -2000,7 +2063,7 @@ export async function createBooking({
         branch_id: resolvedBranchId,
         room_id: availableRoom?.id || null,
         service_id: serviceId,
-        therapist_id: therapistId || null,
+        therapist_id: primaryTherapistId,
         customer_id: customerId,
         customer_name: customerName,
         customer_email: customerEmail || null,
@@ -2023,13 +2086,18 @@ export async function createBooking({
       .single();
 
     if (insertError) {
-      // GIST exclusion constraint: room overlap despite client-side check
-      // (can happen if anon user RLS hides existing bookings from overlap query)
       if (insertError.code === '23P01') {
         return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
       }
       throw insertError;
     }
+
+    // 7b. Insert into junction table for all therapists
+    if (allTherapistIds.length > 0) {
+      const rows = allTherapistIds.map(tid => ({ booking_id: booking.id, therapist_id: tid }));
+      await supabase.from('booking_therapists').insert(rows);
+    }
+
     return { data: booking, error: null };
   } catch (error) {
     console.error('[API] createBooking error:', error.message);
@@ -2057,7 +2125,7 @@ export async function fetchRoomsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name, branch_id, is_active, created_at')
+      .select('id, name, branch_id, is_active, amenities, floor, created_at')
       .eq('branch_id', effectiveBranchId)
       .order('name');
 
@@ -2069,7 +2137,7 @@ export async function fetchRoomsForManagement(branchId) {
   }
 }
 
-export async function createRoom({ name, branchId }) {
+export async function createRoom({ name, branchId, amenities = [], floor = null }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2097,8 +2165,8 @@ export async function createRoom({ name, branchId }) {
 
     const { data, error } = await supabase
       .from('rooms')
-      .insert({ name: name.trim(), branch_id: effectiveBranchId, is_active: true })
-      .select('id, name, branch_id, is_active, created_at')
+      .insert({ name: name.trim(), branch_id: effectiveBranchId, is_active: true, amenities: amenities || [], floor: floor || null })
+      .select('id, name, branch_id, is_active, amenities, floor, created_at')
       .single();
 
     if (error) throw error;
@@ -2109,7 +2177,7 @@ export async function createRoom({ name, branchId }) {
   }
 }
 
-export async function updateRoom({ roomId, name }) {
+export async function updateRoom({ roomId, name, amenities, floor }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2150,11 +2218,15 @@ export async function updateRoom({ roomId, name }) {
       return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A room with this name already exists in this branch.' } };
     }
 
+    const updatePayload = { name: name.trim() };
+    if (amenities !== undefined) updatePayload.amenities = amenities;
+    if (floor !== undefined) updatePayload.floor = floor;
+
     const { data, error } = await supabase
       .from('rooms')
-      .update({ name: name.trim() })
+      .update(updatePayload)
       .eq('id', roomId)
-      .select('id, name, branch_id, is_active, created_at')
+      .select('id, name, branch_id, is_active, amenities, floor, created_at')
       .single();
 
     if (error) throw error;
@@ -2287,7 +2359,7 @@ export async function fetchTherapistsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('therapists')
-      .select('id, name, gender, specialties, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
       .eq('branch_id', effectiveBranchId)
       .order('display_order')
       .order('name');
@@ -2300,7 +2372,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, branchId }) {
+export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2343,11 +2415,13 @@ export async function createTherapist({ name, gender, specialties, branchId }) {
         name: name.trim(),
         gender: gender || 'Male',
         specialties: specialties || [],
+        position: position || null,
+        is_service_staff: isServiceStaff,
         branch_id: effectiveBranchId,
         is_active: true,
         display_order: nextOrder,
       })
-      .select('id, name, gender, specialties, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
       .single();
 
     if (error) throw error;
@@ -2358,7 +2432,7 @@ export async function createTherapist({ name, gender, specialties, branchId }) {
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2404,12 +2478,14 @@ export async function updateTherapist({ therapistId, name, gender, specialties }
     if (name !== undefined) updatePayload.name = name.trim();
     if (gender !== undefined) updatePayload.gender = gender;
     if (specialties !== undefined) updatePayload.specialties = specialties;
+    if (position !== undefined) updatePayload.position = position;
+    if (isServiceStaff !== undefined) updatePayload.is_service_staff = isServiceStaff;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, branch_id, is_active, created_at')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at')
       .single();
 
     if (error) throw error;

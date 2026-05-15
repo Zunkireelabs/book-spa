@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
-import { useAuth } from '../../contexts/AuthContext';
-import { useBranch } from '../../contexts/BranchContext';
-import { useIndustry } from '../../hooks/useIndustry';
+import { useAuth } from 'contexts/AuthContext';
+import { useBranch } from 'contexts/BranchContext';
+import { useIndustry } from 'hooks/useIndustry';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
@@ -208,7 +208,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className={`fixed left-0 top-0 h-full z-staff-sidebar bg-[#ebebeb] flex flex-col transition-all duration-200 ${
+      <aside className={`fixed left-0 top-0 h-full z-staff-sidebar bg-surface-sidebar flex flex-col transition-all duration-200 ${
         isCollapsed ? 'w-16' : 'w-60'
       } hidden lg:flex`}>
         {/* Header */}
@@ -242,7 +242,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               setIsCollapsed(next);
               onCollapseChange?.(next);
             }}
-            className="p-2 rounded-md hover:bg-[#fafafa] transition-colors"
+            className="p-2 rounded-md hover:bg-background transition-colors"
           >
             <Icon
               name={isCollapsed ? "ChevronRight" : "ChevronLeft"}
@@ -268,8 +268,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                     onClick={() => toggleExpand(item.id)}
                     className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                       parentActive
-                        ? 'bg-[#fafafa] text-gray-900'
-                        : 'text-gray-500 hover:bg-[#fafafa] hover:text-gray-900'
+                        ? 'bg-background text-gray-900'
+                        : 'text-gray-500 hover:bg-background hover:text-gray-900'
                     } ${isCollapsed ? 'justify-center' : ''}`}
                   >
                     <div className="flex items-center gap-3">
@@ -346,7 +346,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                                 to={child.path}
                                 className={`flex-1 px-2 py-1.5 rounded-md text-sm transition-colors ${
                                   isChildActive
-                                    ? 'text-gray-900 font-medium bg-[#fafafa]'
+                                    ? 'text-gray-900 font-medium bg-background'
                                     : 'text-gray-500 hover:text-gray-900'
                                 }`}
                               >
@@ -369,8 +369,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 to={item.path}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   isActive(item.path)
-                    ? 'bg-[#fafafa] text-gray-900'
-                    : 'text-gray-500 hover:bg-[#fafafa] hover:text-gray-900'
+                    ? 'bg-background text-gray-900'
+                    : 'text-gray-500 hover:bg-background hover:text-gray-900'
                 } ${isCollapsed ? 'justify-center' : ''}`}
               >
                 <Icon name={item.icon} size={18} className="flex-shrink-0" />
@@ -397,7 +397,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#ebebeb] border-t border-gray-200 z-staff-sidebar">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface-sidebar border-t border-gray-200 z-staff-sidebar">
         <div className="flex items-center justify-around py-2">
           {mobilePrimaryItems.map((item) => (
             <Link
@@ -405,7 +405,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               to={item.path}
               className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
                 isActive(item.path)
-                  ? 'text-gray-900 bg-[#fafafa]'
+                  ? 'text-gray-900 bg-background'
                   : 'text-gray-500 hover:text-gray-900'
               }`}
             >
@@ -417,7 +417,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
             <button
               onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
               className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
-                mobileMoreOpen ? 'text-gray-900 bg-[#fafafa]' : 'text-gray-500 hover:text-gray-900'
+                mobileMoreOpen ? 'text-gray-900 bg-background' : 'text-gray-500 hover:text-gray-900'
               }`}
             >
               <Icon name="MoreHorizontal" size={18} />
@@ -433,11 +433,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               className="fixed inset-0 bg-black/30 z-modal-overlay"
               onClick={() => setMobileMoreOpen(false)}
             />
-            <div className="absolute bottom-full left-0 right-0 bg-[#ebebeb] border-t border-gray-200 rounded-t-xl shadow-lg z-modal animate-slide-in">
+            <div className="absolute bottom-full left-0 right-0 bg-surface-sidebar border-t border-gray-200 rounded-t-xl shadow-lg z-modal animate-slide-in">
               <div className="p-4 space-y-1">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm font-semibold text-gray-900">More</span>
-                  <button onClick={() => setMobileMoreOpen(false)} className="p-1 rounded-md hover:bg-[#fafafa]">
+                  <button onClick={() => setMobileMoreOpen(false)} className="p-1 rounded-md hover:bg-background">
                     <Icon name="X" size={16} className="text-gray-500" />
                   </button>
                 </div>
@@ -448,8 +448,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                     onClick={() => setMobileMoreOpen(false)}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                       isActive(item.path)
-                        ? 'bg-[#fafafa] text-gray-900'
-                        : 'text-gray-500 hover:bg-[#fafafa] hover:text-gray-900'
+                        ? 'bg-background text-gray-900'
+                        : 'text-gray-500 hover:bg-background hover:text-gray-900'
                     }`}
                   >
                     <Icon name={item.icon} size={18} />

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import { to12h } from '../../../services/bookingTransformers';
 
 const BookingCard = ({ booking, onReschedule, onCancel }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -50,7 +51,7 @@ const BookingCard = ({ booking, onReschedule, onCancel }) => {
               Booking ID: {booking.id}
             </p>
             <p className="font-body font-body-medium text-sm text-text-primary">
-              {booking.date} at {booking.time}
+              {booking.date} at {to12h(booking.time)}
             </p>
           </div>
           <button

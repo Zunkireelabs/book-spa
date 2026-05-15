@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
+import { to12h } from '../../../services/bookingTransformers';
 
 const BookingHistory = ({ bookings }) => {
   const [expandedBooking, setExpandedBooking] = useState(null);
@@ -112,7 +113,7 @@ const BookingHistory = ({ bookings }) => {
                         </div>
                         <div className="flex justify-between">
                           <span className="font-body font-body-normal text-text-secondary">Time:</span>
-                          <span className="font-body font-body-normal text-text-primary">{booking.time}</span>
+                          <span className="font-body font-body-normal text-text-primary">{to12h(booking.time)}</span>
                         </div>
                       </div>
                     </div>

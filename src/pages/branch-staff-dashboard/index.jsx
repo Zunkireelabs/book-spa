@@ -171,10 +171,8 @@ const BranchStaffDashboard = () => {
   useEffect(() => {
     if (!branchId) return;
 
-    console.log('[Realtime] Setting up subscription for branch:', branchId);
 
     const handleRealtimeUpdate = (payload) => {
-      console.log('[Realtime] Received event:', payload);
       // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
       setTimeout(() => {
         // Use ref to get current dateRange, avoiding stale closure
@@ -215,7 +213,6 @@ const BranchStaffDashboard = () => {
         filter: `branch_id=eq.${branchId}`
       }, handleRealtimeUpdate)
       .subscribe((status, err) => {
-        console.log('[Realtime] Subscription status:', status, err || '');
         if (status === 'SUBSCRIBED') {
           setRealtimeStatus('connected');
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -351,9 +348,10 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: assignTherapist
-  const handleAssignTherapist = async (bookingId, therapistId, notes) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes) => {
     setActionError(null);
-    const result = await assignTherapist({ bookingId, therapistId });
+    const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
+    const result = await assignTherapist({ bookingId, therapistIds: ids });
 
     if (result.error) {
       showError(result.error.message || 'Failed to assign therapist.');
@@ -387,7 +385,7 @@ const BranchStaffDashboard = () => {
     }
     showSuccess('Discount applied successfully');
     await loadData();
-    return { error: null };
+    return { data: result.data };
   };
 
   // Close profile dropdown on outside click
@@ -416,14 +414,14 @@ const BranchStaffDashboard = () => {
   const userRole = profile?.role || 'staff';
 
   return (
-    <div className="min-h-screen bg-[#ebebeb]">
+    <div className="min-h-screen bg-surface-sidebar">
       <StaffSidebar
         onCollapseChange={setSidebarCollapsed}
       />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200`}>
         {/* Top Bar - Consistent with Admin */}
-        <header className="bg-[#ebebeb] sticky top-0 z-header">
+        <header className="bg-surface-sidebar sticky top-0 z-header">
           <div className="px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between">
               {/* Left: Branch + date/time */}
@@ -554,7 +552,7 @@ const BranchStaffDashboard = () => {
         )}
 
         {/* Main Content Area - Consistent with Admin */}
-        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-[#f1f1f1] min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-surface-dim min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
           {viewMode === 'dashboard' ? (
             <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
               {/* Overview Stats */}

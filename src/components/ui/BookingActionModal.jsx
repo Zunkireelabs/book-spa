@@ -5,6 +5,15 @@ import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 
+// Convert "HH:MM" or "HH:MM:SS" to 12h format
+function to12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 // Status badge styles
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -34,12 +43,14 @@ const BookingActionModal = ({
   userRole = 'staff'
 }) => {
   const [activeTab, setActiveTab] = useState('details');
-  const [selectedTherapist, setSelectedTherapist] = useState('');
+  const [selectedTherapists, setSelectedTherapists] = useState([]);
+  const [therapistSearch, setTherapistSearch] = useState('');
   const [selectedRoom, setSelectedRoom] = useState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -59,10 +70,13 @@ const BookingActionModal = ({
   const [newBookingError, setNewBookingError] = useState(null);
   const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
 
-  // Pre-select current therapist/room when booking changes or assign tab opens
+  // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
     if (booking) {
-      setSelectedTherapist(booking.therapist?.id || '');
+      const ids = booking.therapists?.length > 0
+        ? booking.therapists.map(t => t.id)
+        : (booking.therapist?.id ? [booking.therapist.id] : []);
+      setSelectedTherapists(ids);
       setSelectedRoom(booking.roomId || '');
     }
   }, [booking?.bookingId]);
@@ -71,6 +85,8 @@ const BookingActionModal = ({
   useEffect(() => {
     setIsEditing(false);
     setEditError(null);
+    setActionError(null);
+    setTherapistSearch('');
     setNewBookingMode(null);
     setNewBookingError(null);
     setNewBookingForm({});
@@ -237,13 +253,14 @@ const BookingActionModal = ({
     if (!booking) return;
 
     setIsLoading(true);
+    setActionError(null);
     try {
       if (onAssignTherapist) {
-        await onAssignTherapist(booking.bookingId, selectedTherapist || null, notes, selectedRoom || null);
+        await onAssignTherapist(booking.bookingId, selectedTherapists, notes, selectedRoom || null);
       }
       onClose();
     } catch (error) {
-      console.error('Assignment failed:', error);
+      setActionError(error?.message || 'Assignment failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -252,13 +269,14 @@ const BookingActionModal = ({
   const handleStatusUpdate = async (newStatus) => {
     if (!booking) return;
     setIsLoading(true);
+    setActionError(null);
     try {
       if (onUpdateStatus) {
         await onUpdateStatus(booking.bookingId, newStatus);
       }
       onClose();
     } catch (error) {
-      console.error('Status update failed:', error);
+      setActionError(error?.message || 'Status update failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -289,7 +307,19 @@ const BookingActionModal = ({
       return;
     }
     if (!discountReason.trim()) {
-      setDiscountError('A reason is required for the discount.');
+      setDiscountError('Reason is required.');
+      return;
+    }
+
+    // Client-side discount limit check
+    const maxPercent = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+    const baseAmount = booking.baseAmount || 0;
+    const effectivePercent = discountType === 'percentage'
+      ? Number(discountValue)
+      : baseAmount > 0 ? (Number(discountValue) / baseAmount) * 100 : 0;
+
+    if (effectivePercent > maxPercent) {
+      setDiscountError(`Discount exceeds your ${maxPercent}% limit. Maximum: ${discountType === 'percentage' ? maxPercent + '%' : 'NPR ' + Math.floor(baseAmount * maxPercent / 100)}`);
       return;
     }
 
@@ -330,8 +360,10 @@ const BookingActionModal = ({
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
   const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
-  const canDiscount = !isMutationBlocked && booking.paymentStatus !== 'paid' && !isTerminal;
-  const discountLimitLabel = userRole === 'admin' ? 'Unlimited' : userRole === 'manager' ? '30%' : '5%';
+  // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
+  const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
+    && !['cancelled', 'no show'].includes(booking.status);
+  const discountLimitLabel = userRole === 'admin' ? '30%' : userRole === 'manager' ? '25%' : '15%';
 
   const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
 
@@ -378,6 +410,7 @@ const BookingActionModal = ({
                   key={tab.id}
                   onClick={() => {
                     setActiveTab(tab.id);
+                    setActionError(null);
                     if (tab.id !== 'details') setIsEditing(false);
                   }}
                   className={`flex items-center gap-1.5 sm:gap-2 py-3 sm:py-4 px-3 sm:px-1 border-b-2 spa-transition-fast whitespace-nowrap flex-shrink-0 min-h-[44px] ${
@@ -562,7 +595,7 @@ const BookingActionModal = ({
                             />
                           </div>
                         ) : (
-                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {booking.time}</p>
+                          <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
                         )}
                       </div>
                       <div>
@@ -575,13 +608,20 @@ const BookingActionModal = ({
                   </div>
                 </div>
 
-                {/* Therapist */}
-                {booking.therapist && !isEditing && (
+                {/* Therapist(s) */}
+                {(booking.therapists?.length > 0 || booking.therapist) && !isEditing && (
                   <div className="space-y-1.5 sm:space-y-2">
-                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Assigned Therapist</label>
-                    <p className="font-body font-body-normal text-sm text-text-primary">
-                      {booking.therapist.name} ({booking.therapist.gender})
-                    </p>
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                      Assigned Therapist{(booking.therapists?.length || 0) > 1 ? 's' : ''}
+                    </label>
+                    <div className="font-body font-body-normal text-sm text-text-primary">
+                      {(booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean).map((t, i) => (
+                        <span key={t.id}>
+                          {i > 0 && ', '}
+                          {t.name}{t.gender ? ` (${t.gender})` : ''}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -604,6 +644,14 @@ const BookingActionModal = ({
                     <p className="font-body font-body-normal text-sm text-text-secondary italic">None</p>
                   )}
                 </div>
+
+                {/* Action error (status update failures) */}
+                {actionError && !editError && (
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
+                  </div>
+                )}
 
                 {/* Edit error */}
                 {editError && (
@@ -635,47 +683,74 @@ const BookingActionModal = ({
                   {therapists.length === 0 ? (
                     <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
                   ) : (
-                    <div className="space-y-2 max-h-[240px] overflow-y-auto">
-                      {therapists.map((therapist) => (
-                        <label
-                          key={therapist.id}
-                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[52px] ${
-                            selectedTherapist === therapist.id
-                              ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="therapist"
-                            value={therapist.id}
-                            checked={selectedTherapist === therapist.id}
-                            onChange={(e) => setSelectedTherapist(e.target.value)}
-                            className="text-primary focus:ring-primary w-4 h-4"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-body font-body-medium text-sm text-text-primary truncate">
-                                {therapist.name}
-                              </span>
-                              <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
-                                {therapist.gender}
-                              </span>
-                            </div>
-                            {therapist.specialties && therapist.specialties.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {therapist.specialties.map((specialty) => (
-                                  <span
-                                    key={specialty}
-                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
-                                  >
-                                    {specialty}
-                                  </span>
-                                ))}
+                    <div>
+                      <div className="relative mb-2">
+                        <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                        <input
+                          type="text"
+                          value={therapistSearch}
+                          onChange={(e) => setTherapistSearch(e.target.value)}
+                          placeholder="Search therapists..."
+                          className="w-full pl-8 pr-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                        />
+                      </div>
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {therapists
+                        .filter(t => !therapistSearch.trim() || t.name.toLowerCase().includes(therapistSearch.toLowerCase()))
+                        .map((therapist) => {
+                        const isSelected = selectedTherapists.includes(therapist.id);
+                        const isCurrentlyAssigned = booking?.therapists?.some(t => t.id === therapist.id)
+                          || booking?.therapist?.id === therapist.id;
+                        return (
+                          <label
+                            key={therapist.id}
+                            className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[52px] ${
+                              isSelected
+                                ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              value={therapist.id}
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedTherapists(prev => [...prev, therapist.id]);
+                                } else {
+                                  setSelectedTherapists(prev => prev.filter(id => id !== therapist.id));
+                                }
+                              }}
+                              className="text-primary focus:ring-primary w-4 h-4 rounded"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-body font-body-medium text-sm text-text-primary truncate">
+                                  {therapist.name}
+                                  {isCurrentlyAssigned && (
+                                    <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-success/10 text-success">Assigned</span>
+                                  )}
+                                </span>
+                                <span className="text-xs font-caption font-caption-normal text-text-secondary capitalize flex-shrink-0">
+                                  {therapist.gender}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        </label>
-                      ))}
+                              {therapist.specialties && therapist.specialties.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {therapist.specialties.map((specialty) => (
+                                    <span
+                                      key={specialty}
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-accent/10 text-accent"
+                                    >
+                                      {specialty}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
                     </div>
                   )}
                 </div>
@@ -724,6 +799,9 @@ const BookingActionModal = ({
                             <Icon name="DoorOpen" size={14} className="text-text-secondary" />
                             <span className="font-body font-body-medium text-sm text-text-primary">
                               {room.name}
+                              {booking?.roomId === room.id && (
+                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-primary/10 text-primary">Allocated</span>
+                              )}
                             </span>
                           </div>
                         </label>
@@ -744,6 +822,13 @@ const BookingActionModal = ({
                     className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                   />
                 </div>
+
+                {actionError && (
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -772,15 +857,45 @@ const BookingActionModal = ({
                         <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
                       </div>
                       {booking.discountAmount > 0 && (
-                        <div className="flex items-center justify-between">
-                          <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Current Discount</span>
-                          <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
-                        </div>
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount Applied</span>
+                            <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount %</span>
+                            <span className="font-data font-data-medium text-sm text-error">{booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%</span>
+                          </div>
+                        </>
                       )}
                       <div className="flex items-center justify-between border-t border-border pt-2">
                         <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
                         <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                       </div>
+                      {booking.discountAmount > 0 && (
+                        <button
+                          onClick={async () => {
+                            if (!onApplyDiscount) return;
+                            setIsLoading(true);
+                            setDiscountError(null);
+                            const result = await onApplyDiscount(booking.bookingId, {
+                              discountType: 'fixed',
+                              discountValue: 0,
+                              discountReason: 'Discount cancelled',
+                            });
+                            if (result?.error) {
+                              setDiscountError(result.error.message || 'Failed to cancel discount.');
+                            } else {
+                              setDiscountSuccess('approved');
+                            }
+                            setIsLoading(false);
+                          }}
+                          disabled={isLoading}
+                          className="w-full text-center py-2 text-xs font-body font-body-medium text-error border border-error/30 rounded-spa hover:bg-error/5 spa-transition-fast"
+                        >
+                          Cancel Discount
+                        </button>
+                      )}
                     </div>
 
                     {/* Role limit info */}
@@ -823,13 +938,29 @@ const BookingActionModal = ({
                       <input
                         type="number"
                         min="0"
-                        max={discountType === 'percentage' ? 100 : booking.baseAmount}
+                        max={discountType === 'percentage' ? (userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15) : Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.25 : 0.15))}
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
-                        onChange={(e) => setDiscountValue(e.target.value)}
-                        placeholder={discountType === 'percentage' ? 'e.g. 5' : 'e.g. 200'}
-                        className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                        onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.25 : 0.15))}`}
+                        className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
+                          discountValue && (() => {
+                            const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+                            const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
+                            return eff > maxP;
+                          })() ? 'border-error' : 'border-border'
+                        }`}
                       />
+                      {discountValue && (() => {
+                        const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+                        const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
+                        return eff > maxP ? (
+                          <p className="text-xs text-error mt-1 flex items-center gap-1">
+                            <Icon name="AlertTriangle" size={12} />
+                            Exceeds your {maxP}% discount limit
+                          </p>
+                        ) : null;
+                      })()}
                     </div>
 
                     {/* Reason */}
@@ -840,7 +971,7 @@ const BookingActionModal = ({
                       <textarea
                         value={discountReason}
                         onChange={(e) => setDiscountReason(e.target.value)}
-                        placeholder="Why is this discount being applied? (required)"
+                        placeholder="Why is this discount being applied?"
                         rows={2}
                         className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                       />
@@ -890,8 +1021,20 @@ const BookingActionModal = ({
                 </h3>
                 <div className="bg-background rounded-spa p-3 sm:p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Amount</span>
-                    <span className="font-body font-body-medium text-sm text-text-primary">{booking.price}</span>
+                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Base Amount</span>
+                    <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
+                  </div>
+                  {booking.discountAmount > 0 && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount</span>
+                        <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')} ({booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%)</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between border-t border-border pt-2">
+                    <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
+                    <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Status</span>
@@ -1088,7 +1231,7 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleAssignTherapist}
                       loading={isLoading}
-                      disabled={!selectedTherapist}
+                      disabled={selectedTherapists.length === 0}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment

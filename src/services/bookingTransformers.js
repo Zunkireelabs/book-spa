@@ -1,3 +1,12 @@
+// Convert "HH:MM" or "HH:MM:SS" to 12h format
+export function to12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
@@ -27,6 +36,20 @@ export function transformBooking(dbBooking) {
       }
     : null;
 
+  // Build therapists array from junction table (if available), fallback to single therapist
+  let therapists = [];
+  if (dbBooking.booking_therapists && dbBooking.booking_therapists.length > 0) {
+    therapists = dbBooking.booking_therapists
+      .filter(bt => bt.therapist)
+      .map(bt => ({
+        id: bt.therapist.id,
+        name: bt.therapist.name,
+        gender: bt.therapist.gender || null,
+      }));
+  } else if (therapist) {
+    therapists = [therapist];
+  }
+
   return {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
@@ -45,6 +68,7 @@ export function transformBooking(dbBooking) {
     discountAmount: Number(dbBooking.discount_amount || 0),
     finalAmount: Number(dbBooking.final_amount || dbBooking.base_amount || 0),
     therapist,
+    therapists,
     serviceId: dbBooking.service_id || null,
     roomId: dbBooking.room_id || null,
     roomName: dbBooking.room?.name || null,

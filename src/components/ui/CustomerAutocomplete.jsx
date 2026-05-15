@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../AppIcon';
-import { fetchCustomersLightweight } from '../../services/api';
+import { fetchCustomersLightweight } from 'services/api';
 
 const CustomerAutocomplete = ({
   value,
