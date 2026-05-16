@@ -928,7 +928,7 @@ const BookingActionModal = ({
                           <>
                             {/* Current booking — checkbox only when multiple services */}
                             {relatedBookings.length > 0 ? (
-                              <label className="flex items-center gap-2 mb-1 cursor-pointer">
+                              <label className="flex items-start gap-2 mb-1 cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={selectedDiscountIds.has(booking.bookingId)}
@@ -940,9 +940,16 @@ const BookingActionModal = ({
                                       return next;
                                     });
                                   }}
-                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
                                 />
-                                <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
+                                  <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
+                                    {booking.time && <span>{to12h(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
+                                    {booking.therapist?.name && <span>· {booking.therapist.name}</span>}
+                                    {booking.roomName && <span>· {booking.roomName}</span>}
+                                  </div>
+                                </div>
                               </label>
                             ) : null}
                             <div className="flex items-center justify-between">
@@ -989,7 +996,7 @@ const BookingActionModal = ({
                                   const rbHasPreview = rbChecked && hasLivePreview;
                                   return (
                                     <div key={rb.id} className="space-y-1">
-                                      <label className="flex items-center gap-2 cursor-pointer">
+                                      <label className="flex items-start gap-2 cursor-pointer">
                                         <input
                                           type="checkbox"
                                           checked={rbChecked}
@@ -1001,10 +1008,19 @@ const BookingActionModal = ({
                                               return next;
                                             });
                                           }}
-                                          className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                                          className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
                                         />
-                                        <span className="font-body text-xs text-text-secondary">{rb.service?.name || 'Service'}</span>
-                                        <span className="font-caption text-[10px] text-text-secondary ml-auto">{rb.booking_number}</span>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-body text-xs text-text-primary font-medium">{rb.service?.name || 'Service'}</span>
+                                            <span className="font-caption text-[10px] text-text-secondary">{rb.booking_number}</span>
+                                          </div>
+                                          <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
+                                            {rb.start_time && <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>}
+                                            {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
+                                            {rb.room?.name && <span>· {rb.room.name}</span>}
+                                          </div>
+                                        </div>
                                       </label>
                                       <div className="flex items-center justify-between pl-5">
                                         <span className="font-body font-body-normal text-xs text-text-secondary">Base</span>
@@ -1268,9 +1284,12 @@ const BookingActionModal = ({
                             />
                             <div className="flex-1 min-w-0">
                               <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
-                              <div className="font-caption text-xs text-text-secondary">
-                                {rb.start_time?.slice(0, 5)} · {rb.booking_number}
-                                {rbDiscount > 0 && <span className="text-error ml-1">(-NPR {rbDiscount.toLocaleString('en-IN')})</span>}
+                              <div className="font-caption text-xs text-text-secondary flex flex-wrap gap-x-1">
+                                <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>
+                                {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
+                                {rb.room?.name && <span>· {rb.room.name}</span>}
+                                <span>· {rb.booking_number}</span>
+                                {rbDiscount > 0 && <span className="text-error">(-NPR {rbDiscount.toLocaleString('en-IN')})</span>}
                               </div>
                             </div>
                             <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {rbFinal.toLocaleString('en-IN')}</span>

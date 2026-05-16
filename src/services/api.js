@@ -424,7 +424,7 @@ export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBo
   try {
     const { data, error } = await supabase
       .from('bookings')
-      .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes)')
+      .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
       .eq('customer_name', customerName)
       .eq('date', date)
       .eq('payment_status', 'unpaid')
