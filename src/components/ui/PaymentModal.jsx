@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
-import Select from './Select';
+import CustomSelect from './CustomSelect';
 
 const PAYMENT_MODES = [
   { value: 'Cash', label: 'Cash' },
@@ -16,14 +16,15 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-const PaymentModal = ({ booking, onConfirm, onClose, isSubmitting }) => {
+const PaymentModal = ({ booking, additionalBookings = [], onConfirm, onClose, isSubmitting }) => {
   const [paymentMode, setPaymentMode] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState(null);
 
-  const baseAmount = Number(booking.base_amount || 0);
-  const discountAmount = Number(booking.discount_amount || 0);
-  const finalAmount = Number(booking.final_amount || 0);
+  const allBookings = [booking, ...additionalBookings];
+  const totalBase = allBookings.reduce((s, b) => s + Number(b.base_amount || b.baseAmount || 0), 0);
+  const totalDiscount = allBookings.reduce((s, b) => s + Number(b.discount_amount || b.discountAmount || 0), 0);
+  const totalFinal = allBookings.reduce((s, b) => s + Number(b.final_amount || b.finalAmount || 0), 0);
 
   const handleSubmit = async () => {
     if (!paymentMode) {
@@ -74,21 +75,23 @@ const PaymentModal = ({ booking, onConfirm, onClose, isSubmitting }) => {
               Payment Summary
             </h4>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-body font-body-normal text-sm text-text-secondary">
-                  Base Amount
-                </span>
-                <span className="font-body font-body-medium text-sm text-text-primary">
-                  {formatNPR(baseAmount)}
-                </span>
-              </div>
-              {discountAmount > 0 && (
+              {allBookings.map((b, i) => (
+                <div key={b.id || b.bookingId || i} className="flex items-center justify-between">
+                  <span className="font-body font-body-normal text-sm text-text-secondary truncate pr-2">
+                    {b.service?.name || b.service || 'Service'}
+                  </span>
+                  <span className="font-body font-body-medium text-sm text-text-primary flex-shrink-0">
+                    {formatNPR(Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0))}
+                  </span>
+                </div>
+              ))}
+              {totalDiscount > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="font-body font-body-normal text-sm text-text-secondary">
-                    Discount
+                    Total Discount
                   </span>
                   <span className="font-body font-body-medium text-sm text-error">
-                    - {formatNPR(discountAmount)}
+                    - {formatNPR(totalDiscount)}
                   </span>
                 </div>
               )}
@@ -97,20 +100,23 @@ const PaymentModal = ({ booking, onConfirm, onClose, isSubmitting }) => {
                   Total Due
                 </span>
                 <span className="font-heading font-heading-semibold text-lg text-success">
-                  {formatNPR(finalAmount)}
+                  {formatNPR(totalFinal)}
                 </span>
               </div>
             </div>
           </div>
 
           {/* Payment Mode */}
-          <Select
-            label="Payment Mode"
-            options={PAYMENT_MODES}
-            value={paymentMode}
-            onChange={setPaymentMode}
-            placeholder="Select payment mode..."
-          />
+          <div className="space-y-1">
+            <label className="block font-body font-body-medium text-sm text-text-primary">Payment Mode</label>
+            <CustomSelect
+              options={PAYMENT_MODES}
+              value={paymentMode}
+              onChange={setPaymentMode}
+              placeholder="Select payment mode..."
+              size="md"
+            />
+          </div>
 
           {/* Notes */}
           <div className="space-y-1">

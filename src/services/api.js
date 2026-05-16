@@ -420,6 +420,26 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
   }
 }
 
+export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId }) {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes)')
+      .eq('customer_name', customerName)
+      .eq('date', date)
+      .eq('payment_status', 'unpaid')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .order('start_time');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
 export async function updateTherapistTime({ bookingId, therapistId, startTime, endTime }) {
   try {
     const { error } = await supabase
@@ -2138,8 +2158,14 @@ export async function createBooking({
 
     // 7b. Insert into junction table for all therapists
     if (allTherapistIds.length > 0) {
-      const rows = allTherapistIds.map(tid => ({ booking_id: booking.id, therapist_id: tid }));
-      await supabase.from('booking_therapists').insert(rows);
+      const rows = allTherapistIds.map(tid => ({
+        booking_id: booking.id,
+        therapist_id: tid,
+        start_time: booking.start_time,
+        end_time: booking.end_time,
+      }));
+      const { error: btError } = await supabase.from('booking_therapists').insert(rows);
+      if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
     }
 
     return { data: booking, error: null };
