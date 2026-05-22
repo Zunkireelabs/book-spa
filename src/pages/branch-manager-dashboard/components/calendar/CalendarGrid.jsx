@@ -660,25 +660,47 @@ const CalendarGrid = ({
           isActive={!!activeDragId}
         />
 
-        {/* Booking cards rendered as siblings to droppable, not children */}
-        {colBookings.map(booking => {
-          const cardKey = booking._colTherapistId ? `${booking.id}__${booking._colTherapistId}` : booking.id;
-          return (
-          <CalendarBookingCard
-            key={cardKey}
-            booking={booking}
-            columnMode={columnMode}
-            style={{
-              top: timeToTop(booking.startTime),
-              height: timeToHeight(booking.startTime, booking.endTime),
-            }}
-            onClick={onBookingClick}
-            onResize={handleBookingResize}
-            isSelected={selectedCardIds.has(cardKey)}
-            onSelect={handleCardSelect}
-          />
-          );
-        })}
+        {/* Booking cards with overlap handling */}
+        {(() => {
+          const clusters = clusterOverlapping(colBookings);
+          return clusters.map(cluster => {
+            const layout = getOverlapLayout(cluster.length, minColWidth);
+            return cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
+              const cardKey = booking._colTherapistId ? `${booking.id}__${booking._colTherapistId}` : booking.id;
+              const pos = layout.cards[idx];
+              return (
+                <CalendarBookingCard
+                  key={cardKey}
+                  booking={booking}
+                  columnMode={columnMode}
+                  style={{
+                    top: timeToTop(booking.startTime),
+                    height: timeToHeight(booking.startTime, booking.endTime),
+                    ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
+                  }}
+                  onClick={onBookingClick}
+                  onResize={handleBookingResize}
+                  isSelected={selectedCardIds.has(cardKey)}
+                  onSelect={handleCardSelect}
+                />
+              );
+            }).concat(
+              layout.badge ? (
+                <OverflowBadge
+                  key={`badge-${cluster[0].id}`}
+                  count={layout.badge.count}
+                  style={{
+                    top: timeToTop(cluster[0].startTime),
+                    height: timeToHeight(cluster[0].startTime, cluster[0].endTime),
+                    left: layout.badge.left,
+                    width: layout.badge.width,
+                    right: 'auto',
+                  }}
+                />
+              ) : []
+            );
+          });
+        })()}
       </div>
     );
   };

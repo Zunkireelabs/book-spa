@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
+import { fetchRelatedUnpaidBookings } from '../../services/api';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -70,6 +71,11 @@ const BookingActionModal = ({
   const [newBookingError, setNewBookingError] = useState(null);
   const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
 
+  // Multi-payment/discount: related unpaid bookings for same customer
+  const [relatedBookings, setRelatedBookings] = useState([]);
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState(new Set());
+  const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
+
   // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
     if (booking) {
@@ -92,6 +98,21 @@ const BookingActionModal = ({
     setNewBookingForm({});
     setNewBookingSubmitting(false);
   }, [booking?.bookingId]);
+
+  // Fetch related unpaid bookings when payment tab opens
+  useEffect(() => {
+    if ((activeTab === 'payment' || activeTab === 'discount') && booking) {
+      fetchRelatedUnpaidBookings({
+        customerName: booking.customerName,
+        date: booking.date,
+        excludeBookingId: booking.bookingId,
+      }).then(result => {
+        setRelatedBookings(result.data || []);
+        setSelectedPaymentIds(new Set());
+        setSelectedDiscountIds(new Set([booking.bookingId]));
+      });
+    }
+  }, [activeTab, booking?.bookingId, booking?.paymentStatus]);
 
   // Auto-open rebook form when triggered via Escape fallback
   useEffect(() => {
@@ -286,11 +307,19 @@ const BookingActionModal = ({
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     try {
+      // Pay the current booking
       const result = await onRecordPayment(booking.bookingId, { paymentMode, notes: paymentNotes });
-      if (!result?.error) {
-        setShowPaymentModal(false);
-        onClose();
+      if (result?.error) return result;
+
+      // Pay any selected additional bookings
+      const additionalIds = [...selectedPaymentIds];
+      for (const rbId of additionalIds) {
+        await onRecordPayment(rbId, { paymentMode, notes: paymentNotes });
       }
+
+      setShowPaymentModal(false);
+      setSelectedPaymentIds(new Set());
+      onClose();
       return result;
     } finally {
       setPaymentSubmitting(false);
@@ -325,14 +354,35 @@ const BookingActionModal = ({
 
     setIsLoading(true);
     try {
-      const result = await onApplyDiscount(booking.bookingId, {
-        discountType,
-        discountValue: Number(discountValue),
-        discountReason: discountReason.trim()
-      });
-      if (result?.error) {
-        setDiscountError(result.error.message || 'Failed to apply discount.');
-      } else if (result?.data?.isPending) {
+      // Apply to all selected bookings
+      const bookingIdsToDiscount = [...selectedDiscountIds];
+      let lastResult = null;
+      let failed = false;
+
+      for (const bid of bookingIdsToDiscount) {
+        // For related bookings, compute the discount based on their base amount
+        let dValue = Number(discountValue);
+        if (discountType === 'fixed' && bid !== booking.bookingId) {
+          // For fixed amount on related bookings, compute proportional or use same percentage
+          const rb = relatedBookings.find(r => r.id === bid);
+          const rbBase = Number(rb?.base_amount || 0);
+          // Convert the effective percentage and apply to this booking's base
+          const pct = baseAmount > 0 ? (dValue / baseAmount) : 0;
+          dValue = Math.round(rbBase * pct * 100) / 100;
+        }
+
+        const result = await onApplyDiscount(bid, {
+          discountType: discountType === 'percentage' ? 'percentage' : 'fixed',
+          discountValue: discountType === 'percentage' ? Number(discountValue) : dValue,
+          discountReason: discountReason.trim()
+        });
+        lastResult = result;
+        if (result?.error) { failed = true; break; }
+      }
+
+      if (failed) {
+        setDiscountError(lastResult?.error?.message || 'Failed to apply discount.');
+      } else if (lastResult?.data?.isPending) {
         setDiscountSuccess('pending');
         setDiscountValue('');
         setDiscountReason('');
@@ -850,28 +900,184 @@ const BookingActionModal = ({
                   </div>
                 ) : (
                   <>
-                    {/* Current pricing */}
+                    {/* All bookings pricing summary */}
                     <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Base Amount</span>
-                        <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
-                      </div>
-                      {booking.discountAmount > 0 && (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount Applied</span>
-                            <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount %</span>
-                            <span className="font-data font-data-medium text-sm text-error">{booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%</span>
-                          </div>
-                        </>
-                      )}
-                      <div className="flex items-center justify-between border-t border-border pt-2">
-                        <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
-                        <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
-                      </div>
+                      {(() => {
+                        const base = booking.baseAmount || 0;
+                        let previewDiscountAmt = booking.discountAmount || 0;
+                        let previewDiscountPct = base > 0 ? Math.round((previewDiscountAmt / base) * 100) : 0;
+                        if (discountValue !== '' && discountValue !== null && discountValue !== undefined) {
+                          if (discountType === 'percentage') {
+                            previewDiscountPct = Number(discountValue) || 0;
+                            previewDiscountAmt = Math.round(base * previewDiscountPct / 100 * 100) / 100;
+                          } else {
+                            previewDiscountAmt = Number(discountValue) || 0;
+                            previewDiscountPct = base > 0 ? Math.round((previewDiscountAmt / base) * 100 * 10) / 10 : 0;
+                          }
+                        }
+                        const previewFinal = Math.max(base - previewDiscountAmt, 0);
+                        const hasLivePreview = discountValue !== '' && discountValue !== null && discountValue !== undefined;
+                        const hasExistingDiscount = booking.discountAmount > 0;
+                        const showDiscount = hasLivePreview || hasExistingDiscount;
+
+                        // Related bookings totals
+                        const relatedTotal = relatedBookings.reduce((s, rb) => s + Number(rb.final_amount || rb.base_amount || 0), 0);
+                        const overallTotal = previewFinal + relatedTotal;
+
+                        return (
+                          <>
+                            {/* Current booking — checkbox only when multiple services */}
+                            {relatedBookings.length > 0 ? (
+                              <label className="flex items-start gap-2 mb-1 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedDiscountIds.has(booking.bookingId)}
+                                  onChange={(e) => {
+                                    setSelectedDiscountIds(prev => {
+                                      const next = new Set(prev);
+                                      if (e.target.checked) next.add(booking.bookingId);
+                                      else next.delete(booking.bookingId);
+                                      return next;
+                                    });
+                                  }}
+                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
+                                  <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
+                                    {booking.time && <span>{to12h(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
+                                    {booking.therapist?.name && <span>· {booking.therapist.name}</span>}
+                                    {booking.roomName && <span>· {booking.roomName}</span>}
+                                  </div>
+                                </div>
+                              </label>
+                            ) : null}
+                            <div className="flex items-center justify-between">
+                              <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
+                              <span className="font-data text-sm text-text-primary">NPR {base.toLocaleString('en-IN')}</span>
+                            </div>
+                            {showDiscount && (
+                              <div className="flex items-center justify-between">
+                                <span className="font-body font-body-normal text-xs text-text-secondary">
+                                  {hasLivePreview ? 'Discount Preview' : 'Discount Applied'}
+                                </span>
+                                <span className={`font-data text-sm ${hasLivePreview ? 'text-warning' : 'text-error'}`}>
+                                  - NPR {previewDiscountAmt.toLocaleString('en-IN')} ({previewDiscountPct}%)
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between">
+                              <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
+                              <span className={`font-data text-sm ${hasLivePreview ? 'text-warning' : 'text-text-primary'}`}>
+                                NPR {previewFinal.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+
+                            {/* Related bookings */}
+                            {relatedBookings.length > 0 && (
+                              <>
+                                <div className="border-t border-border my-2" />
+                                {relatedBookings.map(rb => {
+                                  const rbBase = Number(rb.base_amount || 0);
+                                  const rbExistingDiscount = Number(rb.discount_amount || 0);
+                                  const rbChecked = selectedDiscountIds.has(rb.id);
+                                  // Live preview for checked related bookings
+                                  let rbPreviewDiscount = rbExistingDiscount;
+                                  if (rbChecked && hasLivePreview) {
+                                    if (discountType === 'percentage') {
+                                      rbPreviewDiscount = Math.round(rbBase * Number(discountValue) / 100 * 100) / 100;
+                                    } else {
+                                      // Fixed: proportional based on base amounts
+                                      const pct = base > 0 ? Number(discountValue) / base : 0;
+                                      rbPreviewDiscount = Math.round(rbBase * pct * 100) / 100;
+                                    }
+                                  }
+                                  const rbPreviewFinal = Math.max(rbBase - rbPreviewDiscount, 0);
+                                  const rbHasPreview = rbChecked && hasLivePreview;
+                                  return (
+                                    <div key={rb.id} className="space-y-1">
+                                      <label className="flex items-start gap-2 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={rbChecked}
+                                          onChange={(e) => {
+                                            setSelectedDiscountIds(prev => {
+                                              const next = new Set(prev);
+                                              if (e.target.checked) next.add(rb.id);
+                                              else next.delete(rb.id);
+                                              return next;
+                                            });
+                                          }}
+                                          className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-body text-xs text-text-primary font-medium">{rb.service?.name || 'Service'}</span>
+                                            <span className="font-caption text-[10px] text-text-secondary">{rb.booking_number}</span>
+                                          </div>
+                                          <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
+                                            {rb.start_time && <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>}
+                                            {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
+                                            {rb.room?.name && <span>· {rb.room.name}</span>}
+                                          </div>
+                                        </div>
+                                      </label>
+                                      <div className="flex items-center justify-between pl-5">
+                                        <span className="font-body font-body-normal text-xs text-text-secondary">Base</span>
+                                        <span className="font-data text-sm text-text-primary">NPR {rbBase.toLocaleString('en-IN')}</span>
+                                      </div>
+                                      {(rbHasPreview || rbExistingDiscount > 0) && (
+                                        <div className="flex items-center justify-between pl-5">
+                                          <span className="font-body font-body-normal text-xs text-text-secondary">
+                                            {rbHasPreview ? 'Discount Preview' : 'Discount'}
+                                          </span>
+                                          <span className={`font-data text-sm ${rbHasPreview ? 'text-warning' : 'text-error'}`}>
+                                            - NPR {rbPreviewDiscount.toLocaleString('en-IN')} ({rbBase > 0 ? Math.round(rbPreviewDiscount / rbBase * 100) : 0}%)
+                                          </span>
+                                        </div>
+                                      )}
+                                      <div className="flex items-center justify-between pl-5">
+                                        <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
+                                        <span className={`font-data text-sm ${rbHasPreview ? 'text-warning' : 'text-text-primary'}`}>
+                                          NPR {rbPreviewFinal.toLocaleString('en-IN')}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            )}
+
+                            {/* Overall total */}
+                            {(() => {
+                              // Compute overall with live preview
+                              let total = selectedDiscountIds.has(booking.bookingId) ? previewFinal : (booking.finalAmount || base);
+                              relatedBookings.forEach(rb => {
+                                const rbBase = Number(rb.base_amount || 0);
+                                const rbChecked = selectedDiscountIds.has(rb.id);
+                                if (rbChecked && hasLivePreview) {
+                                  let rbDis;
+                                  if (discountType === 'percentage') rbDis = Math.round(rbBase * Number(discountValue) / 100 * 100) / 100;
+                                  else { const pct = base > 0 ? Number(discountValue) / base : 0; rbDis = Math.round(rbBase * pct * 100) / 100; }
+                                  total += Math.max(rbBase - rbDis, 0);
+                                } else {
+                                  total += Number(rb.final_amount || rb.base_amount || 0);
+                                }
+                              });
+                              return (
+                                <div className="flex items-center justify-between border-t border-border pt-2 mt-1">
+                                  <span className="font-body font-body-medium text-xs text-text-primary">
+                                    {relatedBookings.length > 0 ? 'Overall Total' : 'Final Amount'}
+                                  </span>
+                                  <span className={`font-data font-data-medium text-sm ${hasLivePreview ? 'text-warning' : 'text-primary'}`}>
+                                    NPR {total.toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                          </>
+                        );
+                      })()}
                       {booking.discountAmount > 0 && (
                         <button
                           onClick={async () => {
@@ -1001,12 +1207,12 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleApplyDiscount}
                       loading={isLoading}
-                      disabled={!discountValue || !discountReason.trim()}
+                      disabled={!discountValue || !discountReason.trim() || selectedDiscountIds.size === 0}
                       iconName="Percent"
                       iconPosition="left"
                       className="w-full sm:w-auto min-h-[44px]"
                     >
-                      Apply Discount
+                      {selectedDiscountIds.size > 1 ? `Apply Discount to ${selectedDiscountIds.size} Services` : 'Apply Discount'}
                     </Button>
                   </>
                 )}
@@ -1014,35 +1220,108 @@ const BookingActionModal = ({
             )}
 
             {/* Payment Tab */}
-            {activeTab === 'payment' && (
+            {activeTab === 'payment' && (() => {
+              const combinedTotal = (booking.finalAmount || 0) +
+                relatedBookings
+                  .filter(rb => selectedPaymentIds.has(rb.id))
+                  .reduce((sum, rb) => sum + Number(rb.final_amount || rb.base_amount || 0), 0);
+
+              return (
               <div className="space-y-4 sm:space-y-6">
                 <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                   Payment Status
                 </h3>
-                <div className="bg-background rounded-spa p-3 sm:p-4 space-y-3">
+
+                {/* Current booking */}
+                <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
+                  {relatedBookings.length > 0 && (
+                    <div className="flex items-center gap-2 mb-1">
+                      <Icon name="CheckSquare" size={14} className="text-primary" />
+                      <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Base Amount</span>
-                    <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
+                    <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
+                    <span className="font-data text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
                   {booking.discountAmount > 0 && (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Discount</span>
-                        <span className="font-data font-data-medium text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')} ({booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%)</span>
-                      </div>
-                    </>
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-normal text-xs text-text-secondary">Discount</span>
+                      <span className="font-data text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')} ({booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%)</span>
+                    </div>
                   )}
                   <div className="flex items-center justify-between border-t border-border pt-2">
-                    <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Final Amount</span>
+                    <span className="font-body font-body-medium text-xs text-text-primary">{relatedBookings.length > 0 ? 'Subtotal' : 'Final Amount'}</span>
                     <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-xs sm:text-sm text-text-secondary">Status</span>
-                    <span className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
-                      {booking.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
-                    </span>
-                  </div>
                 </div>
+
+                {/* Related unpaid bookings */}
+                {relatedBookings.length > 0 && canPay && (
+                  <div className="space-y-2">
+                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase">
+                      Other unpaid services for {booking.customerName}
+                    </label>
+                    <div className="border border-border rounded-spa divide-y divide-border overflow-hidden">
+                      {relatedBookings.map(rb => {
+                        const isChecked = selectedPaymentIds.has(rb.id);
+                        const rbFinal = Number(rb.final_amount || rb.base_amount || 0);
+                        const rbDiscount = Number(rb.discount_amount || 0);
+                        return (
+                          <label key={rb.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-background/50 ${isChecked ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                setSelectedPaymentIds(prev => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(rb.id);
+                                  else next.delete(rb.id);
+                                  return next;
+                                });
+                              }}
+                              className="text-primary focus:ring-primary w-4 h-4 rounded"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
+                              <div className="font-caption text-xs text-text-secondary flex flex-wrap gap-x-1">
+                                <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>
+                                {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
+                                {rb.room?.name && <span>· {rb.room.name}</span>}
+                                <span>· {rb.booking_number}</span>
+                                {rbDiscount > 0 && <span className="text-error">(-NPR {rbDiscount.toLocaleString('en-IN')})</span>}
+                              </div>
+                            </div>
+                            <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {rbFinal.toLocaleString('en-IN')}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Combined total */}
+                {selectedPaymentIds.size > 0 && (
+                  <div className="bg-primary/5 border border-primary/20 rounded-spa p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-medium text-sm text-text-primary">
+                        Combined Total ({1 + selectedPaymentIds.size} services)
+                      </span>
+                      <span className="font-data font-data-medium text-base text-primary">
+                        NPR {combinedTotal.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment status */}
+                <div className="flex items-center justify-between px-1">
+                  <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
+                  <span className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
+                    {booking.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+                  </span>
+                </div>
+
                 {canPay && (
                   <Button
                     variant="success"
@@ -1051,7 +1330,7 @@ const BookingActionModal = ({
                     iconPosition="left"
                     className="w-full sm:w-auto min-h-[44px]"
                   >
-                    Record Payment
+                    {selectedPaymentIds.size > 0 ? `Pay ${1 + selectedPaymentIds.size} Services` : 'Record Payment'}
                   </Button>
                 )}
                 {booking.paymentStatus === 'paid' && (
@@ -1061,7 +1340,8 @@ const BookingActionModal = ({
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {/* Add Another Service / Rebook Form */}
             {newBookingMode && (
@@ -1249,11 +1529,14 @@ const BookingActionModal = ({
         <PaymentModal
           booking={{
             id: booking.id,
+            bookingId: booking.bookingId,
             booking_number: booking.id,
+            service: booking.service,
             base_amount: booking.baseAmount,
             discount_amount: booking.discountAmount,
             final_amount: booking.finalAmount,
           }}
+          additionalBookings={relatedBookings.filter(rb => selectedPaymentIds.has(rb.id))}
           onConfirm={handlePaymentConfirm}
           onClose={() => setShowPaymentModal(false)}
           isSubmitting={paymentSubmitting}

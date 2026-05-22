@@ -63,6 +63,13 @@ async function getAuthenticatedUser() {
  * Checks: lock, completed immutability, terminal status.
  * Returns null if valid, or a structured error object.
  */
+// Parse room capacity from amenities (e.g., "3 Chair" → 3, "2 Bed" → 2)
+function getRoomCapacity(room) {
+  if (!room.amenities || room.amenities.length === 0) return 1;
+  const match = room.amenities[0].match(/^(\d+)/);
+  return match ? parseInt(match[1], 10) : 1;
+}
+
 function validateBookingMutation(booking) {
   if (booking.is_locked) {
     return { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' };
@@ -410,6 +417,26 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
   } catch (error) {
     console.error('[API] assignTherapist error:', error.message);
     return { data: null, error };
+  }
+}
+
+export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId }) {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
+      .eq('customer_name', customerName)
+      .eq('date', date)
+      .eq('payment_status', 'unpaid')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .order('start_time');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
   }
 }
 
@@ -895,8 +922,17 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       }
     }
 
-    // 7. Check room availability — overlapping bookings in same room (exclude cancelled/no-show)
+    // 7. Check room availability with capacity
     if (effectiveRoomId) {
+      // Fetch room to get capacity
+      const { data: roomData } = await supabase
+        .from('rooms')
+        .select('id, amenities')
+        .eq('id', effectiveRoomId)
+        .single();
+
+      const capacity = roomData ? getRoomCapacity(roomData) : 1;
+
       const { data: conflicts, error: conflictError } = await supabase
         .from('bookings')
         .select('id')
@@ -910,7 +946,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
 
       if (conflictError) throw conflictError;
 
-      if (conflicts && conflicts.length > 0) {
+      if (conflicts && conflicts.length >= capacity) {
         return {
           data: null,
           error: { code: 'ROOM_CONFLICT', message: 'The room is not available at the requested date/time.' },
@@ -1926,7 +1962,7 @@ export async function createBooking({
         // Room explicitly selected — verify it belongs to this branch and is active
         const { data: selectedRoom, error: roomLookupError } = await supabase
           .from('rooms')
-          .select('id, name, is_active')
+          .select('id, name, is_active, amenities')
           .eq('id', roomId)
           .eq('branch_id', resolvedBranchId)
           .maybeSingle();
@@ -1937,12 +1973,29 @@ export async function createBooking({
         if (!selectedRoom.is_active) {
           return { data: null, error: { code: 'ROOM_INACTIVE', message: 'Selected room is not active.' } };
         }
+
+        // Check room capacity — count overlapping bookings
+        const capacity = getRoomCapacity(selectedRoom);
+        const { data: roomOverlaps } = await supabase
+          .from('bookings')
+          .select('id')
+          .eq('room_id', roomId)
+          .eq('branch_id', resolvedBranchId)
+          .eq('date', date)
+          .not('status', 'in', '("Cancelled","No Show")')
+          .lt('start_time', endTime)
+          .gt('end_time', startTime);
+
+        if ((roomOverlaps || []).length >= capacity) {
+          return { data: null, error: { code: 'ROOM_FULL', message: `${selectedRoom.name} is fully booked at this time (capacity: ${capacity}).` } };
+        }
+
         availableRoom = selectedRoom;
       } else {
-        // 3. Fetch active rooms for branch
+        // 3. Fetch active rooms for branch (with amenities for capacity)
         const { data: rooms, error: roomsError } = await supabase
           .from('rooms')
-          .select('id, name')
+          .select('id, name, amenities')
           .eq('branch_id', resolvedBranchId)
           .eq('is_active', true)
           .order('name');
@@ -1952,7 +2005,7 @@ export async function createBooking({
           return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
         }
 
-        // 4. Find rooms with overlapping non-cancelled/no-show bookings
+        // 4. Count overlapping bookings per room
         const { data: overlapping, error: overlapError } = await supabase
           .from('bookings')
           .select('room_id')
@@ -1964,9 +2017,16 @@ export async function createBooking({
 
         if (overlapError) throw overlapError;
 
-        // 5. Pick first available room
-        const occupiedRoomIds = new Set((overlapping || []).map(b => b.room_id));
-        availableRoom = rooms.find(r => !occupiedRoomIds.has(r.id));
+        // 5. Count bookings per room and pick first with remaining capacity
+        const roomBookingCounts = {};
+        (overlapping || []).forEach(b => {
+          roomBookingCounts[b.room_id] = (roomBookingCounts[b.room_id] || 0) + 1;
+        });
+        availableRoom = rooms.find(r => {
+          const capacity = getRoomCapacity(r);
+          const used = roomBookingCounts[r.id] || 0;
+          return used < capacity;
+        });
 
         if (!availableRoom) {
           return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
@@ -2087,15 +2147,25 @@ export async function createBooking({
 
     if (insertError) {
       if (insertError.code === '23P01') {
-        return { data: null, error: { code: 'ROOMS_FULL', message: 'Selected time slot is fully booked.' } };
+        const msg = (insertError.message || '') + (insertError.details || '');
+        if (msg.includes('therapist')) {
+          return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
+        }
+        return { data: null, error: { code: 'ROOMS_FULL', message: 'Scheduling conflict. Please try a different time or room.' } };
       }
       throw insertError;
     }
 
     // 7b. Insert into junction table for all therapists
     if (allTherapistIds.length > 0) {
-      const rows = allTherapistIds.map(tid => ({ booking_id: booking.id, therapist_id: tid }));
-      await supabase.from('booking_therapists').insert(rows);
+      const rows = allTherapistIds.map(tid => ({
+        booking_id: booking.id,
+        therapist_id: tid,
+        start_time: booking.start_time,
+        end_time: booking.end_time,
+      }));
+      const { error: btError } = await supabase.from('booking_therapists').insert(rows);
+      if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
     }
 
     return { data: booking, error: null };
