@@ -27,14 +27,16 @@ VALUES (
 -- STEP 2: Branch — Thamel
 -- ============================================================
 
-INSERT INTO branches (id, name, address, phone, org_id, is_active)
+INSERT INTO branches (id, name, address, phone, org_id, is_active, open_time, close_time)
 VALUES (
   'b0000000-0000-0000-0000-000000000002',
   'Thamel',
   'Thamel Marg, Kathmandu 44600, Nepal',
   '+977-1-4567890',
   '00000000-0000-0000-0000-000000000002',
-  true
+  true,
+  '09:00',
+  '21:00'
 );
 
 -- ============================================================

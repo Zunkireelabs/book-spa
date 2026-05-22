@@ -1737,7 +1737,9 @@ export async function getUtilizationIntelligence({ branchId, date }) {
     return {
       data: {
         operatingMinutes,
-        operatingHours: `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`,
+        operatingHours: branch.open_time && branch.close_time
+          ? `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`
+          : 'Not set',
         roomUtilization,
         therapistUtilization,
         hourlyDistribution,
