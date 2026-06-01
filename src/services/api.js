@@ -96,9 +96,8 @@ function validateStatusTransition(currentStatus, newStatus) {
 // Read-only queries
 // ============================================================
 
-export async function fetchServices() {
+export async function fetchServices(branchId) {
   try {
-    // Get authenticated user's org_id for tenant isolation
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError || !profile?.org_id) {
       console.error('[API] fetchServices: No authenticated user or org_id');
@@ -113,6 +112,20 @@ export async function fetchServices() {
       .order('name');
 
     if (error) throw error;
+
+    const resolvedBranchId = resolveBranchId(branchId || profile.branch_id);
+    if (resolvedBranchId && data) {
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('excluded_service_categories')
+        .eq('id', resolvedBranchId)
+        .single();
+      const excluded = branch?.excluded_service_categories;
+      if (excluded?.length > 0) {
+        return { data: data.filter(s => !excluded.includes(s.category)), error: null };
+      }
+    }
+
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchServices error:', error.message);
@@ -137,17 +150,35 @@ export async function fetchRooms(branchId) {
   }
 }
 
-export async function fetchTherapists(branchId) {
+export async function fetchTherapists(branchId, { date } = {}) {
   try {
-    const { data, error } = await supabase
-      .from('therapists')
-      .select('id, name, gender, specialties, position, is_service_staff')
-      .eq('branch_id', branchId)
-      .eq('is_active', true)
-      .eq('is_service_staff', true)
-      .order('name');
+    const [therapistsResult, attendanceResult] = await Promise.all([
+      supabase
+        .from('therapists')
+        .select('id, name, gender, specialties, position, is_service_staff')
+        .eq('branch_id', branchId)
+        .eq('is_active', true)
+        .eq('is_service_staff', true)
+        .order('name'),
+      date
+        ? supabase
+            .from('therapist_attendance')
+            .select('therapist_id, status')
+            .eq('branch_id', branchId)
+            .eq('date', date)
+            .in('status', ['Absent', 'Leave'])
+        : Promise.resolve({ data: [] }),
+    ]);
 
-    if (error) throw error;
+    if (therapistsResult.error) throw therapistsResult.error;
+
+    const absentIds = new Set(
+      (attendanceResult.data || []).map(a => a.therapist_id)
+    );
+    const data = absentIds.size > 0
+      ? therapistsResult.data.filter(t => !absentIds.has(t.id))
+      : therapistsResult.data;
+
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchTherapists error:', error.message);
@@ -304,10 +335,10 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
     // Support legacy single therapistId param
     const ids = Array.isArray(therapistIds) ? therapistIds.filter(Boolean) : (therapistIds ? [therapistIds] : []);
 
-    // 1. Fetch booking (include room_id for snapshot)
+    // 1. Fetch booking (include room_id + date for attendance check)
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, branch_id, room_id')
+      .select('id, status, is_locked, branch_id, room_id, date')
       .eq('id', bookingId)
       .single();
 
@@ -339,6 +370,20 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       const inactive = (therapistsData || []).find(t => !t.is_active);
       if (inactive) {
         return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign inactive therapist: ${inactive.name}` } };
+      }
+
+      if (booking.date) {
+        const { data: absentRecords } = await supabase
+          .from('therapist_attendance')
+          .select('therapist_id, status')
+          .in('therapist_id', ids)
+          .eq('date', booking.date)
+          .in('status', ['Absent', 'Leave']);
+        const absent = (absentRecords || []).find(Boolean);
+        if (absent) {
+          const absentTherapist = (therapistsData || []).find(t => t.id === absent.therapist_id);
+          return { data: null, error: { code: 'THERAPIST_ABSENT', message: `Cannot assign ${absentTherapist?.name || 'therapist'}: marked as ${absent.status} for this date.` } };
+        }
       }
 
       const primary = (therapistsData || []).find(t => t.id === primaryId);
@@ -927,7 +972,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       // Fetch room to get capacity
       const { data: roomData } = await supabase
         .from('rooms')
-        .select('id, amenities')
+        .select('id, name, amenities')
         .eq('id', effectiveRoomId)
         .single();
 
@@ -949,7 +994,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       if (conflicts && conflicts.length >= capacity) {
         return {
           data: null,
-          error: { code: 'ROOM_CONFLICT', message: 'The room is not available at the requested date/time.' },
+          error: { code: 'ROOM_CONFLICT', message: `Room ${roomData?.name || 'unknown'} is fully booked at this time (${conflicts.length}/${capacity} slots used). Change the room or pick a different time.` },
         };
       }
     }
@@ -2114,6 +2159,21 @@ export async function createBooking({
       if (inactive) {
         return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Therapist ${inactive.name} is not active.` } };
       }
+
+      if (date) {
+        const { data: absentRecords } = await supabase
+          .from('therapist_attendance')
+          .select('therapist_id, status')
+          .in('therapist_id', allTherapistIds)
+          .eq('date', date)
+          .in('status', ['Absent', 'Leave']);
+        const absent = (absentRecords || []).find(Boolean);
+        if (absent) {
+          const absentTherapist = therapistsData.find(t => t.id === absent.therapist_id);
+          return { data: null, error: { code: 'THERAPIST_ABSENT', message: `${absentTherapist?.name || 'Therapist'} is marked as ${absent.status} on this date.` } };
+        }
+      }
+
       const primary = therapistsData.find(t => t.id === primaryTherapistId);
       therapistNameSnapshot = primary?.name || null;
     }
@@ -4284,7 +4344,7 @@ export async function fetchBranchesByOrgId(orgId) {
 /**
  * Fetch services for a specific organization (customer-facing)
  */
-export async function fetchServicesByOrgId(orgId) {
+export async function fetchServicesByOrgId(orgId, branchId) {
   try {
     const { data, error } = await supabase
       .from('services')
@@ -4294,6 +4354,19 @@ export async function fetchServicesByOrgId(orgId) {
       .order('name');
 
     if (error) throw error;
+
+    if (branchId && data) {
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('excluded_service_categories')
+        .eq('id', branchId)
+        .single();
+      const excluded = branch?.excluded_service_categories;
+      if (excluded?.length > 0) {
+        return { data: data.filter(s => !excluded.includes(s.category)), error: null };
+      }
+    }
+
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchServicesByOrgId error:', error.message);

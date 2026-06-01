@@ -44,10 +44,7 @@ const BookingDetailsAssignmentModal = () => {
     }
 
     setPageLoading(true);
-    const [bookingResult, therapistsResult] = await Promise.all([
-      fetchBookingById(bookingIdFromUrl),
-      branchId ? fetchTherapists(branchId) : Promise.resolve({ data: [] }),
-    ]);
+    const bookingResult = await fetchBookingById(bookingIdFromUrl);
 
     if (bookingResult.error) {
       setError(bookingResult.error.message || 'Failed to load booking.');
@@ -55,15 +52,19 @@ const BookingDetailsAssignmentModal = () => {
       return;
     }
 
-    setBooking(transformBooking(bookingResult.data));
+    const transformed = transformBooking(bookingResult.data);
+    setBooking(transformed);
 
-    if (therapistsResult.data) {
-      setTherapists(therapistsResult.data.map(t => ({
-        id: t.id,
-        name: t.name,
-        gender: t.gender,
-        specialties: t.specialties || [],
-      })));
+    if (branchId) {
+      const therapistsResult = await fetchTherapists(branchId, { date: bookingResult.data?.date });
+      if (therapistsResult.data) {
+        setTherapists(therapistsResult.data.map(t => ({
+          id: t.id,
+          name: t.name,
+          gender: t.gender,
+          specialties: t.specialties || [],
+        })));
+      }
     }
 
     setPageLoading(false);

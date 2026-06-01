@@ -1,10 +1,13 @@
-# CLAUDE.md - Project Intelligence
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
 **Project**: Zenly — Multi-tenant Booking Web App
 **Type**: React 18 + Vite SPA with Supabase backend
-**Tech Stack**: React, Vite, Tailwind CSS, Supabase (Postgres, Auth, RLS, Realtime), Framer Motion, Lucide Icons
+**Tech Stack**: React 18, Vite 5, Tailwind CSS 3, Supabase (Postgres, Auth, RLS, Realtime), Framer Motion, Lucide Icons
+**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), FullCalendar (calendar views, resource-timeline)
 
 ---
 
@@ -66,15 +69,26 @@ npm run serve
 docker build --build-arg VITE_SUPABASE_URL=... --build-arg VITE_SUPABASE_ANON_KEY=... -t bookspa .
 ```
 
+**No test runner or linter configured.** Testing libraries (`@testing-library/*`) are installed as devDependencies but there is no `test` or `lint` script in package.json. Use `npm run build` as the primary validation gate.
+
 ---
 
 ## Environment Variables
 
+Two Supabase projects exist — **staging** (default for local dev) and **production**:
+
+| Env | Supabase Project | Domain |
+|-----|-----------------|--------|
+| Staging | `snzcckzfmpboeqkktmwy` | `dev-zenly.zunkireelabs.com` |
+| Production | `pmbvogiphelmpjdalmtv` | `zenly.zunkireelabs.com` |
+
 ```bash
-# Required — copy .env.example to .env.local
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+cp .env.example .env            # defaults to staging
+cp .env.example .env.staging    # preserved staging template
+# To switch: cp .env.production .env && restart dev server
 ```
+
+Only `anon` keys belong in env files. **NEVER** put a `service_role` key in any `.env` file — it bypasses RLS. Service keys stay server-side in Edge Functions only.
 
 ---
 
@@ -112,22 +126,24 @@ book-spa/
     <BranchProvider>    ← Active branch selection
       <AIAssistantProvider>  ← AI assistant state
         <Routes />      ← BrowserRouter + route definitions
+          <TenantProvider>  ← Wraps customer-facing routes (/:orgSlug/book)
 ```
 
 ### Routing Map
 
+All staff/customer routes are org-scoped: `/:orgSlug/login`, `/:orgSlug/staff-dashboard`, etc.
+
 | Path | Component | Access |
 |------|-----------|--------|
-| `/` | CustomerBookingFlow | Public |
-| `/customer-booking-flow` | CustomerBookingFlow | Public |
-| `/staff-login-authentication` | StaffLoginAuthentication | Public |
-| `/booking-management-portal` | BookingManagementPortal | Public |
-| `/branch-staff-dashboard` | BranchStaffDashboard | staff, manager, admin |
-| `/booking-details-assignment-modal` | BookingDetailsAssignmentModal | staff, manager, admin |
-| `/booking-details/:bookingId` | BookingDetailsAssignmentModal | staff, manager, admin |
-| `/branch-manager-dashboard` | BranchManagerDashboard | manager, admin |
+| `/` | ExternalRedirect → zunkireelabs.com | Public (redirects externally) |
+| `/login` | OrgFinder | Public (org slug entry page) |
+| `/:orgSlug/login` | StaffLoginAuthentication | Public |
+| `/:orgSlug/staff-dashboard` | BranchStaffDashboard | staff, manager, admin |
+| `/:orgSlug/manager-dashboard` | BranchManagerDashboard | manager, admin |
+| `/:orgSlug/booking-details/:bookingId` | BookingDetailsAssignmentModal | staff, manager, admin |
+| `/:orgSlug/book` | CustomerBookingFlow (via TenantProvider) | Public |
 
-Protected routes use `<ProtectedRoute allowedRoles={[...]}>`.
+Legacy paths (`/branch-staff-dashboard`, `/booking-details/:id`, etc.) auto-redirect to org-scoped URLs. Protected routes use `<ProtectedRoute allowedRoles={[...]}>`.
 
 ### Data Flow
 
@@ -165,6 +181,19 @@ Cancelled  Cancelled / No Show (terminal)
 | staff | 15% |
 | manager | 25% |
 | admin | 30% |
+
+### PIN Login Flow
+
+PIN login uses a server-side Edge Function (`pin-login`) to avoid exposing the service role key:
+```
+Frontend → POST /functions/v1/pin-login (email, pin, org_slug)
+         ← { email_otp } → supabase.auth.verifyOtp() → session
+```
+
+### Service Enrichment (`services/serviceEnrichment.js`)
+
+- Static UI data (images, benefits, categories) keyed by service name
+- Used to enrich DB service records with display metadata for the customer booking flow
 
 ### Transformers (`services/bookingTransformers.js`)
 
@@ -239,6 +268,19 @@ Cancelled  Cancelled / No Show (terminal)
 
 ---
 
+## Deployment & CI/CD
+
+| Workflow | Trigger | Target |
+|----------|---------|--------|
+| `ci.yml` | PR checks | Lint + build validation |
+| `deploy-staging.yml` | Push to `stage` | `dev-zenly.zunkireelabs.com` |
+| `deploy.yml` | Push to `main` | `zenly.zunkireelabs.com` (production) |
+| `rollback.yml` | Manual | Rollback production |
+
+Deploy process: SSH → `git pull` → `docker compose up -d --build` → health check (2 min timeout).
+
+---
+
 ## Git Workflow & Branching Strategy
 
 **CRITICAL: Follow this branching strategy strictly.**
@@ -273,6 +315,61 @@ gh pr create --base main ...
 - **DO** attribute to the GitHub account: `@sthasadin`
 - PR footers should end with: `Created by @sthasadin`
 - Commit co-author line: `Co-Authored-By: sthasadin <sthasadin@users.noreply.github.com>`
+
+---
+
+## Workflow Orchestration
+
+### 1. Plan Node Default
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately - don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
+
+### 2. Subagent Strategy
+- Use subagents liberally to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One tack per subagent for focused execution
+
+### 3. Self-Improvement Loop
+- After ANY correction from the user: update `tasks/lessons.md` with the pattern
+- Write rules for yourself that prevent the same mistake
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review lessons at session start for relevant project
+
+### 4. Verification Before Done
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
+
+### 5. Demand Elegance (Balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes - don't over-engineer
+- Challenge your own work before presenting it
+
+### 6. Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests - then resolve them
+- Zero context switching required from the user
+- Go fix failing CI tests without being told how
+
+## Task Management
+
+1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
+2. **Verify Plan**: Check in before starting implementation
+3. **Track Progress**: Mark items complete as you go
+4. **Explain Changes**: High-level summary at each step
+5. **Document Results**: Add review section to `tasks/todo.md`
+6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
+
+## Core Principles
+
+- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
+- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
 ---
 

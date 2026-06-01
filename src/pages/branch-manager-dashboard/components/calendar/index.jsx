@@ -651,6 +651,9 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Attendance indicators
+  const [attendanceMap, setAttendanceMap] = useState({});
+
   // Available position options for filter (from service staff only)
   const calendarPositionOptions = useMemo(() => {
     if (!calendarData?.therapists) return [];
@@ -663,10 +666,11 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     return Array.from(positions).sort();
   }, [calendarData?.therapists]);
 
-  // Filter therapists for calendar display
+  // Filter therapists for calendar display (hide absent/leave)
   const filteredTherapists = useMemo(() => {
     if (!calendarData?.therapists) return [];
     let list = calendarData.therapists;
+    list = list.filter(t => !attendanceMap[t.id]);
     if (showServiceOnly) {
       list = list.filter(t => t.is_service_staff !== false);
     }
@@ -674,7 +678,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
       list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
     }
     return list;
-  }, [calendarData?.therapists, showServiceOnly, selectedPositions]);
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap]);
 
   // Close position dropdown on outside click
   useEffect(() => {
@@ -685,9 +689,6 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, [positionDropdownOpen]);
-
-  // Attendance indicators
-  const [attendanceMap, setAttendanceMap] = useState({});
 
   // Modal state
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -1267,7 +1268,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
       setServicesLoading(true);
-      const result = await fetchServices();
+      const result = await fetchServices(branchId);
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
@@ -1345,7 +1346,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
     // Pre-fetch services for "Add Another Service" / edit mode
     if (!servicesCache && !servicesLoading) {
       setServicesLoading(true);
-      const svcResult = await fetchServices();
+      const svcResult = await fetchServices(branchId);
       if (svcResult.data) setServicesCache(svcResult.data);
       setServicesLoading(false);
     }
@@ -1521,14 +1522,16 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
 
   const therapistsForModal = useMemo(() =>
     calendarData
-      ? calendarData.therapists.filter(t => t.is_service_staff !== false).map(t => ({
-          id: t.id,
-          name: t.name,
-          gender: t.gender,
-          specialties: t.specialties || [],
-        }))
+      ? calendarData.therapists
+          .filter(t => t.is_service_staff !== false && !attendanceMap[t.id])
+          .map(t => ({
+            id: t.id,
+            name: t.name,
+            gender: t.gender,
+            specialties: t.specialties || [],
+          }))
       : [],
-    [calendarData]
+    [calendarData, attendanceMap]
   );
 
   // ── Error state ────────────────────────────────────────────

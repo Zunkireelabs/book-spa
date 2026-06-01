@@ -21,6 +21,7 @@ const CustomSelect = ({
   const [isOpen, setIsOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [openUpward, setOpenUpward] = useState(false);
   const dropdownRef = useRef(null);
   const listRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -136,7 +137,13 @@ const CustomSelect = ({
   );
 
   const toggleOpen = () => {
-    if (!disabled) setIsOpen(!isOpen);
+    if (disabled) return;
+    if (!isOpen && dropdownRef.current) {
+      const rect = dropdownRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setOpenUpward(spaceBelow < 240);
+    }
+    setIsOpen(!isOpen);
   };
 
   return (
@@ -177,7 +184,9 @@ const CustomSelect = ({
 
       {isOpen && (
         <div
-          className="absolute left-0 top-full mt-1 w-full min-w-[120px] bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-60 overflow-hidden flex flex-col"
+          className={`absolute left-0 w-full min-w-[120px] bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-60 overflow-hidden flex flex-col ${
+            openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
           role="listbox"
         >
           {/* Search input */}
