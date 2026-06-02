@@ -90,21 +90,27 @@ const LoginForm = () => {
   const handlePinLogin = async (userEmail, pin) => {
     // Step 1: Verify PIN and get OTP via server-side Edge Function
     // (service role key stays server-side, never exposed to browser)
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pin-login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Edge Function has verify_jwt enabled — the public anon key is a valid JWT.
+        'apikey': anonKey,
+        'Authorization': `Bearer ${anonKey}`,
+      },
       body: JSON.stringify({ email: userEmail, pin, org_slug: urlOrgSlug || null }),
     });
 
     const pinData = await res.json();
-    if (!pinData.success || !pinData.email_otp) {
+    if (!pinData.success || !pinData.otp) {
       return { success: false, error: pinData.error || 'PIN login failed.' };
     }
 
     // Step 2: Verify OTP to get a real session
     const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
       email: userEmail,
-      token: pinData.email_otp,
+      token: pinData.otp,
       type: 'email',
     });
 
