@@ -44,7 +44,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       setError(null);
 
       try {
-        const { data, error: fetchError } = await fetchServicesByOrgId(orgId);
+        const { data, error: fetchError } = await fetchServicesByOrgId(orgId, selectedBranch?.id);
         if (cancelled) return;
 
         if (fetchError) {
@@ -66,7 +66,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
     loadServices();
     return () => { cancelled = true; };
-  }, [orgId, tenantLoading]);
+  }, [orgId, tenantLoading, selectedBranch?.id]);
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat('ne-NP', {

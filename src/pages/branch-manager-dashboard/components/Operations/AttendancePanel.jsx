@@ -322,9 +322,9 @@ const AttendancePanel = ({ branchId }) => {
       )}
 
       {/* Therapist Table */}
-      <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
+      <div className="bg-surface rounded-spa-lg border border-border">
         {/* Table header */}
-        <div className="hidden md:grid md:grid-cols-[1fr_140px_110px_110px_1fr_80px] gap-3 px-5 py-3 bg-background/50 border-b border-border">
+        <div className="hidden md:grid md:grid-cols-[1fr_140px_110px_110px_1fr_80px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Therapist</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Status</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Check-in</span>

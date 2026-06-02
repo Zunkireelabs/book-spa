@@ -88,42 +88,29 @@ const LoginForm = () => {
   };
 
   const handlePinLogin = async (userEmail, pin) => {
-    // Step 1: Verify PIN via RPC
-    const { data, error } = await supabase.rpc('login_with_pin', {
-      p_email: userEmail,
-      p_pin: pin,
-      p_org_slug: urlOrgSlug || null,
-    });
-
-    if (error || !data?.success) {
-      return { success: false, error: data?.error || error?.message || 'Invalid PIN' };
-    }
-
-    // Step 2: Generate magic link OTP via admin API
-    const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
-    if (!serviceKey) {
-      return { success: false, error: 'PIN login not configured. Use your password.' };
-    }
-
-    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/admin/generate_link`, {
+    // Step 1: Verify PIN and get OTP via server-side Edge Function
+    // (service role key stays server-side, never exposed to browser)
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pin-login`, {
       method: 'POST',
       headers: {
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
         'Content-Type': 'application/json',
+        // Edge Function has verify_jwt enabled — the public anon key is a valid JWT.
+        'apikey': anonKey,
+        'Authorization': `Bearer ${anonKey}`,
       },
-      body: JSON.stringify({ type: 'magiclink', email: userEmail }),
+      body: JSON.stringify({ email: userEmail, pin, org_slug: urlOrgSlug || null }),
     });
 
-    const linkData = await res.json();
-    if (!linkData.email_otp) {
-      return { success: false, error: 'Failed to generate login token.' };
+    const pinData = await res.json();
+    if (!pinData.success || !pinData.otp) {
+      return { success: false, error: pinData.error || 'PIN login failed.' };
     }
 
-    // Step 3: Verify OTP to get a real session
+    // Step 2: Verify OTP to get a real session
     const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
       email: userEmail,
-      token: linkData.email_otp,
+      token: pinData.otp,
       type: 'email',
     });
 
