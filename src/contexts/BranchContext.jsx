@@ -48,12 +48,15 @@ export const BranchProvider = ({ children }) => {
       setBranches([]);
       setLoading(false);
     }
-  }, [profile?.id, authLoading]);
+  }, [profile?.id, profile?.role, authLoading]);
 
   const loadAdminBranches = async () => {
     setLoading(true);
     const result = await fetchAllBranches();
     const allBranches = result.data || [];
+    if (allBranches.length === 0) {
+      console.warn('[BranchContext] fetchAllBranches returned no branches');
+    }
     setBranches(allBranches);
 
     if (allBranches.length === 0) {
