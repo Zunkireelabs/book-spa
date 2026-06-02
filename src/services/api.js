@@ -100,7 +100,7 @@ export async function fetchServices(branchId) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError || !profile?.org_id) {
-      console.error('[API] fetchServices: No authenticated user or org_id');
+      console.warn('[API] fetchServices: No authenticated user or org_id', authError);
       return { data: [], error: null };
     }
 
@@ -4257,7 +4257,7 @@ export async function fetchAllBranches() {
     // Get authenticated user's org_id for tenant isolation
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError || !profile?.org_id) {
-      console.error('[API] fetchAllBranches: No authenticated user or org_id');
+      console.warn('[API] fetchAllBranches: skipped — no org_id. authError:', authError);
       return { data: [], error: null };
     }
 
