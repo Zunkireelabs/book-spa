@@ -308,9 +308,11 @@ const CalendarGrid = ({
     }
   }, [gridRef]);
 
-  const openHour = 0;  // Full 24-hour view
+  const openHour = 9;  // 9am
 
-  const closeHour = 24;
+  const closeHour = 23;  // last label 10pm (22), grid ends at 11pm
+
+  const TOP_PAD = 12;  // breathing room above the first (9am) line
 
   const hours = useMemo(() => {
     const result = [];
@@ -318,7 +320,7 @@ const CalendarGrid = ({
     return result;
   }, []);
 
-  const totalHeight = hours.length * HOUR_HEIGHT;
+  const totalHeight = hours.length * HOUR_HEIGHT + TOP_PAD;
 
   const days = useMemo(() => {
     if (viewMode === '4day') return [0, 1, 2, 3].map(i => addDaysToStr(currentDate, i));
@@ -460,7 +462,7 @@ const CalendarGrid = ({
   const timeToTop = (timeStr) => {
     if (!timeStr) return 0;
     const [h, m] = timeStr.split(':').map(Number);
-    return ((h - openHour) * 60 + m) / 60 * HOUR_HEIGHT;
+    return ((h - openHour) * 60 + m) / 60 * HOUR_HEIGHT + TOP_PAD;
   };
 
   const timeToHeight = (startStr, endStr) => {
@@ -517,7 +519,7 @@ const CalendarGrid = ({
             className={`flex-shrink-0 ${isUnassigned ? 'text-warning' : 'text-text-secondary'}`}
           />
           <span
-            className={`font-body text-[10px] truncate max-w-full block ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}
+            className={`font-body text-[11px] truncate max-w-full block ${isUnassigned ? 'italic font-medium' : 'font-semibold'}`}
           >
             {col.name}
           </span>
@@ -552,8 +554,8 @@ const CalendarGrid = ({
   const renderTimeLabels = () => (
     <div className="flex-shrink-0 border-r border-border relative bg-surface sticky left-0 z-header" style={{ width: TIME_COL_WIDTH }}>
       {hours.map((hour) => (
-        <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * HOUR_HEIGHT }}>
-          <span className="absolute -top-2.5 right-2 font-data text-[11px] text-text-secondary">
+        <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * HOUR_HEIGHT + TOP_PAD }}>
+          <span className="absolute -top-2.5 right-2 font-data text-[13px] text-text-secondary">
             {hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`}
           </span>
         </div>
@@ -565,10 +567,10 @@ const CalendarGrid = ({
   const renderGridLines = () => (
     <>
       {hours.map((hour) => {
-        const top = (hour - openHour) * HOUR_HEIGHT;
+        const top = (hour - openHour) * HOUR_HEIGHT + TOP_PAD;
         return (
           <React.Fragment key={`lines-${hour}`}>
-            <div className="absolute left-0 right-0 border-t border-border" style={{ top }} />
+            <div className="absolute left-0 right-0 border-t-2 border-border" style={{ top }} />
             <div className="absolute left-0 right-0 border-t border-border/40" style={{ top: top + SLOT_HEIGHT }} />
           </React.Fragment>
         );
@@ -597,7 +599,7 @@ const CalendarGrid = ({
     return (
       <>
         {hours.map((hour) => {
-          const top = (hour - openHour) * HOUR_HEIGHT;
+          const top = (hour - openHour) * HOUR_HEIGHT + TOP_PAD;
           return (
             <React.Fragment key={`interval-${hour}`}>
               {renderIntervalLine(hour, 10, top + TEN_MIN)}
@@ -630,7 +632,7 @@ const CalendarGrid = ({
 
   const handleColumnClick = (e, day, col) => {
     if (activeDragId || !onEmptySlotClick) return;
-    const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top;
+    const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top - TOP_PAD;
     const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
     const hour = Math.floor(minutesFromTop / 60) + openHour;
     const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
@@ -738,7 +740,7 @@ const CalendarGrid = ({
         ref={headerScrollRef}
         className="flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
       >
-        <div className="flex" style={{ minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
+        <div className="flex" style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
           <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center sticky left-0 z-header bg-background" style={{ width: TIME_COL_WIDTH }}>
             <Icon name="Clock" size={14} className="text-text-secondary" />
           </div>
@@ -758,7 +760,7 @@ const CalendarGrid = ({
           {canSortHeaders ? (
             <DndContext sensors={headerSensors} collisionDetection={closestCenter} onDragStart={handleHeaderDragStart} onDragEnd={handleHeaderDragEnd}>
               <SortableContext items={regularColumnIds} strategy={horizontalListSortingStrategy}>
-                <div className="flex" style={{ minWidth: regularMinWidth }}>
+                <div className="flex flex-1" style={{ minWidth: regularMinWidth }}>
                   {regularColumns.map(col => (
                     <SortableColumnHeader key={col.id} id={col.id} minWidth={minColWidth}>
                       {renderColumnHeader(col)}
@@ -768,7 +770,7 @@ const CalendarGrid = ({
               </SortableContext>
             </DndContext>
           ) : (
-            <div className="flex" style={{ minWidth: regularMinWidth }}>
+            <div className="flex flex-1" style={{ minWidth: regularMinWidth }}>
               {regularColumns.map(col => renderColumnHeader(col))}
             </div>
           )}
@@ -777,7 +779,7 @@ const CalendarGrid = ({
       {/* Scrollable grid body */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto sidebar-scroll"
+        className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
         onScroll={(e) => {
           if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.target.scrollLeft;
@@ -787,7 +789,7 @@ const CalendarGrid = ({
         <div
           ref={gridBodyRef}
           className="flex relative"
-          style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + columnsMinWidth }}
+          style={{ height: totalHeight, width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}
           data-open-hour={openHour}
           data-hour-height={HOUR_HEIGHT}
         >
@@ -856,7 +858,7 @@ const CalendarGrid = ({
               </div>
             );
           })()}
-          <div className="flex relative overflow-hidden" style={{ minWidth: regularMinWidth }}>
+          <div className="flex flex-1 relative overflow-hidden" style={{ minWidth: regularMinWidth }}>
             {renderGridLines()}
             {renderNowIndicator(currentDate)}
             {regularColumns.map(col => renderColumn(col, currentDate))}
@@ -876,9 +878,9 @@ const CalendarGrid = ({
         ref={headerScrollRef}
         className="flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
       >
-        <div className="flex" style={{ minWidth: TIME_COL_WIDTH + daysMinWidth }}>
+        <div className="flex" style={{ width: '100%', minWidth: TIME_COL_WIDTH + daysMinWidth }}>
           <div className="flex-shrink-0 border-r border-border sticky left-0 bg-background" style={{ width: TIME_COL_WIDTH }} />
-          <div className="flex" style={{ minWidth: daysMinWidth }}>
+          <div className="flex flex-1" style={{ minWidth: daysMinWidth }}>
             {days.map(day => {
               const isCurrentDay = day === todayStr;
               return (
@@ -899,7 +901,7 @@ const CalendarGrid = ({
       {/* Scrollable grid body */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto sidebar-scroll"
+        className="flex-1 overflow-x-scroll overflow-y-auto calendar-grid-scroll"
         onScroll={(e) => {
           if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.target.scrollLeft;
@@ -909,12 +911,12 @@ const CalendarGrid = ({
         <div
           ref={gridBodyRef}
           className="flex relative"
-          style={{ height: totalHeight, minWidth: TIME_COL_WIDTH + daysMinWidth }}
+          style={{ height: totalHeight, width: '100%', minWidth: TIME_COL_WIDTH + daysMinWidth }}
           data-open-hour={openHour}
           data-hour-height={HOUR_HEIGHT}
         >
           {renderTimeLabels()}
-          <div className="flex relative" style={{ minWidth: daysMinWidth }}>
+          <div className="flex flex-1 relative" style={{ minWidth: daysMinWidth }}>
             {renderGridLines()}
             {days.map((day, di) => {
               const isCurrentDay = day === todayStr;
@@ -930,7 +932,7 @@ const CalendarGrid = ({
                   style={{ minWidth: minColWidth }}
                   onClick={(e) => {
                     if (activeDragId || !onEmptySlotClick) return;
-                    const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top;
+                    const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top - TOP_PAD;
                     const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
                     const hour = Math.floor(minutesFromTop / 60) + openHour;
                     const minute = Math.floor((minutesFromTop % 60) / 5) * 5;

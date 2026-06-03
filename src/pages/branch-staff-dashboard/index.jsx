@@ -419,9 +419,9 @@ const BranchStaffDashboard = () => {
         onCollapseChange={setSidebarCollapsed}
       />
 
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200`}>
+      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : ''}`}>
         {/* Top Bar - Consistent with Admin */}
-        <header className="bg-surface-sidebar sticky top-0 z-header">
+        <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
           <div className="px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between">
               {/* Left: Branch + date/time */}
@@ -552,7 +552,7 @@ const BranchStaffDashboard = () => {
         )}
 
         {/* Main Content Area - Consistent with Admin */}
-        <main className={`${viewMode === 'calendar' ? 'px-0 py-0' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4'} bg-surface-dim min-h-[calc(100vh-52px)]`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
+        <main className={`${viewMode === 'calendar' ? 'px-0 py-0 flex-1 min-h-0 overflow-hidden' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4 min-h-[calc(100vh-52px)]'} bg-surface-dim`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
           {viewMode === 'dashboard' ? (
             <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
               {/* Overview Stats */}
@@ -627,7 +627,7 @@ const BranchStaffDashboard = () => {
               onRefresh={loadData}
             />
           ) : viewMode === 'calendar' ? (
-            <OperationalCalendar branchId={branchId} heightOffset={56} />
+            <OperationalCalendar branchId={branchId} />
           ) : viewMode === 'new-booking' ? (
             <StaffBookingForm onBookingCreated={loadData} />
           ) : (

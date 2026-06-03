@@ -633,7 +633,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
 // ── Component ────────────────────────────────────────────────
 
-const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
+const OperationalCalendar = ({ branchId }) => {
   // Industry-specific labels from auth context
   const { profile } = useAuth();
   const industry = profile?.organizations?.industries;
@@ -1578,7 +1578,7 @@ const OperationalCalendar = ({ branchId, heightOffset = 100 }) => {
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <div className="bg-surface overflow-hidden flex flex-col" style={{ height: `calc(100vh - ${heightOffset}px)` }}>
+        <div className="bg-surface overflow-hidden flex flex-col h-full pb-2">
           {/* Top toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
             {/* Left: Navigation */}
