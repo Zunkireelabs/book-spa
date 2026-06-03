@@ -353,17 +353,25 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
-  -- Completed bookings: block financial and status changes
+  -- Completed bookings: freeze structural fields, but allow discount edits until paid
   -- (Allow is_locked and updated_at to change for closeDay)
   IF OLD.status = 'Completed' THEN
+    -- Structural fields are always immutable once completed
     IF (
       NEW.status IS DISTINCT FROM OLD.status
       OR NEW.base_amount IS DISTINCT FROM OLD.base_amount
-      OR NEW.discount_amount IS DISTINCT FROM OLD.discount_amount
       OR NEW.therapist_id IS DISTINCT FROM OLD.therapist_id
-      OR NEW.discount_status IS DISTINCT FROM OLD.discount_status
     ) THEN
       RAISE EXCEPTION 'BOOKING_IMMUTABLE: Completed bookings cannot be modified.'
+        USING ERRCODE = 'P0002';
+    END IF;
+
+    -- Discounts stay editable until payment is taken; once paid, frozen
+    IF OLD.payment_status = 'paid' AND (
+      NEW.discount_amount IS DISTINCT FROM OLD.discount_amount
+      OR NEW.discount_status IS DISTINCT FROM OLD.discount_status
+    ) THEN
+      RAISE EXCEPTION 'BOOKING_IMMUTABLE: Cannot modify discount on a paid booking.'
         USING ERRCODE = 'P0002';
     END IF;
   END IF;
