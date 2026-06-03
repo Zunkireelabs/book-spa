@@ -1092,7 +1092,7 @@ const BookingActionModal = ({
                             if (result?.error) {
                               setDiscountError(result.error.message || 'Failed to cancel discount.');
                             } else {
-                              setDiscountSuccess('approved');
+                              setDiscountSuccess('removed');
                             }
                             setIsLoading(false);
                           }}
@@ -1194,6 +1194,12 @@ const BookingActionModal = ({
                       <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
                         <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs text-success">Discount applied successfully.</span>
+                      </div>
+                    )}
+                    {discountSuccess === 'removed' && (
+                      <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
+                        <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
+                        <span className="font-body font-body-normal text-xs text-success">Discount removed successfully.</span>
                       </div>
                     )}
                     {discountSuccess === 'pending' && (
