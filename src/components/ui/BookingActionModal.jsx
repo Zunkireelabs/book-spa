@@ -341,7 +341,7 @@ const BookingActionModal = ({
     }
 
     // Client-side discount limit check
-    const maxPercent = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+    const maxPercent = userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15;
     const baseAmount = booking.baseAmount || 0;
     const effectivePercent = discountType === 'percentage'
       ? Number(discountValue)
@@ -413,7 +413,7 @@ const BookingActionModal = ({
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
   const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
-  const discountLimitLabel = userRole === 'admin' ? '30%' : userRole === 'manager' ? '25%' : '15%';
+  const discountLimitLabel = userRole === 'admin' ? '30%' : userRole === 'manager' ? '30%' : '15%';
 
   const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
 
@@ -1144,21 +1144,21 @@ const BookingActionModal = ({
                       <input
                         type="number"
                         min="0"
-                        max={discountType === 'percentage' ? (userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15) : Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.25 : 0.15))}
+                        max={discountType === 'percentage' ? (userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15) : Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.30 : 0.15))}
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
-                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.25 : 0.15))}`}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.30 : 0.15))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
                           discountValue && (() => {
-                            const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+                            const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15;
                             const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
                             return eff > maxP;
                           })() ? 'border-error' : 'border-border'
                         }`}
                       />
                       {discountValue && (() => {
-                        const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 25 : 15;
+                        const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15;
                         const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
                         return eff > maxP ? (
                           <p className="text-xs text-error mt-1 flex items-center gap-1">

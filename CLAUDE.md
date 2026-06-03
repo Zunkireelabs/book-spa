@@ -82,6 +82,18 @@ Two Supabase projects exist — **staging** (default for local dev) and **produc
 | Staging | `snzcckzfmpboeqkktmwy` | `dev-zenly.zunkireelabs.com` |
 | Production | `pmbvogiphelmpjdalmtv` | `zenly.zunkireelabs.com` |
 
+**These are two completely separate databases — they share no data.** Git branch → database:
+
+| Git branch(es) | Supabase database |
+|----------------|-------------------|
+| `feature/*`, `stage` | Staging (`snzcckzfmpboeqkktmwy`) |
+| `main` (production) | Production (`pmbvogiphelmpjdalmtv`) |
+
+Deploys ship **frontend code only** — they do **NOT** copy rows between the two databases.
+Any data created in staging (branches/outlets, rooms, staff, services, logins, exclusions,
+etc.) must be **re-created directly in the production database** via SQL or the Supabase
+dashboard. Merging `stage → main` will never make staging data appear in production.
+
 ```bash
 cp .env.example .env            # defaults to staging
 cp .env.example .env.staging    # preserved staging template
@@ -179,7 +191,7 @@ Cancelled  Cancelled / No Show (terminal)
 | Role | Max Discount |
 |------|-------------|
 | staff | 15% |
-| manager | 25% |
+| manager | 30% |
 | admin | 30% |
 
 ### PIN Login Flow
