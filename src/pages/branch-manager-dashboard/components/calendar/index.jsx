@@ -97,6 +97,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
   const [therapistSearch, setTherapistSearch] = useState('');
   const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
@@ -126,6 +127,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setBookingTime(slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '');
     setError(null);
     setSubmitting(false);
+    submitInFlightRef.current = false;
   }, [slotInfo]);
 
   // Compute which therapists & rooms are busy during the selected time slot
@@ -241,6 +243,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!serviceId || !customerName.trim()) return;
+    // Synchronous re-entry guard: the `submitting` state disables the button
+    // only after a re-render, so a fast double-click can fire two submits and
+    // create duplicate bookings. The ref blocks the second call immediately.
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     setSubmitting(true);
     setError(null);
     const err = await onSubmit({
@@ -258,6 +265,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     if (err) {
       setError(err);
       setSubmitting(false);
+      submitInFlightRef.current = false;
     }
   };
 

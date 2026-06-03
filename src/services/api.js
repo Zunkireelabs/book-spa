@@ -33,7 +33,7 @@ const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 const DISCOUNT_LIMITS = {
   staff:   0.15, // 15%
-  manager: 0.25, // 25%
+  manager: 0.30, // 30%
   admin:   0.30, // 30%
 };
 
