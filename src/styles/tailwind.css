@@ -380,3 +380,32 @@
 .sidebar-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── Calendar grid scroller — thicker horizontal bar, always visible ── */
+.calendar-grid-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: #666666 var(--color-background);
+}
+
+.calendar-grid-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 44px;
+}
+
+.calendar-grid-scroll::-webkit-scrollbar-thumb {
+  background: #666666;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  min-width: 48px;
+}
+
+.calendar-grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+  background-clip: content-box;
+  border: 3px solid transparent;
+}
+
+.calendar-grid-scroll::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
