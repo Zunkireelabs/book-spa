@@ -447,6 +447,23 @@ CREATE INDEX idx_audit_logs_branch ON audit_logs(branch_id);
 CREATE INDEX idx_audit_logs_changed_at ON audit_logs(changed_at);
 
 -- ============================================================
+-- MIGRATION TRACKING (see supabase/PROMOTION.md)
+-- Records which migrations have been applied to THIS database, so
+-- staging/production drift is visible. A fresh bootstrap starts empty and
+-- records migrations as they run; existing databases were backfilled by
+-- migration-027. RLS on with no policies: only the dashboard/MCP postgres
+-- role touches it; app clients are denied.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version    text PRIMARY KEY,
+  name       text,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE schema_migrations ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
 -- SCHEMA COMPLETE
 -- Next: Run rls.sql, then seed.sql
 -- For existing databases: Run migration-002-missing-tables.sql

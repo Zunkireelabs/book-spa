@@ -94,6 +94,9 @@ Any data created in staging (branches/outlets, rooms, staff, services, logins, e
 etc.) must be **re-created directly in the production database** via SQL or the Supabase
 dashboard. Merging `stage → main` will never make staging data appear in production.
 
+**DB promotion process:** see `supabase/PROMOTION.md` for the migration + credential promotion
+runbook and the `schema_migrations` "what's pending on prod?" check.
+
 ```bash
 cp .env.example .env            # defaults to staging
 cp .env.example .env.staging    # preserved staging template
