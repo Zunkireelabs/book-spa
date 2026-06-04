@@ -206,6 +206,10 @@ const OperationalCalendar = ({ branchId }) => {
       }))
     : [];
 
+  const resourceIdSet = calendarData
+    ? new Set(calendarData.therapists.map((t) => t.id))
+    : new Set();
+
   const events = calendarData
     ? calendarData.bookings.flatMap((b) => {
         const statusColor = STATUS_COLORS[b.status] || STATUS_COLORS['Pending'];
@@ -214,15 +218,22 @@ const OperationalCalendar = ({ branchId }) => {
 
         // Place events by the assigned therapist(s) from the booking_therapists
         // junction — the same source the detail popover reads — so the column
-        // always matches the popover. Fall back to the legacy therapist_id
-        // column, then the Unassigned lane. Multi-therapist bookings render one
-        // event per assigned lane.
+        // always matches the popover. Only place into lanes that actually exist
+        // as resources (a therapist may be inactive or filtered out); otherwise
+        // fall back to the legacy therapist_id column, then the Unassigned lane.
+        // This guarantees every booking renders somewhere and is never dropped.
+        // Multi-therapist bookings render one event per assigned lane.
         const junctionIds = (b.booking_therapists || [])
           .map((bt) => bt.therapist_id)
-          .filter(Boolean);
-        const resourceIds = junctionIds.length > 0
-          ? junctionIds
-          : [b.therapist_id || 'unassigned'];
+          .filter((id) => id && resourceIdSet.has(id));
+        let resourceIds;
+        if (junctionIds.length > 0) {
+          resourceIds = junctionIds;
+        } else if (b.therapist_id && resourceIdSet.has(b.therapist_id)) {
+          resourceIds = [b.therapist_id];
+        } else {
+          resourceIds = ['unassigned'];
+        }
 
         const base = {
           start,
