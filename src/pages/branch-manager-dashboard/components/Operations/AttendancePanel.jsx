@@ -8,7 +8,8 @@ const ATTENDANCE_OPTIONS = [
   { value: 'Present', label: 'Present' },
   { value: 'Absent', label: 'Absent' },
   { value: 'Leave', label: 'Leave' },
-  { value: 'Half-Day', label: 'Half-Day' },
+  { value: '1st-Half Day', label: '1st-Half Day' },
+  { value: '2nd-Half Day', label: '2nd-Half Day' },
 ];
 
 function SummaryCard({ icon, iconBg, iconColor, label, value, highlight }) {
@@ -382,7 +383,7 @@ const AttendancePanel = ({ branchId }) => {
                       edit.status === 'Present' ? 'text-success' :
                       edit.status === 'Absent' ? 'text-error' :
                       edit.status === 'Leave' ? 'text-warning' :
-                      edit.status === 'Half-Day' ? 'text-accent' :
+                      (edit.status === '1st-Half Day' || edit.status === '2nd-Half Day') ? 'text-accent' :
                       'text-text-tertiary'
                     }
                   />

@@ -408,7 +408,7 @@ CREATE INDEX idx_customers_phone ON customers(phone);
 -- THERAPIST ATTENDANCE
 -- ============================================================
 
-CREATE TYPE attendance_status AS ENUM ('Present', 'Absent', 'Leave', 'Half-Day');
+CREATE TYPE attendance_status AS ENUM ('Present', 'Absent', 'Leave', '1st-Half Day', '2nd-Half Day');
 
 CREATE TABLE therapist_attendance (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

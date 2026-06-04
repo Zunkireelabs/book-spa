@@ -3847,7 +3847,7 @@ export async function getRiskIndicators({ branchId, date }) {
 // Phase 10F-2: Therapist Attendance API (Read + Write)
 // ============================================================
 
-const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Leave', 'Half-Day'];
+const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Leave', '1st-Half Day', '2nd-Half Day'];
 
 /**
  * Fetch attendance for all active therapists for a specific branch + date.
@@ -4053,7 +4053,8 @@ export async function fetchAttendanceSummary({ branchId, date }) {
         case 'Present': presentCount++; break;
         case 'Absent': absentCount++; break;
         case 'Leave': leaveCount++; break;
-        case 'Half-Day': halfDayCount++; break;
+        case '1st-Half Day': halfDayCount++; break;
+        case '2nd-Half Day': halfDayCount++; break;
       }
     }
 
@@ -4172,7 +4173,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
         if (a.status === 'Present') {
           attendanceByTherapist[a.therapist_id].present += 1;
           attendanceByTherapist[a.therapist_id].daysWorked += 1;
-        } else if (a.status === 'Half-Day') {
+        } else if (a.status === '1st-Half Day' || a.status === '2nd-Half Day') {
           attendanceByTherapist[a.therapist_id].present += 1;
           attendanceByTherapist[a.therapist_id].daysWorked += 0.5;
         }
