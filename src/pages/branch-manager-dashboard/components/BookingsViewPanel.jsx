@@ -49,7 +49,7 @@ const BookingsViewPanel = ({ branchId }) => {
     const dateFilter = getDateFilter(dateRange || filters.dateRange);
     const [bookingsResult, therapistsResult] = await Promise.all([
       fetchBookings(branchId, dateFilter),
-      fetchTherapists(branchId),
+      fetchTherapists(branchId, { date: dateFilter.date }),
     ]);
 
     if (bookingsResult.data) {

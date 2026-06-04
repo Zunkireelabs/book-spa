@@ -121,7 +121,7 @@ const BranchStaffDashboard = () => {
     const dateFilter = getDateFilter(dateRange || filters.dateRange);
     const [bookingsResult, therapistsResult] = await Promise.all([
       fetchBookings(branchId, dateFilter),
-      fetchTherapists(branchId),
+      fetchTherapists(branchId, { date: dateFilter.date }),
     ]);
 
     const transformed = bookingsResult.data ? transformBookings(bookingsResult.data) : [];
