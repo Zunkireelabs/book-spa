@@ -97,6 +97,20 @@ dashboard. Merging `stage → main` will never make staging data appear in produ
 **DB promotion process:** see `supabase/PROMOTION.md` for the migration + credential promotion
 runbook and the `schema_migrations` "what's pending on prod?" check.
 
+> [!IMPORTANT]
+> **CRITICAL — whenever code is promoted to `main` (production), check if the DB needs updating.**
+> Any time changes go from `stage → main`, or a feature branch goes directly to `main`, and those
+> changes depend on a database change (new/changed table, column, enum, trigger, RLS policy,
+> function, migration, or seed/credential data), you MUST:
+> 1. **Tell the user explicitly** that production's database needs to be updated — never assume the
+>    deploy handles it. Deploys ship **frontend only**; SQL is **never** auto-run, and the MCP
+>    reaches **staging only**.
+> 2. **Provide a ready-to-paste SQL script** for the user to run in the **production** Supabase SQL
+>    editor (project `pmbvogiphelmpjdalmtv`). Make it **idempotent** and **portable** (resolve by
+>    name/email, not UUID) per `supabase/PROMOTION.md`.
+> 3. **Do not consider the promotion complete** until the production DB script has been handed off
+>    (and ideally verified). If a change is frontend-only with no DB impact, say so explicitly.
+
 ```bash
 cp .env.example .env            # defaults to staging
 cp .env.example .env.staging    # preserved staging template
