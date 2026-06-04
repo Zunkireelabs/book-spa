@@ -1262,6 +1262,18 @@ const BookingActionModal = ({
                   </div>
                 </div>
 
+                {/* Pending bookings aren't payable yet — guide staff to confirm/complete first */}
+                {!canPay && booking.status === 'pending' && booking.paymentStatus !== 'paid' && !isLocked && (
+                  <div className="flex items-start space-x-2 px-3 py-2.5 rounded-spa bg-warning/5 border border-warning/20">
+                    <Icon name="Info" size={14} className="text-warning flex-shrink-0 mt-0.5" />
+                    <span className="font-body font-body-normal text-xs sm:text-sm text-warning">
+                      {relatedBookings.length > 0
+                        ? `Confirm or complete the bookings before recording payment. Once they're confirmed, this and ${relatedBookings.length} related service${relatedBookings.length > 1 ? 's' : ''} for ${booking.customerName} can be selected and paid together here.`
+                        : 'Confirm or complete this booking before recording payment.'}
+                    </span>
+                  </div>
+                )}
+
                 {/* Related unpaid bookings */}
                 {relatedBookings.length > 0 && canPay && (
                   <div className="space-y-2">
