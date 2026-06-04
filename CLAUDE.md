@@ -219,6 +219,11 @@ Frontend → POST /functions/v1/pin-login (email, pin, org_slug)
          ← { email_otp } → supabase.auth.verifyOtp() → session
 ```
 
+> **Note:** the `pin-login` Edge Function's source is **not tracked in this repo** (there is no
+> `supabase/functions/` directory). It's deployed/managed directly in the Supabase dashboard, per
+> project. Don't search the repo for it — edit it in the dashboard, and remember it must be
+> deployed to **both** the staging and production projects separately.
+
 ### Service Enrichment (`services/serviceEnrichment.js`)
 
 - Static UI data (images, benefits, categories) keyed by service name

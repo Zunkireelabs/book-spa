@@ -1,107 +1,60 @@
-# React
+# Zenly — Multi-tenant Booking Web App
 
-A modern React-based project utilizing the latest frontend technologies and tools for building responsive web applications.
+Zenly is a multi-tenant spa/booking management SPA (currently running Nuad Thai Spa). Staff,
+managers, and admins manage bookings, therapists, rooms, services, payments, and discounts across
+multiple branches; customers book through an org-scoped public flow.
 
-## 🚀 Features
+> **`CLAUDE.md` is the authoritative source of truth** for architecture, conventions, the two
+> Supabase databases, the git/deploy flow, and the DB promotion process. Read it before making
+> changes. This README is a short orientation only.
 
-- **React 18** - React version with improved rendering and concurrent features
-- **Vite** - Lightning-fast build tool and development server
-- **Redux Toolkit** - State management with simplified Redux setup
-- **TailwindCSS** - Utility-first CSS framework with extensive customization
-- **React Router v6** - Declarative routing for React applications
-- **Data Visualization** - Integrated D3.js and Recharts for powerful data visualization
-- **Form Management** - React Hook Form for efficient form handling
-- **Animation** - Framer Motion for smooth UI animations
-- **Testing** - Jest and React Testing Library setup
+## Tech stack
 
-## 📋 Prerequisites
+- **React 18 + Vite 5** SPA (JSX, not TypeScript)
+- **Tailwind CSS 3** with a custom design-token theme (`tailwind.config.js`)
+- **Supabase** — Postgres, Auth, Row-Level Security, Realtime (two separate projects: staging &
+  production)
+- **React Router v6** (Context API for state — no Redux), **Framer Motion**, **date-fns**,
+  **Recharts**, **@dnd-kit**, **FullCalendar**
 
-- Node.js (v14.x or higher)
-- npm or yarn
-
-## 🛠️ Installation
-
-1. Install dependencies:
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
-   
-2. Start the development server:
-   ```bash
-   npm start
-   # or
-   yarn start
-   ```
-
-## 📁 Project Structure
-
-```
-react_app/
-├── public/             # Static assets
-├── src/
-│   ├── components/     # Reusable UI components
-│   ├── pages/          # Page components
-│   ├── styles/         # Global styles and Tailwind configuration
-│   ├── App.jsx         # Main application component
-│   ├── Routes.jsx      # Application routes
-│   └── index.jsx       # Application entry point
-├── .env                # Environment variables
-├── index.html          # HTML template
-├── package.json        # Project dependencies and scripts
-├── tailwind.config.js  # Tailwind CSS configuration
-└── vite.config.js      # Vite configuration
-```
-
-## 🧩 Adding Routes
-
-To add new routes to the application, update the `Routes.jsx` file:
-
-```jsx
-import { useRoutes } from "react-router-dom";
-import HomePage from "pages/HomePage";
-import AboutPage from "pages/AboutPage";
-
-const ProjectRoutes = () => {
-  let element = useRoutes([
-    { path: "/", element: <HomePage /> },
-    { path: "/about", element: <AboutPage /> },
-    // Add more routes as needed
-  ]);
-
-  return element;
-};
-```
-
-## 🎨 Styling
-
-This project uses Tailwind CSS for styling. The configuration includes:
-
-- Forms plugin for form styling
-- Typography plugin for text styling
-- Aspect ratio plugin for responsive elements
-- Container queries for component-specific responsive design
-- Fluid typography for responsive text
-- Animation utilities
-
-## 📱 Responsive Design
-
-The app is built with responsive design using Tailwind CSS breakpoints.
-
-
-## 📦 Deployment
-
-Build the application for production:
+## Getting started
 
 ```bash
-npm run build
+npm install
+cp .env.example .env   # defaults to the staging Supabase project
+npm start              # dev server on http://localhost:4028
 ```
 
-## 🙏 Acknowledgments
+Only Supabase `anon` keys belong in `.env`. Never put a `service_role` key in any env file.
 
-- Built with [Rocket.new](https://rocket.new)
-- Powered by React and Vite
-- Styled with Tailwind CSS
+## Scripts
 
-Built with ❤️ on Rocket.new
+| Command | Description |
+|---------|-------------|
+| `npm start` | Vite dev server (port 4028) |
+| `npm run build` | Production build → `build/` |
+| `npm run serve` | Preview the production build |
+
+There is **no test or lint runner** configured — `npm run build` is the primary validation gate.
+
+## Project layout
+
+```
+src/
+├── components/   # Shared + ui/ reusable components
+├── contexts/     # Auth → Org → Branch → AIAssistant (+ Tenant for customer routes)
+├── lib/          # supabase.js client singleton
+├── pages/        # Route pages (org-scoped: /:orgSlug/...)
+├── services/     # api.js (state machine + mutations), transformers, enrichment
+└── styles/       # Tailwind entry
+supabase/         # schema.sql, rls.sql, migration-NNN-*.sql, seeds, PROMOTION.md
+```
+
+## Database & deployment
+
+There are **two completely separate Supabase databases** (staging and production) that share no
+data. Deploys ship **frontend code only** — schema/seed/credential changes must be applied to each
+database by hand. See **`CLAUDE.md`** and **`supabase/PROMOTION.md`** for the migration tracking
+(`schema_migrations`) and promotion runbook.
+
+Git flow: `feature/*` → `stage` → `main`. `stage` deploys to staging, `main` to production.
