@@ -167,8 +167,8 @@ const OperationalCalendar = ({ branchId }) => {
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistId, notes) => {
-    const result = await assignTherapist({ bookingId, therapistId });
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
+    const result = await assignTherapist({ bookingId, therapistIds, roomId });
     if (result.error) {
       showToast(result.error.message || 'Failed to assign therapist.', 'error');
       return;
@@ -207,14 +207,24 @@ const OperationalCalendar = ({ branchId }) => {
     : [];
 
   const events = calendarData
-    ? calendarData.bookings.map((b) => {
+    ? calendarData.bookings.flatMap((b) => {
         const statusColor = STATUS_COLORS[b.status] || STATUS_COLORS['Pending'];
         const start = b.start_datetime || buildDatetime(b.date, b.start_time);
         const end = b.end_datetime || buildDatetime(b.date, b.end_time);
 
-        return {
-          id: b.id,
-          resourceId: b.therapist_id || 'unassigned',
+        // Place events by the assigned therapist(s) from the booking_therapists
+        // junction — the same source the detail popover reads — so the column
+        // always matches the popover. Fall back to the legacy therapist_id
+        // column, then the Unassigned lane. Multi-therapist bookings render one
+        // event per assigned lane.
+        const junctionIds = (b.booking_therapists || [])
+          .map((bt) => bt.therapist_id)
+          .filter(Boolean);
+        const resourceIds = junctionIds.length > 0
+          ? junctionIds
+          : [b.therapist_id || 'unassigned'];
+
+        const base = {
           start,
           end,
           title: `${b.customer_name} — ${b.service?.name || 'Service'}`,
@@ -233,6 +243,12 @@ const OperationalCalendar = ({ branchId }) => {
             endTime: b.end_time,
           },
         };
+
+        return resourceIds.map((resourceId) => ({
+          ...base,
+          id: `${b.id}::${resourceId}`,
+          resourceId,
+        }));
       })
     : [];
 
