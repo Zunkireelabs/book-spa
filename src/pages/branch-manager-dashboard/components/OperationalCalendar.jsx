@@ -198,12 +198,14 @@ const OperationalCalendar = ({ branchId }) => {
     : [];
 
   const therapistsForModal = calendarData
-    ? calendarData.therapists.map((t) => ({
-        id: t.id,
-        name: t.name,
-        gender: t.gender,
-        specialties: t.specialties || [],
-      }))
+    ? calendarData.therapists
+        .filter((t) => !attendanceMap[t.id])
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          gender: t.gender,
+          specialties: t.specialties || [],
+        }))
     : [];
 
   const resourceIdSet = calendarData

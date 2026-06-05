@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import FilterBar from '../../../../components/ui/FilterBar';
 import { fetchAttendance, fetchAttendanceSummary, markAttendance } from '../../../../services/api';
 
 const ATTENDANCE_OPTIONS = [
@@ -8,7 +9,24 @@ const ATTENDANCE_OPTIONS = [
   { value: 'Present', label: 'Present' },
   { value: 'Absent', label: 'Absent' },
   { value: 'Leave', label: 'Leave' },
-  { value: 'Half-Day', label: 'Half-Day' },
+  { value: '1st-Half Day', label: '1st-Half Day' },
+  { value: '2nd-Half Day', label: '2nd-Half Day' },
+];
+
+const STATUS_FILTER_OPTIONS = [
+  { value: 'all', label: 'All Statuses' },
+  { value: '', label: 'Not Marked' },
+  { value: 'Present', label: 'Present' },
+  { value: 'Absent', label: 'Absent' },
+  { value: 'Leave', label: 'Leave' },
+  { value: '1st-Half Day', label: '1st-Half Day' },
+  { value: '2nd-Half Day', label: '2nd-Half Day' },
+];
+
+const STAFF_TYPE_OPTIONS = [
+  { value: 'all', label: 'All Staff' },
+  { value: 'service', label: 'Service Staff' },
+  { value: 'support', label: 'Support Staff' },
 ];
 
 function SummaryCard({ icon, iconBg, iconColor, label, value, highlight }) {
@@ -42,6 +60,43 @@ const AttendancePanel = ({ branchId }) => {
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState({});
 
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [staffTypeFilter, setStaffTypeFilter] = useState('all');
+
+  // Multi-selection for bulk marking
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'all' || staffTypeFilter !== 'all';
+
+  const filteredTherapists = useMemo(() => {
+    return therapists.filter((t) => {
+      const matchesSearch = !searchQuery.trim()
+        || (t.therapistName || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
+      const currentStatus = edits[t.therapistId]?.status ?? (t.status || '');
+      const matchesStatus = statusFilter === 'all' || currentStatus === statusFilter;
+      const matchesType = staffTypeFilter === 'all'
+        || (staffTypeFilter === 'service' ? t.isServiceStaff : !t.isServiceStaff);
+      return matchesSearch && matchesStatus && matchesType;
+    });
+  }, [therapists, edits, searchQuery, statusFilter, staffTypeFilter]);
+
+  const allFilteredSelected = filteredTherapists.length > 0
+    && filteredTherapists.every((t) => selectedIds.includes(t.therapistId));
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !filteredTherapists.some((t) => t.therapistId === id)));
+    } else {
+      setSelectedIds((prev) => [...new Set([...prev, ...filteredTherapists.map((t) => t.therapistId)])]);
+    }
+  };
+
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -66,6 +121,7 @@ const AttendancePanel = ({ branchId }) => {
 
     const rows = attendanceResult.data || [];
     setTherapists(rows);
+    setSelectedIds([]);
 
     // Initialize edits from fetched data
     const initialEdits = {};
@@ -202,6 +258,61 @@ const AttendancePanel = ({ branchId }) => {
     }
   };
 
+  const handleBulkMark = async (status) => {
+    if (selectedIds.length === 0) return;
+    if (dayLocked) {
+      showToast('Day is closed. Attendance cannot be modified.', 'error');
+      return;
+    }
+
+    let successCount = 0;
+    let lockHit = false;
+
+    for (const id of selectedIds) {
+      setSaving(prev => ({ ...prev, [id]: true }));
+
+      const edit = edits[id] || {};
+      const result = await markAttendance({
+        therapistId: id,
+        date: selectedDate,
+        status,
+        checkInTime: edit.checkInTime || null,
+        checkOutTime: edit.checkOutTime || null,
+        notes: edit.notes || null,
+      });
+
+      setSaving(prev => ({ ...prev, [id]: false }));
+
+      if (result.error) {
+        if (result.error.code === 'ATTENDANCE_DAY_LOCKED') {
+          lockHit = true;
+          setDayLocked(true);
+          break;
+        }
+        continue;
+      }
+
+      setEdits(prev => ({
+        ...prev,
+        [id]: { ...prev[id], status, dirty: false },
+      }));
+      successCount++;
+    }
+
+    if (lockHit) {
+      showToast('Day is closed. Attendance cannot be modified.', 'error');
+    } else if (successCount > 0) {
+      showToast(`Marked ${successCount} therapist${successCount !== 1 ? 's' : ''} ${status}`);
+    }
+
+    setSelectedIds([]);
+
+    const summaryResult = await fetchAttendanceSummary({ branchId, date: selectedDate });
+    if (summaryResult.data) {
+      setSummary(summaryResult.data);
+    }
+  };
+
   const dirtyCount = Object.values(edits).filter(e => e.dirty && e.status).length;
 
   // ── Loading state ──────────────────────────────────────────
@@ -246,8 +357,8 @@ const AttendancePanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Attendance</h2>
-          <p className="font-body text-sm text-text-secondary">Mark daily attendance for active therapists.</p>
+          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Staff Attendance</h2>
+          <p className="font-body text-sm text-text-secondary">Mark daily attendance for active staff.</p>
         </div>
         <div className="flex items-center space-x-3">
           <input
@@ -321,11 +432,76 @@ const AttendancePanel = ({ branchId }) => {
         </div>
       )}
 
+      {/* Search & Status Filter */}
+      <FilterBar
+        search={{
+          value: searchQuery,
+          onChange: setSearchQuery,
+          placeholder: 'Search staff...',
+        }}
+        filters={[
+          {
+            value: staffTypeFilter,
+            onChange: setStaffTypeFilter,
+            options: STAFF_TYPE_OPTIONS,
+          },
+          {
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: STATUS_FILTER_OPTIONS,
+          },
+        ]}
+        resultCount={hasActiveFilters ? { filtered: filteredTherapists.length, total: therapists.length } : undefined}
+        hasActiveFilters={hasActiveFilters}
+        onClear={() => { setSearchQuery(''); setStatusFilter('all'); setStaffTypeFilter('all'); }}
+      />
+
+      {/* Bulk Action Bar */}
+      {selectedIds.length > 0 && !dayLocked && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 bg-primary/5 border border-primary/20 rounded-spa-lg">
+          <span className="font-body font-body-medium text-sm text-text-primary">
+            {selectedIds.length} selected
+          </span>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => handleBulkMark('Present')}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-success text-white rounded-spa font-body font-body-medium text-sm hover:bg-success/90 spa-transition-fast"
+            >
+              <Icon name="UserCheck" size={15} />
+              <span>Mark Present</span>
+            </button>
+            <button
+              onClick={() => handleBulkMark('Absent')}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-error text-white rounded-spa font-body font-body-medium text-sm hover:bg-error/90 spa-transition-fast"
+            >
+              <Icon name="UserX" size={15} />
+              <span>Mark Absent</span>
+            </button>
+            <button
+              onClick={() => setSelectedIds([])}
+              className="px-3 py-1.5 text-text-secondary rounded-spa font-body font-body-medium text-sm hover:bg-background spa-transition-fast"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Therapist Table */}
       <div className="bg-surface rounded-spa-lg border border-border">
         {/* Table header */}
         <div className="hidden md:grid md:grid-cols-[1fr_140px_110px_110px_1fr_80px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
-          <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Therapist</span>
+          <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleSelectAll}
+              disabled={dayLocked || filteredTherapists.length === 0}
+              className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer disabled:cursor-not-allowed"
+              title="Select all"
+            />
+            Staff
+          </span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Status</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Check-in</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Check-out</span>
@@ -336,11 +512,16 @@ const AttendancePanel = ({ branchId }) => {
         {therapists.length === 0 ? (
           <div className="p-8 text-center">
             <Icon name="Users" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body text-sm text-text-tertiary">No active therapists found for this branch.</p>
+            <p className="font-body text-sm text-text-tertiary">No active staff found for this branch.</p>
+          </div>
+        ) : filteredTherapists.length === 0 ? (
+          <div className="p-8 text-center">
+            <Icon name="SearchX" size={32} className="text-text-tertiary mx-auto mb-3" />
+            <p className="font-body text-sm text-text-tertiary">No staff match the current filters.</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {therapists.map(t => {
+            {filteredTherapists.map(t => {
               const edit = edits[t.therapistId] || {};
               const isSaving = saving[t.therapistId];
               const isDirty = edit.dirty;
@@ -355,6 +536,13 @@ const AttendancePanel = ({ branchId }) => {
                 >
                   {/* Therapist name */}
                   <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(t.therapistId)}
+                      onChange={() => toggleSelect(t.therapistId)}
+                      disabled={dayLocked}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
+                    />
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <Icon name="User" size={14} className="text-primary" />
                     </div>
@@ -382,7 +570,7 @@ const AttendancePanel = ({ branchId }) => {
                       edit.status === 'Present' ? 'text-success' :
                       edit.status === 'Absent' ? 'text-error' :
                       edit.status === 'Leave' ? 'text-warning' :
-                      edit.status === 'Half-Day' ? 'text-accent' :
+                      (edit.status === '1st-Half Day' || edit.status === '2nd-Half Day') ? 'text-accent' :
                       'text-text-tertiary'
                     }
                   />

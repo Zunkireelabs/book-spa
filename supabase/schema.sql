@@ -126,6 +126,8 @@ CREATE TABLE bookings (
   -- Discount workflow
   discount_status discount_status_enum NOT NULL DEFAULT 'none',
   discount_approved_by uuid REFERENCES users(id),
+  discount_requested_by uuid REFERENCES users(id),
+  discount_requested_to uuid REFERENCES users(id),
   discount_reason text,
 
   -- CRM link (nullable for walk-ins)
@@ -140,6 +142,9 @@ CREATE TABLE bookings (
 
   -- Lock (set by daily close)
   is_locked boolean NOT NULL DEFAULT false,
+
+  -- Group bookings: rows created together share one UUID (NULL = individual)
+  booking_group_id uuid,
 
   -- Audit
   created_by uuid REFERENCES users(id),
@@ -408,7 +413,7 @@ CREATE INDEX idx_customers_phone ON customers(phone);
 -- THERAPIST ATTENDANCE
 -- ============================================================
 
-CREATE TYPE attendance_status AS ENUM ('Present', 'Absent', 'Leave', 'Half-Day');
+CREATE TYPE attendance_status AS ENUM ('Present', 'Absent', 'Leave', '1st-Half Day', '2nd-Half Day');
 
 CREATE TABLE therapist_attendance (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

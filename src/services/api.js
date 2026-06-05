@@ -219,6 +219,33 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
   }
 }
 
+/**
+ * Fetch who created a booking + when. Returns { createdByName, createdAt }.
+ * createdByName is null for anonymous customer self-bookings (online).
+ */
+export async function fetchBookingCreator(bookingId) {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('created_at, creator:users!created_by(full_name)')
+      .eq('id', bookingId)
+      .single();
+
+    if (error) throw error;
+
+    return {
+      data: {
+        createdByName: data.creator?.full_name || null,
+        createdAt: data.created_at || null,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchBookingCreator error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // Booking Mutations (Phase 4 + Phase 6 hardened)
 // ============================================================
@@ -611,7 +638,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
   }
 }
 
-export async function applyDiscount({ bookingId, discountType, discountValue, discountReason }) {
+export async function applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
@@ -672,11 +699,18 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     // 8. If staff exceeds limit, set to pending instead of blocking
     const isWithinLimit = effectivePercent <= maxPercent;
 
+    // Over-limit discounts must be routed to a specific approver.
+    if (!isWithinLimit && !requestedTo) {
+      return { data: null, error: { code: 'APPROVER_REQUIRED', message: 'Select a manager or admin to send this discount request to.' } };
+    }
+
     const updatePayload = {
       discount_amount: discountAmount,
       discount_reason: discountReason.trim(),
       discount_status: isWithinLimit ? 'approved' : 'pending',
       discount_approved_by: isWithinLimit ? user.id : null,
+      discount_requested_by: isWithinLimit ? null : user.id,
+      discount_requested_to: isWithinLimit ? null : requestedTo,
     };
 
     // 9. Update booking — trigger recomputes final_amount
@@ -711,6 +745,9 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
  */
 export async function fetchPendingDiscounts(branchId) {
   try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
     const resolvedBranchId = resolveBranchId(branchId);
 
     const { data, error } = await supabase
@@ -718,10 +755,12 @@ export async function fetchPendingDiscounts(branchId) {
       .select(`
         id, booking_number, customer_name, date, start_time,
         base_amount, discount_amount, final_amount, discount_reason,
-        status, service_id, services:service_id(name)
+        status, service_id, services:service_id(name),
+        requester:users!discount_requested_by(full_name)
       `)
       .eq('branch_id', resolvedBranchId)
       .eq('discount_status', 'pending')
+      .eq('discount_requested_to', user.id)
       .eq('is_locked', false)
       .order('created_at', { ascending: false });
 
@@ -743,11 +782,84 @@ export async function fetchPendingDiscounts(branchId) {
           : 0,
         status: b.status,
         serviceName: b.services?.name || '—',
+        requestedByName: b.requester?.full_name || null,
       })),
       error: null,
     };
   } catch (error) {
     console.error('[API] fetchPendingDiscounts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * List the managers/admins the current user may send a discount request to.
+ * Backed by the list_discount_approvers() SECURITY DEFINER function.
+ */
+export async function fetchDiscountApprovers() {
+  try {
+    const { data, error } = await supabase.rpc('list_discount_approvers');
+    if (error) throw error;
+    return {
+      data: (data || []).map(u => ({ id: u.id, fullName: u.full_name, role: u.role })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchDiscountApprovers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * All discounts for a branch (pending + approved) with requester/approver
+ * names — powers the manager/admin Discounts page.
+ */
+export async function fetchAllDiscounts(branchId) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        id, booking_number, customer_name, date, start_time,
+        base_amount, discount_amount, final_amount, discount_reason,
+        discount_status, status, service_id,
+        services:service_id(name),
+        requester:users!discount_requested_by(full_name),
+        approver:users!discount_approved_by(full_name),
+        requestedTo:users!discount_requested_to(full_name)
+      `)
+      .eq('branch_id', resolvedBranchId)
+      .neq('discount_status', 'none')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return {
+      data: (data || []).map(b => ({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        startTime: b.start_time,
+        serviceName: b.services?.name || '—',
+        baseAmount: Number(b.base_amount),
+        discountAmount: Number(b.discount_amount),
+        finalAmount: Number(b.final_amount),
+        discountPercent: Number(b.base_amount) > 0
+          ? Math.round((Number(b.discount_amount) / Number(b.base_amount)) * 100)
+          : 0,
+        discountReason: b.discount_reason,
+        discountStatus: b.discount_status,
+        status: b.status,
+        requestedByName: b.requester?.full_name || null,
+        approvedByName: b.approver?.full_name || null,
+        requestedToName: b.requestedTo?.full_name || null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAllDiscounts error:', error.message);
     return { data: null, error };
   }
 }
@@ -858,6 +970,8 @@ export async function rejectDiscount(bookingId) {
         discount_status: 'none',
         discount_approved_by: null,
         discount_reason: null,
+        discount_requested_by: null,
+        discount_requested_to: null,
       })
       .eq('id', bookingId)
       .eq('discount_status', 'pending')
@@ -1961,6 +2075,7 @@ export async function createBooking({
   therapistId,
   therapistIds,
   roomId,
+  bookingGroupId,
 }) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -2179,6 +2294,8 @@ export async function createBooking({
     }
 
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
+    // Capture who created it (null for anonymous customer self-booking).
+    const { data: { user: authUser } } = await supabase.auth.getUser();
     const { data: booking, error: insertError } = await supabase
       .from('bookings')
       .insert({
@@ -2196,7 +2313,8 @@ export async function createBooking({
         base_amount: Number(service.price_npr),
         discount_amount: 0,
         special_requests: specialRequests || null,
-        created_by: null,
+        created_by: authUser?.id || null,
+        booking_group_id: bookingGroupId || null,
         // Phase 9A: Snapshot fields — preserve original values at booking time
         service_name_snapshot: service.name,
         service_duration_snapshot: service.duration_minutes,
@@ -3847,7 +3965,7 @@ export async function getRiskIndicators({ branchId, date }) {
 // Phase 10F-2: Therapist Attendance API (Read + Write)
 // ============================================================
 
-const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Leave', 'Half-Day'];
+const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Leave', '1st-Half Day', '2nd-Half Day'];
 
 /**
  * Fetch attendance for all active therapists for a specific branch + date.
@@ -3866,7 +3984,7 @@ export async function fetchAttendance({ branchId, date }) {
     const [therapistsResult, attendanceResult] = await Promise.all([
       supabase
         .from('therapists')
-        .select('id, name')
+        .select('id, name, is_service_staff')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('name'),
@@ -3895,6 +4013,7 @@ export async function fetchAttendance({ branchId, date }) {
       return {
         therapistId: t.id,
         therapistName: t.name,
+        isServiceStaff: t.is_service_staff !== false,
         status: att?.status || null,
         checkInTime: att?.check_in_time || null,
         checkOutTime: att?.check_out_time || null,
@@ -4053,7 +4172,8 @@ export async function fetchAttendanceSummary({ branchId, date }) {
         case 'Present': presentCount++; break;
         case 'Absent': absentCount++; break;
         case 'Leave': leaveCount++; break;
-        case 'Half-Day': halfDayCount++; break;
+        case '1st-Half Day': halfDayCount++; break;
+        case '2nd-Half Day': halfDayCount++; break;
       }
     }
 
@@ -4074,6 +4194,97 @@ export async function fetchAttendanceSummary({ branchId, date }) {
     };
   } catch (error) {
     console.error('[API] fetchAttendanceSummary error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Attendance report over a date range (inclusive).
+ * Aggregates per-staff and overall counts of Present/Absent/Leave/Half Day.
+ */
+export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    if (!startDate || !endDate) {
+      return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Start and end dates are required.' } };
+    }
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const [therapistsResult, attendanceResult] = await Promise.all([
+      supabase
+        .from('therapists')
+        .select('id, name, is_service_staff')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, date, status')
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate),
+    ]);
+
+    if (therapistsResult.error) throw therapistsResult.error;
+    if (attendanceResult.error) throw attendanceResult.error;
+
+    const therapists = therapistsResult.data || [];
+    const records = attendanceResult.data || [];
+
+    const emptyCounts = () => ({ present: 0, absent: 0, leave: 0, halfDay: 0, marked: 0 });
+    const bump = (acc, status) => {
+      switch (status) {
+        case 'Present': acc.present++; acc.marked++; break;
+        case 'Absent': acc.absent++; acc.marked++; break;
+        case 'Leave': acc.leave++; acc.marked++; break;
+        case '1st-Half Day':
+        case '2nd-Half Day': acc.halfDay++; acc.marked++; break;
+        default: break;
+      }
+    };
+
+    // Per-therapist aggregation
+    const perStaffMap = {};
+    for (const t of therapists) {
+      perStaffMap[t.id] = {
+        therapistId: t.id,
+        therapistName: t.name,
+        isServiceStaff: t.is_service_staff !== false,
+        ...emptyCounts(),
+      };
+    }
+
+    const totals = emptyCounts();
+    for (const r of records) {
+      const acc = perStaffMap[r.therapist_id];
+      if (acc) bump(acc, r.status);
+      bump(totals, r.status);
+    }
+
+    const perStaff = Object.values(perStaffMap).map((s) => ({
+      ...s,
+      attendanceRate: s.marked > 0 ? Math.round((s.present / s.marked) * 100) : 0,
+    }));
+
+    const overallRate = totals.marked > 0
+      ? Math.round((totals.present / totals.marked) * 100)
+      : 0;
+
+    return {
+      data: {
+        startDate,
+        endDate,
+        totalStaff: therapists.length,
+        totals: { ...totals, attendanceRate: overallRate },
+        perStaff,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAttendanceReport error:', error.message);
     return { data: null, error };
   }
 }
@@ -4172,7 +4383,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
         if (a.status === 'Present') {
           attendanceByTherapist[a.therapist_id].present += 1;
           attendanceByTherapist[a.therapist_id].daysWorked += 1;
-        } else if (a.status === 'Half-Day') {
+        } else if (a.status === '1st-Half Day' || a.status === '2nd-Half Day') {
           attendanceByTherapist[a.therapist_id].present += 1;
           attendanceByTherapist[a.therapist_id].daysWorked += 0.5;
         }

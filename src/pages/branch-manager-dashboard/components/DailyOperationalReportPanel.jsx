@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
-import { getDailyOperationalReport, exportDailyReportCSV, closeDay } from '../../../services/api';
+import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttendance, fetchAttendanceSummary } from '../../../services/api';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -12,10 +12,20 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+function formatTime(timeStr) {
+  if (!timeStr) return '—';
+  const [h, m] = timeStr.split(':');
+  const d = new Date();
+  d.setHours(Number(h), Number(m), 0, 0);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 const DailyOperationalReportPanel = ({ branchId }) => {
   const today = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState(today);
   const [report, setReport] = useState(null);
+  const [attendance, setAttendance] = useState(null);
+  const [attendanceSummary, setAttendanceSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [closing, setClosing] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -28,13 +38,19 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     setError(null);
     setSuccessMsg(null);
 
-    const { data, error: fetchError } = await getDailyOperationalReport(branchId, selectedDate);
+    const [reportRes, attendanceRes, summaryRes] = await Promise.all([
+      getDailyOperationalReport(branchId, selectedDate),
+      fetchAttendance({ branchId, date: selectedDate }),
+      fetchAttendanceSummary({ branchId, date: selectedDate }),
+    ]);
 
-    if (fetchError) {
-      setError(fetchError.message || 'Failed to load daily report.');
+    if (reportRes.error) {
+      setError(reportRes.error.message || 'Failed to load daily report.');
     } else {
-      setReport(data);
+      setReport(reportRes.data);
     }
+    setAttendance(attendanceRes.error ? null : attendanceRes.data);
+    setAttendanceSummary(summaryRes.error ? null : summaryRes.data);
     setLoading(false);
   }, [branchId, selectedDate]);
 
@@ -69,7 +85,39 @@ const DailyOperationalReportPanel = ({ branchId }) => {
   const handleExportCSV = () => {
     if (!report) return;
 
-    const csv = exportDailyReportCSV(report);
+    let csv = exportDailyReportCSV(report);
+
+    if (report.therapistRevenueSummary?.length) {
+      const top = report.therapistRevenueSummary.reduce((t, x) => (x.totalRevenue > t.totalRevenue ? x : t));
+      csv += '\n\nTop Performer\n';
+      csv += `Staff,${top.therapistName}\n`;
+      csv += `Completed Bookings,${top.completedBookings}\n`;
+      csv += `Revenue,${top.totalRevenue}\n`;
+    }
+
+    if (attendanceSummary && attendanceSummary.totalTherapists > 0) {
+      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      csv += '\n\nStaff Attendance\n';
+      csv += `Total Staff,${attendanceSummary.totalTherapists}\n`;
+      csv += `Present,${attendanceSummary.presentCount}\n`;
+      csv += `Absent,${attendanceSummary.absentCount}\n`;
+      csv += `Leave,${attendanceSummary.leaveCount}\n`;
+      csv += `Half Day,${attendanceSummary.halfDayCount}\n`;
+      csv += `Attendance Rate,${attendanceSummary.attendanceRate}%\n`;
+      if (attendance && attendance.length > 0) {
+        csv += '\nStaff,Status,Check In,Check Out,Notes\n';
+        for (const a of attendance) {
+          csv += [
+            esc(a.therapistName),
+            esc(a.status || 'Not Marked'),
+            esc(a.checkInTime || ''),
+            esc(a.checkOutTime || ''),
+            esc(a.notes || ''),
+          ].join(',') + '\n';
+        }
+      }
+    }
+
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -86,6 +134,10 @@ const DailyOperationalReportPanel = ({ branchId }) => {
       </div>
     );
   }
+
+  const topPerformer = report?.therapistRevenueSummary?.length
+    ? report.therapistRevenueSummary.reduce((top, t) => (t.totalRevenue > top.totalRevenue ? t : top))
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -360,6 +412,30 @@ const DailyOperationalReportPanel = ({ branchId }) => {
             </div>
           )}
 
+          {/* Top Performer (service staff) */}
+          {topPerformer && (
+            <div className="bg-white rounded-lg p-5 border border-gray-200 border-l-4 border-l-accent">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center shrink-0">
+                    <Icon name="Award" size={20} className="text-accent" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Top Performer</p>
+                    <p className="text-lg font-semibold text-gray-900">{topPerformer.therapistName}</p>
+                    <p className="text-xs text-gray-500">
+                      {topPerformer.completedBookings} completed booking{topPerformer.completedBookings !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</p>
+                  <p className="text-xl font-semibold text-emerald-600">{formatNPR(topPerformer.totalRevenue)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Therapist Revenue Summary */}
           {report.therapistRevenueSummary.length > 0 && (
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -389,6 +465,75 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Attendance Report */}
+          {attendanceSummary && attendanceSummary.totalTherapists > 0 && (
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-base font-medium text-gray-900 flex items-center gap-2">
+                  <Icon name="Users" size={18} className="text-primary" />
+                  <span>Staff Attendance</span>
+                  <span className="text-xs text-gray-500 ml-2">
+                    ({attendanceSummary.attendanceRate}% present)
+                  </span>
+                </h3>
+              </div>
+
+              {/* Summary chips */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 p-4 border-b border-gray-200">
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Staff</p>
+                  <p className="text-lg font-semibold text-gray-900">{attendanceSummary.totalTherapists}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Present</p>
+                  <p className="text-lg font-semibold text-emerald-600">{attendanceSummary.presentCount}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Absent</p>
+                  <p className="text-lg font-semibold text-red-600">{attendanceSummary.absentCount}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Leave</p>
+                  <p className="text-lg font-semibold text-amber-600">{attendanceSummary.leaveCount}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Half Day</p>
+                  <p className="text-lg font-semibold text-indigo-600">{attendanceSummary.halfDayCount}</p>
+                </div>
+              </div>
+
+              {/* Per-staff table */}
+              {attendance && attendance.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="text-left px-4 py-3 font-medium text-gray-500">Staff</th>
+                        <th className="text-center px-4 py-3 font-medium text-gray-500">Status</th>
+                        <th className="text-center px-4 py-3 font-medium text-gray-500">Check In</th>
+                        <th className="text-center px-4 py-3 font-medium text-gray-500">Check Out</th>
+                        <th className="text-left px-4 py-3 font-medium text-gray-500">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {attendance.map((a) => (
+                        <tr key={a.therapistId} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 font-medium text-gray-900">{a.therapistName}</td>
+                          <td className="px-4 py-3 text-center">
+                            <AttendanceBadge status={a.status} />
+                          </td>
+                          <td className="px-4 py-3 text-center text-gray-500">{formatTime(a.checkInTime)}</td>
+                          <td className="px-4 py-3 text-center text-gray-500">{formatTime(a.checkOutTime)}</td>
+                          <td className="px-4 py-3 text-gray-500">{a.notes || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -559,6 +704,31 @@ function StatusBadge({ status }) {
     'Completed': 'bg-emerald-100 text-emerald-700',
     'Cancelled': 'bg-red-100 text-red-700',
     'No Show': 'bg-gray-100 text-gray-600',
+  };
+
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+      {status}
+    </span>
+  );
+}
+
+// Attendance status badge helper
+function AttendanceBadge({ status }) {
+  if (!status) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+        Not Marked
+      </span>
+    );
+  }
+
+  const styles = {
+    'Present': 'bg-emerald-100 text-emerald-700',
+    'Absent': 'bg-red-100 text-red-700',
+    'Leave': 'bg-amber-100 text-amber-700',
+    '1st-Half Day': 'bg-indigo-100 text-indigo-700',
+    '2nd-Half Day': 'bg-indigo-100 text-indigo-700',
   };
 
   return (

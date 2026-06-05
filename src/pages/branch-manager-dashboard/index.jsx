@@ -7,6 +7,7 @@ import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
+import NotificationBell from '../../components/ui/NotificationBell';
 import { fetchBookings, fetchTherapists, updateBookingStatus } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
@@ -36,6 +37,8 @@ import TherapistPerformancePanel from './components/Performance/TherapistPerform
 import TopPerformersCard from './components/Performance/TopPerformersCard';
 import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
+import DiscountsPanel from './components/DiscountsPanel';
+import AttendanceReportPanel from './components/AttendanceReportPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -54,6 +57,7 @@ const BranchManagerDashboard = () => {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newBookingNotification, setNewBookingNotification] = useState(null);
+  const [notifications, setNotifications] = useState([]);
   const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 
@@ -111,6 +115,23 @@ const BranchManagerDashboard = () => {
           const newBooking = payload.new;
           const today = new Date().toISOString().split('T')[0];
           const isToday = newBooking.date === today;
+
+          // Add every new booking to the header notification feed (deduped by id)
+          setNotifications((prev) =>
+            prev.some((n) => n.id === newBooking.id)
+              ? prev
+              : [
+                  {
+                    id: newBooking.id,
+                    bookingNumber: newBooking.booking_number,
+                    customerName: newBooking.customer_name,
+                    date: newBooking.date,
+                    createdAt: new Date(),
+                    read: false,
+                  },
+                  ...prev,
+                ].slice(0, 30)
+          );
 
           if (!isToday && newBooking.date) {
             const bookingDate = new Date(newBooking.date);
@@ -213,6 +234,14 @@ const BranchManagerDashboard = () => {
   // Handle viewing a booking from the new booking notification
   const handleViewNewBooking = () => {
     setNewBookingNotification(null);
+    navigate('?view=bookings');
+  };
+
+  // Header notification feed
+  const unreadNotifications = notifications.filter((n) => !n.read).length;
+  const markAllNotificationsRead = () => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  const handleNotificationClick = (n) => {
+    setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
     navigate('?view=bookings');
   };
 
@@ -386,6 +415,14 @@ const BranchManagerDashboard = () => {
                     <span className="text-sm font-medium hidden sm:inline">Assistant</span>
                   </button>
 
+                  {/* Notifications */}
+                  <NotificationBell
+                    notifications={notifications}
+                    unreadCount={unreadNotifications}
+                    onMarkAllRead={markAllNotificationsRead}
+                    onItemClick={handleNotificationClick}
+                  />
+
                   {/* Profile Dropdown */}
                   <div className="relative" ref={profileDropdownRef}>
                     <button
@@ -524,6 +561,8 @@ const BranchManagerDashboard = () => {
               {viewMode === 'customers' && <CustomersPanel branchId={branchId} />}
               {viewMode === 'attendance' && <AttendancePanel branchId={branchId} />}
               {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
+              {viewMode === 'discounts' && <DiscountsPanel branchId={branchId} />}
+              {viewMode === 'attendance-report' && <AttendanceReportPanel branchId={branchId} />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && <ServiceManagementPanel />}
