@@ -437,7 +437,7 @@ const AttendancePanel = ({ branchId }) => {
         search={{
           value: searchQuery,
           onChange: setSearchQuery,
-          placeholder: 'Search therapists...',
+          placeholder: 'Search staff...',
         }}
         filters={[
           {
@@ -500,7 +500,7 @@ const AttendancePanel = ({ branchId }) => {
               className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer disabled:cursor-not-allowed"
               title="Select all"
             />
-            Therapist
+            Staff
           </span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Status</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Check-in</span>
@@ -517,7 +517,7 @@ const AttendancePanel = ({ branchId }) => {
         ) : filteredTherapists.length === 0 ? (
           <div className="p-8 text-center">
             <Icon name="SearchX" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body text-sm text-text-tertiary">No therapists match the current filters.</p>
+            <p className="font-body text-sm text-text-tertiary">No staff match the current filters.</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
