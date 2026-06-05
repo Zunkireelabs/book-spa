@@ -143,6 +143,9 @@ CREATE TABLE bookings (
   -- Lock (set by daily close)
   is_locked boolean NOT NULL DEFAULT false,
 
+  -- Group bookings: rows created together share one UUID (NULL = individual)
+  booking_group_id uuid,
+
   -- Audit
   created_by uuid REFERENCES users(id),
   created_at timestamptz DEFAULT now(),

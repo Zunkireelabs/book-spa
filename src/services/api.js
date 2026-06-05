@@ -2075,6 +2075,7 @@ export async function createBooking({
   therapistId,
   therapistIds,
   roomId,
+  bookingGroupId,
 }) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -2313,6 +2314,7 @@ export async function createBooking({
         discount_amount: 0,
         special_requests: specialRequests || null,
         created_by: authUser?.id || null,
+        booking_group_id: bookingGroupId || null,
         // Phase 9A: Snapshot fields — preserve original values at booking time
         service_name_snapshot: service.name,
         service_duration_snapshot: service.duration_minutes,
@@ -4192,6 +4194,97 @@ export async function fetchAttendanceSummary({ branchId, date }) {
     };
   } catch (error) {
     console.error('[API] fetchAttendanceSummary error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Attendance report over a date range (inclusive).
+ * Aggregates per-staff and overall counts of Present/Absent/Leave/Half Day.
+ */
+export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    if (!startDate || !endDate) {
+      return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Start and end dates are required.' } };
+    }
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const [therapistsResult, attendanceResult] = await Promise.all([
+      supabase
+        .from('therapists')
+        .select('id, name, is_service_staff')
+        .eq('branch_id', resolvedBranchId)
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, date, status')
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate),
+    ]);
+
+    if (therapistsResult.error) throw therapistsResult.error;
+    if (attendanceResult.error) throw attendanceResult.error;
+
+    const therapists = therapistsResult.data || [];
+    const records = attendanceResult.data || [];
+
+    const emptyCounts = () => ({ present: 0, absent: 0, leave: 0, halfDay: 0, marked: 0 });
+    const bump = (acc, status) => {
+      switch (status) {
+        case 'Present': acc.present++; acc.marked++; break;
+        case 'Absent': acc.absent++; acc.marked++; break;
+        case 'Leave': acc.leave++; acc.marked++; break;
+        case '1st-Half Day':
+        case '2nd-Half Day': acc.halfDay++; acc.marked++; break;
+        default: break;
+      }
+    };
+
+    // Per-therapist aggregation
+    const perStaffMap = {};
+    for (const t of therapists) {
+      perStaffMap[t.id] = {
+        therapistId: t.id,
+        therapistName: t.name,
+        isServiceStaff: t.is_service_staff !== false,
+        ...emptyCounts(),
+      };
+    }
+
+    const totals = emptyCounts();
+    for (const r of records) {
+      const acc = perStaffMap[r.therapist_id];
+      if (acc) bump(acc, r.status);
+      bump(totals, r.status);
+    }
+
+    const perStaff = Object.values(perStaffMap).map((s) => ({
+      ...s,
+      attendanceRate: s.marked > 0 ? Math.round((s.present / s.marked) * 100) : 0,
+    }));
+
+    const overallRate = totals.marked > 0
+      ? Math.round((totals.present / totals.marked) * 100)
+      : 0;
+
+    return {
+      data: {
+        startDate,
+        endDate,
+        totalStaff: therapists.length,
+        totals: { ...totals, attendanceRate: overallRate },
+        perStaff,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAttendanceReport error:', error.message);
     return { data: null, error };
   }
 }

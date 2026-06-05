@@ -90,7 +90,7 @@ const DiscountsPanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Discounts</h2>
+          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Discounts Report</h2>
           <p className="font-body text-sm text-text-secondary">
             All discounts given, with who requested and who approved them.
           </p>
@@ -164,10 +164,11 @@ const DiscountsPanel = ({ branchId }) => {
                   )}
                 </div>
 
-                {/* Requested by */}
+                {/* Requested by — direct (self-approved) discounts have no separate
+                    requester, so fall back to the approver who applied it. */}
                 <div className="min-w-0">
                   <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Requested:</span>
-                  <span className="font-body text-sm text-text-secondary">{d.requestedByName || '—'}</span>
+                  <span className="font-body text-sm text-text-secondary">{d.requestedByName || d.approvedByName || '—'}</span>
                 </div>
 
                 {/* Approved by */}

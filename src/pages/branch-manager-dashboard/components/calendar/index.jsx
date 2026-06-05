@@ -96,6 +96,18 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [roomId, setRoomId] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
+  // Group booking state (Individual = default, behaves exactly as before)
+  const [bookingMode, setBookingMode] = useState('individual'); // 'individual' | 'group'
+  const [groupType, setGroupType] = useState('couple');         // 'couple' | 'separate'
+  const [separateCount, setSeparateCount] = useState(3);        // people when 'separate'
+  const [countText, setCountText] = useState('3');              // editable text for the count combo
+  const [countDropdownOpen, setCountDropdownOpen] = useState(false);
+  const countDropdownRef = useRef(null);
+  const [serviceMode, setServiceMode] = useState('same');       // 'same' | 'different'
+  const [groupServiceId, setGroupServiceId] = useState('');     // shared service when 'same'
+  const [groupRoomId, setGroupRoomId] = useState('');           // shared room (couple)
+  const [people, setPeople] = useState([]);                     // per-person rows
+  const [timeText, setTimeText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const submitInFlightRef = useRef(false);
   const [error, setError] = useState(null);
@@ -124,7 +136,17 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setBookingDate(slotInfo?.day || '');
-    setBookingTime(slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '');
+    const slotTime = slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '';
+    setBookingTime(slotTime);
+    setTimeText(slotTime ? format12h(slotTime) : '');
+    setBookingMode('individual');
+    setGroupType('couple');
+    setSeparateCount(3);
+    setCountText('3');
+    setServiceMode('same');
+    setGroupServiceId('');
+    setGroupRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
+    setPeople([]);
     setError(null);
     setSubmitting(false);
     submitInFlightRef.current = false;
@@ -194,6 +216,32 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     }
   }, [slotInfo]);
 
+  // How many people the group has (Couple is always 2)
+  const peopleCount = bookingMode === 'group'
+    ? (groupType === 'couple' ? 2 : separateCount)
+    : 0;
+
+  // Keep the per-person rows array sized to peopleCount, preserving entries
+  useEffect(() => {
+    if (bookingMode !== 'group') return;
+    setPeople((prev) => {
+      const next = prev.slice(0, peopleCount);
+      while (next.length < peopleCount) {
+        next.push({ name: '', phone: '', email: '', gender: '', therapistId: '', serviceId: '', roomId: '' });
+      }
+      return next;
+    });
+  }, [bookingMode, peopleCount]);
+
+  const setPerson = (idx, patch) =>
+    setPeople((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+
+  const ordinal = (n) => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  };
+
   const timeOptions = useMemo(() => {
     const [openH] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
     const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
@@ -220,6 +268,23 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
   };
 
+  // Parse free-typed time (e.g. "9", "9:30", "9:30am", "21:15") into "HH:MM".
+  // Returns null while the text is incomplete/invalid so the field can keep it.
+  const parseTimeInput = (raw) => {
+    const match = raw.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (!match) return null;
+    let h = parseInt(match[1], 10);
+    const m = match[2] ? parseInt(match[2], 10) : 0;
+    const ampm = match[3]?.toLowerCase();
+    if (ampm) {
+      if (h < 1 || h > 12) return null;
+      if (ampm === 'pm' && h < 12) h += 12;
+      if (ampm === 'am' && h === 12) h = 0;
+    }
+    if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
   // Close time dropdown on outside click
   useEffect(() => {
     if (!timeDropdownOpen) return;
@@ -232,6 +297,25 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return () => document.removeEventListener('mousedown', handleClick);
   }, [timeDropdownOpen]);
 
+  // Close the people-count dropdown on outside click
+  useEffect(() => {
+    if (!countDropdownOpen) return;
+    const handleClick = (e) => {
+      if (countDropdownRef.current && !countDropdownRef.current.contains(e.target)) {
+        setCountDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [countDropdownOpen]);
+
+  const commitCount = (raw) => {
+    const n = parseInt(raw, 10);
+    const clamped = Number.isNaN(n) ? 2 : Math.min(Math.max(n, 2), 20);
+    setSeparateCount(clamped);
+    setCountText(String(clamped));
+  };
+
   // Auto-scroll to selected time when dropdown opens
   useEffect(() => {
     if (timeDropdownOpen && timeListRef.current) {
@@ -240,9 +324,33 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     }
   }, [timeDropdownOpen]);
 
+  // Same mode → one shared service; Different mode → every person must pick one.
+  const groupServiceValid = serviceMode === 'same'
+    ? !!groupServiceId
+    : (people.length > 0 && people.every((p) => !!p.serviceId));
+  const groupValid = bookingMode !== 'group'
+    || (people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && groupServiceValid);
+
+  const buildGroupPeople = () => {
+    // Blank "other" persons inherit the booking contact's credentials.
+    const lead = people[0] || {};
+    const leadName = lead.name?.trim();
+    const leadPhone = lead.phone?.replace(/\D/g, '');
+    const leadEmail = lead.email?.trim();
+    return people.map((p, idx) => ({
+      customerName: p.name?.trim() || (idx === 0 ? null : leadName) || null,
+      customerPhone: p.phone?.replace(/\D/g, '') || (idx === 0 ? null : leadPhone) || null,
+      customerEmail: p.email?.trim() || (idx === 0 ? null : leadEmail) || null,
+      customerGender: p.gender || (idx === 0 ? null : lead.gender) || null,
+      serviceId: serviceMode === 'same' ? groupServiceId : p.serviceId,
+      therapistIds: p.therapistId ? [p.therapistId] : null,
+      roomId: groupType === 'couple' ? (groupRoomId || null) : (p.roomId || null),
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!serviceId || !customerName.trim()) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim())) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
     // create duplicate bookings. The ref blocks the second call immediately.
@@ -250,18 +358,27 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     submitInFlightRef.current = true;
     setSubmitting(true);
     setError(null);
-    const err = await onSubmit({
-      serviceId,
-      customerName: customerName.trim(),
-      customerPhone: customerPhone.replace(/\D/g, '') || null,
-      customerEmail: customerEmail.trim() || null,
-      customerGender: customerGender || null,
-      specialRequests: specialRequests.trim() || null,
-      therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
-      roomId: roomId || null,
-      bookingDate,
-      bookingTime,
-    });
+    const payload = bookingMode === 'group'
+      ? {
+          mode: 'group',
+          specialRequests: specialRequests.trim() || null,
+          people: buildGroupPeople(),
+          bookingDate,
+          bookingTime,
+        }
+      : {
+          serviceId,
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.replace(/\D/g, '') || null,
+          customerEmail: customerEmail.trim() || null,
+          customerGender: customerGender || null,
+          specialRequests: specialRequests.trim() || null,
+          therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
+          roomId: roomId || null,
+          bookingDate,
+          bookingTime,
+        };
+    const err = await onSubmit(payload);
     if (err) {
       setError(err);
       setSubmitting(false);
@@ -310,29 +427,19 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <Icon name="Clock" size={14} className="text-primary" />
                 <input
                   type="text"
-                  value={bookingTime ? format12h(bookingTime) : ''}
+                  value={timeText}
                   onChange={(e) => {
-                    // Parse manual time input (HH:MM, H:MM AM/PM formats)
+                    // Let the field reflect whatever is typed; commit to
+                    // bookingTime only once it parses to a valid time.
                     const raw = e.target.value;
-                    const match24 = raw.match(/^(\d{1,2}):(\d{2})$/);
-                    const matchAmPm = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
-                    if (match24) {
-                      const h = parseInt(match24[1]), m = parseInt(match24[2]);
-                      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-                        setBookingTime(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
-                      }
-                    } else if (matchAmPm) {
-                      let h = parseInt(matchAmPm[1]);
-                      const m = parseInt(matchAmPm[2]);
-                      const pm = matchAmPm[3].toLowerCase() === 'pm';
-                      if (pm && h < 12) h += 12;
-                      if (!pm && h === 12) h = 0;
-                      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-                        setBookingTime(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
-                      }
-                    }
+                    setTimeText(raw);
+                    setBookingTime(parseTimeInput(raw) ?? '');
                   }}
                   onFocus={(e) => { e.target.select(); setTimeDropdownOpen(true); }}
+                  onBlur={() => {
+                    // Normalize to the canonical 12h display once editing ends.
+                    setTimeText(bookingTime ? format12h(bookingTime) : '');
+                  }}
                   placeholder="--:--"
                   autoComplete="off"
                   className="font-body font-body-medium text-sm text-text-primary bg-transparent border border-border rounded-spa px-2 py-0.5 w-20 focus:outline-none focus:ring-1 focus:ring-primary"
@@ -354,7 +461,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                         key={t}
                         type="button"
                         data-selected={t === bookingTime}
-                        onClick={() => { setBookingTime(t); setTimeDropdownOpen(false); }}
+                        onClick={() => { setBookingTime(t); setTimeText(format12h(t)); setTimeDropdownOpen(false); }}
                         className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${t === bookingTime ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'}`}
                       >
                         {format12h(t)}
@@ -374,6 +481,26 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-y-auto">
           <div className="px-5 py-4 space-y-4 flex-1">
+            {/* Booking mode: Individual | Group */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-background border border-border rounded-spa">
+              {[['individual', 'Individual'], ['group', 'Group']].map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setBookingMode(val)}
+                  className={`px-3 py-1.5 text-sm font-body font-body-medium rounded-spa transition-colors ${
+                    bookingMode === val
+                      ? 'bg-surface text-primary shadow-spa-resting'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {bookingMode === 'individual' && (
+            <>
             {/* Service */}
             <div>
               <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
@@ -583,6 +710,270 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 ))}
               </div>
             </div>
+            </>
+            )}
+
+            {bookingMode === 'group' && (
+            <>
+            {/* Couple | Separate */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Group type
+              </label>
+              <div className="flex gap-2">
+                {[['couple', 'Couple'], ['separate', 'Separate']].map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setGroupType(val)}
+                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                      groupType === val
+                        ? 'border-primary bg-primary/10 text-primary font-medium'
+                        : 'border-border bg-surface text-text-secondary hover:bg-background'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {groupType === 'separate' && (
+                <div className="flex items-center gap-3 mt-2.5">
+                  <span className="text-sm text-text-secondary whitespace-nowrap">How many people?</span>
+                  <div className="relative w-24" ref={countDropdownRef}>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={countText}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/\D/g, '');
+                        setCountText(raw);
+                        const n = parseInt(raw, 10);
+                        if (!Number.isNaN(n) && n >= 2 && n <= 20) setSeparateCount(n);
+                      }}
+                      onFocus={(e) => { e.target.select(); setCountDropdownOpen(true); }}
+                      onBlur={() => commitCount(countText)}
+                      className="w-full h-10 pl-3 pr-8 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCountDropdownOpen((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary transition-colors"
+                    >
+                      <Icon name="ChevronDown" size={14} />
+                    </button>
+                    {countDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-full max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown">
+                        {[2, 3, 4, 5, 6, 8, 10].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => { commitCount(String(n)); setCountDropdownOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${n === separateCount ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'}`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Same | Different service */}
+            <div>
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Service for the group
+                <span className="text-error"> *</span>
+              </label>
+              <div className="flex gap-2">
+                {[['same', 'Same service'], ['different', 'Different services']].map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setServiceMode(val)}
+                    className={`px-4 py-2 text-sm border rounded-spa transition-colors ${
+                      serviceMode === val
+                        ? 'border-primary bg-primary/10 text-primary font-medium'
+                        : 'border-border bg-surface text-text-secondary hover:bg-background'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {serviceMode === 'same' && (
+                <div className="mt-2">
+                  <CustomSelect
+                    value={groupServiceId}
+                    onChange={(val) => setGroupServiceId(val)}
+                    options={[
+                      { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
+                      ...(services || []).map((s) => ({
+                        value: s.id,
+                        label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                      })),
+                    ]}
+                    placeholder={<>Select a service <span className="text-error">*</span></>}
+                    size="md"
+                    searchable
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Shared room for couple */}
+            {groupType === 'couple' && rooms && rooms.length > 0 && (
+              <div>
+                <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                  Room <span className="text-xs text-text-secondary font-normal">(shared — needs capacity 2)</span>
+                </label>
+                <CustomSelect
+                  value={groupRoomId}
+                  onChange={(val) => setGroupRoomId(val)}
+                  options={[
+                    { value: '', label: 'No room' },
+                    ...(rooms || [])
+                      .filter((r) => getRoomCapacity(r) >= 2)
+                      .map((r) => {
+                        const amenityStr = r.amenities?.join(', ') || '';
+                        return {
+                          value: r.id,
+                          label: (
+                            <>
+                              {r.name}
+                              {amenityStr && <span className="text-text-secondary"> ({amenityStr})</span>}
+                            </>
+                          ),
+                          searchLabel: r.name,
+                        };
+                      }),
+                  ]}
+                  placeholder="No room"
+                  size="md"
+                  searchable
+                />
+              </div>
+            )}
+
+            {/* Per-person rows */}
+            <div className="space-y-3">
+              {people.map((p, idx) => (
+                <div key={idx} className="border border-border rounded-spa p-3 space-y-2.5 bg-background/40">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-body-medium">
+                      {idx + 1}
+                    </span>
+                    <span className="text-sm font-body font-body-medium text-text-primary">
+                      {idx === 0 ? 'Booking contact' : `Person ${idx + 1}`}
+                      {idx === 0 && <span className="text-error"> *</span>}
+                    </span>
+                  </div>
+
+                  <input
+                    type="text"
+                    value={p.name}
+                    onChange={(e) => setPerson(idx, { name: e.target.value })}
+                    placeholder={idx === 0 ? 'Name (required)' : 'Name (optional — uses booking contact if blank)'}
+                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+
+                  <div className="flex">
+                    <span className="inline-flex items-center px-3 py-2 text-sm border border-r-0 border-border rounded-l-spa bg-background text-text-secondary">
+                      +977
+                    </span>
+                    <input
+                      type="tel"
+                      value={p.phone}
+                      onChange={(e) => setPerson(idx, { phone: e.target.value })}
+                      placeholder={idx === 0 ? 'Phone (required)' : 'Phone (optional)'}
+                      className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
+
+                  <input
+                    type="email"
+                    value={p.email}
+                    onChange={(e) => setPerson(idx, { email: e.target.value })}
+                    placeholder="Email (optional)"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+
+                  <div className="flex gap-2">
+                    {['Male', 'Female'].map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setPerson(idx, { gender: p.gender === g.toLowerCase() ? '' : g.toLowerCase() })}
+                        className={`px-4 py-1.5 text-sm border rounded-spa transition-colors ${
+                          p.gender === g.toLowerCase()
+                            ? 'border-primary bg-primary/10 text-primary font-medium'
+                            : 'border-border bg-surface text-text-secondary hover:bg-background'
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+
+                  {serviceMode === 'different' && (
+                    <div>
+                      <label className="block text-xs font-body-medium text-text-secondary mb-1">
+                        Service <span className="text-error">*</span>
+                      </label>
+                      <CustomSelect
+                        value={p.serviceId}
+                        onChange={(val) => setPerson(idx, { serviceId: val })}
+                        options={[
+                          { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
+                          ...(services || []).map((s) => ({
+                            value: s.id,
+                            label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                          })),
+                        ]}
+                        placeholder={<>Select a service <span className="text-error">*</span></>}
+                        size="md"
+                        searchable
+                      />
+                    </div>
+                  )}
+
+                  <CustomSelect
+                    value={p.therapistId}
+                    onChange={(val) => setPerson(idx, { therapistId: val })}
+                    options={[
+                      { value: '', label: 'No therapist' },
+                      ...(therapists || []).map((t) => ({
+                        value: t.id,
+                        label: t.full_name || t.name,
+                      })),
+                    ]}
+                    placeholder="Therapist (optional)"
+                    size="md"
+                    searchable
+                  />
+
+                  {groupType === 'separate' && rooms && rooms.length > 0 && (
+                    <CustomSelect
+                      value={p.roomId}
+                      onChange={(val) => setPerson(idx, { roomId: val })}
+                      options={[
+                        { value: '', label: 'No room' },
+                        ...(rooms || []).map((r) => ({
+                          value: r.id,
+                          label: r.name,
+                        })),
+                      ]}
+                      placeholder="No room"
+                      size="md"
+                      searchable
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            </>
+            )}
 
             {/* Special requests */}
             <div>
@@ -618,11 +1009,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             </button>
             <button
               type="submit"
-              disabled={submitting || !serviceId || !customerName.trim()}
+              disabled={submitting || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim()))}
               className="px-4 py-2 text-sm font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-              {submitting ? 'Creating...' : 'Create Booking'}
+              {submitting
+                ? 'Creating...'
+                : bookingMode === 'group'
+                  ? `Create ${peopleCount} Bookings`
+                  : 'Create Booking'}
             </button>
           </div>
         </form>
@@ -1291,6 +1686,44 @@ const OperationalCalendar = ({ branchId }) => {
     const date = formData.bookingDate;
     const startTime = formData.bookingTime;
     if (!date || !startTime) return 'Date and time are required.';
+
+    // Group booking: one booking per person, all sharing one booking_group_id.
+    // Created sequentially so each room-capacity check sees prior group members
+    // (matters for a Couple sharing one room, and Separate rooms running low).
+    if (formData.mode === 'group') {
+      const people = formData.people || [];
+      if (people.length === 0) return 'Add at least one person.';
+      const groupId = crypto.randomUUID();
+      let created = 0;
+      for (let i = 0; i < people.length; i++) {
+        const person = people[i];
+        const result = await createBooking({
+          branchId,
+          serviceId: person.serviceId,
+          date,
+          startTime,
+          customerName: person.customerName,
+          customerPhone: person.customerPhone,
+          customerEmail: person.customerEmail,
+          customerGender: person.customerGender,
+          specialRequests: formData.specialRequests,
+          therapistIds: person.therapistIds,
+          roomId: person.roomId || 'none',
+          bookingGroupId: groupId,
+        });
+        if (result.error) {
+          const who = person.customerName || `person ${i + 1}`;
+          const tail = created > 0 ? ` (${created} booking${created > 1 ? 's' : ''} already created)` : '';
+          return `Failed for ${who}: ${result.error.message || 'could not create booking.'}${tail}`;
+        }
+        created++;
+      }
+      showToast(`${created} group bookings created successfully`);
+      setQuickCreateSlot(null);
+      refreshCalendar();
+      return null;
+    }
+
     const result = await createBooking({
       branchId,
       serviceId: formData.serviceId,
@@ -1983,7 +2416,7 @@ const OperationalCalendar = ({ branchId }) => {
         slotInfo={quickCreateSlot}
         services={servicesCache}
         servicesLoading={servicesLoading}
-        therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false)}
+        therapists={(calendarData?.therapists || []).filter(t => t.is_service_staff !== false && !attendanceMap[t.id])}
         rooms={calendarData?.rooms || []}
         bookings={calendarData?.bookings || []}
         onClose={handleQuickCreateClose}

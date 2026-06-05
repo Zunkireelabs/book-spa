@@ -76,6 +76,7 @@ export function transformBooking(dbBooking) {
     specialRequests: dbBooking.special_requests || null,
     price: formatNPR(dbBooking.final_amount || dbBooking.base_amount || 0),
     isLocked: dbBooking.is_locked || false,
+    bookingGroupId: dbBooking.booking_group_id || null,
   };
 }
 
