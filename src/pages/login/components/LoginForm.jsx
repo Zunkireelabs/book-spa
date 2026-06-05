@@ -87,9 +87,9 @@ const LoginForm = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handlePinLogin = async (userEmail, pin) => {
-    // Step 1: Verify PIN and get OTP via server-side Edge Function
-    // (service role key stays server-side, never exposed to browser)
+  // Request a fresh OTP from the pin-login Edge Function.
+  // (service role key stays server-side, never exposed to browser)
+  const requestPinOtp = async (userEmail, pin) => {
     const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pin-login`, {
       method: 'POST',
@@ -108,21 +108,36 @@ const LoginForm = () => {
     // regardless of which version a given environment is running.
     const otp = pinData.email_otp || pinData.otp;
     if (!pinData.success || !otp) {
-      return { success: false, error: pinData.error || 'PIN login failed.' };
+      return { otp: null, error: pinData.error || 'PIN login failed.' };
+    }
+    return { otp, error: null };
+  };
+
+  const handlePinLogin = async (userEmail, pin) => {
+    // The recovery OTP is single-use and is rotated on every pin-login call,
+    // so a transient verify failure (network blip, races) can leave a stale
+    // token. Retry once with a fresh OTP before surfacing the error.
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { otp, error: otpReqError } = await requestPinOtp(userEmail, pin);
+      if (!otp) {
+        // A bad PIN won't succeed on retry — fail fast.
+        return { success: false, error: otpReqError };
+      }
+
+      const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
+        email: userEmail,
+        token: otp,
+        type: 'email',
+      });
+
+      if (!otpError && otpData?.session) {
+        return { success: true, session: otpData.session, user: otpData.user };
+      }
+      lastError = otpError?.message || 'Session creation failed.';
     }
 
-    // Step 2: Verify OTP to get a real session
-    const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
-      email: userEmail,
-      token: otp,
-      type: 'email',
-    });
-
-    if (otpError || !otpData?.session) {
-      return { success: false, error: otpError?.message || 'Session creation failed.' };
-    }
-
-    return { success: true, session: otpData.session, user: otpData.user };
+    return { success: false, error: lastError };
   };
 
   const handleSubmit = async (e) => {

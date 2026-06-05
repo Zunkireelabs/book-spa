@@ -49,7 +49,7 @@ const BookingsViewPanel = ({ branchId }) => {
     const dateFilter = getDateFilter(dateRange || filters.dateRange);
     const [bookingsResult, therapistsResult] = await Promise.all([
       fetchBookings(branchId, dateFilter),
-      fetchTherapists(branchId),
+      fetchTherapists(branchId, { date: dateFilter.date }),
     ]);
 
     if (bookingsResult.data) {
@@ -150,10 +150,10 @@ const BookingsViewPanel = ({ branchId }) => {
     return { error: null };
   };
 
-  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason }) => {
-    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason });
+  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
+    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo });
     if (result.error) return { error: result.error };
-    showToast('Discount applied successfully');
+    showToast(result.data?.isPending ? 'Discount request sent for approval' : 'Discount applied successfully');
     await loadData();
     return { data: result.data };
   };

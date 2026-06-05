@@ -125,6 +125,11 @@ const PendingDiscountsPanel = ({ branchId }) => {
                   &ldquo;{d.discountReason}&rdquo;
                 </p>
               )}
+              {d.requestedByName && (
+                <p className="mt-1 text-xs text-gray-400">
+                  Requested by {d.requestedByName}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center space-x-2 flex-shrink-0">
