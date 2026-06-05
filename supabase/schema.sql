@@ -126,6 +126,8 @@ CREATE TABLE bookings (
   -- Discount workflow
   discount_status discount_status_enum NOT NULL DEFAULT 'none',
   discount_approved_by uuid REFERENCES users(id),
+  discount_requested_by uuid REFERENCES users(id),
+  discount_requested_to uuid REFERENCES users(id),
   discount_reason text,
 
   -- CRM link (nullable for walk-ins)

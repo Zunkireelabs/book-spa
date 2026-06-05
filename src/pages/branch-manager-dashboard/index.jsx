@@ -37,6 +37,7 @@ import TherapistPerformancePanel from './components/Performance/TherapistPerform
 import TopPerformersCard from './components/Performance/TopPerformersCard';
 import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
+import DiscountsPanel from './components/DiscountsPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -559,6 +560,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'customers' && <CustomersPanel branchId={branchId} />}
               {viewMode === 'attendance' && <AttendancePanel branchId={branchId} />}
               {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
+              {viewMode === 'discounts' && <DiscountsPanel branchId={branchId} />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && <ServiceManagementPanel />}

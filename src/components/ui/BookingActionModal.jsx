@@ -4,7 +4,7 @@ import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers } from '../../services/api';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -75,6 +75,9 @@ const BookingActionModal = ({
   const [discountReason, setDiscountReason] = useState('');
   const [discountError, setDiscountError] = useState(null);
   const [discountSuccess, setDiscountSuccess] = useState(false);
+  // Approver routing when a discount exceeds the user's limit
+  const [approvers, setApprovers] = useState([]);
+  const [selectedApprover, setSelectedApprover] = useState('');
 
   // Add another service / Rebook state
   const [newBookingMode, setNewBookingMode] = useState(null); // 'add-service' | 'rebook' | null
@@ -124,6 +127,8 @@ const BookingActionModal = ({
         setRelatedBookings(result.data || []);
         setSelectedPaymentIds(new Set());
         setSelectedDiscountIds(new Set([booking.bookingId]));
+        setSelectedApprover('');
+        setDiscountSuccess(false);
       });
     }
   }, [activeTab, booking?.bookingId, booking?.paymentStatus]);
@@ -136,6 +141,13 @@ const BookingActionModal = ({
       setCreator(null);
     }
   }, [isOpen, booking?.bookingId]);
+
+  // Load eligible approvers the first time the discount tab is opened
+  useEffect(() => {
+    if (isOpen && activeTab === 'discount' && approvers.length === 0) {
+      fetchDiscountApprovers().then(result => setApprovers(result.data || []));
+    }
+  }, [isOpen, activeTab]);
 
   // Auto-open rebook form when triggered via Escape fallback
   useEffect(() => {
@@ -363,15 +375,16 @@ const BookingActionModal = ({
       return;
     }
 
-    // Client-side discount limit check
+    // Over-limit discounts are routed to a chosen approver instead of blocked.
     const maxPercent = userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15;
     const baseAmount = booking.baseAmount || 0;
     const effectivePercent = discountType === 'percentage'
       ? Number(discountValue)
       : baseAmount > 0 ? (Number(discountValue) / baseAmount) * 100 : 0;
+    const exceedsLimit = effectivePercent > maxPercent;
 
-    if (effectivePercent > maxPercent) {
-      setDiscountError(`Discount exceeds your ${maxPercent}% limit. Maximum: ${discountType === 'percentage' ? maxPercent + '%' : 'NPR ' + Math.floor(baseAmount * maxPercent / 100)}`);
+    if (exceedsLimit && !selectedApprover) {
+      setDiscountError('Select a manager or admin to send this discount request to.');
       return;
     }
 
@@ -397,7 +410,8 @@ const BookingActionModal = ({
         const result = await onApplyDiscount(bid, {
           discountType: discountType === 'percentage' ? 'percentage' : 'fixed',
           discountValue: discountType === 'percentage' ? Number(discountValue) : dValue,
-          discountReason: discountReason.trim()
+          discountReason: discountReason.trim(),
+          requestedTo: exceedsLimit ? selectedApprover : undefined
         });
         lastResult = result;
         if (result?.error) { failed = true; break; }
@@ -409,6 +423,7 @@ const BookingActionModal = ({
         setDiscountSuccess('pending');
         setDiscountValue('');
         setDiscountReason('');
+        setSelectedApprover('');
       } else {
         setDiscountSuccess('approved');
         setDiscountValue('');
@@ -437,6 +452,18 @@ const BookingActionModal = ({
   const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
   const discountLimitLabel = userRole === 'admin' ? '30%' : userRole === 'manager' ? '30%' : '15%';
+
+  // Request-mode derivations: a discount over the user's role limit must be
+  // routed to a chosen approver instead of being applied directly.
+  const discountMaxPercent = userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15;
+  const discountEffPercent = discountType === 'percentage'
+    ? Number(discountValue || 0)
+    : (booking.baseAmount > 0 ? (Number(discountValue || 0) / booking.baseAmount) * 100 : 0);
+  const discountExceedsLimit = Number(discountValue) > 0 && discountEffPercent > discountMaxPercent;
+  const previewDiscountAmount = discountType === 'percentage'
+    ? Math.round((booking.baseAmount || 0) * Number(discountValue || 0) / 100)
+    : Number(discountValue || 0);
+  const selectedApproverName = approvers.find(a => a.id === selectedApprover)?.fullName || '';
 
   const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
 
@@ -1179,7 +1206,7 @@ const BookingActionModal = ({
                       <input
                         type="number"
                         min="0"
-                        max={discountType === 'percentage' ? (userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15) : Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.30 : userRole === 'manager' ? 0.30 : 0.15))}
+                        max={discountType === 'percentage' ? 100 : Math.floor(booking.baseAmount || 0)}
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
@@ -1192,31 +1219,78 @@ const BookingActionModal = ({
                           })() ? 'border-error' : 'border-border'
                         }`}
                       />
-                      {discountValue && (() => {
-                        const maxP = userRole === 'admin' ? 30 : userRole === 'manager' ? 30 : 15;
-                        const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
-                        return eff > maxP ? (
-                          <p className="text-xs text-error mt-1 flex items-center gap-1">
-                            <Icon name="AlertTriangle" size={12} />
-                            Exceeds your {maxP}% discount limit
-                          </p>
-                        ) : null;
-                      })()}
+                      {discountExceedsLimit && (
+                        <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
+                          <Icon name="AlertTriangle" size={12} />
+                          Exceeds your {discountMaxPercent}% limit — send a request to an approver below.
+                        </p>
+                      )}
                     </div>
 
-                    {/* Reason */}
+                    {/* Reason / Remarks */}
                     <div className="space-y-1.5 sm:space-y-2">
                       <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
-                        Reason <span className="text-error">*</span>
+                        {discountExceedsLimit ? 'Remarks' : 'Reason'} <span className="text-error">*</span>
                       </label>
                       <textarea
                         value={discountReason}
                         onChange={(e) => setDiscountReason(e.target.value)}
-                        placeholder="Why is this discount being applied?"
+                        placeholder={discountExceedsLimit ? 'Add remarks for the approver…' : 'Why is this discount being applied?'}
                         rows={2}
                         className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                       />
                     </div>
+
+                    {/* Request routing — only when discount exceeds the user's limit */}
+                    {discountExceedsLimit && (
+                      <div className="space-y-3 p-3 rounded-spa bg-amber-50 border border-amber-200">
+                        <div className="flex items-center gap-2">
+                          <Icon name="Send" size={14} className="text-amber-600" />
+                          <span className="font-body font-body-medium text-xs sm:text-sm text-amber-800">
+                            Send discount request for approval
+                          </span>
+                        </div>
+
+                        {/* Request summary */}
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-text-secondary">Client</span>
+                            <span className="font-body-medium text-text-primary">{booking.customerName || '—'}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-text-secondary">Package</span>
+                            <span className="font-body-medium text-text-primary text-right">{booking.service || '—'}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-text-secondary">Discount</span>
+                            <span className="font-data text-error">
+                              {Math.round(discountEffPercent)}% · NPR {previewDiscountAmount.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Approver picker */}
+                        <div className="space-y-1.5">
+                          <label className="font-body font-body-medium text-xs text-text-primary">
+                            Send request to <span className="text-error">*</span>
+                          </label>
+                          {approvers.length === 0 ? (
+                            <p className="text-xs text-text-tertiary">No managers or admins available to approve.</p>
+                          ) : (
+                            <CustomSelect
+                              value={selectedApprover}
+                              onChange={(val) => { setSelectedApprover(val); setDiscountError(null); }}
+                              options={approvers.map(a => ({
+                                value: a.id,
+                                label: `${a.fullName} (${a.role === 'admin' ? 'Admin' : 'Branch Manager'})`,
+                              }))}
+                              placeholder="Select an approver…"
+                              size="md"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Error / Success */}
                     {discountError && (
@@ -1240,7 +1314,7 @@ const BookingActionModal = ({
                     {discountSuccess === 'pending' && (
                       <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-amber-50 border border-amber-200">
                         <Icon name="Clock" size={14} className="text-amber-600 flex-shrink-0" />
-                        <span className="font-body font-body-normal text-xs text-amber-700">Discount exceeds your limit — sent for manager approval.</span>
+                        <span className="font-body font-body-normal text-xs text-amber-700">Discount request sent for approval.</span>
                       </div>
                     )}
 
@@ -1248,12 +1322,14 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleApplyDiscount}
                       loading={isLoading}
-                      disabled={!discountValue || !discountReason.trim() || selectedDiscountIds.size === 0}
-                      iconName="Percent"
+                      disabled={!discountValue || !discountReason.trim() || selectedDiscountIds.size === 0 || (discountExceedsLimit && !selectedApprover)}
+                      iconName={discountExceedsLimit ? 'Send' : 'Percent'}
                       iconPosition="left"
                       className="w-full sm:w-auto min-h-[44px]"
                     >
-                      {selectedDiscountIds.size > 1 ? `Apply Discount to ${selectedDiscountIds.size} Services` : 'Apply Discount'}
+                      {discountExceedsLimit
+                        ? 'Send Discount Request'
+                        : (selectedDiscountIds.size > 1 ? `Apply Discount to ${selectedDiscountIds.size} Services` : 'Apply Discount')}
                     </Button>
                   </>
                 )}

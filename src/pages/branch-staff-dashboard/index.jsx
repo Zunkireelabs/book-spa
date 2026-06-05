@@ -377,13 +377,13 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: applyDiscount
-  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason }) => {
+  const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     setActionError(null);
-    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason });
+    const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo });
     if (result.error) {
       return { error: result.error };
     }
-    showSuccess('Discount applied successfully');
+    showSuccess(result.data?.isPending ? 'Discount request sent for approval' : 'Discount applied successfully');
     await loadData();
     return { data: result.data };
   };

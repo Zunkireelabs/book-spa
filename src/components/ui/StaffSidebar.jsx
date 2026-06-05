@@ -95,6 +95,12 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=performance`,
           roles: ['manager', 'admin']
         },
+        {
+          id: 'discounts',
+          label: 'Discounts',
+          path: `${basePath}?view=discounts`,
+          roles: ['manager', 'admin']
+        },
       ]
     },
     {

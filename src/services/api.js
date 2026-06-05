@@ -638,7 +638,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
   }
 }
 
-export async function applyDiscount({ bookingId, discountType, discountValue, discountReason }) {
+export async function applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
@@ -699,11 +699,18 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
     // 8. If staff exceeds limit, set to pending instead of blocking
     const isWithinLimit = effectivePercent <= maxPercent;
 
+    // Over-limit discounts must be routed to a specific approver.
+    if (!isWithinLimit && !requestedTo) {
+      return { data: null, error: { code: 'APPROVER_REQUIRED', message: 'Select a manager or admin to send this discount request to.' } };
+    }
+
     const updatePayload = {
       discount_amount: discountAmount,
       discount_reason: discountReason.trim(),
       discount_status: isWithinLimit ? 'approved' : 'pending',
       discount_approved_by: isWithinLimit ? user.id : null,
+      discount_requested_by: isWithinLimit ? null : user.id,
+      discount_requested_to: isWithinLimit ? null : requestedTo,
     };
 
     // 9. Update booking — trigger recomputes final_amount
@@ -738,6 +745,9 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
  */
 export async function fetchPendingDiscounts(branchId) {
   try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
     const resolvedBranchId = resolveBranchId(branchId);
 
     const { data, error } = await supabase
@@ -745,10 +755,12 @@ export async function fetchPendingDiscounts(branchId) {
       .select(`
         id, booking_number, customer_name, date, start_time,
         base_amount, discount_amount, final_amount, discount_reason,
-        status, service_id, services:service_id(name)
+        status, service_id, services:service_id(name),
+        requester:users!discount_requested_by(full_name)
       `)
       .eq('branch_id', resolvedBranchId)
       .eq('discount_status', 'pending')
+      .eq('discount_requested_to', user.id)
       .eq('is_locked', false)
       .order('created_at', { ascending: false });
 
@@ -770,11 +782,84 @@ export async function fetchPendingDiscounts(branchId) {
           : 0,
         status: b.status,
         serviceName: b.services?.name || '—',
+        requestedByName: b.requester?.full_name || null,
       })),
       error: null,
     };
   } catch (error) {
     console.error('[API] fetchPendingDiscounts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * List the managers/admins the current user may send a discount request to.
+ * Backed by the list_discount_approvers() SECURITY DEFINER function.
+ */
+export async function fetchDiscountApprovers() {
+  try {
+    const { data, error } = await supabase.rpc('list_discount_approvers');
+    if (error) throw error;
+    return {
+      data: (data || []).map(u => ({ id: u.id, fullName: u.full_name, role: u.role })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchDiscountApprovers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * All discounts for a branch (pending + approved) with requester/approver
+ * names — powers the manager/admin Discounts page.
+ */
+export async function fetchAllDiscounts(branchId) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        id, booking_number, customer_name, date, start_time,
+        base_amount, discount_amount, final_amount, discount_reason,
+        discount_status, status, service_id,
+        services:service_id(name),
+        requester:users!discount_requested_by(full_name),
+        approver:users!discount_approved_by(full_name),
+        requestedTo:users!discount_requested_to(full_name)
+      `)
+      .eq('branch_id', resolvedBranchId)
+      .neq('discount_status', 'none')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return {
+      data: (data || []).map(b => ({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        startTime: b.start_time,
+        serviceName: b.services?.name || '—',
+        baseAmount: Number(b.base_amount),
+        discountAmount: Number(b.discount_amount),
+        finalAmount: Number(b.final_amount),
+        discountPercent: Number(b.base_amount) > 0
+          ? Math.round((Number(b.discount_amount) / Number(b.base_amount)) * 100)
+          : 0,
+        discountReason: b.discount_reason,
+        discountStatus: b.discount_status,
+        status: b.status,
+        requestedByName: b.requester?.full_name || null,
+        approvedByName: b.approver?.full_name || null,
+        requestedToName: b.requestedTo?.full_name || null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAllDiscounts error:', error.message);
     return { data: null, error };
   }
 }
@@ -885,6 +970,8 @@ export async function rejectDiscount(bookingId) {
         discount_status: 'none',
         discount_approved_by: null,
         discount_reason: null,
+        discount_requested_by: null,
+        discount_requested_to: null,
       })
       .eq('id', bookingId)
       .eq('discount_status', 'pending')
