@@ -531,7 +531,7 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
   }
 }
 
-export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests }) {
+export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy }) {
   try {
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
@@ -566,6 +566,9 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     }
     if (specialRequests !== undefined) {
       updatePayload.special_requests = specialRequests || null;
+    }
+    if (referredBy !== undefined) {
+      updatePayload.referred_by = referredBy || null;
     }
 
     // 5. If service changed, recalculate financials and duration

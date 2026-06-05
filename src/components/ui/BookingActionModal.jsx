@@ -187,6 +187,7 @@ const BookingActionModal = ({
       date: booking.date || '',
       startTime: booking.startTime ? booking.startTime.slice(0, 5) : booking.time || '',
       specialRequests: booking.specialRequests || '',
+      referredBy: booking.referredBy || '',
     });
     setEditError(null);
     setIsEditing(true);
@@ -215,6 +216,7 @@ const BookingActionModal = ({
         date: editForm.date || undefined,
         startTime: editForm.startTime ? editForm.startTime + ':00' : undefined,
         specialRequests: editForm.specialRequests.trim() || null,
+        referredBy: (editForm.referredBy || '').trim() || null,
       });
       if (result?.error) {
         setEditError(result.error.message || 'Failed to update booking.');
@@ -749,6 +751,34 @@ const BookingActionModal = ({
                   ) : booking.specialRequests ? (
                     <div className="p-2.5 sm:p-3 bg-background rounded-spa">
                       <p className="font-body font-body-normal text-sm text-text-primary">{booking.specialRequests}</p>
+                    </div>
+                  ) : (
+                    <p className="font-body font-body-normal text-sm text-text-secondary italic">None</p>
+                  )}
+                </div>
+
+                {/* Referred by — type freely or pick an existing therapist */}
+                <div className="space-y-1.5 sm:space-y-2">
+                  <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by</label>
+                  {isEditing ? (
+                    <>
+                      <input
+                        type="text"
+                        list="referred-by-therapists"
+                        value={editForm.referredBy || ''}
+                        onChange={(e) => setEditForm(f => ({ ...f, referredBy: e.target.value }))}
+                        placeholder="Type a name or pick a therapist…"
+                        className={inputClasses}
+                      />
+                      <datalist id="referred-by-therapists">
+                        {therapists.map(t => (
+                          <option key={t.id} value={t.name} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : booking.referredBy ? (
+                    <div className="p-2.5 sm:p-3 bg-background rounded-spa">
+                      <p className="font-body font-body-normal text-sm text-text-primary">{booking.referredBy}</p>
                     </div>
                   ) : (
                     <p className="font-body font-body-normal text-sm text-text-secondary italic">None</p>

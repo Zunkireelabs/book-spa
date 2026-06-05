@@ -116,6 +116,7 @@ CREATE TABLE bookings (
   -- Status
   status booking_status NOT NULL DEFAULT 'Pending',
   special_requests text,
+  referred_by text,
   payment_status payment_status_enum NOT NULL DEFAULT 'unpaid',
 
   -- Financial (persisted at booking time, not derived dynamically)
