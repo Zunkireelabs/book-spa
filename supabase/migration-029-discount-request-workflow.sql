@@ -21,6 +21,9 @@ CREATE INDEX IF NOT EXISTS idx_bookings_discount_requested_to
 -- may send a discount request to. SECURITY DEFINER bypasses the users-table
 -- RLS that otherwise hides other users from staff; only id/name/role/branch
 -- are exposed.
+--
+-- Only users who can actually log in are eligible: an approver with no PIN set
+-- can never sign in to approve the request, so they are excluded.
 CREATE OR REPLACE FUNCTION public.list_discount_approvers()
 RETURNS TABLE (id uuid, full_name text, role public.user_role, branch_id uuid)
 LANGUAGE sql
@@ -31,6 +34,7 @@ AS $$
   SELECT u.id, u.full_name, u.role, u.branch_id
   FROM public.users u
   WHERE u.is_active = true
+    AND u.pin IS NOT NULL AND u.pin <> ''
     AND u.id <> auth.uid()
     AND u.org_id = (SELECT org_id FROM public.users WHERE id = auth.uid())
     AND (
