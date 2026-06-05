@@ -68,6 +68,7 @@ const BookingActionModal = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [editError, setEditError] = useState(null);
+  const [referredByOpen, setReferredByOpen] = useState(false);
 
   // Discount state
   const [discountType, setDiscountType] = useState('percentage');
@@ -761,21 +762,36 @@ const BookingActionModal = ({
                 <div className="space-y-1.5 sm:space-y-2">
                   <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by</label>
                   {isEditing ? (
-                    <>
+                    <div className="relative">
                       <input
                         type="text"
-                        list="referred-by-therapists"
                         value={editForm.referredBy || ''}
-                        onChange={(e) => setEditForm(f => ({ ...f, referredBy: e.target.value }))}
+                        onChange={(e) => { setEditForm(f => ({ ...f, referredBy: e.target.value })); setReferredByOpen(true); }}
+                        onFocus={() => setReferredByOpen(true)}
+                        onBlur={() => setTimeout(() => setReferredByOpen(false), 150)}
                         placeholder="Type a name or pick a therapist…"
                         className={inputClasses}
                       />
-                      <datalist id="referred-by-therapists">
-                        {therapists.map(t => (
-                          <option key={t.id} value={t.name} />
-                        ))}
-                      </datalist>
-                    </>
+                      {referredByOpen && (() => {
+                        const q = (editForm.referredBy || '').toLowerCase().trim();
+                        const matches = therapists.filter(t => !q || t.name.toLowerCase().includes(q));
+                        if (matches.length === 0) return null;
+                        return (
+                          <div className="absolute z-dropdown mt-1 w-full bg-surface border border-border rounded-spa shadow-spa-elevated max-h-[180px] overflow-y-auto">
+                            {matches.map(t => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onMouseDown={() => { setEditForm(f => ({ ...f, referredBy: t.name })); setReferredByOpen(false); }}
+                                className="w-full text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                              >
+                                {t.name}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   ) : booking.referredBy ? (
                     <div className="p-2.5 sm:p-3 bg-background rounded-spa">
                       <p className="font-body font-body-normal text-sm text-text-primary">{booking.referredBy}</p>
