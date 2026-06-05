@@ -219,6 +219,33 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
   }
 }
 
+/**
+ * Fetch who created a booking + when. Returns { createdByName, createdAt }.
+ * createdByName is null for anonymous customer self-bookings (online).
+ */
+export async function fetchBookingCreator(bookingId) {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('created_at, creator:users!created_by(full_name)')
+      .eq('id', bookingId)
+      .single();
+
+    if (error) throw error;
+
+    return {
+      data: {
+        createdByName: data.creator?.full_name || null,
+        createdAt: data.created_at || null,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchBookingCreator error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // Booking Mutations (Phase 4 + Phase 6 hardened)
 // ============================================================
@@ -2179,6 +2206,8 @@ export async function createBooking({
     }
 
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
+    // Capture who created it (null for anonymous customer self-booking).
+    const { data: { user: authUser } } = await supabase.auth.getUser();
     const { data: booking, error: insertError } = await supabase
       .from('bookings')
       .insert({
@@ -2196,7 +2225,7 @@ export async function createBooking({
         base_amount: Number(service.price_npr),
         discount_amount: 0,
         special_requests: specialRequests || null,
-        created_by: null,
+        created_by: authUser?.id || null,
         // Phase 9A: Snapshot fields — preserve original values at booking time
         service_name_snapshot: service.name,
         service_duration_snapshot: service.duration_minutes,

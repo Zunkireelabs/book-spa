@@ -1,9 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import FilterBar from '../../../../components/ui/FilterBar';
 import { fetchAttendance, fetchAttendanceSummary, markAttendance } from '../../../../services/api';
 
 const ATTENDANCE_OPTIONS = [
+  { value: '', label: 'Not Marked' },
+  { value: 'Present', label: 'Present' },
+  { value: 'Absent', label: 'Absent' },
+  { value: 'Leave', label: 'Leave' },
+  { value: '1st-Half Day', label: '1st-Half Day' },
+  { value: '2nd-Half Day', label: '2nd-Half Day' },
+];
+
+const STATUS_FILTER_OPTIONS = [
+  { value: 'all', label: 'All Statuses' },
   { value: '', label: 'Not Marked' },
   { value: 'Present', label: 'Present' },
   { value: 'Absent', label: 'Absent' },
@@ -42,6 +53,22 @@ const AttendancePanel = ({ branchId }) => {
   // Track local edits per therapist: { [therapistId]: { status, checkInTime, checkOutTime, notes, dirty } }
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState({});
+
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'all';
+
+  const filteredTherapists = useMemo(() => {
+    return therapists.filter((t) => {
+      const matchesSearch = !searchQuery.trim()
+        || (t.therapistName || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
+      const currentStatus = edits[t.therapistId]?.status ?? (t.status || '');
+      const matchesStatus = statusFilter === 'all' || currentStatus === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [therapists, edits, searchQuery, statusFilter]);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -322,6 +349,25 @@ const AttendancePanel = ({ branchId }) => {
         </div>
       )}
 
+      {/* Search & Status Filter */}
+      <FilterBar
+        search={{
+          value: searchQuery,
+          onChange: setSearchQuery,
+          placeholder: 'Search therapists...',
+        }}
+        filters={[
+          {
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: STATUS_FILTER_OPTIONS,
+          },
+        ]}
+        resultCount={hasActiveFilters ? { filtered: filteredTherapists.length, total: therapists.length } : undefined}
+        hasActiveFilters={hasActiveFilters}
+        onClear={() => { setSearchQuery(''); setStatusFilter('all'); }}
+      />
+
       {/* Therapist Table */}
       <div className="bg-surface rounded-spa-lg border border-border">
         {/* Table header */}
@@ -339,9 +385,14 @@ const AttendancePanel = ({ branchId }) => {
             <Icon name="Users" size={32} className="text-text-tertiary mx-auto mb-3" />
             <p className="font-body text-sm text-text-tertiary">No active therapists found for this branch.</p>
           </div>
+        ) : filteredTherapists.length === 0 ? (
+          <div className="p-8 text-center">
+            <Icon name="SearchX" size={32} className="text-text-tertiary mx-auto mb-3" />
+            <p className="font-body text-sm text-text-tertiary">No therapists match the current filters.</p>
+          </div>
         ) : (
           <div className="divide-y divide-border">
-            {therapists.map(t => {
+            {filteredTherapists.map(t => {
               const edit = edits[t.therapistId] || {};
               const isSaving = saving[t.therapistId];
               const isDirty = edit.dirty;

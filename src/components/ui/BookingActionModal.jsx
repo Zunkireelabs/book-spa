@@ -4,7 +4,7 @@ import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
-import { fetchRelatedUnpaidBookings } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator } from '../../services/api';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -13,6 +13,17 @@ function to12h(timeStr) {
   const period = h >= 12 ? 'pm' : 'am';
   const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+// Format an ISO timestamp as "5 Jun 2026, 2:14 pm"
+function formatCreatedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  });
 }
 
 // Status badge styles
@@ -71,6 +82,9 @@ const BookingActionModal = ({
   const [newBookingError, setNewBookingError] = useState(null);
   const [newBookingSubmitting, setNewBookingSubmitting] = useState(false);
 
+  // Who created this booking (lazy-loaded on open)
+  const [creator, setCreator] = useState(null);
+
   // Multi-payment/discount: related unpaid bookings for same customer
   const [relatedBookings, setRelatedBookings] = useState([]);
   const [selectedPaymentIds, setSelectedPaymentIds] = useState(new Set());
@@ -113,6 +127,15 @@ const BookingActionModal = ({
       });
     }
   }, [activeTab, booking?.bookingId, booking?.paymentStatus]);
+
+  // Load who created this booking when the modal opens
+  useEffect(() => {
+    if (isOpen && booking?.bookingId) {
+      fetchBookingCreator(booking.bookingId).then(result => setCreator(result.data || null));
+    } else {
+      setCreator(null);
+    }
+  }, [isOpen, booking?.bookingId]);
 
   // Auto-open rebook form when triggered via Escape fallback
   useEffect(() => {
@@ -694,6 +717,18 @@ const BookingActionModal = ({
                     <p className="font-body font-body-normal text-sm text-text-secondary italic">None</p>
                   )}
                 </div>
+
+                {/* Created-by audit line — only when a staff creator was recorded */}
+                {!isEditing && creator?.createdByName && (
+                  <div className="pt-3 border-t border-border">
+                    <p className="font-caption text-xs text-text-tertiary">
+                      <Icon name="UserPlus" size={12} className="inline-block mr-1 -mt-0.5" />
+                      Created by{' '}
+                      <span className="text-text-secondary">{creator.createdByName}</span>
+                      {creator.createdAt ? ` · ${formatCreatedAt(creator.createdAt)}` : ''}
+                    </p>
+                  </div>
+                )}
 
                 {/* Action error (status update failures) */}
                 {actionError && !editError && (
