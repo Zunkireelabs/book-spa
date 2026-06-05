@@ -3895,7 +3895,7 @@ export async function fetchAttendance({ branchId, date }) {
     const [therapistsResult, attendanceResult] = await Promise.all([
       supabase
         .from('therapists')
-        .select('id, name')
+        .select('id, name, is_service_staff')
         .eq('branch_id', resolvedBranchId)
         .eq('is_active', true)
         .order('name'),
@@ -3924,6 +3924,7 @@ export async function fetchAttendance({ branchId, date }) {
       return {
         therapistId: t.id,
         therapistName: t.name,
+        isServiceStaff: t.is_service_staff !== false,
         status: att?.status || null,
         checkInTime: att?.check_in_time || null,
         checkOutTime: att?.check_out_time || null,
