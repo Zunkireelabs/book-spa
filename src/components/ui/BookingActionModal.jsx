@@ -448,8 +448,8 @@ const BookingActionModal = ({
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
   const isLocked = booking.isLocked || false;
   const isMutationBlocked = isTerminal || isLocked;
-  // "Rebook" reads as booking-again-after on terminal states; on active bookings "Book Another" is clearer
-  const rebookLabel = isTerminal ? 'Rebook' : 'Book Another';
+  // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
+  const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
   const nextStatuses = getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
