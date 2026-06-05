@@ -103,14 +103,18 @@ const LoginForm = () => {
     });
 
     const pinData = await res.json();
-    if (!pinData.success || !pinData.otp) {
+    // The Edge Function has shipped under two response shapes across
+    // deployments (`otp` and `email_otp`); accept either so login works
+    // regardless of which version a given environment is running.
+    const otp = pinData.email_otp || pinData.otp;
+    if (!pinData.success || !otp) {
       return { success: false, error: pinData.error || 'PIN login failed.' };
     }
 
     // Step 2: Verify OTP to get a real session
     const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
       email: userEmail,
-      token: pinData.otp,
+      token: otp,
       type: 'email',
     });
 
