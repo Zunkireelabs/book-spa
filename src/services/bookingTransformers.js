@@ -74,6 +74,7 @@ export function transformBooking(dbBooking) {
     roomName: dbBooking.room?.name || null,
     startTime: dbBooking.start_time || null,
     specialRequests: dbBooking.special_requests || null,
+    referredBy: dbBooking.referred_by || null,
     price: formatNPR(dbBooking.final_amount || dbBooking.base_amount || 0),
     isLocked: dbBooking.is_locked || false,
     bookingGroupId: dbBooking.booking_group_id || null,
