@@ -104,13 +104,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     },
     {
       id: 'insights',
-      label: 'Insights',
+      label: 'Reports',
       icon: 'BarChart3',
       roles: ['manager', 'admin'],
       children: [
         {
           id: 'reports',
-          label: 'Reports',
+          label: 'Daily Report',
           path: `${basePath}?view=reports`,
           roles: ['manager', 'admin']
         },
