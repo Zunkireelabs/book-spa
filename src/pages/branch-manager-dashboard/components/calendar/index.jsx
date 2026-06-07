@@ -23,6 +23,7 @@ import {
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useAuth } from '../../../../contexts/AuthContext';
 
@@ -89,6 +90,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [serviceId, setServiceId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerCountryCode, setCustomerCountryCode] = useState('+977');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
@@ -119,7 +121,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const handleCustomerSelect = useCallback((customer) => {
     setCustomerName(customer.full_name);
-    setCustomerPhone(customer.phone || '');
+    const { dial, national } = parsePhone(customer.phone);
+    setCustomerPhone(national);
+    setCustomerCountryCode(dial);
     setCustomerEmail(customer.email || '');
     setCustomerGender(customer.gender || '');
   }, []);
@@ -129,6 +133,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setServiceId('');
     setCustomerName('');
     setCustomerPhone('');
+    setCustomerCountryCode('+977');
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
@@ -227,7 +232,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setPeople((prev) => {
       const next = prev.slice(0, peopleCount);
       while (next.length < peopleCount) {
-        next.push({ name: '', phone: '', email: '', gender: '', therapistId: '', serviceId: '', roomId: '' });
+        next.push({ name: '', phone: '', countryCode: '+977', email: '', gender: '', therapistId: '', serviceId: '', roomId: '' });
       }
       return next;
     });
@@ -335,11 +340,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     // Blank "other" persons inherit the booking contact's credentials.
     const lead = people[0] || {};
     const leadName = lead.name?.trim();
-    const leadPhone = lead.phone?.replace(/\D/g, '');
+    const leadPhone = lead.phone?.replace(/\D/g, '')
+      ? (lead.countryCode || '+977') + lead.phone.replace(/\D/g, '')
+      : null;
     const leadEmail = lead.email?.trim();
     return people.map((p, idx) => ({
       customerName: p.name?.trim() || (idx === 0 ? null : leadName) || null,
-      customerPhone: p.phone?.replace(/\D/g, '') || (idx === 0 ? null : leadPhone) || null,
+      customerPhone: p.phone?.replace(/\D/g, '')
+        ? (p.countryCode || '+977') + p.phone.replace(/\D/g, '')
+        : (idx === 0 ? null : leadPhone) || null,
       customerEmail: p.email?.trim() || (idx === 0 ? null : leadEmail) || null,
       customerGender: p.gender || (idx === 0 ? null : lead.gender) || null,
       serviceId: serviceMode === 'same' ? groupServiceId : p.serviceId,
@@ -369,7 +378,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       : {
           serviceId,
           customerName: customerName.trim(),
-          customerPhone: customerPhone.replace(/\D/g, '') || null,
+          customerPhone: customerPhone.replace(/\D/g, '')
+            ? customerCountryCode + customerPhone.replace(/\D/g, '')
+            : null,
           customerEmail: customerEmail.trim() || null,
           customerGender: customerGender || null,
           specialRequests: specialRequests.trim() || null,
@@ -660,9 +671,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 Phone
               </label>
               <div className="flex">
-                <span className="inline-flex items-center px-3 py-2 text-sm border border-r-0 border-border rounded-l-spa bg-background text-text-secondary">
-                  +977
-                </span>
+                <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
                 <CustomerAutocomplete
                   value={customerPhone}
                   onChange={setCustomerPhone}
@@ -879,9 +888,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   />
 
                   <div className="flex">
-                    <span className="inline-flex items-center px-3 py-2 text-sm border border-r-0 border-border rounded-l-spa bg-background text-text-secondary">
-                      +977
-                    </span>
+                    <CountryCodeSelect
+                      value={p.countryCode || '+977'}
+                      onChange={(code) => setPerson(idx, { countryCode: code })}
+                    />
                     <input
                       type="tel"
                       value={p.phone}
