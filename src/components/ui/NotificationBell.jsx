@@ -62,14 +62,21 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
             ) : (
               notifications.map((n) => {
                 const isDiscount = n.type === 'discount';
+                const isApproved = n.type === 'discount_approved';
+                const isDeclined = n.type === 'discount_declined';
+                const isDecision = isApproved || isDeclined;
+                const iconName = isDiscount ? 'Percent' : isApproved ? 'Check' : isDeclined ? 'X' : 'Calendar';
+                const iconWrap = isDiscount ? 'bg-amber-50' : isApproved ? 'bg-emerald-50' : isDeclined ? 'bg-red-50' : 'bg-primary/10';
+                const iconColor = isDiscount ? 'text-amber-600' : isApproved ? 'text-emerald-600' : isDeclined ? 'text-red-600' : 'text-primary';
+                const dotColor = isDiscount ? 'bg-amber-500' : isApproved ? 'bg-emerald-500' : isDeclined ? 'bg-red-500' : 'bg-primary';
                 return (
                   <button
                     key={n.id}
                     onClick={() => { onItemClick?.(n); setOpen(false); }}
                     className={`w-full text-left flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0 hover:bg-gray-50 spa-transition-fast ${n.read ? '' : 'bg-primary/5'}`}
                   >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isDiscount ? 'bg-amber-50' : 'bg-primary/10'}`}>
-                      <Icon name={isDiscount ? 'Percent' : 'Calendar'} size={15} className={isDiscount ? 'text-amber-600' : 'text-primary'} />
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${iconWrap}`}>
+                      <Icon name={iconName} size={15} className={iconColor} />
                     </div>
                     <div className="flex-1 min-w-0">
                       {isDiscount ? (
@@ -84,6 +91,12 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
                             {n.bookingNumber || 'Awaiting your approval'}
                           </p>
                         </>
+                      ) : isDecision ? (
+                        <>
+                          <p className="text-sm text-gray-900">{n.title}</p>
+                          {n.body && <p className="text-xs text-gray-500">{n.body}</p>}
+                          <p className="text-[11px] text-gray-400 mt-0.5">{timeAgo(n.createdAt)}</p>
+                        </>
                       ) : (
                         <>
                           <p className="text-sm text-gray-900">
@@ -96,7 +109,7 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
                         </>
                       )}
                     </div>
-                    {!n.read && <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${isDiscount ? 'bg-amber-500' : 'bg-primary'}`} />}
+                    {!n.read && <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${dotColor}`} />}
                   </button>
                 );
               })

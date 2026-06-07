@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { fetchPendingDiscounts, approveDiscount, rejectDiscount } from '../../../services/api';
 
-const PendingDiscountsPanel = ({ branchId }) => {
+const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
   const [discounts, setDiscounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
+  const rowRefs = useRef({});
 
   const loadPending = useCallback(async () => {
     if (!branchId) return;
@@ -24,6 +26,17 @@ const PendingDiscountsPanel = ({ branchId }) => {
   }, [branchId]);
 
   useEffect(() => { loadPending(); }, [loadPending]);
+
+  // Scroll to + briefly highlight the row targeted from a notification click
+  useEffect(() => {
+    if (!highlightBookingId || discounts.length === 0) return;
+    const el = rowRefs.current[highlightBookingId];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightId(highlightBookingId);
+    const t = setTimeout(() => setHighlightId(null), 2500);
+    return () => clearTimeout(t);
+  }, [highlightBookingId, discounts]);
 
   const handleApprove = async (bookingId) => {
     setProcessingId(bookingId);
@@ -98,7 +111,8 @@ const PendingDiscountsPanel = ({ branchId }) => {
         {discounts.map(d => (
           <div
             key={d.bookingId}
-            className="bg-gray-50 rounded-lg p-4 flex items-start justify-between gap-4"
+            ref={(el) => { rowRefs.current[d.bookingId] = el; }}
+            className={`bg-gray-50 rounded-lg p-4 flex items-start justify-between gap-4 spa-transition-fast ${highlightId === d.bookingId ? 'ring-2 ring-amber-400 bg-amber-50' : ''}`}
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center space-x-2 mb-1">

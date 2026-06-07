@@ -917,7 +917,7 @@ export async function approveDiscount(bookingId) {
     // Fetch booking to validate state before approval
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, payment_status, is_locked, discount_status')
+      .select('id, payment_status, is_locked, discount_status, discount_requested_by, base_amount, discount_amount, booking_number, customer_name')
       .eq('id', bookingId)
       .single();
 
@@ -957,6 +957,8 @@ export async function approveDiscount(bookingId) {
       throw updateError;
     }
 
+    await notifyDiscountDecision(booking, 'approved');
+
     return { data: { success: true, bookingId, discountStatus: 'approved' }, error: null };
   } catch (error) {
     console.error('[API] approveDiscount error:', error.message);
@@ -979,7 +981,7 @@ export async function rejectDiscount(bookingId) {
     // Fetch booking to validate state before rejection
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, payment_status, is_locked, discount_status')
+      .select('id, payment_status, is_locked, discount_status, discount_requested_by, base_amount, discount_amount, booking_number, customer_name')
       .eq('id', bookingId)
       .single();
 
@@ -1023,9 +1025,105 @@ export async function rejectDiscount(bookingId) {
       throw updateError;
     }
 
+    await notifyDiscountDecision(booking, 'declined');
+
     return { data: { success: true, bookingId, discountStatus: 'none' }, error: null };
   } catch (error) {
     console.error('[API] rejectDiscount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Notify the staff member who requested a discount that it was approved/declined.
+ * Best-effort: never blocks or fails the parent decision if the insert errors.
+ */
+async function notifyDiscountDecision(booking, decision) {
+  try {
+    if (!booking?.discount_requested_by) return;
+
+    const base = Number(booking.base_amount) || 0;
+    const amount = Number(booking.discount_amount) || 0;
+    const percent = base > 0 ? Math.round((amount / base) * 100) : 0;
+    const who = booking.customer_name ? ` — ${booking.customer_name}` : '';
+    const ref = booking.booking_number ? ` (${booking.booking_number})` : '';
+
+    const title = decision === 'approved'
+      ? `Discount approved${who}`
+      : `Discount declined${who}`;
+    const body = decision === 'approved'
+      ? `Your ${percent}% discount request${ref} was approved.`
+      : `Your ${percent}% discount request${ref} was declined.`;
+
+    await supabase.rpc('enqueue_notification', {
+      p_user_id: booking.discount_requested_by,
+      p_type: decision === 'approved' ? 'discount_approved' : 'discount_declined',
+      p_title: title,
+      p_body: body,
+      p_booking_id: booking.id,
+    });
+  } catch (error) {
+    console.error('[API] notifyDiscountDecision error:', error.message);
+  }
+}
+
+/**
+ * Fetch the current user's in-app notifications (most recent first).
+ */
+export async function fetchNotifications(limit = 30) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('id, type, title, body, booking_id, read, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchNotifications error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Mark a single notification as read.
+ */
+export async function markNotificationRead(notificationId) {
+  try {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', notificationId);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] markNotificationRead error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Mark all of the current user's notifications as read.
+ */
+export async function markAllNotificationsRead() {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', user.id)
+      .eq('read', false);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] markAllNotificationsRead error:', error.message);
     return { data: null, error };
   }
 }

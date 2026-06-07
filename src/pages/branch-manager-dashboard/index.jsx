@@ -11,6 +11,7 @@ import NotificationBell from '../../components/ui/NotificationBell';
 import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
+import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 
 // Import all components
 import MetricsCard from './components/MetricsCard';
@@ -44,8 +45,9 @@ import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, user } = useAuth();
   const { branchId, branchName } = useBranch();
+  const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -268,20 +270,27 @@ const BranchManagerDashboard = () => {
     navigate('?view=bookings');
   };
 
-  // Header notification feed — discount approvals first, then new bookings
+  // Header notification feed — pending approvals, decision updates, then new bookings
   const feedNotifications = [
     ...discountNotifs.map((n) => ({ ...n, read: readDiscountIds.has(n.id) })),
+    ...persistentNotifs,
     ...notifications,
   ];
   const unreadNotifications = feedNotifications.filter((n) => !n.read).length;
   const markAllNotificationsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     setReadDiscountIds(new Set(discountNotifs.map((n) => n.id)));
+    markAllPersistentRead();
   };
   const handleNotificationClick = (n) => {
     if (n.type === 'discount') {
       setReadDiscountIds((prev) => new Set(prev).add(n.id));
-      navigate('?view=dashboard');
+      navigate(`?view=dashboard&highlight=${n.bookingId}`);
+      return;
+    }
+    if (n.type === 'discount_approved' || n.type === 'discount_declined') {
+      markPersistentRead(n.id);
+      navigate('?view=bookings');
       return;
     }
     setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
@@ -308,7 +317,7 @@ const BranchManagerDashboard = () => {
       <RiskIndicatorsPanel branchId={branchId} />
 
       {/* Pending Discount Approvals */}
-      <PendingDiscountsPanel branchId={branchId} />
+      <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
 
       {/* Key Metrics Row - Responsive grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
