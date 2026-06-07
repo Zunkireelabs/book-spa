@@ -67,20 +67,27 @@ const AttendanceReportPanel = ({ branchId }) => {
 
   const [activePreset, setActivePreset] = useState('monthly');
   const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [customFrom, setCustomFrom] = useState('');   // live input value
+  const [customTo, setCustomTo] = useState('');       // live input value
+  const [appliedFrom, setAppliedFrom] = useState(''); // committed on Apply
+  const [appliedTo, setAppliedTo] = useState('');     // committed on Apply
   const [staffType, setStaffType] = useState('all'); // 'all' | 'service' | 'support'
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Range is driven by the APPLIED dates, never the live inputs, so editing the
+  // date pickers does not re-fetch until the user clicks Apply.
   const range = useMemo(() => {
-    if (mode === 'custom' && customFrom) {
-      return { startDate: customFrom, endDate: customTo || today };
+    if (mode === 'custom' && appliedFrom) {
+      return { startDate: appliedFrom, endDate: appliedTo || today };
     }
     return getPresetRange(activePreset);
-  }, [mode, activePreset, customFrom, customTo, today]);
+  }, [mode, activePreset, appliedFrom, appliedTo, today]);
+
+  // True when the inputs differ from what's currently applied (pending Apply).
+  const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
 
   const loadData = useCallback(async () => {
     if (!branchId) return;
@@ -103,7 +110,10 @@ const AttendanceReportPanel = ({ branchId }) => {
   };
 
   const handleCustomApply = () => {
-    if (customFrom) setMode('custom');
+    if (!customFrom) return;
+    setAppliedFrom(customFrom);
+    setAppliedTo(customTo);
+    setMode('custom');
   };
 
   const handleExportCSV = () => {
@@ -274,15 +284,29 @@ const AttendanceReportPanel = ({ branchId }) => {
           />
           <button
             onClick={handleCustomApply}
-            disabled={!customFrom}
+            disabled={!customFrom || !customDirty}
             className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed ${
-              mode === 'custom' ? 'bg-primary text-white' : 'bg-background text-text-secondary hover:bg-border/50'
+              customDirty
+                ? 'bg-accent text-white hover:bg-accent/90'
+                : mode === 'custom'
+                  ? 'bg-primary text-white'
+                  : 'bg-background text-text-secondary hover:bg-border/50'
             }`}
           >
             Apply
           </button>
         </div>
       </div>
+
+      {/* Applied custom range indicator */}
+      {mode === 'custom' && appliedFrom && (
+        <div className="flex items-center gap-1.5 -mt-1">
+          <Icon name="CalendarRange" size={14} className="text-text-tertiary" />
+          <span className="font-body text-xs text-text-secondary">
+            Showing {formatDate(appliedFrom)} – {formatDate(appliedTo || today)}
+          </span>
+        </div>
+      )}
 
       {/* Staff-type filter */}
       <div className="flex items-center gap-2">
