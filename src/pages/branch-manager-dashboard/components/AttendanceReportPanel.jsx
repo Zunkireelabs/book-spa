@@ -3,6 +3,7 @@ import Icon from '../../../components/AppIcon';
 import { fetchAttendanceReport } from '../../../services/api';
 
 const PRESETS = [
+  { id: 'daily', label: 'Daily' },
   { id: 'weekly', label: 'Weekly' },
   { id: 'monthly', label: 'Monthly' },
   { id: 'quarterly', label: 'Quarterly' },
@@ -17,6 +18,9 @@ function getPresetRange(preset) {
   const end = toISO(today);
   let start;
   switch (preset) {
+    case 'daily':
+      start = end;
+      break;
     case 'weekly':
       start = toISO(new Date(today.getTime() - 6 * 86400000));
       break;
