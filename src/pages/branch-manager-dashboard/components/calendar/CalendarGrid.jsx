@@ -403,6 +403,7 @@ const CalendarGrid = ({
         discountAmount: b.discount_amount,
         finalAmount: b.final_amount,
         specialRequests: b.special_requests || null,
+        createdByName: b.creator?.full_name || null,
         isShared,
         sharedCount: isShared ? b.booking_therapists.length : 0,
       };
