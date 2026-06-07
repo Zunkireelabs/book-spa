@@ -1,15 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
+import { fetchPendingApprovalCount } from 'services/api';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
-  const { branchName: contextBranchName } = useBranch();
+  const { branchName: contextBranchName, branchId } = useBranch();
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -18,6 +20,29 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
   const isManagerOrAdmin = ['manager', 'admin'].includes(userRole);
+
+  // Pending discount-approval count for the badge on "Dashboard".
+  // Only approvers (manager/admin) can receive requests; re-check on branch
+  // change, on navigation, and on a slow poll so the badge stays current.
+  useEffect(() => {
+    if (!isManagerOrAdmin || !branchId) {
+      setPendingApprovals(0);
+      return;
+    }
+    let active = true;
+    const load = async () => {
+      const { count } = await fetchPendingApprovalCount(branchId);
+      if (active) setPendingApprovals(count);
+    };
+    load();
+    const interval = setInterval(load, 60000);
+    window.addEventListener('pending-approvals-changed', load);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      window.removeEventListener('pending-approvals-changed', load);
+    };
+  }, [isManagerOrAdmin, branchId, location.pathname, location.search]);
 
   // Get org slug from URL params or profile
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
@@ -375,6 +400,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
             }
 
             // Regular nav item (no children)
+            const showBadge = item.id === 'dashboard' && pendingApprovals > 0;
             return (
               <Link
                 key={item.id}
@@ -385,8 +411,18 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                     : 'text-gray-500 hover:bg-background hover:text-gray-900'
                 } ${isCollapsed ? 'justify-center' : ''}`}
               >
-                <Icon name={item.icon} size={18} className="flex-shrink-0" />
-                {!isCollapsed && <span>{item.label}</span>}
+                <div className="relative flex-shrink-0">
+                  <Icon name={item.icon} size={18} />
+                  {showBadge && isCollapsed && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-error rounded-full ring-2 ring-surface-sidebar" />
+                  )}
+                </div>
+                {!isCollapsed && <span className="flex-1">{item.label}</span>}
+                {showBadge && !isCollapsed && (
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[11px] font-semibold text-white bg-error rounded-full">
+                    {pendingApprovals > 99 ? '99+' : pendingApprovals}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -411,20 +447,30 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       {/* Mobile Bottom Navigation */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface-sidebar border-t border-gray-200 z-staff-sidebar">
         <div className="flex items-center justify-around py-2">
-          {mobilePrimaryItems.map((item) => (
-            <Link
-              key={item.id}
-              to={item.path}
-              className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
-                isActive(item.path)
-                  ? 'text-gray-900 bg-background'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              <Icon name={item.icon} size={18} />
-              <span className="text-xs font-medium">{item.label}</span>
-            </Link>
-          ))}
+          {mobilePrimaryItems.map((item) => {
+            const showBadge = item.id === 'dashboard' && pendingApprovals > 0;
+            return (
+              <Link
+                key={item.id}
+                to={item.path}
+                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
+                  isActive(item.path)
+                    ? 'text-gray-900 bg-background'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <div className="relative">
+                  <Icon name={item.icon} size={18} />
+                  {showBadge && (
+                    <span className="absolute -top-1.5 -right-2 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 text-[10px] font-semibold text-white bg-error rounded-full">
+                      {pendingApprovals > 99 ? '99+' : pendingApprovals}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
           {mobileOverflowItems.length > 0 && (
             <button
               onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
