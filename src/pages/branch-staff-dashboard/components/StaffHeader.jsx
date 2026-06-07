@@ -1,11 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
+import NotificationBell from '../../../components/ui/NotificationBell';
 import { useAuth } from '../../../contexts/AuthContext';
+import { usePersistentNotifications } from '../../../hooks/usePersistentNotifications';
 
 const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'dashboard', onViewChange }) => {
   const { orgSlug: urlOrgSlug } = useParams();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, user } = useAuth();
+  const { items: notifications, markRead, markAllRead } = usePersistentNotifications(user?.id);
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const handleNotificationClick = (n) => {
+    markRead(n.id);
+    onViewChange?.('bookings');
+  };
 
   // Get org slug from URL or profile
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
@@ -149,9 +158,12 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
             </div>
 
             {/* Notifications */}
-            <button className="relative p-2 rounded-spa hover:bg-background spa-transition-fast">
-              <Icon name="Bell" size={20} className="text-text-secondary" />
-            </button>
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onMarkAllRead={markAllRead}
+              onItemClick={handleNotificationClick}
+            />
 
             {/* Profile Dropdown */}
             <div className="relative" ref={dropdownRef}>
