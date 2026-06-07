@@ -319,6 +319,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
               />
               <DetailRow label="Therapist" value={booking.therapistName || '—'} />
               <DetailRow label="Room" value={booking.roomName || '—'} />
+              <DetailRow label="Created by" value={booking.createdByName || 'Online booking'} />
             </div>
 
             {/* Financial info */}

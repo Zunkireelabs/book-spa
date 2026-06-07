@@ -2169,6 +2169,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         service:services(name, duration_minutes),
         therapist:therapists(id, name),
         room:rooms(id, name),
+        creator:users!created_by(full_name),
         booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name))
       `)
       .eq('branch_id', resolvedBranchId)
