@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import { fetchServices, createBooking } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 
@@ -18,6 +19,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   const [selectedTime, setSelectedTime] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerCountryCode, setCustomerCountryCode] = useState('+977');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
@@ -81,7 +83,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       startTime: selectedTime,
       customerName: customerName.trim(),
       customerEmail: customerEmail.trim() || null,
-      customerPhone: customerPhone.trim() ? `+977${customerPhone.replace(/\s+/g, '')}` : null,
+      customerPhone: customerPhone.trim() ? `${customerCountryCode}${customerPhone.replace(/\D/g, '')}` : null,
       customerGender: customerGender || null,
       specialRequests: specialRequests.trim() || null,
     });
@@ -105,6 +107,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setSelectedTime('');
     setCustomerName('');
     setCustomerPhone('');
+    setCustomerCountryCode('+977');
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
@@ -312,13 +315,11 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   Phone
                 </label>
                 <div className="flex">
-                  <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-200 bg-gray-50 text-sm text-gray-500">
-                    +977
-                  </span>
+                  <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
                   <input
                     type="tel"
                     value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
                     placeholder="9800000000"
                     className="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
@@ -410,7 +411,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               {customerPhone && (
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Phone</span>
-                  <span className="text-sm text-gray-900">+977 {customerPhone}</span>
+                  <span className="text-sm text-gray-900">{customerCountryCode} {customerPhone}</span>
                 </div>
               )}
               {customerEmail && (
