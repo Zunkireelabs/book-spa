@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
+import NotificationBell from '../../components/ui/NotificationBell';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingLookupPanel from './components/BookingLookupPanel';
@@ -13,11 +14,19 @@ import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
+import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 
 const BranchStaffDashboard = () => {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, user } = useAuth();
   const { branchId, branchName } = useBranch();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { items: notifications, markRead: markNotifRead, markAllRead: markAllNotifsRead } = usePersistentNotifications(user?.id);
+  const unreadNotifCount = notifications.filter((n) => !n.read).length;
+
+  const handleNotificationClick = (n) => {
+    markNotifRead(n.id);
+    setSearchParams({ view: 'bookings' });
+  };
 
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -468,6 +477,12 @@ const BranchStaffDashboard = () => {
                 <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize bg-accent/10 text-accent">
                   {userRole}
                 </span>
+                <NotificationBell
+                  notifications={notifications}
+                  unreadCount={unreadNotifCount}
+                  onMarkAllRead={markAllNotifsRead}
+                  onItemClick={handleNotificationClick}
+                />
                 <div className="relative" ref={profileDropdownRef}>
                   <button
                     onClick={() => setShowProfileDropdown(!showProfileDropdown)}
