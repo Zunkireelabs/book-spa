@@ -31,6 +31,7 @@ const PendingDiscountsPanel = ({ branchId }) => {
     setProcessingId(null);
     if (!result.error) {
       setDiscounts(prev => prev.filter(d => d.bookingId !== bookingId));
+      window.dispatchEvent(new CustomEvent('pending-approvals-changed'));
     }
   };
 
@@ -40,6 +41,7 @@ const PendingDiscountsPanel = ({ branchId }) => {
     setProcessingId(null);
     if (!result.error) {
       setDiscounts(prev => prev.filter(d => d.bookingId !== bookingId));
+      window.dispatchEvent(new CustomEvent('pending-approvals-changed'));
     }
   };
 

@@ -804,6 +804,33 @@ export async function fetchPendingDiscounts(branchId) {
 }
 
 /**
+ * Count of pending discount requests routed to the current user (the approver),
+ * scoped to a branch. Powers the sidebar "Dashboard" approval badge.
+ */
+export async function fetchPendingApprovalCount(branchId) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { count: 0, error: authError };
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { count, error } = await supabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('branch_id', resolvedBranchId)
+      .eq('discount_status', 'pending')
+      .eq('discount_requested_to', user.id)
+      .eq('is_locked', false);
+
+    if (error) throw error;
+    return { count: count || 0, error: null };
+  } catch (error) {
+    console.error('[API] fetchPendingApprovalCount error:', error.message);
+    return { count: 0, error };
+  }
+}
+
+/**
  * List the managers/admins the current user may send a discount request to.
  * Backed by the list_discount_approvers() SECURITY DEFINER function.
  */
