@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
 
 function timeAgo(date) {
@@ -16,20 +17,41 @@ function timeAgo(date) {
 
 const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, onItemClick }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [coords, setCoords] = useState({ top: 0, right: 0 });
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
 
-  useEffect(() => {
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+  const updateCoords = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setCoords({ top: r.bottom + 12, right: window.innerWidth - r.right });
   }, []);
 
+  const toggle = () => {
+    if (!open) updateCoords();
+    setOpen((o) => !o);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e) => {
+      if (btnRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    window.addEventListener('resize', updateCoords);
+    window.addEventListener('scroll', updateCoords, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('resize', updateCoords);
+      window.removeEventListener('scroll', updateCoords, true);
+    };
+  }, [open, updateCoords]);
+
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
-        onClick={() => setOpen((o) => !o)}
+        ref={btnRef}
+        onClick={toggle}
         className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-700 spa-transition-fast"
         title="Notifications"
         aria-label="Notifications"
@@ -42,8 +64,12 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
         )}
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-3 w-80 bg-white rounded-xl shadow-lg border border-gray-200 z-dropdown overflow-hidden">
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', top: coords.top, right: coords.right }}
+          className="w-80 bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden"
+        >
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
             {unreadCount > 0 && (
@@ -115,9 +141,10 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
               })
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 
