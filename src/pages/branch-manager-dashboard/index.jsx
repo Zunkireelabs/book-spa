@@ -8,7 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
 import NotificationBell from '../../components/ui/NotificationBell';
-import { fetchBookings, fetchTherapists, updateBookingStatus } from '../../services/api';
+import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 
@@ -58,6 +58,8 @@ const BranchManagerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [newBookingNotification, setNewBookingNotification] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [discountNotifs, setDiscountNotifs] = useState([]);
+  const [readDiscountIds, setReadDiscountIds] = useState(() => new Set());
   const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 
@@ -100,6 +102,35 @@ const BranchManagerDashboard = () => {
   }, [branchId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Pending discount approvals routed to the current user → notification feed
+  const loadDiscountNotifs = useCallback(async () => {
+    if (!branchId) { setDiscountNotifs([]); return; }
+    const { data } = await fetchPendingDiscounts(branchId);
+    setDiscountNotifs(
+      (data || []).map((d) => ({
+        id: `discount-${d.bookingId}`,
+        type: 'discount',
+        bookingId: d.bookingId,
+        bookingNumber: d.bookingNumber,
+        customerName: d.customerName,
+        discountPercent: d.discountPercent,
+        discountAmount: d.discountAmount,
+        requestedByName: d.requestedByName,
+      }))
+    );
+  }, [branchId]);
+
+  useEffect(() => {
+    loadDiscountNotifs();
+    const onChange = () => loadDiscountNotifs();
+    window.addEventListener('pending-approvals-changed', onChange);
+    const interval = setInterval(loadDiscountNotifs, 60000);
+    return () => {
+      window.removeEventListener('pending-approvals-changed', onChange);
+      clearInterval(interval);
+    };
+  }, [loadDiscountNotifs]);
 
   // Real-time subscription for booking changes
   useEffect(() => {
@@ -237,10 +268,22 @@ const BranchManagerDashboard = () => {
     navigate('?view=bookings');
   };
 
-  // Header notification feed
-  const unreadNotifications = notifications.filter((n) => !n.read).length;
-  const markAllNotificationsRead = () => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  // Header notification feed — discount approvals first, then new bookings
+  const feedNotifications = [
+    ...discountNotifs.map((n) => ({ ...n, read: readDiscountIds.has(n.id) })),
+    ...notifications,
+  ];
+  const unreadNotifications = feedNotifications.filter((n) => !n.read).length;
+  const markAllNotificationsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setReadDiscountIds(new Set(discountNotifs.map((n) => n.id)));
+  };
   const handleNotificationClick = (n) => {
+    if (n.type === 'discount') {
+      setReadDiscountIds((prev) => new Set(prev).add(n.id));
+      navigate('?view=dashboard');
+      return;
+    }
     setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
     navigate('?view=bookings');
   };
@@ -417,7 +460,7 @@ const BranchManagerDashboard = () => {
 
                   {/* Notifications */}
                   <NotificationBell
-                    notifications={notifications}
+                    notifications={feedNotifications}
                     unreadCount={unreadNotifications}
                     onMarkAllRead={markAllNotificationsRead}
                     onItemClick={handleNotificationClick}

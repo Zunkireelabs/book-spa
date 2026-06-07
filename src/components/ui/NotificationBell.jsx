@@ -60,27 +60,46 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
                 <p className="text-sm text-gray-400">No notifications yet</p>
               </div>
             ) : (
-              notifications.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => { onItemClick?.(n); setOpen(false); }}
-                  className={`w-full text-left flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0 hover:bg-gray-50 spa-transition-fast ${n.read ? '' : 'bg-primary/5'}`}
-                >
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <Icon name="Calendar" size={15} className="text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-900">
-                      New booking{n.customerName ? ` — ${n.customerName}` : ''}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      {n.bookingNumber ? `${n.bookingNumber} · ` : ''}{n.date}
-                    </p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">{timeAgo(n.createdAt)}</p>
-                  </div>
-                  {!n.read && <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-1.5" />}
-                </button>
-              ))
+              notifications.map((n) => {
+                const isDiscount = n.type === 'discount';
+                return (
+                  <button
+                    key={n.id}
+                    onClick={() => { onItemClick?.(n); setOpen(false); }}
+                    className={`w-full text-left flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0 hover:bg-gray-50 spa-transition-fast ${n.read ? '' : 'bg-primary/5'}`}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isDiscount ? 'bg-amber-50' : 'bg-primary/10'}`}>
+                      <Icon name={isDiscount ? 'Percent' : 'Calendar'} size={15} className={isDiscount ? 'text-amber-600' : 'text-primary'} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {isDiscount ? (
+                        <>
+                          <p className="text-sm text-gray-900">
+                            Discount approval{n.customerName ? ` — ${n.customerName}` : ''}
+                          </p>
+                          <p className="text-xs text-gray-500 truncate">
+                            {n.discountPercent}% off{n.requestedByName ? ` · by ${n.requestedByName}` : ''}
+                          </p>
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            {n.bookingNumber || 'Awaiting your approval'}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-gray-900">
+                            New booking{n.customerName ? ` — ${n.customerName}` : ''}
+                          </p>
+                          <p className="text-xs text-gray-500 truncate">
+                            {n.bookingNumber ? `${n.bookingNumber} · ` : ''}{n.date}
+                          </p>
+                          <p className="text-[11px] text-gray-400 mt-0.5">{timeAgo(n.createdAt)}</p>
+                        </>
+                      )}
+                    </div>
+                    {!n.read && <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${isDiscount ? 'bg-amber-500' : 'bg-primary'}`} />}
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
