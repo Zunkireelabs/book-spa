@@ -76,10 +76,12 @@ These came up in discussion and decide how we protect the data:
 **Customers** — org-level identity, one record per `(org, normalized phone)`. `branch_id` is kept
 as "origin branch" metadata (not dropped). History + credit span the org.
 
-**Staff** — "one identity, many branches": the `therapists` row becomes the org-level identity
-(`org_id`), and a new **`staff_branch_memberships`** table lists which branches each identity works
-at, carrying **per-branch `display_order`** (and room for per-branch scheduling later). Bookings and
-the multi-therapist junction keep referencing a single staff id.
+**Staff** — "one current branch + transfer" (chosen model): the `therapists` row gets `org_id`
+(org-level identity) but **`branch_id` stays NOT NULL and represents the staffer's CURRENT branch**.
+A staffer is at exactly one branch at a time. A **branch manager/admin transfers** a staffer to
+another branch in the same org; the transfer updates `therapists.branch_id` and writes an audit row
+to a new **`staff_transfers`** table. After a transfer, only the destination branch's manager/admin
+can transfer the staffer onward. No simultaneous multi-branch, no membership junction, no row merge.
 
 ---
 
@@ -147,61 +149,76 @@ First-ever enforcement of "one customer per phone per org." Phoneless rows exclu
 
 ---
 
-## 6. PHASE 2 — STAFF  *(only after Phase 1 is live in prod and stable)*
+## 6. PHASE 2 — STAFF (transfer model)  *(only after Phase 1 is live in prod and stable)*
 
-Structurally harder (new junction, 3 constrained child FKs) and **semantically riskier** (names
-aren't identifiers). New files **038–041**.
+**Chosen model: one current branch + transfer.** A staffer is at exactly one branch at a time
+(`therapists.branch_id` = current branch). A branch manager/admin **transfers** a staffer to another
+branch in the same org; only the destination branch's manager/admin can transfer them onward.
 
-### 6.1 `migration-038-staff-org-id-and-membership.sql` — additive (REVERSIBLE)
-- Add `therapists.org_id` (backfill → verify → `SET NOT NULL`, index). Keep `branch_id NOT NULL`.
-- New table **`staff_branch_memberships`** `(id, therapist_id→therapists ON DELETE CASCADE,
-  branch_id→branches, org_id, display_order int, is_active, created_at, UNIQUE(therapist_id,
-  branch_id))`; enable RLS; index branch_id + therapist_id.
-- Backfill one membership per existing therapist at its current branch, carrying over `display_order`
-  + `is_active`. Membership becomes source of truth for per-branch order (keep legacy
-  `therapists.display_order` during transition).
+This is **additive-only** — no row merge, no junction table, no attendance-constraint change. New
+files **038–039**.
 
-### 6.2 `migration-039-staff-merge-dryrun.sql` — REPORT ONLY, **HUMAN REVIEW REQUIRED** ⚠️
-- Group by `(org_id, lower(trim(name)))` HAVING count > 1. Emit `dup_count`, **divergence flags**
-  `array_agg(distinct position)` + `array_agg(distinct gender)`, branches, proposed canonical.
-- A human vets candidates and populates `staff_merge_approved(merged_id, canonical_id)`.
-  **Default: merge nothing unless explicitly approved.** Differing position/gender ⇒ almost certainly
-  different people ⇒ do NOT merge.
+### 6.1 `migration-038-staff-org-id-and-transfers.sql` — additive (REVERSIBLE)
+- Add `therapists.org_id` (backfill from `branches.org_id` via `branch_id` → verify 0 NULLs →
+  `SET NOT NULL`, index `idx_therapists_org`). **Keep `branch_id NOT NULL` = current branch.**
+- New audit table **`staff_transfers`** `(id, therapist_id→therapists, org_id, from_branch_id→branches,
+  to_branch_id→branches, transferred_by→users, transferred_at timestamptz default now(), note text)`;
+  enable RLS; index `therapist_id`. Append-only history of every move (also the "undo" trail — a
+  transfer is reversed by another transfer).
+- No change to `therapist_attendance` uniqueness — stays `(therapist_id, date)`.
 
-### 6.3 `migration-040-staff-merge.sql` — DESTRUCTIVE (transaction + backup + collisions) ⚠️
-Reads ONLY the approved list; `therapist_merge_log` snapshots deleted rows **incl. colliding child
-rows**. Repoint order matters (unique constraints + ON DELETE CASCADE):
-1. `bookings.therapist_id` → canonical (unconstrained, direct).
-2. `booking_therapists` `UNIQUE(booking_id,therapist_id)`: delete merged-side rows that collide with
-   an existing canonical row on the same booking, then repoint survivors.
-3. `therapist_attendance`: delete colliding merged-side rows (same date+branch), then repoint.
-4. `staff_branch_memberships` `UNIQUE(therapist_id,branch_id)`: delete colliding, then repoint.
-5. **Delete merged `therapists` rows LAST** (so the `booking_therapists` CASCADE can't wipe rows we
-   just repointed).
-- Snapshot step (§5.3 equivalent) for `therapists` + the 3 child tables runs first.
+### 6.2 `migration-039-staff-rls-org.sql` — RLS swap
+- Replace branch-join therapist policies (`migration-012` L165-232) with `org_id = get_user_org_id()`
+  for SELECT/INSERT/UPDATE; keep `anon read where is_active`.
+- `staff_transfers` policies: org-scoped read; INSERT restricted to manager/admin (write authz also
+  enforced in the API — see 6.3).
+- **No dedup/merge step.** Duplicate-staff cleanup (if ever wanted) is a separate, optional,
+  human-reviewed exercise — not required by the transfer model.
 
-### 6.4 `migration-041-attendance-unique-and-staff-rls.sql` — constraints + RLS (partly IRREVERSIBLE) ⚠️
-- Attendance uniqueness `(therapist_id, date)` → **`(therapist_id, branch_id, date)`** (a staffer can
-  work multiple branches on a day). Confirm exact old constraint name per DB; run AFTER merge.
-  Dropping the old constraint loosens uniqueness = irreversible.
-- Staff RLS: replace branch-join therapist policies (`migration-012` L165-232) with
-  `org_id = get_user_org_id()`; keep `anon read where is_active`. Add `staff_branch_memberships`
-  policies (org read, anon read active, manager/admin write).
-- **Future-dup guard:** no global `(org,name)` unique (names aren't identifiers). Rely on
-  `staff_branch_memberships UNIQUE(therapist_id,branch_id)` + the existing per-branch name dup-check.
+### 6.3 App refactor (Phase 2) — `api.js` + `…/MasterData/TherapistManagementPanel.jsx` + attendance
+- **New `transferTherapist(therapistId, toBranchId, note?)` in `api.js`:**
+  1. Load the therapist; assert `to_branch_id` is in the **same `org_id`** and ≠ current branch.
+  2. **Authz:** caller must be admin (org-wide) **or** manager/admin of the staffer's **current**
+     branch. (This enforces "only the owning branch can transfer them out.")
+  3. `UPDATE therapists SET branch_id = toBranchId, display_order = <next at destination>`.
+  4. `INSERT staff_transfers(therapist_id, org_id, from_branch_id, to_branch_id, transferred_by, note)`.
+  5. Return refreshed staff; caller runs `loadData()`.
+- **Transfer UI** in `TherapistManagementPanel.jsx` (Staff → Therapists): add a **Transfer** action
+  (button/column) per staff row → opens a branch picker (dropdown of the org's *other* branches; or
+  type an existing branch name) → confirm → calls `transferTherapist`. Surface a small "Transferred
+  from X on <date>" hint from `staff_transfers` if useful. (Can also be surfaced on the Attendance
+  table's ACTION column if you want transfer reachable from there.)
+- `fetchTherapists(branchId,{date})` (~L156) & `fetchTherapistsForManagement` (~L2740): **unchanged** —
+  still filter by `therapists.branch_id` (current branch), order by `display_order`.
+- `createTherapist`/`updateTherapist`/`toggleTherapistActive`/`deleteTherapist`/`updateTherapistOrder`:
+  **largely unchanged** (still operate on the single `therapists` row / current branch).
+- Attendance fns (~L4111-4427): **unchanged** — recorded against the staffer's current branch.
+- **Enabled net-new:** "move staff to another branch" = the Transfer action (one UPDATE + one audit
+  row), instead of recreating the person at the second branch.
 
-### 6.5 App refactor (Phase 2) — `api.js` + `…/MasterData/TherapistManagementPanel.jsx`
-- `fetchTherapists(branchId,{date})` (~L156) & `fetchTherapistsForManagement` (~L2740): join
-  `staff_branch_memberships` → `therapists` by `branch_id`; order by membership `display_order`.
-- `createTherapist` (~L2762): "find-or-create org identity, then upsert membership"; `display_order`
-  computed over the **branch's** memberships.
-- `updateTherapist` (~L2822): edits identity fields on `therapists`; branch authz becomes "manager's
-  branch has a membership for this therapist."
-- `toggleTherapistActive` (~L2886) & `deleteTherapist` (~L2946): split into **per-branch**
-  (membership) vs **identity-wide** ops — product decision to confirm.
-- `updateTherapistOrder` (~L3006) + @dnd-kit panel: write reorder to membership `display_order`.
-- Attendance fns (~L4111-4427): group by `(therapist_id, branch_id)`; compatible with new unique.
-- **Enabled net-new:** "assign existing staff to my branch" = insert a membership row.
+### 6.4 Transfer leftover-booking reminder (1 day before) — `migration-040` + scheduled job
+**Decision (was §10.5a):** transferring a staffer does **not** block the transfer or auto-reassign
+their existing future bookings. The bookings **stay as-is at the branch where they were created**;
+the system instead sends a **reminder one day before** each such booking so the branch can arrange
+coverage or reassign in time.
+
+- **Reuse the existing notification infra** (`migration-032`): the `notifications` table
+  `(user_id, type, title, body, booking_id, read)`, the `NotificationBell` UI, and realtime delivery.
+  Only the *scheduling* is net-new.
+- **`migration-040-transfer-booking-reminders.sql`:** add a **system** enqueue path. The existing
+  `enqueue_notification()` requires `auth.uid()` to be manager/admin, so a scheduled job can't call
+  it — add a SECURITY DEFINER `enqueue_system_notification(...)` (no role check; callable only by the
+  job / service role) **or** insert directly from a service-role Edge Function.
+- **Daily scheduler** (set up in **both** Supabase projects): a `pg_cron` job (or a scheduled Edge
+  Function) that runs once/day, finds **non-terminal bookings starting tomorrow (Nepal time) whose
+  assigned staffer's current `branch_id` ≠ the booking's branch** (i.e. left-behind after a transfer),
+  and enqueues a reminder.
+- **Recipients (decided):** the **manager/admin of the booking's branch** *and* the **staff currently
+  at that branch** (the people who can actually cover/reassign) — **not** the transferred staffer who
+  left. The job enqueues one `notifications` row per recipient, all with the booking's `booking_id`
+  set so the bell deep-links to it.
+- Edge Functions / cron live in the dashboard (not in this repo) — deploy to staging **and**
+  production separately, same as `pin-login`.
 
 ---
 
@@ -219,11 +236,12 @@ For **each migration**, and for **each phase**:
    never reuse staging's merge result.
 
 Sequence: `033 → 034(dryrun)→review → [snapshot] → 035 → 036 → 037 → app P1 → verify → promote P1`,
-then (later) `038 → 039(dryrun)→HUMAN review → [snapshot] → 040 → 041 → app P2 → verify → promote P2`.
+then (later) `038 → 039 → app P2 (transfer UI) → verify → promote P2`. Phase 2 is additive-only — no
+snapshot/merge step required.
 
-Keep `customer_merge_log` / `therapist_merge_log` + the `*_backup_<date>` tables permanently as the
-audit/undo trail. Keep `supabase/schema.sql` baseline in sync with new columns/tables/constraints.
-`npm run build` is the app gate.
+Keep `customer_merge_log` + the `*_backup_<date>` tables permanently as the Phase 1 audit/undo trail;
+`staff_transfers` is the permanent Phase 2 audit trail. Keep `supabase/schema.sql` baseline in sync
+with new columns/tables/constraints. `npm run build` is the app gate.
 
 ---
 
@@ -235,9 +253,12 @@ audit/undo trail. Keep `supabase/schema.sql` baseline in sync with new columns/t
 | Add `org_id`, new table, new index | ✅ yes | reverse migration: drop column/table/index |
 | `SET NOT NULL` on `org_id` | ✅ if no NULLs written | `DROP NOT NULL` |
 | **Merge + delete duplicate customer rows (035)** | ⚠️ not automatically | `customer_merge_log` / `customers_backup_<date>` / PITR |
-| **Merge + delete duplicate staff rows (040)** | ⚠️ not automatically | `therapist_merge_log` / backups / PITR |
-| **Drop attendance unique → add per-branch (041)** | ⚠️ hard | can't restore old key if new data already violates it |
+| Staff transfer (UPDATE `branch_id`) | ✅ yes | reverse transfer; full history in `staff_transfers` |
 | RLS widening (org-wide visibility) | ✅ yes | restore prior policies |
+
+> Phase 2 (staff transfer model) has **no irreversible step** — it is additive DDL plus an UPDATE
+> that is itself undone by another transfer. The only irreversible work in this whole effort is the
+> Phase 1 customer merge (035).
 
 Belt-and-suspenders on the irreversible rows: transaction-wrapped + jsonb row snapshots + full
 table backups + (recommended) prod PITR checkpoint before running.
@@ -246,25 +267,42 @@ table backups + (recommended) prod PITR checkpoint before running.
 
 ## 9. Verification (staging via MCP `execute_sql`, then mirror on prod)
 
-- **033 / 038:** `SELECT count(*) … WHERE org_id IS NULL` = 0 before `SET NOT NULL`; after 038,
-  membership count == therapist count.
-- **034 / 039 dry-runs:** counts match (3 customer / 7 therapist redundant on staging); phoneless
-  customers listed+excluded; staff position/gender divergence human-reviewed.
-- **035 / 040:** `*_merge_log` count == redundant/approved count; **0 orphan** child rows
-  (`bookings.customer_id`, `booking_therapists`, `therapist_attendance` all resolve); totals dropped
-  by exactly the merged count.
+- **033 / 038:** `SELECT count(*) … WHERE org_id IS NULL` = 0 before `SET NOT NULL` (customers and
+  therapists respectively).
+- **034 dry-run:** counts match (3 customer redundant on staging); phoneless customers listed+excluded.
+- **035:** `customer_merge_log` count == redundant count; **0 orphan** `bookings.customer_id`; total
+  customers dropped by exactly the merged count.
 - **036:** inserting a duplicate `(org_id, phone)` raises a unique violation; phoneless insert ok.
-- **041:** new attendance unique exists / old gone; same staff+date at a *different* branch succeeds,
-  same branch+date fails.
-- **App E2E:** booking a phone seen at another branch links to the canonical org customer (no new
-  row) and the autocomplete shows them; a staffer added to two branches appears in both branches'
-  lists with independent order; attendance markable per branch. Run `get_advisors` for new warnings.
+- **039 (staff RLS):** non-admin staff can read all org therapists; `staff_transfers` readable
+  org-wide, insert restricted to manager/admin.
+- **Transfer E2E:** as a manager of branch A, transfer a staffer to branch B → they disappear from
+  A's staff/attendance list and appear in B's; a `staff_transfers` row is written with the correct
+  from/to/by; the staffer's `display_order` is sane at B; a manager of A can **no longer** transfer
+  them (only B's manager/admin can); transferring back restores them to A.
+- **Reminder E2E (§6.4):** with a staffer transferred A→B who still has a booking at A tomorrow,
+  running the daily job enqueues exactly one `notifications` row to the intended recipient(s) with
+  the correct `booking_id`; the bell shows it and deep-links to the booking; a booking whose staffer
+  was NOT transferred (current branch == booking branch) produces no reminder; re-running the job the
+  same day does not double-send.
+- **App E2E (customers):** booking a phone seen at another branch links to the canonical org customer
+  (no new row) and the autocomplete shows them. Run `get_advisors` for new warnings.
 
 ---
 
 ## 10. Open product decisions to confirm before coding
 1. **Scope/sequencing:** ✅ **Decided — Customers first**, Staff as a later gated phase (both phases
    documented above). Staff begins only once Customers is live in prod and stable.
-2. **PITR:** is it enabled on production? If not, the `*_backup_<date>` SQL copies are the fallback.
-3. **Staff toggle/delete semantics (Phase 2):** per-branch (membership) vs identity-wide.
+2. **Staff model:** ✅ **Decided — single current branch + transfer** (not a membership junction). A
+   staffer is at one branch at a time; manager/admin of the current branch transfers them to another
+   branch in the org; only the destination branch's manager/admin can transfer them onward.
+3. **PITR:** is it enabled on production? If not, the `customers_backup_<date>` SQL copies are the
+   Phase 1 fallback. (Phase 2 has no destructive step, so no snapshot needed.)
 4. **RLS widening:** confirm all org staff seeing all org customers is acceptable.
+5. **Transfer mid-state edge cases:**
+   - (a) Future bookings already assigned at the old branch — ✅ **Decided: keep as-is, do not block
+     or auto-reassign; send a reminder one day before each (see §6.4).** Recipients ✅ **decided —
+     the booking-branch manager/admin + the staff currently at that branch** (not the transferred
+     staffer).
+   - (b) Can an **admin** transfer anyone regardless of current branch? (assumed **yes**)
+   - (c) Should the Transfer action live on the **Therapists** panel, the **Attendance** table's
+     ACTION column, or both?
