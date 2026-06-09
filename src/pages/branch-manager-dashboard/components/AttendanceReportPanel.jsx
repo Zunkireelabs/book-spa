@@ -72,6 +72,7 @@ const AttendanceReportPanel = ({ branchId }) => {
   const [appliedFrom, setAppliedFrom] = useState(''); // committed on Apply
   const [appliedTo, setAppliedTo] = useState('');     // committed on Apply
   const [staffType, setStaffType] = useState('all'); // 'all' | 'service' | 'support'
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -220,7 +221,11 @@ const AttendanceReportPanel = ({ branchId }) => {
   );
   totals.attendanceRate = totals.marked > 0 ? Math.round((totals.present / totals.marked) * 100) : 0;
   const filteredStaffCount = perStaff.length;
-  const rankedStaff = [...perStaff].sort((a, b) => b.marked - a.marked || a.therapistName.localeCompare(b.therapistName));
+  const q = searchQuery.trim().toLowerCase();
+  const searchedStaff = q
+    ? perStaff.filter((s) => (s.therapistName || '').toLowerCase().includes(q))
+    : perStaff;
+  const rankedStaff = [...searchedStaff].sort((a, b) => b.marked - a.marked || a.therapistName.localeCompare(b.therapistName));
 
   return (
     <div className="space-y-6">
@@ -308,22 +313,43 @@ const AttendanceReportPanel = ({ branchId }) => {
         </div>
       )}
 
-      {/* Staff-type filter */}
-      <div className="flex items-center gap-2">
-        <span className="font-body text-xs text-text-tertiary uppercase tracking-wide mr-1">Staff</span>
-        {[['all', 'All'], ['service', 'Service'], ['support', 'Support']].map(([val, label]) => (
-          <button
-            key={val}
-            onClick={() => setStaffType(val)}
-            className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast ${
-              staffType === val
-                ? 'bg-primary text-white'
-                : 'bg-background text-text-secondary hover:bg-border/50'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Staff-type filter + search */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="font-body text-xs text-text-tertiary uppercase tracking-wide mr-1">Staff</span>
+          {[['all', 'All'], ['service', 'Service'], ['support', 'Support']].map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setStaffType(val)}
+              className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast ${
+                staffType === val
+                  ? 'bg-primary text-white'
+                  : 'bg-background text-text-secondary hover:bg-border/50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="relative sm:ml-auto w-full sm:max-w-xs">
+          <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+          <input
+            type="text"
+            placeholder="Search staff by name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 bg-surface border border-border rounded-spa text-sm font-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-primary/30"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary spa-transition-fast"
+              title="Clear search"
+            >
+              <Icon name="X" size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -353,6 +379,11 @@ const AttendanceReportPanel = ({ branchId }) => {
           <div className="p-8 text-center">
             <Icon name="CalendarX" size={32} className="text-text-tertiary mx-auto mb-3" />
             <p className="font-body text-sm text-text-tertiary">No attendance recorded in this period.</p>
+          </div>
+        ) : rankedStaff.length === 0 ? (
+          <div className="p-8 text-center">
+            <Icon name="SearchX" size={32} className="text-text-tertiary mx-auto mb-3" />
+            <p className="font-body text-sm text-text-tertiary">No staff match "{searchQuery.trim()}".</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
