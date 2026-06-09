@@ -3088,7 +3088,7 @@ export async function deleteTherapist({ therapistId }) {
  * SECURITY DEFINER transfer_therapist() function (migration-039):
  * only an admin, or the manager of the staffer's CURRENT branch, may transfer.
  */
-export async function transferTherapist({ therapistId, toBranchId, note = null }) {
+export async function transferTherapist({ therapistId, toBranchId, note = null, effectiveDate = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -3097,6 +3097,7 @@ export async function transferTherapist({ therapistId, toBranchId, note = null }
       p_therapist_id: therapistId,
       p_to_branch_id: toBranchId,
       p_note: note,
+      p_effective_date: effectiveDate,
     });
 
     if (error) throw error;
@@ -3116,7 +3117,7 @@ export async function fetchStaffTransfers() {
     const { data, error } = await supabase
       .from('staff_transfers')
       .select(`
-        id, transferred_at, note,
+        id, transferred_at, effective_date, applied, note,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name),
@@ -3129,6 +3130,8 @@ export async function fetchStaffTransfers() {
     const transfers = (data || []).map(t => ({
       id: t.id,
       transferredAt: t.transferred_at,
+      effectiveDate: t.effective_date,
+      applied: t.applied,
       note: t.note,
       therapistName: t.therapist?.name || '—',
       fromBranch: t.fromBranch?.name || '—',
@@ -3139,6 +3142,70 @@ export async function fetchStaffTransfers() {
     return { data: transfers, error: null };
   } catch (error) {
     console.error('[API] fetchStaffTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Pending (scheduled, not-yet-applied) transfers. When branchId is given, returns
+// only those moving a staffer OUT of that branch (the source branch's manager view).
+export async function fetchPendingTransfers(branchId = null) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    let query = supabase
+      .from('staff_transfers')
+      .select(`
+        id, transferred_at, effective_date, applied, note, therapist_id,
+        therapist:therapists!staff_transfers_therapist_id_fkey(name),
+        fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
+        toBranch:branches!staff_transfers_to_branch_id_fkey(name),
+        transferredBy:users!staff_transfers_transferred_by_fkey(full_name)
+      `)
+      .eq('applied', false)
+      .order('effective_date', { ascending: true });
+
+    if (branchId && !isOverallBranch(branchId)) {
+      query = query.eq('from_branch_id', branchId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const transfers = (data || []).map(t => ({
+      id: t.id,
+      therapistId: t.therapist_id,
+      transferredAt: t.transferred_at,
+      effectiveDate: t.effective_date,
+      applied: t.applied,
+      note: t.note,
+      therapistName: t.therapist?.name || '—',
+      fromBranch: t.fromBranch?.name || '—',
+      toBranch: t.toBranch?.name || '—',
+      transferredBy: t.transferredBy?.full_name || 'System',
+    }));
+
+    return { data: transfers, error: null };
+  } catch (error) {
+    console.error('[API] fetchPendingTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Cancel a scheduled (not-yet-applied) transfer. Org/role checked server-side.
+export async function cancelScheduledTransfer(transferId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('cancel_scheduled_transfer', {
+      p_id: transferId,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] cancelScheduledTransfer error:', error.message);
     return { data: null, error };
   }
 }

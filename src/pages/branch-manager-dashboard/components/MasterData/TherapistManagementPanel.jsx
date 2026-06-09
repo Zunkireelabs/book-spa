@@ -801,9 +801,11 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                 <table className="w-full">
                   <thead className="sticky top-0">
                     <tr className="bg-background border-b border-border">
-                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Date</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Recorded</th>
                       <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">{staffLabel}</th>
                       <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">From → To</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Effective</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
                       <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">By</th>
                       <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remarks</th>
                     </tr>
@@ -817,6 +819,19 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                         <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{t.therapistName}</td>
                         <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
                           {t.fromBranch} <span className="text-text-tertiary">→</span> {t.toBranch}
+                        </td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                          {t.effectiveDate
+                            ? (() => { const [y, m, d] = t.effectiveDate.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); })()
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
+                            t.applied ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
+                          }`}>
+                            <Icon name={t.applied ? 'CheckCircle' : 'Clock'} size={12} />
+                            {t.applied ? 'Applied' : 'Scheduled'}
+                          </span>
                         </td>
                         <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.transferredBy}</td>
                         <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.note || '—'}</td>
