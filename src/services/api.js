@@ -2821,6 +2821,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
         position: position || null,
         is_service_staff: isServiceStaff,
         branch_id: effectiveBranchId,
+        org_id: profile.org_id,
         is_active: true,
         display_order: nextOrder,
       })
@@ -3015,6 +3016,31 @@ export async function deleteTherapist({ therapistId }) {
     return { data: { deleted: true, therapistId, therapistName: therapist.name }, error: null };
   } catch (error) {
     console.error('[API] deleteTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Transfer a staffer to another branch in the same org.
+ * Authorization + the audit row are enforced server-side by the
+ * SECURITY DEFINER transfer_therapist() function (migration-039):
+ * only an admin, or the manager of the staffer's CURRENT branch, may transfer.
+ */
+export async function transferTherapist({ therapistId, toBranchId, note = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('transfer_therapist', {
+      p_therapist_id: therapistId,
+      p_to_branch_id: toBranchId,
+      p_note: note,
+    });
+
+    if (error) throw error;
+    return { data: { transferId: data }, error: null };
+  } catch (error) {
+    console.error('[API] transferTherapist error:', error.message);
     return { data: null, error };
   }
 }
