@@ -26,7 +26,6 @@ import {
   toggleTherapistActive,
   deleteTherapist,
   updateTherapistOrder,
-  transferTherapist,
   fetchAllBranches,
   fetchStaffTransfers,
 } from '../../../../services/api';
@@ -36,7 +35,7 @@ const GENDER_OPTIONS = [
   { value: 'Female', label: 'Female' },
 ];
 
-const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, onEdit, onDelete, onToggle, onTransfer }) => {
+const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, onEdit, onDelete, onToggle }) => {
   const {
     attributes,
     listeners,
@@ -121,13 +120,6 @@ const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, on
               <Icon name="Pencil" size={16} />
             </button>
             <button
-              onClick={() => onTransfer(therapist)}
-              className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-primary"
-              title="Transfer to another branch"
-            >
-              <Icon name="ArrowRightLeft" size={16} />
-            </button>
-            <button
               onClick={() => onDelete(therapist)}
               className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
               title="Delete"
@@ -165,11 +157,6 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [transferTarget, setTransferTarget] = useState(null);
-  const [transferToBranch, setTransferToBranch] = useState('');
-  const [transferNote, setTransferNote] = useState('');
-  const [transferError, setTransferError] = useState(null);
-  const [transferring, setTransferring] = useState(false);
   const [orgBranches, setOrgBranches] = useState([]);
   const [showTransferLog, setShowTransferLog] = useState(false);
   const [transferLog, setTransferLog] = useState([]);
@@ -247,42 +234,12 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
     fetchAllBranches().then(({ data }) => setOrgBranches(data || []));
   }, []);
 
-  const handleOpenTransfer = (therapist) => {
-    setTransferTarget(therapist);
-    setTransferToBranch('');
-    setTransferNote('');
-    setTransferError(null);
-  };
-
   const handleOpenTransferLog = async () => {
     setShowTransferLog(true);
     setTransferLogLoading(true);
     const { data } = await fetchStaffTransfers();
     setTransferLog(data || []);
     setTransferLogLoading(false);
-  };
-
-  const handleTransfer = async () => {
-    if (!transferToBranch) {
-      setTransferError('Select a destination branch.');
-      return;
-    }
-    setTransferring(true);
-    setTransferError(null);
-
-    const result = await transferTherapist({
-      therapistId: transferTarget.id,
-      toBranchId: transferToBranch,
-      note: transferNote.trim() || null,
-    });
-
-    if (result.error) {
-      setTransferError(result.error.message || 'Transfer failed.');
-    } else {
-      setTransferTarget(null);
-      await loadTherapists();
-    }
-    setTransferring(false);
   };
 
   const handleDragEnd = async (event) => {
@@ -558,7 +515,6 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                       onEdit={handleOpenEdit}
                       onDelete={setConfirmDelete}
                       onToggle={handleToggle}
-                      onTransfer={handleOpenTransfer}
                     />
                   ))}
                 </SortableContext>
@@ -718,58 +674,6 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
               <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transfer Modal */}
-      {transferTarget && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !transferring && setTransferTarget(null)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                Transfer {staffLabel}
-              </h3>
-              <button onClick={() => !transferring && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
-                <Icon name="X" size={20} className="text-text-secondary" />
-              </button>
-            </div>
-
-            <p className="font-body text-sm text-text-secondary">
-              Move <span className="font-body-medium text-text-primary">"{transferTarget.name}"</span> to another branch.
-              The {staffLabel.toLowerCase()} will appear in the destination branch's roster; existing bookings at the current branch are left in place.
-            </p>
-
-            {transferError && (
-              <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-                <Icon name="AlertCircle" size={16} />
-                <span>{transferError}</span>
-              </div>
-            )}
-
-            <Select
-              label="Destination Branch"
-              placeholder="Select a branch..."
-              options={orgBranches
-                .filter(b => b.id !== transferTarget.branch_id)
-                .map(b => ({ value: b.id, label: b.name }))}
-              value={transferToBranch}
-              onChange={setTransferToBranch}
-            />
-
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Note (optional)</label>
-              <Input
-                value={transferNote}
-                onChange={(e) => setTransferNote(e.target.value)}
-                placeholder="Reason for transfer..."
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={transferring}>Cancel</Button>
-              <Button variant="primary" size="sm" onClick={handleTransfer} loading={transferring}>Transfer</Button>
             </div>
           </div>
         </div>
