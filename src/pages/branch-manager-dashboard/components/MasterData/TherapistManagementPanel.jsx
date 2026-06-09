@@ -35,7 +35,7 @@ const GENDER_OPTIONS = [
   { value: 'Female', label: 'Female' },
 ];
 
-const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle, onTransfer }) => {
+const SortableRow = ({ therapist, disabled, readOnly, onEdit, onDelete, onToggle, onTransfer }) => {
   const {
     attributes,
     listeners,
@@ -105,46 +105,50 @@ const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle, onTransf
         </span>
       </td>
       <td className="px-4 py-3">
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={() => onEdit(therapist)}
-            className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
-            title="Edit"
-          >
-            <Icon name="Pencil" size={16} />
-          </button>
-          <button
-            onClick={() => onTransfer(therapist)}
-            className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-primary"
-            title="Transfer to another branch"
-          >
-            <Icon name="ArrowRightLeft" size={16} />
-          </button>
-          <button
-            onClick={() => onDelete(therapist)}
-            className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
-            title="Delete"
-          >
-            <Icon name="Trash2" size={16} />
-          </button>
-          <button
-            onClick={() => onToggle(therapist)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-              therapist.is_active ? 'bg-success' : 'bg-border'
-            }`}
-            title={therapist.is_active ? 'Deactivate' : 'Activate'}
-          >
-            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-              therapist.is_active ? 'translate-x-6' : 'translate-x-1'
-            }`} />
-          </button>
-        </div>
+        {readOnly ? (
+          <div className="flex items-center justify-end text-text-secondary text-sm">—</div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => onEdit(therapist)}
+              className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+              title="Edit"
+            >
+              <Icon name="Pencil" size={16} />
+            </button>
+            <button
+              onClick={() => onTransfer(therapist)}
+              className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-primary"
+              title="Transfer to another branch"
+            >
+              <Icon name="ArrowRightLeft" size={16} />
+            </button>
+            <button
+              onClick={() => onDelete(therapist)}
+              className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
+              title="Delete"
+            >
+              <Icon name="Trash2" size={16} />
+            </button>
+            <button
+              onClick={() => onToggle(therapist)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                therapist.is_active ? 'bg-success' : 'bg-border'
+              }`}
+              title={therapist.is_active ? 'Deactivate' : 'Activate'}
+            >
+              <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                therapist.is_active ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+        )}
       </td>
     </tr>
   );
 };
 
-const TherapistManagementPanel = ({ branchId }) => {
+const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
   const { staffLabel, staffLabelPlural } = useIndustry();
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -441,14 +445,16 @@ const TherapistManagementPanel = ({ branchId }) => {
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{staffLabel} Management</h3>
           <p className="font-body text-sm text-text-secondary">{countLabel}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="primary" size="sm" iconName="Plus" onClick={() => { setShowPositionModal(true); setNewPosition(''); setPositionError(null); }}>
-            Add Position
-          </Button>
-          <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
-            Add {staffLabel}
-          </Button>
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-2">
+            <Button variant="primary" size="sm" iconName="Plus" onClick={() => { setShowPositionModal(true); setNewPosition(''); setPositionError(null); }}>
+              Add Position
+            </Button>
+            <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
+              Add {staffLabel}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Search & Position Filter */}
@@ -518,7 +524,8 @@ const TherapistManagementPanel = ({ branchId }) => {
                     <SortableRow
                       key={t.id}
                       therapist={t}
-                      disabled={isSearching}
+                      disabled={isSearching || readOnly}
+                      readOnly={readOnly}
                       onEdit={handleOpenEdit}
                       onDelete={setConfirmDelete}
                       onToggle={handleToggle}

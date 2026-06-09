@@ -10,7 +10,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const location = useLocation();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
-  const { branchName: contextBranchName, branchId } = useBranch();
+  const { branchName: contextBranchName, branchId, isOverall } = useBranch();
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -91,7 +91,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           id: 'new-booking',
           label: 'New Booking',
           path: `${basePath}?view=new-booking`,
-          roles: ['staff', 'manager', 'admin']
+          roles: ['staff', 'manager', 'admin'],
+          overallHidden: true
         },
       ]
     },
@@ -150,7 +151,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           id: 'attendance',
           label: 'Attendance',
           path: `${basePath}?view=attendance`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin'],
+          overallHidden: true
         },
       ]
     },
@@ -165,19 +167,22 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           id: 'rooms',
           label: locationLabelPlural,
           path: `${basePath}?view=rooms`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin'],
+          overallHidden: true
         }] : []),
         {
           id: 'services',
           label: 'Services',
           path: `${basePath}?view=services`,
-          roles: ['admin']
+          roles: ['admin'],
+          overallHidden: true
         },
         {
           id: 'categories',
           label: 'Categories',
           path: `${basePath}?view=categories`,
-          roles: ['admin']
+          roles: ['admin'],
+          overallHidden: true
         },
         {
           id: 'audit',
@@ -189,15 +194,19 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     },
   ];
 
-  // Filter items by role (including children)
+  // Filter items by role (and, in the Overall aggregate view, hide write/creation items
+  // that have no single target branch).
+  const isVisible = (item) =>
+    item.roles.includes(userRole) && !(isOverall && item.overallHidden);
+
   const filterByRole = (items) => {
     return items
-      .filter(item => item.roles.includes(userRole))
+      .filter(isVisible)
       .map(item => {
         if (item.children) {
           return {
             ...item,
-            children: item.children.filter(child => child.roles.includes(userRole))
+            children: item.children.filter(isVisible)
           };
         }
         return item;

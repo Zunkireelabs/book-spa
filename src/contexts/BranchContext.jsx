@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { fetchAllBranches } from '../services/api';
+import { fetchAllBranches, OVERALL_BRANCH_ID } from '../services/api';
+
+export { OVERALL_BRANCH_ID };
 
 const BranchContext = createContext(null);
 
@@ -74,6 +76,15 @@ export const BranchProvider = ({ children }) => {
     // Use org-specific storage key to prevent cross-tenant branch selection
     const storageKey = getStorageKey(profile.org_id);
     const savedId = localStorage.getItem(storageKey);
+
+    // Restore a saved "Overall" selection (admin-only aggregate view)
+    if (savedId === OVERALL_BRANCH_ID) {
+      setBranchId(OVERALL_BRANCH_ID);
+      setBranchName('Overall');
+      setLoading(false);
+      return;
+    }
+
     // Validate saved branch exists in current org's branches
     const savedBranch = savedId ? allBranches.find(b => b.id === savedId) : null;
 
@@ -92,6 +103,16 @@ export const BranchProvider = ({ children }) => {
   const switchBranch = useCallback((newBranchId) => {
     if (!isAdmin) return;
 
+    // "Overall" — org-wide aggregate view (not a real branch row)
+    if (newBranchId === OVERALL_BRANCH_ID) {
+      setBranchId(OVERALL_BRANCH_ID);
+      setBranchName('Overall');
+      if (profile?.org_id) {
+        localStorage.setItem(getStorageKey(profile.org_id), OVERALL_BRANCH_ID);
+      }
+      return;
+    }
+
     const branch = branches.find(b => b.id === newBranchId);
     if (!branch) return;
 
@@ -103,12 +124,15 @@ export const BranchProvider = ({ children }) => {
     }
   }, [isAdmin, branches, profile?.org_id]);
 
+  const isOverall = branchId === OVERALL_BRANCH_ID;
+
   return (
     <BranchContext.Provider value={{
       branchId,
       branchName,
       branches,
       isAdmin,
+      isOverall,
       switchBranch,
       loading,
     }}>

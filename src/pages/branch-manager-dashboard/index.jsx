@@ -46,7 +46,7 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
   const { profile, signOut, user } = useAuth();
-  const { branchId, branchName } = useBranch();
+  const { branchId, branchName, isOverall } = useBranch();
   const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
@@ -136,7 +136,8 @@ const BranchManagerDashboard = () => {
 
   // Real-time subscription for booking changes
   useEffect(() => {
-    if (!branchId) return;
+    // Overall is a read-only org-wide aggregate — no single branch to subscribe to.
+    if (!branchId || isOverall) return;
 
     const handleRealtimeUpdate = (payload) => {
       // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
@@ -204,7 +205,15 @@ const BranchManagerDashboard = () => {
       });
 
     return () => { supabase.removeChannel(channel); };
-  }, [branchId, loadData]);
+  }, [branchId, isOverall, loadData]);
+
+  // Overall is read-only: redirect away from booking-creation / per-branch write views.
+  useEffect(() => {
+    const writeOnlyViews = ['new-booking', 'attendance', 'rooms', 'services', 'categories'];
+    if (isOverall && writeOnlyViews.includes(viewMode)) {
+      navigate('?view=dashboard', { replace: true });
+    }
+  }, [isOverall, viewMode, navigate]);
 
   // Compute live metrics from real bookings
   const totalBookings = bookings.length;
@@ -610,18 +619,18 @@ const BranchManagerDashboard = () => {
               {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
               {viewMode === 'calendar' && renderCalendarView()}
               {viewMode === 'reports' && renderReportsView()}
-              {viewMode === 'customers' && <CustomersPanel branchId={branchId} />}
-              {viewMode === 'attendance' && <AttendancePanel branchId={branchId} />}
+              {viewMode === 'customers' && <CustomersPanel branchId={branchId} readOnly={isOverall} />}
+              {viewMode === 'attendance' && !isOverall && <AttendancePanel branchId={branchId} />}
               {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
               {viewMode === 'discounts' && <DiscountsPanel branchId={branchId} />}
               {viewMode === 'attendance-report' && <AttendanceReportPanel branchId={branchId} />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
-              {viewMode === 'rooms' && <RoomManagementPanel branchId={branchId} />}
-              {viewMode === 'services' && <ServiceManagementPanel />}
-              {viewMode === 'categories' && <CategoryManagementPanel />}
-              {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} />}
+              {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
+              {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
+              {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
+              {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
-              {viewMode === 'new-booking' && <StaffBookingForm onBookingCreated={loadData} />}
+              {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
             </main>
 
             {/* AI Assistant Panel */}

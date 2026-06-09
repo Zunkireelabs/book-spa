@@ -1,11 +1,24 @@
 import { supabase } from '../lib/supabase';
 
+// Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
+// Admin RLS is already org-scoped, so dropping the per-branch filter for this value
+// returns exactly the org's rows across every branch (never other orgs).
+export const OVERALL_BRANCH_ID = '__overall__';
+export const isOverallBranch = (branchId) => branchId === OVERALL_BRANCH_ID;
+
 // MVP: single branch — resolve mock branch IDs to real DB UUID
 function resolveBranchId(branchId) {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(branchId)) {
     return branchId;
   }
   return 'b0000000-0000-0000-0000-000000000001';
+}
+
+// Conditionally apply a branch_id equality filter to a Supabase query builder.
+// In the Overall view (sentinel branchId) the filter is omitted so org-wide RLS applies.
+// NOTE: never route the sentinel through resolveBranchId — it would coerce to a default branch.
+function withBranch(query, branchId, col = 'branch_id') {
+  return isOverallBranch(branchId) ? query : query.eq(col, resolveBranchId(branchId));
 }
 
 function addMinutesToTime(timeStr, minutes) {
@@ -155,22 +168,30 @@ export async function fetchRooms(branchId) {
 
 export async function fetchTherapists(branchId, { date } = {}) {
   try {
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, gender, specialties, position, is_service_staff')
+      .eq('is_active', true)
+      .eq('is_service_staff', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+
+    let attendancePromise;
+    if (date) {
+      let attendanceQuery = supabase
+        .from('therapist_attendance')
+        .select('therapist_id, status')
+        .eq('date', date)
+        .in('status', ['Absent', 'Leave']);
+      attendanceQuery = withBranch(attendanceQuery, branchId);
+      attendancePromise = attendanceQuery;
+    } else {
+      attendancePromise = Promise.resolve({ data: [] });
+    }
+
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, gender, specialties, position, is_service_staff')
-        .eq('branch_id', branchId)
-        .eq('is_active', true)
-        .eq('is_service_staff', true)
-        .order('name'),
-      date
-        ? supabase
-            .from('therapist_attendance')
-            .select('therapist_id, status')
-            .eq('branch_id', branchId)
-            .eq('date', date)
-            .in('status', ['Absent', 'Leave'])
-        : Promise.resolve({ data: [] }),
+      therapistsQuery,
+      attendancePromise,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -199,8 +220,8 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
         therapist:therapists(id, name, gender),
         room:rooms(id, name)
       `)
-      .eq('branch_id', branchId)
       .order('start_time');
+    query = withBranch(query, branchId);
 
     if (date) {
       query = query.eq('date', date);
@@ -759,9 +780,7 @@ export async function fetchPendingDiscounts(branchId) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select(`
         id, booking_number, customer_name, date, start_time,
@@ -769,11 +788,13 @@ export async function fetchPendingDiscounts(branchId) {
         status, service_id, services:service_id(name),
         requester:users!discount_requested_by(full_name)
       `)
-      .eq('branch_id', resolvedBranchId)
       .eq('discount_status', 'pending')
       .eq('discount_requested_to', user.id)
       .eq('is_locked', false)
       .order('created_at', { ascending: false });
+    query = withBranch(query, branchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -812,15 +833,15 @@ export async function fetchPendingApprovalCount(branchId) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { count: 0, error: authError };
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
-    const { count, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select('id', { count: 'exact', head: true })
-      .eq('branch_id', resolvedBranchId)
       .eq('discount_status', 'pending')
       .eq('discount_requested_to', user.id)
       .eq('is_locked', false);
+    query = withBranch(query, branchId);
+
+    const { count, error } = await query;
 
     if (error) throw error;
     return { count: count || 0, error: null };
@@ -854,9 +875,7 @@ export async function fetchDiscountApprovers() {
  */
 export async function fetchAllDiscounts(branchId) {
   try {
-    const resolvedBranchId = resolveBranchId(branchId);
-
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select(`
         id, booking_number, customer_name, date, start_time,
@@ -867,9 +886,11 @@ export async function fetchAllDiscounts(branchId) {
         approver:users!discount_approved_by(full_name),
         requestedTo:users!discount_requested_to(full_name)
       `)
-      .eq('branch_id', resolvedBranchId)
       .neq('discount_status', 'none')
       .order('created_at', { ascending: false });
+    query = withBranch(query, branchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1295,14 +1316,15 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
 
 export async function getDailySummary(branchId, date) {
   try {
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
 
     // 1. Fetch all bookings for the branch + date
-    const { data: bookings, error: bookingsError } = await supabase
+    let bookingsQuery = supabase
       .from('bookings')
       .select('id, status, payment_status, base_amount, discount_amount, final_amount')
-      .eq('branch_id', resolvedBranchId)
       .eq('date', date);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
 
     if (bookingsError) throw bookingsError;
 
@@ -1347,13 +1369,17 @@ export async function getDailySummary(branchId, date) {
       }
     }
 
-    // 5. Check if day is already closed
-    const { data: existingReport } = await supabase
-      .from('daily_reports')
-      .select('id, closed_at, closed_by')
-      .eq('branch_id', resolvedBranchId)
-      .eq('report_date', date)
-      .maybeSingle();
+    // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
+    let existingReport = null;
+    if (!overall) {
+      const { data } = await supabase
+        .from('daily_reports')
+        .select('id, closed_at, closed_by')
+        .eq('branch_id', resolveBranchId(branchId))
+        .eq('report_date', date)
+        .maybeSingle();
+      existingReport = data;
+    }
 
     return {
       data: {
@@ -1479,23 +1505,27 @@ export async function getDailyOperationalReport(branchId, date) {
       return { data: null, error: { code: 'INVALID_DATE', message: 'Date is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
 
-    // Step 1 — Check if day is closed (stored snapshot)
-    const { data: closedReport, error: closedError } = await supabase
-      .from('daily_reports')
-      .select('*')
-      .eq('branch_id', resolvedBranchId)
-      .eq('report_date', date)
-      .maybeSingle();
+    // Step 1 — Check if day is closed (stored snapshot) — Overall always live-computes
+    let closedReport = null;
+    if (!overall) {
+      const { data, error: closedError } = await supabase
+        .from('daily_reports')
+        .select('*')
+        .eq('branch_id', resolveBranchId(branchId))
+        .eq('report_date', date)
+        .maybeSingle();
 
-    if (closedError) throw closedError;
+      if (closedError) throw closedError;
+      closedReport = data;
+    }
 
     const isClosed = !!closedReport;
 
     // Step 2 — Fetch all bookings for branch + date
     // Phase 9A: Use snapshot fields for display instead of JOINed live data
-    const { data: bookings, error: bookingsError } = await supabase
+    let bookingsQuery = supabase
       .from('bookings')
       .select(`
         id, booking_number, customer_name, status, payment_status,
@@ -1504,9 +1534,10 @@ export async function getDailyOperationalReport(branchId, date) {
         service_name_snapshot, service_duration_snapshot, service_price_snapshot,
         therapist_name_snapshot, room_name_snapshot
       `)
-      .eq('branch_id', resolvedBranchId)
       .eq('date', date)
       .order('start_time');
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
 
     if (bookingsError) throw bookingsError;
 
@@ -1790,17 +1821,21 @@ function getMonthStart(date) {
 }
 
 async function computeRevenueForRange(branchId, startDate, endDate) {
-  const resolvedBranchId = resolveBranchId(branchId);
+  const overall = isOverallBranch(branchId);
 
-  // 1. Fetch closed-day snapshots in range
-  const { data: reports, error: reportsError } = await supabase
-    .from('daily_reports')
-    .select('report_date, gross_revenue, total_discounts, net_revenue')
-    .eq('branch_id', resolvedBranchId)
-    .gte('report_date', startDate)
-    .lte('report_date', endDate);
+  // 1. Fetch closed-day snapshots in range — Overall computes purely live (no snapshots)
+  let reports = [];
+  if (!overall) {
+    const { data, error: reportsError } = await supabase
+      .from('daily_reports')
+      .select('report_date, gross_revenue, total_discounts, net_revenue')
+      .eq('branch_id', resolveBranchId(branchId))
+      .gte('report_date', startDate)
+      .lte('report_date', endDate);
 
-  if (reportsError) throw reportsError;
+    if (reportsError) throw reportsError;
+    reports = data || [];
+  }
 
   const closedDates = new Set((reports || []).map(r => r.report_date));
 
@@ -1812,13 +1847,14 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
   }
 
   // 2. Fetch paid bookings in range
-  const { data: bookings, error: bookingsError } = await supabase
+  let bookingsQuery = supabase
     .from('bookings')
     .select('date, base_amount, discount_amount, final_amount')
-    .eq('branch_id', resolvedBranchId)
     .eq('payment_status', 'paid')
     .gte('date', startDate)
     .lte('date', endDate);
+  bookingsQuery = withBranch(bookingsQuery, branchId);
+  const { data: bookings, error: bookingsError } = await bookingsQuery;
 
   if (bookingsError) throw bookingsError;
 
@@ -1892,40 +1928,59 @@ export async function getUtilizationIntelligence({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
 
-    // 1. Fetch branch operating hours
-    const { data: branch, error: branchError } = await supabase
-      .from('branches')
-      .select('open_time, close_time')
-      .eq('id', resolvedBranchId)
-      .single();
+    // 1. Fetch branch operating hours. Overall: build a per-branch window map across the org.
+    let branch = null;
+    let operatingMinutes = 0;
+    const branchWindow = {};
+    if (overall) {
+      const { data: branches, error: branchesError } = await supabase
+        .from('branches')
+        .select('id, open_time, close_time');
+      if (branchesError) throw branchesError;
+      for (const br of (branches || [])) {
+        branchWindow[br.id] = timeToMinutes(br.close_time) - timeToMinutes(br.open_time);
+      }
+    } else {
+      const { data: branchRow, error: branchError } = await supabase
+        .from('branches')
+        .select('open_time, close_time')
+        .eq('id', resolveBranchId(branchId))
+        .single();
 
-    if (branchError) throw branchError;
+      if (branchError) throw branchError;
+      branch = branchRow;
+      const openMin = timeToMinutes(branch.open_time);
+      const closeMin = timeToMinutes(branch.close_time);
+      operatingMinutes = closeMin - openMin; // e.g. 720 for 9:00–21:00
+    }
 
-    const openMin = timeToMinutes(branch.open_time);
-    const closeMin = timeToMinutes(branch.close_time);
-    const operatingMinutes = closeMin - openMin; // e.g. 720 for 9:00–21:00
+    // Operating window (minutes) attributable to a given resource's branch.
+    const windowFor = (bid) => overall ? (branchWindow[bid] || 0) : operatingMinutes;
 
     // 2. Fetch active rooms + therapists + attendance (parallel)
+    let roomsQuery = supabase
+      .from('rooms')
+      .select('id, name, branch_id')
+      .eq('is_active', true);
+    roomsQuery = withBranch(roomsQuery, branchId);
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, branch_id')
+      .eq('is_active', true);
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .eq('date', targetDate)
+      .in('status', ['Absent', 'Leave']);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [roomsResult, therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('rooms')
-        .select('id, name')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true),
-      supabase
-        .from('therapists')
-        .select('id, name')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', targetDate)
-        .in('status', ['Absent', 'Leave']),
+      roomsQuery,
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (roomsResult.error) throw roomsResult.error;
@@ -1944,12 +1999,13 @@ export async function getUtilizationIntelligence({ branchId, date }) {
     const availableTherapists = therapists.filter(t => !absentIds.has(t.id));
 
     // 3. Fetch qualifying bookings: Confirmed, In-Progress, Completed only
-    const { data: bookings, error: bookingsError } = await supabase
+    let bookingsQuery = supabase
       .from('bookings')
       .select('id, room_id, therapist_id, start_time, end_time, service_duration_snapshot, status')
-      .eq('branch_id', resolvedBranchId)
       .eq('date', targetDate)
       .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
 
     if (bookingsError) throw bookingsError;
 
@@ -1969,12 +2025,13 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     const roomUtilization = rooms.map(r => {
       const booked = roomMinutesMap[r.id]?.bookedMinutes || 0;
+      const total = windowFor(r.branch_id);
       return {
         id: r.id,
         name: r.name,
         bookedMinutes: booked,
-        totalMinutes: operatingMinutes,
-        percent: operatingMinutes > 0 ? Math.round((booked / operatingMinutes) * 100) : 0,
+        totalMinutes: total,
+        percent: total > 0 ? Math.round((booked / total) * 100) : 0,
       };
     });
 
@@ -1992,12 +2049,13 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     const therapistUtilization = availableTherapists.map(t => {
       const booked = therapistMinutesMap[t.id]?.bookedMinutes || 0;
+      const total = windowFor(t.branch_id);
       return {
         id: t.id,
         name: t.name,
         bookedMinutes: booked,
-        totalMinutes: operatingMinutes,
-        percent: operatingMinutes > 0 ? Math.round((booked / operatingMinutes) * 100) : 0,
+        totalMinutes: total,
+        percent: total > 0 ? Math.round((booked / total) * 100) : 0,
       };
     });
 
@@ -2013,8 +2071,8 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     // 7. Summary stats
     const totalBookedMinutes = allBookings.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
-    const totalRoomCapacity = rooms.length * operatingMinutes;
-    const totalTherapistCapacity = availableTherapists.length * operatingMinutes;
+    const totalRoomCapacity = rooms.reduce((sum, r) => sum + windowFor(r.branch_id), 0);
+    const totalTherapistCapacity = availableTherapists.reduce((sum, t) => sum + windowFor(t.branch_id), 0);
 
     const avgRoomUtilization = totalRoomCapacity > 0
       ? Math.round((roomUtilization.reduce((sum, r) => sum + r.bookedMinutes, 0) / totalRoomCapacity) * 100)
@@ -2031,10 +2089,12 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     return {
       data: {
-        operatingMinutes,
-        operatingHours: branch.open_time && branch.close_time
-          ? `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`
-          : 'Not set',
+        operatingMinutes: overall ? null : operatingMinutes,
+        operatingHours: overall
+          ? 'Multiple branches'
+          : (branch.open_time && branch.close_time
+            ? `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`
+            : 'Not set'),
         roomUtilization,
         therapistUtilization,
         hourlyDistribution,
@@ -2760,12 +2820,14 @@ export async function fetchTherapistsForManagement(branchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('therapists')
       .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
-      .eq('branch_id', effectiveBranchId)
       .order('display_order')
       .order('name');
+    query = withBranch(query, effectiveBranchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
     return { data, error: null };
@@ -3453,8 +3515,8 @@ export async function fetchAuditLogs({
       .from('audit_logs')
       .select('id, branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, changed_at', { count: 'exact' });
 
-    // Branch filter (manager always scoped; admin optional)
-    if (effectiveBranchId) {
+    // Branch filter (manager always scoped; admin optional; skipped in Overall view)
+    if (effectiveBranchId && !isOverallBranch(effectiveBranchId)) {
       query = query.eq('branch_id', effectiveBranchId);
     }
 
@@ -3782,20 +3844,20 @@ export async function getCustomerIntelligence({ branchId }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
     // 1. Parallel fetch: customers + bookings
+    let custQuery = supabase
+      .from('customers')
+      .select('id, full_name, phone, email, is_active, created_at')
+      .order('full_name');
+    custQuery = withBranch(custQuery, branchId);
+    let bookQuery = supabase
+      .from('bookings')
+      .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
+      .not('customer_id', 'is', null);
+    bookQuery = withBranch(bookQuery, branchId);
     const [custResult, bookResult] = await Promise.all([
-      supabase
-        .from('customers')
-        .select('id, full_name, phone, email, is_active, created_at')
-        .eq('branch_id', resolvedBranchId)
-        .order('full_name'),
-      supabase
-        .from('bookings')
-        .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
-        .eq('branch_id', resolvedBranchId)
-        .not('customer_id', 'is', null),
+      custQuery,
+      bookQuery,
     ]);
 
     if (custResult.error) throw custResult.error;
@@ -3956,7 +4018,6 @@ export async function getRiskIndicators({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
     const today = date || new Date().toISOString().split('T')[0];
 
     // Date windows
@@ -3964,6 +4025,45 @@ export async function getRiskIndicators({ branchId, date }) {
     const fourteenDaysAgo = new Date(new Date(today).getTime() - 14 * 86400000).toISOString().split('T')[0];
     const thirtyDaysAgo = new Date(new Date(today).getTime() - 30 * 86400000).toISOString().split('T')[0];
     const sixtyDaysAgo = new Date(new Date(today).getTime() - 60 * 86400000).toISOString().split('T')[0];
+
+    // 1. Unpaid risk: Confirmed/Completed + unpaid
+    let unpaidQuery = supabase
+      .from('bookings')
+      .select('id, final_amount')
+      .in('status', ['Confirmed', 'Completed'])
+      .eq('payment_status', 'unpaid');
+    unpaidQuery = withBranch(unpaidQuery, branchId);
+
+    // 2. Last 7 days bookings (for cancellation/no-show rates)
+    let last7dQuery = supabase
+      .from('bookings')
+      .select('id, status')
+      .gte('date', sevenDaysAgo)
+      .lte('date', today);
+    last7dQuery = withBranch(last7dQuery, branchId);
+
+    // 3. Previous 7 days (days 8-14 ago, for trend delta)
+    let prev7dQuery = supabase
+      .from('bookings')
+      .select('id, status')
+      .gte('date', fourteenDaysAgo)
+      .lt('date', sevenDaysAgo);
+    prev7dQuery = withBranch(prev7dQuery, branchId);
+
+    // 4. Last 30 days bookings (for discount analysis)
+    let last30dQuery = supabase
+      .from('bookings')
+      .select('id, base_amount, discount_amount, discount_approved_by')
+      .gte('date', thirtyDaysAgo)
+      .lte('date', today);
+    last30dQuery = withBranch(last30dQuery, branchId);
+
+    // 5. All completed bookings per customer (for retention risk)
+    let allCustomerQuery = supabase
+      .from('bookings')
+      .select('customer_phone, date')
+      .eq('status', 'Completed');
+    allCustomerQuery = withBranch(allCustomerQuery, branchId);
 
     // Run all queries in parallel
     const [
@@ -3973,44 +4073,11 @@ export async function getRiskIndicators({ branchId, date }) {
       last30dResult,
       allCustomerResult,
     ] = await Promise.all([
-      // 1. Unpaid risk: Confirmed/Completed + unpaid
-      supabase
-        .from('bookings')
-        .select('id, final_amount')
-        .eq('branch_id', resolvedBranchId)
-        .in('status', ['Confirmed', 'Completed'])
-        .eq('payment_status', 'unpaid'),
-
-      // 2. Last 7 days bookings (for cancellation/no-show rates)
-      supabase
-        .from('bookings')
-        .select('id, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', sevenDaysAgo)
-        .lte('date', today),
-
-      // 3. Previous 7 days (days 8-14 ago, for trend delta)
-      supabase
-        .from('bookings')
-        .select('id, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', fourteenDaysAgo)
-        .lt('date', sevenDaysAgo),
-
-      // 4. Last 30 days bookings (for discount analysis)
-      supabase
-        .from('bookings')
-        .select('id, base_amount, discount_amount, discount_approved_by')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', thirtyDaysAgo)
-        .lte('date', today),
-
-      // 5. All completed bookings per customer (for retention risk)
-      supabase
-        .from('bookings')
-        .select('customer_phone, date')
-        .eq('branch_id', resolvedBranchId)
-        .eq('status', 'Completed'),
+      unpaidQuery,
+      last7dQuery,
+      prev7dQuery,
+      last30dQuery,
+      allCustomerQuery,
     ]);
 
     if (unpaidResult.error) throw unpaidResult.error;
@@ -4165,22 +4232,23 @@ export async function fetchAttendance({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     // Parallel: active therapists + attendance records
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, is_service_staff')
+      .eq('is_active', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status, check_in_time, check_out_time, notes')
+      .eq('date', targetDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, is_service_staff')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name'),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status, check_in_time, check_out_time, notes')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', targetDate),
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4327,21 +4395,22 @@ export async function fetchAttendanceSummary({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     // Parallel: active therapist count + attendance records
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id')
+      .eq('is_active', true);
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('status')
+      .eq('date', targetDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true),
-      supabase
-        .from('therapist_attendance')
-        .select('status')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', targetDate),
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4399,21 +4468,21 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
       return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Start and end dates are required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, is_service_staff')
+      .eq('is_active', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, date, status')
+      .gte('date', startDate)
+      .lte('date', endDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, is_service_staff')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name'),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, date, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate),
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4487,24 +4556,25 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
     const today = new Date().toISOString().split('T')[0];
     const endDate = toDate || today;
     const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
 
-    // 1. Fetch active therapists + branch hours
+    // 1. Fetch active therapists + branch hours.
+    // Overall: build a branch_id → operating-window map across the org instead of one branch row.
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select(overall ? 'id, name, gender, specialties, branch_id' : 'id, name, gender, specialties')
+      .eq('is_active', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    const branchQuery = overall
+      ? supabase.from('branches').select('id, open_time, close_time')
+      : supabase.from('branches').select('open_time, close_time').eq('id', resolveBranchId(branchId)).single();
     const [therapistsResult, branchResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, gender, specialties')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name'),
-      supabase
-        .from('branches')
-        .select('open_time, close_time')
-        .eq('id', resolvedBranchId)
-        .single(),
+      therapistsQuery,
+      branchQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4515,29 +4585,42 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       return { data: { therapists: [], periodStart: startDate, periodEnd: endDate }, error: null };
     }
 
-    const openMin = timeToMinutes(branchResult.data.open_time);
-    const closeMin = timeToMinutes(branchResult.data.close_time);
-    const operatingMinutesPerDay = closeMin - openMin;
+    let operatingMinutesPerDay = 0;
+    const branchWindow = {};
+    if (overall) {
+      for (const br of (branchResult.data || [])) {
+        branchWindow[br.id] = timeToMinutes(br.close_time) - timeToMinutes(br.open_time);
+      }
+    } else {
+      const openMin = timeToMinutes(branchResult.data.open_time);
+      const closeMin = timeToMinutes(branchResult.data.close_time);
+      operatingMinutesPerDay = closeMin - openMin;
+    }
+
+    // Operating minutes per day for a given therapist's branch.
+    const dayWindowFor = (bid) => overall ? (branchWindow[bid] || 0) : operatingMinutesPerDay;
 
     const therapistIds = therapists.map(t => t.id);
 
     // 2. Fetch bookings + attendance in parallel
+    let bookingsQuery = supabase
+      .from('bookings')
+      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('therapist_id', therapistIds)
+      .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('therapist_id', therapistIds);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [bookingsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('bookings')
-        .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .in('therapist_id', therapistIds)
-        .in('status', ['Confirmed', 'In-Progress', 'Completed']),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .in('therapist_id', therapistIds),
+      bookingsQuery,
+      attendanceQuery,
     ]);
 
     if (bookingsResult.error) throw bookingsResult.error;
@@ -4597,7 +4680,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       // Present = 1.0 day, Half-Day = 0.5 day, Absent/Leave = 0.0 day
       const totalBookedMinutes = bookings.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
       const daysWorked = att.total > 0 ? att.daysWorked : totalDaysInRange;
-      const totalAvailableMinutes = daysWorked * operatingMinutesPerDay;
+      const totalAvailableMinutes = daysWorked * dayWindowFor(t.branch_id);
       const utilizationRate = totalAvailableMinutes > 0 ? totalBookedMinutes / totalAvailableMinutes : 0;
 
       return {

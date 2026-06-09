@@ -25,7 +25,8 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-const CustomersPanel = ({ branchId }) => {
+// readOnly accepted for the Overall view; this panel has no write affordances, so it is unused.
+const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-line no-unused-vars
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
