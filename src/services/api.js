@@ -2334,29 +2334,32 @@ export async function createBooking({
     }
     // End of room handling - industries without rooms skip the above block
 
-    // 6. Look up or create customer record for CRM linking
+    // 6. Look up or create customer record for CRM linking.
+    // Identity is org-wide (org_id + normalized phone), so a returning customer first
+    // seen at another branch links to their single profile instead of duplicating.
     let customerId = null;
+    const orgId = branchData?.org_id || null;
     try {
       const phone = customerPhone?.replace(/\D/g, '') || null;
       const email = customerEmail?.trim().toLowerCase() || null;
 
-      // Try to find existing customer by phone or email within the branch
+      // Try to find existing customer by phone or email across the whole org
       let existingCustomer = null;
-      if (phone) {
+      if (orgId && phone) {
         const { data } = await supabase
           .from('customers')
           .select('id')
-          .eq('branch_id', resolvedBranchId)
+          .eq('org_id', orgId)
           .eq('phone', phone)
           .limit(1)
           .maybeSingle();
         existingCustomer = data;
       }
-      if (!existingCustomer && email) {
+      if (!existingCustomer && orgId && email) {
         const { data } = await supabase
           .from('customers')
           .select('id')
-          .eq('branch_id', resolvedBranchId)
+          .eq('org_id', orgId)
           .eq('email', email)
           .limit(1)
           .maybeSingle();
@@ -2371,10 +2374,11 @@ export async function createBooking({
           .update({ full_name: customerName, phone: phone || undefined, email: email || undefined })
           .eq('id', customerId);
       } else {
-        // Create new customer record
-        const { data: newCustomer } = await supabase
+        // Create new customer record (org-wide identity; branch_id kept as origin)
+        const { data: newCustomer, error: insertCustErr } = await supabase
           .from('customers')
           .insert({
+            org_id: orgId,
             branch_id: resolvedBranchId,
             full_name: customerName,
             phone: phone || null,
@@ -2382,7 +2386,19 @@ export async function createBooking({
           })
           .select('id')
           .single();
-        if (newCustomer) customerId = newCustomer.id;
+        if (newCustomer) {
+          customerId = newCustomer.id;
+        } else if (insertCustErr?.code === '23505' && orgId && phone) {
+          // Lost a race against customers_org_nphone_uniq — re-fetch the winner
+          const { data } = await supabase
+            .from('customers')
+            .select('id')
+            .eq('org_id', orgId)
+            .eq('phone', phone)
+            .limit(1)
+            .maybeSingle();
+          if (data) customerId = data.id;
+        }
       }
     } catch (custErr) {
       // Non-blocking: booking still proceeds without customer link
@@ -3556,10 +3572,19 @@ export async function fetchCustomersLightweight(branchId) {
 
     const resolvedBranchId = resolveBranchId(branchId);
 
+    // Resolve the branch's org so autocomplete suggests the whole org's customers
+    // (a returning cross-branch customer appears instead of being invisible).
+    const { data: branch, error: branchErr } = await supabase
+      .from('branches')
+      .select('org_id')
+      .eq('id', resolvedBranchId)
+      .single();
+    if (branchErr) throw branchErr;
+
     const { data, error } = await supabase
       .from('customers')
       .select('id, full_name, phone')
-      .eq('branch_id', resolvedBranchId)
+      .eq('org_id', branch.org_id)
       .eq('is_active', true)
       .order('full_name');
 
@@ -3592,7 +3617,8 @@ export async function fetchCustomerProfile(customerId) {
       throw custError;
     }
 
-    // 2. Fetch all bookings for this customer (branch-scoped via customer's branch_id)
+    // 2. Fetch all bookings for this customer org-wide (history follows the person across
+    //    branches — the merge repointed cross-branch bookings to this canonical id).
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
@@ -3602,7 +3628,6 @@ export async function fetchCustomerProfile(customerId) {
         is_locked
       `)
       .eq('customer_id', customerId)
-      .eq('branch_id', customer.branch_id)
       .order('date', { ascending: false });
 
     if (bookingsError) throw bookingsError;
