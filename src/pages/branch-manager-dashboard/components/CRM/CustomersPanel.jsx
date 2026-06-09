@@ -96,9 +96,9 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
-        c.fullName.toLowerCase().includes(q) ||
-        c.phone.includes(q) ||
-        (c.email && c.email.toLowerCase().includes(q))
+        (c.fullName || '').toLowerCase().includes(q) ||
+        (c.phone || '').includes(q) ||
+        (c.email || '').toLowerCase().includes(q)
       );
     }
     return true;
