@@ -35,7 +35,7 @@ const GENDER_OPTIONS = [
   { value: 'Female', label: 'Female' },
 ];
 
-const SortableRow = ({ therapist, disabled, readOnly, onEdit, onDelete, onToggle, onTransfer }) => {
+const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, onEdit, onDelete, onToggle, onTransfer }) => {
   const {
     attributes,
     listeners,
@@ -71,6 +71,9 @@ const SortableRow = ({ therapist, disabled, readOnly, onEdit, onDelete, onToggle
         )}
       </td>
       <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{therapist.name}</td>
+      {showBranch && (
+        <td className="px-4 py-3 font-body text-sm text-text-secondary">{branchName || '—'}</td>
+      )}
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="font-body text-sm text-text-secondary">{therapist.position || '—'}</span>
@@ -200,6 +203,12 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       ...Array.from(positions).sort().map(p => ({ value: p, label: p })),
     ];
   }, [therapists, customPositions]);
+
+  const branchNameById = useMemo(() => {
+    const map = {};
+    orgBranches.forEach(b => { map[b.id] = b.name; });
+    return map;
+  }, [orgBranches]);
 
   const hasActiveFilters = searchQuery.trim().length > 0 || selectedPosition !== 'all' || selectedStaffType !== 'all';
 
@@ -501,6 +510,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
               <tr className="bg-background border-b border-border">
                 <th className="w-8 px-2 py-3" />
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Name</th>
+                {readOnly && <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Branch</th>}
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Position</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Gender</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden md:table-cell">Specialties</th>
@@ -511,7 +521,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
             <tbody>
               {filteredTherapists.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
+                  <td colSpan={readOnly ? 8 : 7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
                     {isSearching
                       ? `No ${staffLabelPlural.toLowerCase()} match "${searchQuery}"`
                       : `No ${staffLabelPlural.toLowerCase()} found. Add your first ${staffLabel.toLowerCase()}.`
@@ -526,6 +536,8 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                       therapist={t}
                       disabled={isSearching || readOnly}
                       readOnly={readOnly}
+                      showBranch={readOnly}
+                      branchName={branchNameById[t.branch_id]}
                       onEdit={handleOpenEdit}
                       onDelete={setConfirmDelete}
                       onToggle={handleToggle}
