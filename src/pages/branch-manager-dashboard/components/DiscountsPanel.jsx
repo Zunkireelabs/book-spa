@@ -62,6 +62,35 @@ const DiscountsPanel = ({ branchId }) => {
     [filtered]
   );
 
+  const handleExportCSV = () => {
+    if (!filtered.length) return;
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Date', 'Customer', 'Booking', 'Package', 'Discount %', 'Discount Amount', 'Reason', 'Requested By', 'Approved By', 'Status'];
+    let csv = header.join(',') + '\n';
+    filtered.forEach((d) => {
+      csv += [
+        esc(formatDate(d.date)),
+        esc(d.customerName),
+        esc(d.bookingNumber),
+        esc(d.serviceName),
+        d.discountPercent,
+        d.discountAmount,
+        esc(d.discountReason || ''),
+        esc(d.requestedByName || d.approvedByName || ''),
+        esc(d.discountStatus === 'approved' ? (d.approvedByName || '') : (d.requestedToName ? `Awaiting ${d.requestedToName}` : '')),
+        esc(d.discountStatus),
+      ].join(',') + '\n';
+    });
+    csv += `\nTotal Discount,${totalDiscount}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'discounts-report.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <div className="bg-surface rounded-spa-lg border border-border p-6 animate-pulse">
@@ -102,6 +131,15 @@ const DiscountsPanel = ({ branchId }) => {
             </p>
             <p className="font-caption text-[11px] text-text-tertiary">Total discount ({filtered.length})</p>
           </div>
+          {filtered.length > 0 && (
+            <button
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-surface font-body font-body-medium text-sm text-text-secondary hover:bg-background spa-transition-fast"
+            >
+              <Icon name="Download" size={16} />
+              <span>Export CSV</span>
+            </button>
+          )}
           <button onClick={loadData} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Refresh">
             <Icon name="RefreshCw" size={16} className="text-text-tertiary" />
           </button>

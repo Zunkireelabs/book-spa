@@ -86,6 +86,36 @@ const TherapistPerformancePanel = ({ branchId }) => {
     }
   };
 
+  const handleExportCSV = () => {
+    const rows = data?.therapists || [];
+    if (!rows.length) return;
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Rank', 'Therapist', 'Score', 'Tier', 'Revenue', 'Completed', 'Total Assigned', 'Completion %', 'Attendance %', 'Utilization %', 'Avg/Booking'];
+    let csv = header.join(',') + '\n';
+    rows.forEach((t, idx) => {
+      csv += [
+        idx + 1,
+        esc(t.therapistName),
+        t.performanceScore,
+        esc(getTier(t.performanceScore).label),
+        t.paidRevenue,
+        t.completedBookings,
+        t.totalAssigned,
+        t.completionRate,
+        t.attendanceRate,
+        t.utilizationRate,
+        t.avgRevenuePerBooking,
+      ].join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `performance-report-${data?.periodStart || ''}-to-${data?.periodEnd || ''}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ── Loading ────────────────────────────────────────────────
   if (loading) {
     return (
@@ -120,12 +150,23 @@ const TherapistPerformancePanel = ({ branchId }) => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Performance Index</h2>
-        <p className="font-body text-sm text-text-secondary">
-          Ranked by weighted performance score.
-          {data && ` Period: ${data.periodStart} to ${data.periodEnd}`}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Performance Index</h2>
+          <p className="font-body text-sm text-text-secondary">
+            Ranked by weighted performance score.
+            {data && ` Period: ${data.periodStart} to ${data.periodEnd}`}
+          </p>
+        </div>
+        {therapists.length > 0 && (
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-surface font-body font-body-medium text-sm text-text-secondary hover:bg-background spa-transition-fast flex-shrink-0"
+          >
+            <Icon name="Download" size={16} />
+            <span>Export CSV</span>
+          </button>
+        )}
       </div>
 
       {/* Filters */}

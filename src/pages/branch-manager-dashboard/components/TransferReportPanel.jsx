@@ -53,6 +53,32 @@ const TransferReportPanel = () => {
     );
   }, [transfers, searchQuery]);
 
+  const handleExportCSV = () => {
+    if (!filtered.length) return;
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Status', 'Transferred By', 'Remarks'];
+    let csv = header.join(',') + '\n';
+    filtered.forEach((t) => {
+      csv += [
+        esc(formatDateTime(t.transferredAt)),
+        esc(t.therapistName),
+        esc(t.fromBranch),
+        esc(t.toBranch),
+        esc(formatDateOnly(t.effectiveDate)),
+        esc(t.applied ? 'Applied' : 'Scheduled'),
+        esc(t.transferredBy),
+        esc(t.note || ''),
+      ].join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'transfer-report.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -63,6 +89,15 @@ const TransferReportPanel = () => {
             {loading ? 'Loading…' : `${filtered.length} transfer${filtered.length !== 1 ? 's' : ''}`}
           </p>
         </div>
+        {filtered.length > 0 && (
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-surface font-body font-body-medium text-sm text-text-secondary hover:bg-background spa-transition-fast flex-shrink-0"
+          >
+            <Icon name="Download" size={16} />
+            <span>Export CSV</span>
+          </button>
+        )}
       </div>
 
       {/* Search */}
