@@ -3107,6 +3107,42 @@ export async function transferTherapist({ therapistId, toBranchId, note = null }
   }
 }
 
+// Org-wide staff transfer history. RLS scopes rows to the caller's org.
+export async function fetchStaffTransfers() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('staff_transfers')
+      .select(`
+        id, transferred_at, note,
+        therapist:therapists!staff_transfers_therapist_id_fkey(name),
+        fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
+        toBranch:branches!staff_transfers_to_branch_id_fkey(name),
+        transferredBy:users!staff_transfers_transferred_by_fkey(full_name)
+      `)
+      .order('transferred_at', { ascending: false });
+
+    if (error) throw error;
+
+    const transfers = (data || []).map(t => ({
+      id: t.id,
+      transferredAt: t.transferred_at,
+      note: t.note,
+      therapistName: t.therapist?.name || '—',
+      fromBranch: t.fromBranch?.name || '—',
+      toBranch: t.toBranch?.name || '—',
+      transferredBy: t.transferredBy?.full_name || 'System',
+    }));
+
+    return { data: transfers, error: null };
+  } catch (error) {
+    console.error('[API] fetchStaffTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function updateTherapistOrder({ branchId, orderedIds }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();

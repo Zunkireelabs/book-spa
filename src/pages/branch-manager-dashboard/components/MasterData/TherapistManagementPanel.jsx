@@ -28,6 +28,7 @@ import {
   updateTherapistOrder,
   transferTherapist,
   fetchAllBranches,
+  fetchStaffTransfers,
 } from '../../../../services/api';
 
 const GENDER_OPTIONS = [
@@ -170,6 +171,9 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
   const [transferError, setTransferError] = useState(null);
   const [transferring, setTransferring] = useState(false);
   const [orgBranches, setOrgBranches] = useState([]);
+  const [showTransferLog, setShowTransferLog] = useState(false);
+  const [transferLog, setTransferLog] = useState([]);
+  const [transferLogLoading, setTransferLogLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPosition, setSelectedPosition] = useState('all');
   const [selectedStaffType, setSelectedStaffType] = useState('all');
@@ -248,6 +252,14 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
     setTransferToBranch('');
     setTransferNote('');
     setTransferError(null);
+  };
+
+  const handleOpenTransferLog = async () => {
+    setShowTransferLog(true);
+    setTransferLogLoading(true);
+    const { data } = await fetchStaffTransfers();
+    setTransferLog(data || []);
+    setTransferLogLoading(false);
   };
 
   const handleTransfer = async () => {
@@ -454,16 +466,21 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{staffLabel} Management</h3>
           <p className="font-body text-sm text-text-secondary">{countLabel}</p>
         </div>
-        {!readOnly && (
-          <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" iconName="Plus" onClick={() => { setShowPositionModal(true); setNewPosition(''); setPositionError(null); }}>
-              Add Position
-            </Button>
-            <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
-              Add {staffLabel}
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" iconName="History" onClick={handleOpenTransferLog}>
+            Transfer Log
+          </Button>
+          {!readOnly && (
+            <>
+              <Button variant="primary" size="sm" iconName="Plus" onClick={() => { setShowPositionModal(true); setNewPosition(''); setPositionError(null); }}>
+                Add Position
+              </Button>
+              <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
+                Add {staffLabel}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Search & Position Filter */}
@@ -754,6 +771,61 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
               <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={transferring}>Cancel</Button>
               <Button variant="primary" size="sm" onClick={handleTransfer} loading={transferring}>Transfer</Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Log Modal */}
+      {showTransferLog && (
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowTransferLog(false)}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-2xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{staffLabel} Transfer Log</h3>
+              <button onClick={() => setShowTransferLog(false)} className="p-1 rounded hover:bg-background">
+                <Icon name="X" size={20} className="text-text-secondary" />
+              </button>
+            </div>
+
+            {transferLogLoading ? (
+              <div className="py-10 text-center">
+                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+                <p className="font-body text-sm text-text-secondary">Loading transfer history...</p>
+              </div>
+            ) : transferLog.length === 0 ? (
+              <div className="py-10 text-center">
+                <Icon name="ArrowRightLeft" size={32} className="text-text-secondary mx-auto mb-3" />
+                <p className="font-body text-sm text-text-secondary">No transfers recorded yet.</p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-spa overflow-hidden max-h-[60vh] overflow-y-auto">
+                <table className="w-full">
+                  <thead className="sticky top-0">
+                    <tr className="bg-background border-b border-border">
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Date</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">{staffLabel}</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">From → To</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">By</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transferLog.map(t => (
+                      <tr key={t.id} className="border-b border-border last:border-b-0">
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                          {new Date(t.transferredAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{t.therapistName}</td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                          {t.fromBranch} <span className="text-text-tertiary">→</span> {t.toBranch}
+                        </td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.transferredBy}</td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.note || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
