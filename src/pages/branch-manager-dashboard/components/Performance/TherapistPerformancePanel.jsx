@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
-import { PERIOD_PRESETS, getPeriodRange } from '../../../../utils/periodPresets';
+import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getTherapistPerformance } from '../../../../services/api';
 
 function getTier(score) {
@@ -24,7 +24,7 @@ function ScoreBadge({ score }) {
 }
 
 const TherapistPerformancePanel = ({ branchId }) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayISO();
 
   const [activePreset, setActivePreset] = useState('monthly');
   const [mode, setMode] = useState('preset'); // 'preset' | 'custom'

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
-import { PERIOD_PRESETS, getPeriodRange } from '../../../utils/periodPresets';
+import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
 import { fetchAttendanceReport } from '../../../services/api';
 
 const STAFF_TYPE_OPTIONS = [
@@ -9,8 +9,6 @@ const STAFF_TYPE_OPTIONS = [
   { value: 'service', label: 'Service' },
   { value: 'support', label: 'Support' },
 ];
-
-const toISO = (d) => d.toISOString().split('T')[0];
 
 function formatDate(d) {
   if (!d) return '—';
@@ -34,7 +32,7 @@ function SummaryCard({ label, value, tone }) {
 }
 
 const AttendanceReportPanel = ({ branchId }) => {
-  const today = toISO(new Date());
+  const today = getTodayISO();
 
   const [activePreset, setActivePreset] = useState('monthly');
   const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
