@@ -1,15 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
+import { PERIOD_PRESETS, getPeriodRange } from '../../../utils/periodPresets';
 import { fetchAttendanceReport } from '../../../services/api';
-
-const PRESETS = [
-  { id: 'daily', label: 'Daily' },
-  { id: 'weekly', label: 'Weekly' },
-  { id: 'monthly', label: 'Monthly' },
-  { id: 'quarterly', label: 'Quarterly' },
-  { id: 'yearly', label: 'Yearly' },
-];
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'all', label: 'All staff' },
@@ -18,35 +11,6 @@ const STAFF_TYPE_OPTIONS = [
 ];
 
 const toISO = (d) => d.toISOString().split('T')[0];
-
-// Calendar-period-to-date ranges ending today (weekly = rolling 7 days).
-function getPresetRange(preset) {
-  const today = new Date();
-  const end = toISO(today);
-  let start;
-  switch (preset) {
-    case 'daily':
-      start = end;
-      break;
-    case 'weekly':
-      start = toISO(new Date(today.getTime() - 6 * 86400000));
-      break;
-    case 'monthly':
-      start = toISO(new Date(today.getFullYear(), today.getMonth(), 1));
-      break;
-    case 'quarterly': {
-      const q = Math.floor(today.getMonth() / 3);
-      start = toISO(new Date(today.getFullYear(), q * 3, 1));
-      break;
-    }
-    case 'yearly':
-      start = toISO(new Date(today.getFullYear(), 0, 1));
-      break;
-    default:
-      start = end;
-  }
-  return { startDate: start, endDate: end };
-}
 
 function formatDate(d) {
   if (!d) return '—';
@@ -91,7 +55,7 @@ const AttendanceReportPanel = ({ branchId }) => {
     if (mode === 'custom' && appliedFrom) {
       return { startDate: appliedFrom, endDate: appliedTo || today };
     }
-    return getPresetRange(activePreset);
+    return getPeriodRange(activePreset);
   }, [mode, activePreset, appliedFrom, appliedTo, today]);
 
   // True when the inputs differ from what's currently applied (pending Apply).
@@ -264,7 +228,7 @@ const AttendanceReportPanel = ({ branchId }) => {
       <FilterBar
         count={{ value: filteredStaffCount, label: 'Staff' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search staff by name…' }}
-        presets={PRESETS.map((p) => ({
+        presets={PERIOD_PRESETS.map((p) => ({
           label: p.label,
           active: mode === 'preset' && activePreset === p.id,
           onClick: () => handlePreset(p.id),

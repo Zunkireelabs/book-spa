@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
+import { PERIOD_PRESETS, getPeriodRange } from '../../../../utils/periodPresets';
 import { getTherapistPerformance } from '../../../../services/api';
 
 function getTier(score) {
@@ -22,47 +23,37 @@ function ScoreBadge({ score }) {
   );
 }
 
-const QUICK_FILTERS = [
-  { label: 'Last 7 Days', days: 7 },
-  { label: 'Last 30 Days', days: 30 },
-  { label: 'This Month', days: 'month' },
-];
-
-function getDateRange(filter) {
-  const today = new Date();
-  const endDate = today.toISOString().split('T')[0];
-
-  if (filter === 'month') {
-    const startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    return { fromDate: startDate, toDate: endDate };
-  }
-
-  const startDate = new Date(today.getTime() - filter * 86400000).toISOString().split('T')[0];
-  return { fromDate: startDate, toDate: endDate };
-}
-
 const TherapistPerformancePanel = ({ branchId }) => {
   const today = new Date().toISOString().split('T')[0];
 
-  const [activeFilter, setActiveFilter] = useState(30);
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [activePreset, setActivePreset] = useState('monthly');
+  const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
+  const [customFrom, setCustomFrom] = useState('');   // live input value
+  const [customTo, setCustomTo] = useState('');       // live input value
+  const [appliedFrom, setAppliedFrom] = useState(''); // committed on Apply
+  const [appliedTo, setAppliedTo] = useState('');     // committed on Apply
   const [searchQuery, setSearchQuery] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Range is driven by APPLIED dates so editing the pickers doesn't re-fetch
+  // until the user clicks Apply.
+  const range = useMemo(() => {
+    if (mode === 'custom' && appliedFrom) {
+      return { fromDate: appliedFrom, toDate: appliedTo || today };
+    }
+    const { startDate, endDate } = getPeriodRange(activePreset);
+    return { fromDate: startDate, toDate: endDate };
+  }, [mode, activePreset, appliedFrom, appliedTo, today]);
+
+  // True when the inputs differ from what's currently applied (pending Apply).
+  const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
+
   const loadData = useCallback(async () => {
     if (!branchId) return;
     setLoading(true);
     setError(null);
-
-    let range;
-    if (activeFilter === 'custom') {
-      range = { fromDate: customFrom, toDate: customTo || today };
-    } else {
-      range = getDateRange(activeFilter);
-    }
 
     const result = await getTherapistPerformance({ branchId, ...range });
 
@@ -74,18 +65,20 @@ const TherapistPerformancePanel = ({ branchId }) => {
 
     setData(result.data);
     setLoading(false);
-  }, [branchId, activeFilter, customFrom, customTo, today]);
+  }, [branchId, range]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const handleQuickFilter = (days) => {
-    setActiveFilter(days);
+  const handlePreset = (id) => {
+    setMode('preset');
+    setActivePreset(id);
   };
 
   const handleCustomApply = () => {
-    if (customFrom) {
-      setActiveFilter('custom');
-    }
+    if (!customFrom) return;
+    setAppliedFrom(customFrom);
+    setAppliedTo(customTo);
+    setMode('custom');
   };
 
   const visibleTherapists = useMemo(() => {
@@ -182,10 +175,10 @@ const TherapistPerformancePanel = ({ branchId }) => {
       <FilterBar
         count={{ value: therapists.length, label: therapists.length === 1 ? 'Therapist' : 'Therapists' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search therapist by name…' }}
-        presets={QUICK_FILTERS.map((f) => ({
-          label: f.label,
-          active: activeFilter === f.days,
-          onClick: () => handleQuickFilter(f.days),
+        presets={PERIOD_PRESETS.map((p) => ({
+          label: p.label,
+          active: mode === 'preset' && activePreset === p.id,
+          onClick: () => handlePreset(p.id),
         }))}
         dateRange={{
           from: customFrom,
@@ -194,8 +187,8 @@ const TherapistPerformancePanel = ({ branchId }) => {
           onToChange: setCustomTo,
           max: today,
           onApply: handleCustomApply,
-          applyDisabled: !customFrom,
-          applyActive: activeFilter === 'custom',
+          applyDisabled: !customFrom || !customDirty,
+          applyActive: mode === 'custom',
         }}
       />
 
