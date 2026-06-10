@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
+import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from '../../../utils/periodPresets';
 import { useIndustry } from '../../../hooks/useIndustry';
 import { fetchStaffTransfers } from '../../../services/api';
 
@@ -21,10 +22,38 @@ function formatDateOnly(d) {
 
 const TransferReportPanel = () => {
   const { staffLabel } = useIndustry();
+  const today = getTodayISO();
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activePreset, setActivePreset] = useState('monthly');
+  const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [appliedFrom, setAppliedFrom] = useState('');
+  const [appliedTo, setAppliedTo] = useState('');
+
+  const range = useMemo(() => {
+    if (mode === 'custom' && appliedFrom) {
+      return { startDate: appliedFrom, endDate: appliedTo || today };
+    }
+    return getPeriodRange(activePreset);
+  }, [mode, activePreset, appliedFrom, appliedTo, today]);
+
+  const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
+
+  const handlePreset = (id) => {
+    setMode('preset');
+    setActivePreset(id);
+  };
+
+  const handleCustomApply = () => {
+    if (!customFrom) return;
+    setAppliedFrom(customFrom);
+    setAppliedTo(customTo);
+    setMode('custom');
+  };
 
   useEffect(() => {
     let active = true;
@@ -45,14 +74,17 @@ const TransferReportPanel = () => {
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return transfers;
-    return transfers.filter(t =>
-      t.therapistName.toLowerCase().includes(q) ||
-      t.fromBranch.toLowerCase().includes(q) ||
-      t.toBranch.toLowerCase().includes(q) ||
-      t.transferredBy.toLowerCase().includes(q)
-    );
-  }, [transfers, searchQuery]);
+    return transfers.filter(t => {
+      const matchesSearch = !q
+        || t.therapistName.toLowerCase().includes(q)
+        || t.fromBranch.toLowerCase().includes(q)
+        || t.toBranch.toLowerCase().includes(q)
+        || t.transferredBy.toLowerCase().includes(q);
+      const ds = t.transferredAt ? toISO(new Date(t.transferredAt)) : '';
+      const matchesDate = !ds || (ds >= range.startDate && ds <= range.endDate);
+      return matchesSearch && matchesDate;
+    });
+  }, [transfers, searchQuery, range]);
 
   const handleExportCSV = () => {
     if (!filtered.length) return;
@@ -105,6 +137,21 @@ const TransferReportPanel = () => {
       <FilterBar
         count={{ value: filtered.length, label: filtered.length === 1 ? 'Transfer' : 'Transfers' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search by staff, branch, or person…' }}
+        presets={PERIOD_PRESETS.map((p) => ({
+          label: p.label,
+          active: mode === 'preset' && activePreset === p.id,
+          onClick: () => handlePreset(p.id),
+        }))}
+        dateRange={{
+          from: customFrom,
+          onFromChange: setCustomFrom,
+          to: customTo,
+          onToChange: setCustomTo,
+          max: today,
+          onApply: handleCustomApply,
+          applyDisabled: !customFrom || !customDirty,
+          applyActive: mode === 'custom',
+        }}
         hasActiveFilters={searchQuery.trim().length > 0}
         onClear={() => setSearchQuery('')}
       />
@@ -128,7 +175,7 @@ const TransferReportPanel = () => {
           <div className="py-12 text-center">
             <Icon name="ArrowRightLeft" size={32} className="text-text-tertiary mx-auto mb-3" />
             <p className="font-body text-sm text-text-secondary">
-              {transfers.length === 0 ? 'No transfers recorded yet.' : 'No transfers match your search.'}
+              {transfers.length === 0 ? 'No transfers recorded yet.' : 'No transfers match the current filters.'}
             </p>
           </div>
         ) : (

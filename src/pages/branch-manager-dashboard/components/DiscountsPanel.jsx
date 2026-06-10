@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
+import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
 import { fetchAllDiscounts } from '../../../services/api';
 
 const STATUS_FILTER_OPTIONS = [
@@ -24,8 +25,36 @@ const DiscountsPanel = ({ branchId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const today = getTodayISO();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [activePreset, setActivePreset] = useState('monthly');
+  const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [appliedFrom, setAppliedFrom] = useState('');
+  const [appliedTo, setAppliedTo] = useState('');
+
+  const range = useMemo(() => {
+    if (mode === 'custom' && appliedFrom) {
+      return { startDate: appliedFrom, endDate: appliedTo || today };
+    }
+    return getPeriodRange(activePreset);
+  }, [mode, activePreset, appliedFrom, appliedTo, today]);
+
+  const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
+
+  const handlePreset = (id) => {
+    setMode('preset');
+    setActivePreset(id);
+  };
+
+  const handleCustomApply = () => {
+    if (!customFrom) return;
+    setAppliedFrom(customFrom);
+    setAppliedTo(customTo);
+    setMode('custom');
+  };
 
   const loadData = useCallback(async () => {
     if (!branchId) return;
@@ -53,9 +82,11 @@ const DiscountsPanel = ({ branchId }) => {
         || (d.requestedByName || '').toLowerCase().includes(q)
         || (d.approvedByName || '').toLowerCase().includes(q);
       const matchesStatus = statusFilter === 'all' || d.discountStatus === statusFilter;
-      return matchesSearch && matchesStatus;
+      const ds = (d.date || '').slice(0, 10);
+      const matchesDate = !ds || (ds >= range.startDate && ds <= range.endDate);
+      return matchesSearch && matchesStatus && matchesDate;
     });
-  }, [discounts, searchQuery, statusFilter]);
+  }, [discounts, searchQuery, statusFilter, range]);
 
   const totalDiscount = useMemo(
     () => filtered.reduce((sum, d) => sum + (d.discountAmount || 0), 0),
@@ -149,6 +180,21 @@ const DiscountsPanel = ({ branchId }) => {
       <FilterBar
         count={{ value: filtered.length, label: filtered.length === 1 ? 'Discount' : 'Discounts' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search client, booking, or staff…' }}
+        presets={PERIOD_PRESETS.map((p) => ({
+          label: p.label,
+          active: mode === 'preset' && activePreset === p.id,
+          onClick: () => handlePreset(p.id),
+        }))}
+        dateRange={{
+          from: customFrom,
+          onFromChange: setCustomFrom,
+          to: customTo,
+          onToChange: setCustomTo,
+          max: today,
+          onApply: handleCustomApply,
+          applyDisabled: !customFrom || !customDirty,
+          applyActive: mode === 'custom',
+        }}
         filters={[{ value: statusFilter, onChange: setStatusFilter, options: STATUS_FILTER_OPTIONS }]}
         hasActiveFilters={hasActiveFilters}
         onClear={() => { setSearchQuery(''); setStatusFilter('all'); }}
