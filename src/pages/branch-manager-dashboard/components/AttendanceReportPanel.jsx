@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
+import FilterBar from '../../../components/ui/FilterBar';
 import { fetchAttendanceReport } from '../../../services/api';
 
 const PRESETS = [
@@ -8,6 +9,12 @@ const PRESETS = [
   { id: 'monthly', label: 'Monthly' },
   { id: 'quarterly', label: 'Quarterly' },
   { id: 'yearly', label: 'Yearly' },
+];
+
+const STAFF_TYPE_OPTIONS = [
+  { value: 'all', label: 'All staff' },
+  { value: 'service', label: 'Service' },
+  { value: 'support', label: 'Support' },
 ];
 
 const toISO = (d) => d.toISOString().split('T')[0];
@@ -253,55 +260,26 @@ const AttendanceReportPanel = ({ branchId }) => {
         </div>
       </div>
 
-      {/* Period controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-        <div className="flex items-center flex-wrap gap-2">
-          {PRESETS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => handlePreset(p.id)}
-              className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast ${
-                mode === 'preset' && activePreset === p.id
-                  ? 'bg-primary text-white'
-                  : 'bg-background text-text-secondary hover:bg-border/50'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center flex-wrap gap-2 lg:ml-auto">
-          <input
-            type="date"
-            value={customFrom}
-            max={today}
-            onChange={(e) => setCustomFrom(e.target.value)}
-            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <span className="font-body text-xs text-text-tertiary">to</span>
-          <input
-            type="date"
-            value={customTo}
-            max={today}
-            onChange={(e) => setCustomTo(e.target.value)}
-            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <button
-            onClick={handleCustomApply}
-            disabled={!customFrom || !customDirty}
-            className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed ${
-              customDirty
-                ? 'bg-[#2e5928] text-white hover:bg-[#2e5928]/90'
-                : mode === 'custom'
-                  ? 'bg-primary text-white'
-                  : 'bg-background text-text-secondary hover:bg-border/50'
-            }`}
-          >
-            Apply
-          </button>
-        </div>
-      </div>
+      {/* Filters */}
+      <FilterBar
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search staff by name…' }}
+        presets={PRESETS.map((p) => ({
+          label: p.label,
+          active: mode === 'preset' && activePreset === p.id,
+          onClick: () => handlePreset(p.id),
+        }))}
+        dateRange={{
+          from: customFrom,
+          onFromChange: setCustomFrom,
+          to: customTo,
+          onToChange: setCustomTo,
+          max: today,
+          onApply: handleCustomApply,
+          applyDisabled: !customFrom || !customDirty,
+          applyActive: mode === 'custom',
+        }}
+        filters={[{ value: staffType, onChange: setStaffType, options: STAFF_TYPE_OPTIONS }]}
+      />
 
       {/* Applied custom range indicator */}
       {mode === 'custom' && appliedFrom && (
@@ -312,45 +290,6 @@ const AttendanceReportPanel = ({ branchId }) => {
           </span>
         </div>
       )}
-
-      {/* Staff-type filter + search */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-center gap-2">
-          <span className="font-body text-xs text-text-tertiary uppercase tracking-wide mr-1">Staff</span>
-          {[['all', 'All'], ['service', 'Service'], ['support', 'Support']].map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => setStaffType(val)}
-              className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast ${
-                staffType === val
-                  ? 'bg-primary text-white'
-                  : 'bg-background text-text-secondary hover:bg-border/50'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="relative sm:ml-auto w-full sm:max-w-xs">
-          <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search staff by name..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-8 py-2 bg-surface border border-border rounded-spa text-sm font-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-primary/30"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary spa-transition-fast"
-              title="Clear search"
-            >
-              <Icon name="X" size={15} />
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

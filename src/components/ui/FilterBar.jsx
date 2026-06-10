@@ -8,6 +8,8 @@ import CustomSelect from './CustomSelect';
  * @example
  * <FilterBar
  *   search={{ value, onChange, placeholder: "Search..." }}
+ *   presets={[{ label: 'Last 7 Days', active: true, onClick: () => {} }]}
+ *   dateRange={{ from, onFromChange, to, onToChange, max, onApply, applyDisabled, applyActive }}
  *   filters={[
  *     { value, onChange, options: [{ value: 'all', label: 'All' }] },
  *   ]}
@@ -19,6 +21,8 @@ import CustomSelect from './CustomSelect';
 
 const FilterBar = ({
   search,
+  presets = [],
+  dateRange,
   filters = [],
   resultCount,
   onClear,
@@ -47,6 +51,61 @@ const FilterBar = ({
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
               >
                 <Icon name="X" size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Preset pill buttons */}
+        {presets.length > 0 && (
+          <div className="flex items-center flex-wrap gap-2">
+            {presets.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={p.onClick}
+                className={`px-3 h-9 rounded-md text-sm font-medium transition-colors ${
+                  p.active
+                    ? 'bg-primary text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Date range inputs */}
+        {dateRange && (
+          <div className="flex items-center flex-wrap gap-2">
+            <input
+              type="date"
+              value={dateRange.from}
+              max={dateRange.max}
+              onChange={(e) => dateRange.onFromChange(e.target.value)}
+              className="h-9 px-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+            />
+            <span className="text-xs text-gray-400">to</span>
+            <input
+              type="date"
+              value={dateRange.to}
+              max={dateRange.max}
+              onChange={(e) => dateRange.onToChange(e.target.value)}
+              className="h-9 px-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+            />
+            {dateRange.onApply && (
+              <button
+                type="button"
+                onClick={dateRange.onApply}
+                disabled={dateRange.applyDisabled}
+                className={`px-3 h-9 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  dateRange.applyActive
+                    ? 'bg-primary text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Apply
               </button>
             )}
           </div>

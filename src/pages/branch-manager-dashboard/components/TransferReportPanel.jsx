@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
+import FilterBar from '../../../components/ui/FilterBar';
 import { useIndustry } from '../../../hooks/useIndustry';
 import { fetchStaffTransfers } from '../../../services/api';
 
@@ -100,17 +101,13 @@ const TransferReportPanel = () => {
         )}
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
-        <input
-          type="text"
-          placeholder="Search by staff, branch, or person..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-spa text-sm font-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-primary/30"
-        />
-      </div>
+      {/* Filters */}
+      <FilterBar
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search by staff, branch, or person…' }}
+        resultCount={searchQuery.trim() ? { filtered: filtered.length, total: transfers.length } : undefined}
+        hasActiveFilters={searchQuery.trim().length > 0}
+        onClear={() => setSearchQuery('')}
+      />
 
       {/* Error */}
       {error && (

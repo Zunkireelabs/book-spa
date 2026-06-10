@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
+import FilterBar from '../../../../components/ui/FilterBar';
 import { getTherapistPerformance } from '../../../../services/api';
 
 function getTier(score) {
@@ -46,6 +47,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
   const [activeFilter, setActiveFilter] = useState(30);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -86,8 +88,15 @@ const TherapistPerformancePanel = ({ branchId }) => {
     }
   };
 
+  const visibleTherapists = useMemo(() => {
+    const all = data?.therapists || [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((t) => (t.therapistName || '').toLowerCase().includes(q));
+  }, [data, searchQuery]);
+
   const handleExportCSV = () => {
-    const rows = data?.therapists || [];
+    const rows = visibleTherapists;
     if (!rows.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = ['Rank', 'Therapist', 'Score', 'Tier', 'Revenue', 'Completed', 'Total Assigned', 'Completion %', 'Attendance %', 'Utilization %', 'Avg/Booking'];
@@ -145,7 +154,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
     );
   }
 
-  const therapists = data?.therapists || [];
+  const therapists = visibleTherapists;
 
   return (
     <div className="space-y-6">
@@ -170,48 +179,24 @@ const TherapistPerformancePanel = ({ branchId }) => {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-center space-x-2">
-          {QUICK_FILTERS.map(f => (
-            <button
-              key={f.days}
-              onClick={() => handleQuickFilter(f.days)}
-              className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast ${
-                activeFilter === f.days
-                  ? 'bg-primary text-white'
-                  : 'bg-background text-text-secondary hover:bg-border/50'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <input
-            type="date"
-            value={customFrom}
-            max={today}
-            onChange={(e) => setCustomFrom(e.target.value)}
-            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <span className="font-body text-xs text-text-tertiary">to</span>
-          <input
-            type="date"
-            value={customTo}
-            max={today}
-            onChange={(e) => setCustomTo(e.target.value)}
-            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <button
-            onClick={handleCustomApply}
-            disabled={!customFrom}
-            className="px-3 py-1.5 rounded-spa font-body font-body-medium text-sm bg-background text-text-secondary hover:bg-border/50 disabled:opacity-50 disabled:cursor-not-allowed spa-transition-fast"
-          >
-            Apply
-          </button>
-        </div>
-      </div>
+      <FilterBar
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search therapist by name…' }}
+        presets={QUICK_FILTERS.map((f) => ({
+          label: f.label,
+          active: activeFilter === f.days,
+          onClick: () => handleQuickFilter(f.days),
+        }))}
+        dateRange={{
+          from: customFrom,
+          onFromChange: setCustomFrom,
+          to: customTo,
+          onToChange: setCustomTo,
+          max: today,
+          onApply: handleCustomApply,
+          applyDisabled: !customFrom,
+          applyActive: activeFilter === 'custom',
+        }}
+      />
 
       {/* Tier Legend */}
       <div className="flex flex-wrap items-center gap-3">
