@@ -147,9 +147,9 @@ const DiscountsPanel = ({ branchId }) => {
       </div>
 
       <FilterBar
+        count={{ value: filtered.length, label: filtered.length === 1 ? 'Discount' : 'Discounts' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search client, booking, or staff…' }}
         filters={[{ value: statusFilter, onChange: setStatusFilter, options: STATUS_FILTER_OPTIONS }]}
-        resultCount={hasActiveFilters ? { filtered: filtered.length, total: discounts.length } : undefined}
         hasActiveFilters={hasActiveFilters}
         onClear={() => { setSearchQuery(''); setStatusFilter('all'); }}
       />

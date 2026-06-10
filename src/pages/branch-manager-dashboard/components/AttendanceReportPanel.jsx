@@ -262,6 +262,7 @@ const AttendanceReportPanel = ({ branchId }) => {
 
       {/* Filters */}
       <FilterBar
+        count={{ value: filteredStaffCount, label: 'Staff' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search staff by name…' }}
         presets={PRESETS.map((p) => ({
           label: p.label,

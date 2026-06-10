@@ -180,6 +180,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
 
       {/* Filters */}
       <FilterBar
+        count={{ value: therapists.length, label: therapists.length === 1 ? 'Therapist' : 'Therapists' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search therapist by name…' }}
         presets={QUICK_FILTERS.map((f) => ({
           label: f.label,

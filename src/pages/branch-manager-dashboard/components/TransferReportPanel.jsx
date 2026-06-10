@@ -103,8 +103,8 @@ const TransferReportPanel = () => {
 
       {/* Filters */}
       <FilterBar
+        count={{ value: filtered.length, label: filtered.length === 1 ? 'Transfer' : 'Transfers' }}
         search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search by staff, branch, or person…' }}
-        resultCount={searchQuery.trim() ? { filtered: filtered.length, total: transfers.length } : undefined}
         hasActiveFilters={searchQuery.trim().length > 0}
         onClear={() => setSearchQuery('')}
       />
