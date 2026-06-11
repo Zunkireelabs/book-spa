@@ -312,7 +312,7 @@ const ReferralsReportPanel = ({ branchId }) => {
       />
 
       {/* Bulk-apply bar */}
-      {selectedGroups.size > 0 && (
+      {selectedInView > 0 && (
         <div className="flex items-center gap-3 flex-wrap p-3 bg-primary/5 border border-primary/20 rounded-spa">
           <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
             {selectedInView} referrer{selectedInView !== 1 ? 's' : ''} selected
