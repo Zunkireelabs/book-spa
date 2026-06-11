@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder } from '../../../../services/api';
 
@@ -35,7 +36,9 @@ const OutstandingReportPanel = ({ branchId }) => {
   const [appliedFrom, setAppliedFrom] = useState('');
   const [appliedTo, setAppliedTo] = useState('');
 
-  const [expanded, setExpanded] = useState(() => new Set());
+  const [personFilter, setPersonFilter] = useState('');
+  const [sortKey, setSortKey] = useState('due'); // 'customer' | 'responsible' | 'due'
+  const [sortDir, setSortDir] = useState('desc');
   // bookingId currently being assigned a name → { value }
   const [assigning, setAssigning] = useState(null);
   const [assignName, setAssignName] = useState('');
@@ -89,41 +92,68 @@ const OutstandingReportPanel = ({ branchId }) => {
     setMode('custom');
   };
 
+  // Flatten the grouped API response into one row per outstanding booking,
+  // each carrying its responsible person.
+  const rows = useMemo(() => {
+    const out = [];
+    groups.forEach((g) => {
+      const responsible = g.dueHolderName || UNASSIGNED_LABEL;
+      const isUnassigned = !g.dueHolderName;
+      g.bookings.forEach((b) => out.push({ ...b, responsible, isUnassigned }));
+    });
+    return out;
+  }, [groups]);
+
+  const personOptions = useMemo(() => {
+    const names = new Set();
+    let hasUnassigned = false;
+    rows.forEach((r) => { r.isUnassigned ? (hasUnassigned = true) : names.add(r.responsible); });
+    const opts = [
+      { value: '', label: 'All responsible persons' },
+      ...Array.from(names).sort((a, b) => a.localeCompare(b)).map((n) => ({ value: n, label: n })),
+    ];
+    if (hasUnassigned) opts.push({ value: UNASSIGNED_LABEL, label: UNASSIGNED_LABEL });
+    return opts;
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return groups;
-    return groups
-      .map(g => {
-        const label = g.dueHolderName || UNASSIGNED_LABEL;
-        const nameMatch = label.toLowerCase().includes(q);
-        if (nameMatch) return g;
-        const bookings = g.bookings.filter(b =>
-          (b.customerName || '').toLowerCase().includes(q) ||
-          (b.bookingNumber || '').toLowerCase().includes(q) ||
-          (b.serviceName || '').toLowerCase().includes(q)
-        );
-        if (bookings.length === 0) return null;
-        const totalDue = Math.round(bookings.reduce((s, b) => s + Number(b.amountDue || 0), 0) * 100) / 100;
-        return { ...g, bookings, bookingCount: bookings.length, totalDue };
-      })
-      .filter(Boolean);
-  }, [groups, searchQuery]);
+    let list = rows;
+    if (personFilter) list = list.filter((r) => r.responsible === personFilter);
+    if (q) {
+      list = list.filter((r) =>
+        (r.customerName || '').toLowerCase().includes(q) ||
+        (r.bookingNumber || '').toLowerCase().includes(q) ||
+        (r.serviceName || '').toLowerCase().includes(q) ||
+        r.responsible.toLowerCase().includes(q)
+      );
+    }
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...list].sort((a, b) => {
+      if (sortKey === 'due') return (Number(a.amountDue || 0) - Number(b.amountDue || 0)) * dir;
+      if (sortKey === 'responsible') return a.responsible.localeCompare(b.responsible) * dir;
+      return (a.customerName || '').localeCompare(b.customerName || '') * dir;
+    });
+  }, [rows, searchQuery, personFilter, sortKey, sortDir]);
 
   const totalOutstanding = useMemo(
-    () => filtered.reduce((s, g) => s + Number(g.totalDue || 0), 0),
+    () => filtered.reduce((s, r) => s + Number(r.amountDue || 0), 0),
     [filtered]
   );
-  const totalBookings = useMemo(
-    () => filtered.reduce((s, g) => s + g.bookingCount, 0),
-    [filtered]
-  );
+  const totalBookings = filtered.length;
 
-  const toggleExpand = (key) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'due' ? 'desc' : 'asc');
+    }
+  };
+
+  const sortIcon = (key) => {
+    if (sortKey !== key) return 'ChevronsUpDown';
+    return sortDir === 'asc' ? 'ChevronUp' : 'ChevronDown';
   };
 
   const startAssign = (bookingId, current) => {
@@ -153,23 +183,20 @@ const OutstandingReportPanel = ({ branchId }) => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Responsible Person', 'Customer', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
+    const header = ['Customer', 'Responsible Person', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
     let csv = header.join(',') + '\n';
-    filtered.forEach((g) => {
-      const label = g.dueHolderName || UNASSIGNED_LABEL;
-      g.bookings.forEach((b) => {
-        csv += [
-          esc(label),
-          esc(b.customerName),
-          esc(b.bookingNumber),
-          esc(formatDateOnly(b.date)),
-          esc(b.serviceName),
-          esc(b.finalAmount),
-          esc(b.amountPaid),
-          esc(b.amountDue),
-          esc(b.paymentStatus),
-        ].join(',') + '\n';
-      });
+    filtered.forEach((r) => {
+      csv += [
+        esc(r.customerName),
+        esc(r.responsible),
+        esc(r.bookingNumber),
+        esc(formatDateOnly(r.date)),
+        esc(r.serviceName),
+        esc(r.finalAmount),
+        esc(r.amountPaid),
+        esc(r.amountDue),
+        esc(r.paymentStatus),
+      ].join(',') + '\n';
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -227,9 +254,22 @@ const OutstandingReportPanel = ({ branchId }) => {
           applyDisabled: !customFrom || !customDirty,
           applyActive: mode === 'custom',
         }}
-        hasActiveFilters={searchQuery.trim().length > 0}
-        onClear={() => setSearchQuery('')}
+        hasActiveFilters={searchQuery.trim().length > 0 || personFilter !== ''}
+        onClear={() => { setSearchQuery(''); setPersonFilter(''); }}
       />
+
+      {/* Responsible person filter */}
+      <div className="flex items-center gap-2">
+        <span className="font-body text-sm text-text-secondary flex-shrink-0">Responsible person</span>
+        <CustomSelect
+          value={personFilter}
+          onChange={setPersonFilter}
+          options={personOptions}
+          size="sm"
+          searchable
+          className="w-60"
+        />
+      </div>
 
       {/* Error */}
       {error && (
@@ -258,134 +298,118 @@ const OutstandingReportPanel = ({ branchId }) => {
             <table className="w-full">
               <thead>
                 <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Responsible Person</th>
-                  <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Outstanding</th>
-                  <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary"># Bookings</th>
-                  <th className="w-10" />
+                  <th className="text-left px-4 py-3">
+                    <button
+                      onClick={() => handleSort('customer')}
+                      className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary spa-transition-fast"
+                    >
+                      Customer <Icon name={sortIcon('customer')} size={14} />
+                    </button>
+                  </th>
+                  <th className="text-left px-4 py-3">
+                    <button
+                      onClick={() => handleSort('responsible')}
+                      className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary spa-transition-fast"
+                    >
+                      Responsible Person <Icon name={sortIcon('responsible')} size={14} />
+                    </button>
+                  </th>
+                  <th className="text-right px-4 py-3">
+                    <button
+                      onClick={() => handleSort('due')}
+                      className="inline-flex items-center gap-1 ml-auto font-body font-body-medium text-sm text-text-secondary hover:text-text-primary spa-transition-fast"
+                    >
+                      Outstanding <Icon name={sortIcon('due')} size={14} />
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((g) => {
-                  const key = g.dueHolderName || '__unassigned__';
-                  const isUnassigned = !g.dueHolderName;
-                  const isOpen = expanded.has(key);
-                  return (
-                    <React.Fragment key={key}>
-                      <tr
-                        className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast cursor-pointer"
-                        onClick={() => toggleExpand(key)}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            {isUnassigned ? (
-                              <span className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-warning">
-                                <Icon name="HelpCircle" size={15} />
-                                {UNASSIGNED_LABEL}
-                              </span>
-                            ) : (
-                              <span className="font-body font-body-medium text-sm text-text-primary">{g.dueHolderName}</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-warning font-semibold whitespace-nowrap">
-                          {formatNPR(g.totalDue)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-data text-sm text-text-secondary whitespace-nowrap">
-                          {g.bookingCount}
-                        </td>
-                        <td className="px-2 py-3 text-text-tertiary">
-                          <Icon name={isOpen ? 'ChevronUp' : 'ChevronDown'} size={16} />
-                        </td>
-                      </tr>
-
-                      {isOpen && g.bookings.map((b) => (
-                        <tr key={b.bookingId} className="border-b border-border last:border-b-0 bg-background/30">
-                          <td colSpan={4} className="px-4 py-2.5">
-                            <div className="flex items-center justify-between gap-3 flex-wrap pl-4">
-                              <div className="min-w-0">
-                                <span className="font-body font-body-medium text-sm text-text-primary">{b.customerName}</span>
-                                <span className="font-body text-xs text-text-secondary ml-2">
-                                  #{b.bookingNumber} · {b.serviceName} · {formatDateOnly(b.date)}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-3 flex-shrink-0">
-                                <span className="font-data text-xs text-text-secondary">
-                                  Paid {formatNPR(b.amountPaid)}
-                                </span>
-                                <span className="font-data text-sm text-warning font-semibold">
-                                  Due {formatNPR(b.amountDue)}
-                                </span>
-                                {isUnassigned && (
-                                  assigning === b.bookingId ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <div className="relative w-36">
-                                        <input
-                                          type="text"
-                                          autoFocus
-                                          value={assignName}
-                                          onChange={(e) => { setAssignName(e.target.value); setShowAssignSuggestions(true); }}
-                                          onFocus={() => setShowAssignSuggestions(true)}
-                                          onBlur={() => setTimeout(() => setShowAssignSuggestions(false), 150)}
-                                          onKeyDown={(e) => { if (e.key === 'Enter') saveAssign(b.bookingId); }}
-                                          placeholder="Name…"
-                                          className="w-full rounded-spa border border-border bg-surface px-2 py-1 font-body text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                                        />
-                                        {showAssignSuggestions && filteredAssignSuggestions.length > 0 && (
-                                          <div className="absolute z-dropdown left-0 right-0 mt-1 bg-surface border border-border rounded-spa shadow-spa-elevated max-h-44 overflow-y-auto">
-                                            {filteredAssignSuggestions.map((name) => (
-                                              <button
-                                                key={name}
-                                                type="button"
-                                                onMouseDown={() => { setAssignName(name); setShowAssignSuggestions(false); }}
-                                                className="w-full text-left px-2 py-1.5 text-xs text-text-primary hover:bg-background spa-transition-fast"
-                                              >
-                                                {name}
-                                              </button>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <button
-                                        onClick={() => saveAssign(b.bookingId)}
-                                        disabled={assignSaving || !assignName.trim()}
-                                        className="px-2 py-1 rounded-spa bg-primary text-white text-xs font-body-medium disabled:opacity-50"
-                                      >
-                                        Save
-                                      </button>
-                                      <button
-                                        onClick={() => { setAssigning(null); setAssignName(''); setShowAssignSuggestions(false); }}
-                                        className="p-1 rounded-spa hover:bg-background text-text-secondary"
-                                      >
-                                        <Icon name="X" size={14} />
-                                      </button>
-                                    </div>
-                                  ) : (
+                {filtered.map((r) => (
+                  <tr key={r.bookingId} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
+                    <td className="px-4 py-3">
+                      <div className="font-body font-body-medium text-sm text-text-primary">{r.customerName}</div>
+                      <div className="font-body text-xs text-text-secondary">
+                        #{r.bookingNumber} · {r.serviceName} · {formatDateOnly(r.date)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {r.isUnassigned ? (
+                        assigning === r.bookingId ? (
+                          <div className="flex items-center gap-1.5">
+                            <div className="relative w-40">
+                              <input
+                                type="text"
+                                autoFocus
+                                value={assignName}
+                                onChange={(e) => { setAssignName(e.target.value); setShowAssignSuggestions(true); }}
+                                onFocus={() => setShowAssignSuggestions(true)}
+                                onBlur={() => setTimeout(() => setShowAssignSuggestions(false), 150)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') saveAssign(r.bookingId); }}
+                                placeholder="Name…"
+                                className="w-full rounded-spa border border-border bg-surface px-2 py-1 font-body text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+                              />
+                              {showAssignSuggestions && filteredAssignSuggestions.length > 0 && (
+                                <div className="absolute z-dropdown left-0 right-0 mt-1 bg-surface border border-border rounded-spa shadow-spa-elevated max-h-44 overflow-y-auto">
+                                  {filteredAssignSuggestions.map((name) => (
                                     <button
-                                      onClick={() => startAssign(b.bookingId, '')}
-                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
+                                      key={name}
+                                      type="button"
+                                      onMouseDown={() => { setAssignName(name); setShowAssignSuggestions(false); }}
+                                      className="w-full text-left px-2 py-1.5 text-xs text-text-primary hover:bg-background spa-transition-fast"
                                     >
-                                      <Icon name="UserPlus" size={13} />
-                                      Assign name
+                                      {name}
                                     </button>
-                                  )
-                                )}
-                              </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  );
-                })}
+                            <button
+                              onClick={() => saveAssign(r.bookingId)}
+                              disabled={assignSaving || !assignName.trim()}
+                              className="px-2 py-1 rounded-spa bg-primary text-white text-xs font-body-medium disabled:opacity-50"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => { setAssigning(null); setAssignName(''); setShowAssignSuggestions(false); }}
+                              className="p-1 rounded-spa hover:bg-background text-text-secondary"
+                            >
+                              <Icon name="X" size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-warning">
+                              <Icon name="HelpCircle" size={15} />
+                              {UNASSIGNED_LABEL}
+                            </span>
+                            <button
+                              onClick={() => startAssign(r.bookingId, '')}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
+                            >
+                              <Icon name="UserPlus" size={13} />
+                              Assign
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <span className="font-body font-body-medium text-sm text-text-primary">{r.responsible}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-warning font-semibold whitespace-nowrap">
+                      {formatNPR(r.amountDue)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
                   <td className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
+                  <td className="px-4 py-3" />
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning whitespace-nowrap">
                     {formatNPR(totalOutstanding)}
                   </td>
-                  <td className="px-4 py-3 text-right font-data text-sm text-text-secondary">{totalBookings}</td>
-                  <td />
                 </tr>
               </tfoot>
             </table>
