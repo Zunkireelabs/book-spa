@@ -515,6 +515,119 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   }
 }
 
+export const REFERRAL_COMMISSION_TYPES = ['percentage', 'amount'];
+
+// Earned commission for a booking from its per-booking commission config.
+// percentage -> final_amount * value / 100 ; amount -> flat value.
+function computeReferralCommission(finalAmount, type, value) {
+  const v = Number(value);
+  if (!type || !(v >= 0)) return 0;
+  if (type === 'percentage') {
+    return Math.round(((Number(finalAmount) * v) / 100) * 100) / 100;
+  }
+  if (type === 'amount') {
+    return Math.round(v * 100) / 100;
+  }
+  return 0;
+}
+
+// Set / change a booking's per-booking referral commission. Pass a null type to
+// clear it. Allowed while the booking's day is not locked.
+export async function setReferralCommission({ bookingId, commissionType, commissionValue }) {
+  try {
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, is_locked')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    }
+
+    const clearing = !commissionType;
+    if (!clearing) {
+      if (!REFERRAL_COMMISSION_TYPES.includes(commissionType)) {
+        return { data: null, error: { code: 'INVALID_COMMISSION_TYPE', message: `Invalid commission type: ${commissionType}.` } };
+      }
+      const v = Number(commissionValue);
+      if (!(v >= 0)) {
+        return { data: null, error: { code: 'INVALID_COMMISSION_VALUE', message: 'Commission value must be zero or more.' } };
+      }
+      if (commissionType === 'percentage' && v > 100) {
+        return { data: null, error: { code: 'INVALID_COMMISSION_VALUE', message: 'Percentage commission cannot exceed 100%.' } };
+      }
+    }
+
+    const payload = clearing
+      ? { referral_commission_type: null, referral_commission_value: null }
+      : { referral_commission_type: commissionType, referral_commission_value: Math.round(Number(commissionValue) * 100) / 100 };
+
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update(payload)
+      .eq('id', bookingId);
+    if (updateError) throw updateError;
+
+    return { data: { success: true, bookingId, ...payload }, error: null };
+  } catch (error) {
+    console.error('[API] setReferralCommission error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Referral commissions grouped by the referring person. Counts PAID bookings
+// only (commission is earned once the money is collected). from/to are ISO
+// dates (inclusive); omit for all-time.
+export async function getReferralsReport({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, date, final_amount, referred_by, referral_commission_type, referral_commission_value, service_name_snapshot')
+      .eq('payment_status', 'paid')
+      .not('referred_by', 'is', null);
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const groups = {};
+    for (const b of (bookings || [])) {
+      const name = (b.referred_by || '').trim();
+      if (!name) continue;
+      const commission = computeReferralCommission(b.final_amount, b.referral_commission_type, b.referral_commission_value);
+      if (!groups[name]) {
+        groups[name] = { referredBy: name, totalCommission: 0, bookingCount: 0, bookings: [] };
+      }
+      groups[name].totalCommission = Math.round((groups[name].totalCommission + commission) * 100) / 100;
+      groups[name].bookingCount += 1;
+      groups[name].bookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        serviceName: b.service_name_snapshot || '—',
+        finalAmount: Number(b.final_amount),
+        commissionType: b.referral_commission_type || null,
+        commissionValue: b.referral_commission_value != null ? Number(b.referral_commission_value) : null,
+        commission,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalCommission - a.totalCommission);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getReferralsReport error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function updateBookingStatus({ bookingId, newStatus }) {
   try {
     // 1. Fetch booking

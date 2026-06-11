@@ -1906,8 +1906,8 @@ const OperationalCalendar = ({ branchId }) => {
     return { data: result.data };
   };
 
-  const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
-    const result = await recordPayment({ bookingId, paymentMode, notes });
+  const handleRecordPayment = async (bookingId, opts) => {
+    const result = await recordPayment({ bookingId, ...opts });
     if (result.error) {
       return { error: result.error };
     }

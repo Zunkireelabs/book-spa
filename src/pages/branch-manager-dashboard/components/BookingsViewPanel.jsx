@@ -142,8 +142,8 @@ const BookingsViewPanel = ({ branchId }) => {
     await loadData();
   };
 
-  const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
-    const result = await recordPayment({ bookingId, paymentMode, notes });
+  const handleRecordPayment = async (bookingId, opts) => {
+    const result = await recordPayment({ bookingId, ...opts });
     if (result.error) return { error: result.error };
     showToast('Payment recorded successfully');
     await loadData();

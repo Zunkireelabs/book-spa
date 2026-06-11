@@ -145,6 +145,12 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=outstanding`,
           roles: ['manager', 'admin']
         },
+        {
+          id: 'referrals',
+          label: 'Referrals Report',
+          path: `${basePath}?view=referrals`,
+          roles: ['manager', 'admin']
+        },
       ]
     },
     {

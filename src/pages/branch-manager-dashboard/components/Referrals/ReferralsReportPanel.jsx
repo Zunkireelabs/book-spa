@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
-import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder } from '../../../../services/api';
+import { getReferralsReport, setReferralCommission } from '../../../../services/api';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -16,18 +17,24 @@ function formatDateOnly(d) {
   });
 }
 
-const UNASSIGNED_LABEL = 'Unassigned';
+function commissionLabel(type, value) {
+  if (!type) return 'Not set';
+  if (type === 'percentage') return `${Number(value)}%`;
+  return formatNPR(value);
+}
 
-const OutstandingReportPanel = ({ branchId }) => {
+const TYPE_OPTIONS = [
+  { value: 'percentage', label: '%' },
+  { value: 'amount', label: 'NPR' },
+];
+
+const ReferralsReportPanel = ({ branchId }) => {
   const today = getTodayISO();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
 
-  // 'all' shows every outstanding balance regardless of date (the useful default
-  // for cumulative credit); presets/custom narrow by booking date.
   const [mode, setMode] = useState('all'); // 'all' | 'preset' | 'custom'
   const [activePreset, setActivePreset] = useState('monthly');
   const [customFrom, setCustomFrom] = useState('');
@@ -36,10 +43,12 @@ const OutstandingReportPanel = ({ branchId }) => {
   const [appliedTo, setAppliedTo] = useState('');
 
   const [expanded, setExpanded] = useState(() => new Set());
-  // bookingId currently being assigned a name → { value }
-  const [assigning, setAssigning] = useState(null);
-  const [assignName, setAssignName] = useState('');
-  const [assignSaving, setAssignSaving] = useState(false);
+  const [editing, setEditing] = useState(null); // bookingId being edited
+  const [editType, setEditType] = useState('percentage');
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const isPreset = mode === 'preset';
 
   const range = useMemo(() => {
     if (mode === 'all') return { from: undefined, to: undefined };
@@ -53,9 +62,9 @@ const OutstandingReportPanel = ({ branchId }) => {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await getOutstandingByStaff({ branchId, from: range.from, to: range.to });
+    const { data, error: err } = await getReferralsReport({ branchId, from: range.from, to: range.to });
     if (err) {
-      setError(err.message || 'Failed to load outstanding balances.');
+      setError(err.message || 'Failed to load referrals.');
     } else {
       setGroups(data || []);
     }
@@ -63,14 +72,6 @@ const OutstandingReportPanel = ({ branchId }) => {
   }, [branchId, range.from, range.to]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    let active = true;
-    fetchDueHolderNames(branchId).then(({ data }) => {
-      if (active && Array.isArray(data)) setSuggestions(data);
-    });
-    return () => { active = false; };
-  }, [branchId]);
 
   const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
 
@@ -86,23 +87,21 @@ const OutstandingReportPanel = ({ branchId }) => {
     if (!q) return groups;
     return groups
       .map(g => {
-        const label = g.dueHolderName || UNASSIGNED_LABEL;
-        const nameMatch = label.toLowerCase().includes(q);
-        if (nameMatch) return g;
+        if (g.referredBy.toLowerCase().includes(q)) return g;
         const bookings = g.bookings.filter(b =>
           (b.customerName || '').toLowerCase().includes(q) ||
           (b.bookingNumber || '').toLowerCase().includes(q) ||
           (b.serviceName || '').toLowerCase().includes(q)
         );
         if (bookings.length === 0) return null;
-        const totalDue = Math.round(bookings.reduce((s, b) => s + Number(b.amountDue || 0), 0) * 100) / 100;
-        return { ...g, bookings, bookingCount: bookings.length, totalDue };
+        const totalCommission = Math.round(bookings.reduce((s, b) => s + Number(b.commission || 0), 0) * 100) / 100;
+        return { ...g, bookings, bookingCount: bookings.length, totalCommission };
       })
       .filter(Boolean);
   }, [groups, searchQuery]);
 
-  const totalOutstanding = useMemo(
-    () => filtered.reduce((s, g) => s + Number(g.totalDue || 0), 0),
+  const totalCommission = useMemo(
+    () => filtered.reduce((s, g) => s + Number(g.totalCommission || 0), 0),
     [filtered]
   );
   const totalBookings = useMemo(
@@ -118,47 +117,57 @@ const OutstandingReportPanel = ({ branchId }) => {
     });
   };
 
-  const startAssign = (bookingId, current) => {
-    setAssigning(bookingId);
-    setAssignName(current || '');
+  const startEdit = (b) => {
+    setEditing(b.bookingId);
+    setEditType(b.commissionType || 'percentage');
+    setEditValue(b.commissionValue != null ? String(b.commissionValue) : '');
   };
 
-  const saveAssign = async (bookingId) => {
-    const name = assignName.trim();
-    if (!name) return;
-    setAssignSaving(true);
-    const { error: err } = await setDueHolder({ bookingId, dueHolderName: name });
-    setAssignSaving(false);
-    if (err) {
-      setError(err.message || 'Failed to assign name.');
+  const saveEdit = async (bookingId) => {
+    const v = Number(editValue);
+    if (!(v >= 0) || (editType === 'percentage' && v > 100)) {
+      setError(editType === 'percentage' ? 'Percentage must be between 0 and 100.' : 'Amount must be zero or more.');
       return;
     }
-    setAssigning(null);
-    setAssignName('');
+    setSaving(true);
+    const { error: err } = await setReferralCommission({ bookingId, commissionType: editType, commissionValue: v });
+    setSaving(false);
+    if (err) {
+      setError(err.message || 'Failed to save commission.');
+      return;
+    }
+    setEditing(null);
     await load();
-    fetchDueHolderNames(branchId).then(({ data }) => {
-      if (Array.isArray(data)) setSuggestions(data);
-    });
+  };
+
+  const clearEdit = async (bookingId) => {
+    setSaving(true);
+    const { error: err } = await setReferralCommission({ bookingId, commissionType: null, commissionValue: null });
+    setSaving(false);
+    if (err) {
+      setError(err.message || 'Failed to clear commission.');
+      return;
+    }
+    setEditing(null);
+    await load();
   };
 
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Responsible Person', 'Customer', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
+    const header = ['Referrer', 'Customer', 'Booking #', 'Date', 'Service', 'Final', 'Commission Rule', 'Commission Earned'];
     let csv = header.join(',') + '\n';
     filtered.forEach((g) => {
-      const label = g.dueHolderName || UNASSIGNED_LABEL;
       g.bookings.forEach((b) => {
         csv += [
-          esc(label),
+          esc(g.referredBy),
           esc(b.customerName),
           esc(b.bookingNumber),
           esc(formatDateOnly(b.date)),
           esc(b.serviceName),
           esc(b.finalAmount),
-          esc(b.amountPaid),
-          esc(b.amountDue),
-          esc(b.paymentStatus),
+          esc(commissionLabel(b.commissionType, b.commissionValue)),
+          esc(b.commission),
         ].join(',') + '\n';
       });
     });
@@ -166,7 +175,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'outstanding-report.csv';
+    link.download = 'referrals-report.csv';
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -175,7 +184,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     { label: 'All Time', active: mode === 'all', onClick: () => setMode('all') },
     ...PERIOD_PRESETS.map((p) => ({
       label: p.label,
-      active: mode === 'preset' && activePreset === p.id,
+      active: isPreset && activePreset === p.id,
       onClick: () => { setMode('preset'); setActivePreset(p.id); },
     })),
   ];
@@ -185,11 +194,11 @@ const OutstandingReportPanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Outstanding Report</h3>
+          <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Referrals Report</h3>
           <p className="font-body text-sm text-text-secondary">
             {loading
               ? 'Loading…'
-              : `${formatNPR(totalOutstanding)} across ${totalBookings} booking${totalBookings !== 1 ? 's' : ''}`}
+              : `${formatNPR(totalCommission)} commission across ${totalBookings} paid booking${totalBookings !== 1 ? 's' : ''}`}
           </p>
         </div>
         {filtered.length > 0 && (
@@ -206,7 +215,7 @@ const OutstandingReportPanel = ({ branchId }) => {
       {/* Filters */}
       <FilterBar
         count={{ value: totalBookings, label: totalBookings === 1 ? 'Booking' : 'Bookings' }}
-        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search by person, customer, or booking…' }}
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search by referrer, customer, or booking…' }}
         presets={presetItems}
         dateRange={{
           from: customFrom,
@@ -235,13 +244,15 @@ const OutstandingReportPanel = ({ branchId }) => {
         {loading ? (
           <div className="py-12 text-center">
             <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-            <p className="font-body text-sm text-text-secondary">Loading outstanding balances...</p>
+            <p className="font-body text-sm text-text-secondary">Loading referrals...</p>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center">
-            <Icon name="CheckCircle" size={32} className="text-success mx-auto mb-3" />
+            <Icon name="UserPlus" size={32} className="text-text-tertiary mx-auto mb-3" />
             <p className="font-body text-sm text-text-secondary">
-              {groups.length === 0 ? 'No outstanding balances. Everything is settled.' : 'No balances match the current filters.'}
+              {groups.length === 0
+                ? 'No paid bookings with a referrer in this period.'
+                : 'No referrals match the current filters.'}
             </p>
           </div>
         ) : (
@@ -249,16 +260,15 @@ const OutstandingReportPanel = ({ branchId }) => {
             <table className="w-full">
               <thead>
                 <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Responsible Person</th>
-                  <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Outstanding</th>
+                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Referred By</th>
+                  <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Commission</th>
                   <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary"># Bookings</th>
                   <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((g) => {
-                  const key = g.dueHolderName || '__unassigned__';
-                  const isUnassigned = !g.dueHolderName;
+                  const key = g.referredBy;
                   const isOpen = expanded.has(key);
                   return (
                     <React.Fragment key={key}>
@@ -267,19 +277,13 @@ const OutstandingReportPanel = ({ branchId }) => {
                         onClick={() => toggleExpand(key)}
                       >
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            {isUnassigned ? (
-                              <span className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-warning">
-                                <Icon name="HelpCircle" size={15} />
-                                {UNASSIGNED_LABEL}
-                              </span>
-                            ) : (
-                              <span className="font-body font-body-medium text-sm text-text-primary">{g.dueHolderName}</span>
-                            )}
-                          </div>
+                          <span className="inline-flex items-center gap-1.5 font-body font-body-medium text-sm text-text-primary">
+                            <Icon name="UserCheck" size={15} className="text-primary" />
+                            {g.referredBy}
+                          </span>
                         </td>
-                        <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-warning font-semibold whitespace-nowrap">
-                          {formatNPR(g.totalDue)}
+                        <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-success font-semibold whitespace-nowrap">
+                          {formatNPR(g.totalCommission)}
                         </td>
                         <td className="px-4 py-3 text-right font-data text-sm text-text-secondary whitespace-nowrap">
                           {g.bookingCount}
@@ -296,52 +300,65 @@ const OutstandingReportPanel = ({ branchId }) => {
                               <div className="min-w-0">
                                 <span className="font-body font-body-medium text-sm text-text-primary">{b.customerName}</span>
                                 <span className="font-body text-xs text-text-secondary ml-2">
-                                  #{b.bookingNumber} · {b.serviceName} · {formatDateOnly(b.date)}
+                                  #{b.bookingNumber} · {b.serviceName} · {formatDateOnly(b.date)} · {formatNPR(b.finalAmount)}
                                 </span>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0">
-                                <span className="font-data text-xs text-text-secondary">
-                                  Paid {formatNPR(b.amountPaid)}
-                                </span>
-                                <span className="font-data text-sm text-warning font-semibold">
-                                  Due {formatNPR(b.amountDue)}
-                                </span>
-                                {isUnassigned && (
-                                  assigning === b.bookingId ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <input
-                                        list="due-holder-suggestions"
-                                        type="text"
-                                        autoFocus
-                                        value={assignName}
-                                        onChange={(e) => setAssignName(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') saveAssign(b.bookingId); }}
-                                        placeholder="Name…"
-                                        className="w-36 rounded-spa border border-border bg-surface px-2 py-1 font-body text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                                      />
-                                      <button
-                                        onClick={() => saveAssign(b.bookingId)}
-                                        disabled={assignSaving || !assignName.trim()}
-                                        className="px-2 py-1 rounded-spa bg-primary text-white text-xs font-body-medium disabled:opacity-50"
-                                      >
-                                        Save
-                                      </button>
-                                      <button
-                                        onClick={() => { setAssigning(null); setAssignName(''); }}
-                                        className="p-1 rounded-spa hover:bg-background text-text-secondary"
-                                      >
-                                        <Icon name="X" size={14} />
-                                      </button>
+                                {editing === b.bookingId ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-20">
+                                      <CustomSelect options={TYPE_OPTIONS} value={editType} onChange={setEditType} size="sm" />
                                     </div>
-                                  ) : (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      autoFocus
+                                      value={editValue}
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(b.bookingId); }}
+                                      placeholder={editType === 'percentage' ? '%' : 'NPR'}
+                                      className="w-24 rounded-spa border border-border bg-surface px-2 py-1 font-data text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+                                    />
                                     <button
-                                      onClick={() => startAssign(b.bookingId, '')}
+                                      onClick={() => saveEdit(b.bookingId)}
+                                      disabled={saving || editValue === ''}
+                                      className="px-2 py-1 rounded-spa bg-primary text-white text-xs font-body-medium disabled:opacity-50"
+                                    >
+                                      Save
+                                    </button>
+                                    {b.commissionType && (
+                                      <button
+                                        onClick={() => clearEdit(b.bookingId)}
+                                        disabled={saving}
+                                        className="px-2 py-1 rounded-spa border border-border text-xs font-body-medium text-error hover:bg-error/5"
+                                      >
+                                        Clear
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => setEditing(null)}
+                                      className="p-1 rounded-spa hover:bg-background text-text-secondary"
+                                    >
+                                      <Icon name="X" size={14} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <span className="font-body text-xs text-text-secondary">
+                                      Rule: <span className="text-text-primary font-body-medium">{commissionLabel(b.commissionType, b.commissionValue)}</span>
+                                    </span>
+                                    <span className="font-data text-sm text-success font-semibold w-24 text-right">
+                                      {formatNPR(b.commission)}
+                                    </span>
+                                    <button
+                                      onClick={() => startEdit(b)}
                                       className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
                                     >
-                                      <Icon name="UserPlus" size={13} />
-                                      Assign name
+                                      <Icon name="Pencil" size={13} />
+                                      {b.commissionType ? 'Edit' : 'Set'}
                                     </button>
-                                  )
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -355,8 +372,8 @@ const OutstandingReportPanel = ({ branchId }) => {
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
                   <td className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning whitespace-nowrap">
-                    {formatNPR(totalOutstanding)}
+                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-success whitespace-nowrap">
+                    {formatNPR(totalCommission)}
                   </td>
                   <td className="px-4 py-3 text-right font-data text-sm text-text-secondary">{totalBookings}</td>
                   <td />
@@ -366,12 +383,8 @@ const OutstandingReportPanel = ({ branchId }) => {
           </div>
         )}
       </div>
-
-      <datalist id="due-holder-suggestions">
-        {suggestions.map((n) => <option key={n} value={n} />)}
-      </datalist>
     </div>
   );
 };
 
-export default OutstandingReportPanel;
+export default ReferralsReportPanel;

@@ -42,6 +42,7 @@ import DiscountsPanel from './components/DiscountsPanel';
 import AttendanceReportPanel from './components/AttendanceReportPanel';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
+import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -628,6 +629,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'attendance-report' && <AttendanceReportPanel branchId={branchId} />}
               {viewMode === 'transfer-report' && <TransferReportPanel />}
               {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
+              {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
