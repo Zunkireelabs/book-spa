@@ -478,11 +478,35 @@ const CalendarGrid = ({
   const todayStr = now.toISOString().split('T')[0];
   const nowTop = timeToTop(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`);
 
+  // Scroll the grid to the current time once, when the calendar opens on today.
+  // Deferred via rAF so it runs after the flex layout has sized the scroll
+  // container (setting scrollTop too early clamps it to 0). The ref guard keeps
+  // it one-shot so later data refreshes don't yank the user's scroll position.
+  const hasScrolledToNowRef = useRef(false);
   useEffect(() => {
-    if (scrollRef.current && days.includes(todayStr)) {
-      const containerHeight = scrollRef.current.clientHeight;
-      scrollRef.current.scrollTop = Math.max(0, (nowTop || 0) - containerHeight / 2);
+    if (hasScrolledToNowRef.current || !days.includes(todayStr)) return;
+    let raf1, raf2, timer;
+    const tryScroll = () => {
+      const el = scrollRef.current;
+      if (!el || el.clientHeight === 0 || el.scrollHeight <= el.clientHeight) return false;
+      el.scrollTop = Math.max(0, (nowTop || 0) - el.clientHeight / 2);
+      hasScrolledToNowRef.current = true;
+      return true;
+    };
+    if (!tryScroll()) {
+      raf1 = requestAnimationFrame(() => {
+        if (!tryScroll()) {
+          raf2 = requestAnimationFrame(() => {
+            if (!tryScroll()) timer = setTimeout(tryScroll, 200);
+          });
+        }
+      });
     }
+    return () => {
+      if (raf1) cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+      if (timer) clearTimeout(timer);
+    };
   }, [days, todayStr, nowTop]);
 
   const minColWidth = isMultiDay ? 80 : 120;
