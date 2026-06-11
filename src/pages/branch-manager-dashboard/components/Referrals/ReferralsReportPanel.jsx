@@ -53,6 +53,9 @@ const ReferralsReportPanel = ({ branchId }) => {
   const [bulkValue, setBulkValue] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
 
+  const [sortKey, setSortKey] = useState('commission'); // 'name' | 'commission' | 'bookings'
+  const [sortDir, setSortDir] = useState('desc');
+
   const isPreset = mode === 'preset';
 
   const range = useMemo(() => {
@@ -112,6 +115,34 @@ const ReferralsReportPanel = ({ branchId }) => {
   const totalBookings = useMemo(
     () => filtered.reduce((s, g) => s + g.bookingCount, 0),
     [filtered]
+  );
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      if (sortKey === 'name') return dir * a.referredBy.localeCompare(b.referredBy);
+      if (sortKey === 'bookings') return dir * (a.bookingCount - b.bookingCount);
+      return dir * (Number(a.totalCommission) - Number(b.totalCommission));
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+    }
+  };
+
+  const sortIcon = (key) => (
+    <Icon
+      name={sortKey === key ? (sortDir === 'asc' ? 'ChevronUp' : 'ChevronDown') : 'ChevronsUpDown'}
+      size={14}
+      className={sortKey === key ? 'text-primary' : 'text-text-tertiary'}
+    />
   );
 
   const toggleExpand = (key) => {
@@ -206,7 +237,7 @@ const ReferralsReportPanel = ({ branchId }) => {
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = ['Referrer', 'Customer', 'Booking #', 'Date', 'Service', 'Final', 'Commission Rule', 'Commission Earned'];
     let csv = header.join(',') + '\n';
-    filtered.forEach((g) => {
+    sorted.forEach((g) => {
       g.bookings.forEach((b) => {
         csv += [
           esc(g.referredBy),
@@ -354,14 +385,26 @@ const ReferralsReportPanel = ({ branchId }) => {
                       className="w-4 h-4 align-middle cursor-pointer accent-primary"
                     />
                   </th>
-                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Referred By</th>
-                  <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Commission</th>
-                  <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary"># Bookings</th>
+                  <th className="text-left px-4 py-3">
+                    <button type="button" onClick={() => handleSort('name')} className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary">
+                      <span>Referred By</span>{sortIcon('name')}
+                    </button>
+                  </th>
+                  <th className="text-right px-4 py-3">
+                    <button type="button" onClick={() => handleSort('commission')} className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary">
+                      <span>Commission</span>{sortIcon('commission')}
+                    </button>
+                  </th>
+                  <th className="text-right px-4 py-3">
+                    <button type="button" onClick={() => handleSort('bookings')} className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary">
+                      <span># Bookings</span>{sortIcon('bookings')}
+                    </button>
+                  </th>
                   <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((g) => {
+                {sorted.map((g) => {
                   const key = g.referredBy;
                   const isOpen = expanded.has(key);
                   return (
