@@ -294,9 +294,9 @@ const OutstandingReportPanel = ({ branchId }) => {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={`overflow-x-auto ${filtered.length > 10 ? 'max-h-[640px] overflow-y-auto' : ''}`}>
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 z-sticky-filter">
                 <tr className="bg-background border-b border-border">
                   <th className="text-left px-4 py-3">
                     <button

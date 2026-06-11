@@ -216,10 +216,10 @@ const TherapistPerformancePanel = ({ branchId }) => {
             <p className="font-body text-xs text-text-tertiary">No active therapists or bookings found for this period.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={`overflow-x-auto ${therapists.length > 10 ? 'max-h-[640px] overflow-y-auto' : ''}`}>
             <table className="w-full min-w-[800px]">
-              <thead>
-                <tr className="bg-background/50 border-b border-border">
+              <thead className="sticky top-0 z-sticky-filter">
+                <tr className="bg-background border-b border-border">
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide w-12">#</th>
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Therapist</th>
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Score</th>

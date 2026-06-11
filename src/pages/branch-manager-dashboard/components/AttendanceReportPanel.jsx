@@ -265,8 +265,8 @@ const AttendanceReportPanel = ({ branchId }) => {
       </div>
 
       {/* Per-staff table */}
-      <div className="bg-surface rounded-spa-lg border border-border">
-        <div className="hidden lg:grid lg:grid-cols-[1.6fr_90px_90px_90px_110px_110px_110px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
+      <div className={`bg-surface rounded-spa-lg border border-border ${rankedStaff.length > 10 ? 'max-h-[640px] overflow-y-auto' : ''}`}>
+        <div className="hidden lg:grid lg:grid-cols-[1.6fr_90px_90px_90px_110px_110px_110px] gap-3 px-5 py-3 bg-background border-b border-border rounded-t-spa-lg sticky top-0 z-sticky-filter">
           {['Staff', 'Present', 'Absent', 'Leave', 'Half Day', 'Days Marked', 'Attendance %'].map((h, i) => (
             <span key={h} className={`font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide ${i === 0 ? '' : 'text-center'}`}>{h}</span>
           ))}
