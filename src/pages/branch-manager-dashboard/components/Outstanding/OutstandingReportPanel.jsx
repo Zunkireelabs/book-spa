@@ -40,6 +40,14 @@ const OutstandingReportPanel = ({ branchId }) => {
   const [assigning, setAssigning] = useState(null);
   const [assignName, setAssignName] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
+  const [showAssignSuggestions, setShowAssignSuggestions] = useState(false);
+
+  const filteredAssignSuggestions = useMemo(() => {
+    const q = assignName.trim().toLowerCase();
+    return suggestions
+      .filter((n) => n && n.toLowerCase().includes(q) && n.toLowerCase() !== q)
+      .slice(0, 6);
+  }, [assignName, suggestions]);
 
   const range = useMemo(() => {
     if (mode === 'all') return { from: undefined, to: undefined };
@@ -121,6 +129,7 @@ const OutstandingReportPanel = ({ branchId }) => {
   const startAssign = (bookingId, current) => {
     setAssigning(bookingId);
     setAssignName(current || '');
+    setShowAssignSuggestions(false);
   };
 
   const saveAssign = async (bookingId) => {
@@ -309,16 +318,33 @@ const OutstandingReportPanel = ({ branchId }) => {
                                 {isUnassigned && (
                                   assigning === b.bookingId ? (
                                     <div className="flex items-center gap-1.5">
-                                      <input
-                                        list="due-holder-suggestions"
-                                        type="text"
-                                        autoFocus
-                                        value={assignName}
-                                        onChange={(e) => setAssignName(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') saveAssign(b.bookingId); }}
-                                        placeholder="Name…"
-                                        className="w-36 rounded-spa border border-border bg-surface px-2 py-1 font-body text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                                      />
+                                      <div className="relative w-36">
+                                        <input
+                                          type="text"
+                                          autoFocus
+                                          value={assignName}
+                                          onChange={(e) => { setAssignName(e.target.value); setShowAssignSuggestions(true); }}
+                                          onFocus={() => setShowAssignSuggestions(true)}
+                                          onBlur={() => setTimeout(() => setShowAssignSuggestions(false), 150)}
+                                          onKeyDown={(e) => { if (e.key === 'Enter') saveAssign(b.bookingId); }}
+                                          placeholder="Name…"
+                                          className="w-full rounded-spa border border-border bg-surface px-2 py-1 font-body text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+                                        />
+                                        {showAssignSuggestions && filteredAssignSuggestions.length > 0 && (
+                                          <div className="absolute z-dropdown left-0 right-0 mt-1 bg-surface border border-border rounded-spa shadow-spa-elevated max-h-44 overflow-y-auto">
+                                            {filteredAssignSuggestions.map((name) => (
+                                              <button
+                                                key={name}
+                                                type="button"
+                                                onMouseDown={() => { setAssignName(name); setShowAssignSuggestions(false); }}
+                                                className="w-full text-left px-2 py-1.5 text-xs text-text-primary hover:bg-background spa-transition-fast"
+                                              >
+                                                {name}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
                                       <button
                                         onClick={() => saveAssign(b.bookingId)}
                                         disabled={assignSaving || !assignName.trim()}
@@ -327,7 +353,7 @@ const OutstandingReportPanel = ({ branchId }) => {
                                         Save
                                       </button>
                                       <button
-                                        onClick={() => { setAssigning(null); setAssignName(''); }}
+                                        onClick={() => { setAssigning(null); setAssignName(''); setShowAssignSuggestions(false); }}
                                         className="p-1 rounded-spa hover:bg-background text-text-secondary"
                                       >
                                         <Icon name="X" size={14} />
@@ -366,10 +392,6 @@ const OutstandingReportPanel = ({ branchId }) => {
           </div>
         )}
       </div>
-
-      <datalist id="due-holder-suggestions">
-        {suggestions.map((n) => <option key={n} value={n} />)}
-      </datalist>
     </div>
   );
 };

@@ -292,6 +292,7 @@ Frontend → POST /functions/v1/pin-login (email, pin, org_slug)
 5. Financial fields: base_amount, discount_amount, final_amount
 6. After mutations, call `loadData()` to refresh from Supabase
 7. Parent components pass `therapists[]` prop to children
+8. **Dropdowns must use the app's design-system component, never a native `<select>`.** Every dropdown/select (including inline typeahead/combobox fields) must render through the shared `CustomSelect` (`src/components/ui/CustomSelect.jsx`) so it matches the system UI across browsers and OSes. A raw `<select>` falls back to the OS-native control (different fonts, chrome, and behavior on macOS/Windows/mobile) and is **not allowed**.
 
 ---
 
