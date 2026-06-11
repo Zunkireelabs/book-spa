@@ -20,7 +20,6 @@ import BookingPipelineChart from './components/BookingPipelineChart';
 import RealtimeBookingFeed from './components/RealtimeBookingFeed';
 import DateRangePicker from './components/DateRangePicker';
 import RevenueAnalyticsChart from './components/RevenueAnalyticsChart';
-import AlertsNotificationPanel from './components/AlertsNotificationPanel';
 import DailyOperationalReportPanel from './components/DailyOperationalReportPanel';
 import OperationalCalendar from './components/calendar';
 import RoomManagementPanel from './components/MasterData/RoomManagementPanel';
@@ -380,8 +379,6 @@ const BranchManagerDashboard = () => {
           <RevenueAnalyticsChart branchId={branchId} />
         </div>
       </div>
-
-      <AlertsNotificationPanel />
     </div>
   );
 
