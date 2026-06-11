@@ -13,6 +13,10 @@ const DATE_RANGE_LABELS = {
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
 
+function formatNPR(amount) {
+  return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
+}
+
 // Status badge styles using Tailwind classes directly (not dynamic)
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -191,6 +195,11 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
                         Paid
                       </span>
                     )}
+                    {booking.paymentStatus === 'partial' && (
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                        Due {formatNPR(booking.amountDue)}
+                      </span>
+                    )}
                     {booking.isLocked && (
                       <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700">
                         <Icon name="Lock" size={10} className="mr-1" />
@@ -274,6 +283,11 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
                           {booking.paymentStatus === 'paid' && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
                               Paid
+                            </span>
+                          )}
+                          {booking.paymentStatus === 'partial' && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                              Due {formatNPR(booking.amountDue)}
                             </span>
                           )}
                           {booking.isLocked && (

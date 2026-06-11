@@ -50,6 +50,20 @@ export function transformBooking(dbBooking) {
     therapists = [therapist];
   }
 
+  const finalAmount = Number(dbBooking.final_amount || dbBooking.base_amount || 0);
+  const paymentStatus = dbBooking.payment_status || 'unpaid';
+
+  // amountPaid is derived from joined payment rows when present; otherwise fall
+  // back to the status flag (exact partial amounts require the payments join).
+  const paymentRows = Array.isArray(dbBooking.payments) ? dbBooking.payments : null;
+  let amountPaid;
+  if (paymentRows) {
+    amountPaid = paymentRows.reduce((s, p) => s + Number(p.amount || 0), 0);
+  } else {
+    amountPaid = paymentStatus === 'paid' ? finalAmount : 0;
+  }
+  const amountDue = Math.max(finalAmount - amountPaid, 0);
+
   return {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
@@ -63,10 +77,13 @@ export function transformBooking(dbBooking) {
     time: dbBooking.start_time ? dbBooking.start_time.slice(0, 5) : '',
     date: dbBooking.date,
     status: dbBooking.status ? dbBooking.status.toLowerCase() : 'pending',
-    paymentStatus: dbBooking.payment_status || 'unpaid',
+    paymentStatus,
     baseAmount: Number(dbBooking.base_amount || 0),
     discountAmount: Number(dbBooking.discount_amount || 0),
-    finalAmount: Number(dbBooking.final_amount || dbBooking.base_amount || 0),
+    finalAmount,
+    amountPaid,
+    amountDue,
+    dueHolderName: dbBooking.due_holder_name || null,
     therapist,
     therapists,
     serviceId: dbBooking.service_id || null,

@@ -4,7 +4,8 @@ import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames } from '../../services/api';
+import { useBranch } from '../../contexts/BranchContext';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -54,6 +55,7 @@ const BookingActionModal = ({
   defaultNewBookingMode,
   userRole = 'staff'
 }) => {
+  const { branchId } = useBranch();
   const [activeTab, setActiveTab] = useState('details');
   const [selectedTherapists, setSelectedTherapists] = useState([]);
   const [therapistSearch, setTherapistSearch] = useState('');
@@ -92,7 +94,18 @@ const BookingActionModal = ({
   // Multi-payment/discount: related unpaid bookings for same customer
   const [relatedBookings, setRelatedBookings] = useState([]);
   const [selectedPaymentIds, setSelectedPaymentIds] = useState(new Set());
+  const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
+
+  // Load due-holder name suggestions for the split-payment typeahead.
+  useEffect(() => {
+    if (!showPaymentModal) return;
+    let cancelled = false;
+    fetchDueHolderNames(branchId).then(({ data }) => {
+      if (!cancelled && Array.isArray(data)) setDueHolderSuggestions(data);
+    });
+    return () => { cancelled = true; };
+  }, [showPaymentModal, branchId]);
 
   // Pre-select current therapists/room when booking changes or assign tab opens
   useEffect(() => {
@@ -341,15 +354,16 @@ const BookingActionModal = ({
     }
   };
 
-  const handlePaymentConfirm = async ({ paymentMode, notes: paymentNotes }) => {
+  const handlePaymentConfirm = async ({ tenders, paymentMode, dueHolderName, notes: paymentNotes }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     try {
-      // Pay the current booking
-      const result = await onRecordPayment(booking.bookingId, { paymentMode, notes: paymentNotes });
+      // Pay the current booking. Split mode forwards tenders + dueHolderName;
+      // batch mode forwards a single paymentMode (full amount per booking).
+      const result = await onRecordPayment(booking.bookingId, { tenders, paymentMode, dueHolderName, notes: paymentNotes });
       if (result?.error) return result;
 
-      // Pay any selected additional bookings
+      // Batch: pay any selected additional bookings in full with the same mode.
       const additionalIds = [...selectedPaymentIds];
       for (const rbId of additionalIds) {
         await onRecordPayment(rbId, { paymentMode, notes: paymentNotes });
@@ -1727,8 +1741,11 @@ const BookingActionModal = ({
             base_amount: booking.baseAmount,
             discount_amount: booking.discountAmount,
             final_amount: booking.finalAmount,
+            amountPaid: booking.amountPaid,
+            dueHolderName: booking.dueHolderName,
           }}
           additionalBookings={relatedBookings.filter(rb => selectedPaymentIds.has(rb.id))}
+          dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handlePaymentConfirm}
           onClose={() => setShowPaymentModal(false)}
           isSubmitting={paymentSubmitting}

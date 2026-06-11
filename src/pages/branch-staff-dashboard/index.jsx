@@ -372,9 +372,9 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: recordPayment
-  const handleRecordPayment = async (bookingId, { paymentMode, notes }) => {
+  const handleRecordPayment = async (bookingId, opts) => {
     setActionError(null);
-    const result = await recordPayment({ bookingId, paymentMode, notes });
+    const result = await recordPayment({ bookingId, ...opts });
 
     if (result.error) {
       return { error: result.error };

@@ -218,7 +218,8 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
         *,
         service:services(id, name, duration_minutes),
         therapist:therapists(id, name, gender),
-        room:rooms(id, name)
+        room:rooms(id, name),
+        payments(amount)
       `)
       .order('start_time');
     query = withBranch(query, branchId);
@@ -274,12 +275,19 @@ export async function fetchBookingCreator(bookingId) {
 // Booking Mutations (Phase 4 + Phase 6 hardened)
 // ============================================================
 
-export async function recordPayment({ bookingId, paymentMode, notes }) {
+export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti'];
+
+// Record one or more payment tenders against a booking. Supports split payments
+// (e.g. part cash + part card) and leaving a remaining balance as a due, which is
+// attributed to a free-typed responsible person (dueHolderName).
+//   recordPayment({ bookingId, tenders: [{ amount, paymentMode }], dueHolderName, notes })
+// Backward-compatible single full payment: { bookingId, paymentMode, notes }.
+export async function recordPayment({ bookingId, tenders, paymentMode, dueHolderName, notes }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, payment_status, final_amount, is_locked')
+      .select('id, status, payment_status, final_amount, is_locked, due_holder_name')
       .eq('id', bookingId)
       .single();
 
@@ -295,7 +303,7 @@ export async function recordPayment({ bookingId, paymentMode, notes }) {
       return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
     }
 
-    // 3. Already paid check
+    // 3. Already fully paid check (partial/unpaid may still receive tenders)
     if (booking.payment_status === 'paid') {
       return { data: null, error: { code: 'ALREADY_PAID', message: 'Payment has already been recorded for this booking.' } };
     }
@@ -309,29 +317,200 @@ export async function recordPayment({ bookingId, paymentMode, notes }) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    // 6. Insert payment
-    const { data: payment, error: insertError } = await supabase
+    // 6. Determine already-collected and remaining
+    const finalAmount = Number(booking.final_amount);
+    const { data: existing, error: sumError } = await supabase
       .from('payments')
-      .insert({
-        booking_id: bookingId,
-        amount: Number(booking.final_amount),
-        payment_mode: paymentMode,
-        recorded_by: user.id,
-        notes: notes || null,
-      })
-      .select('id')
-      .single();
+      .select('amount')
+      .eq('booking_id', bookingId);
+    if (sumError) throw sumError;
+    const collected = (existing || []).reduce((s, p) => s + Number(p.amount), 0);
+    const remaining = Math.round((finalAmount - collected) * 100) / 100;
 
-    if (insertError) {
-      if (insertError.code === '23505') {
-        return { data: null, error: { code: 'ALREADY_PAID', message: 'Payment has already been recorded for this booking.' } };
-      }
-      throw insertError;
+    if (remaining <= 0) {
+      return { data: null, error: { code: 'ALREADY_PAID', message: 'This booking is already fully paid.' } };
     }
 
-    return { data: { success: true, paymentId: payment.id, bookingId }, error: null };
+    // 7. Normalize tenders (fall back to a single full-remaining tender)
+    let tenderList = Array.isArray(tenders) && tenders.length > 0
+      ? tenders
+      : [{ amount: remaining, paymentMode }];
+
+    tenderList = tenderList
+      .map(t => ({ amount: Math.round(Number(t.amount) * 100) / 100, paymentMode: t.paymentMode }))
+      .filter(t => t.amount > 0);
+
+    if (tenderList.length === 0) {
+      return { data: null, error: { code: 'NO_TENDER', message: 'Enter at least one payment amount.' } };
+    }
+    for (const t of tenderList) {
+      if (!PAYMENT_MODES.includes(t.paymentMode)) {
+        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: `Invalid payment method: ${t.paymentMode}.` } };
+      }
+    }
+
+    const tenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    if (tenderTotal > remaining) {
+      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${tenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
+    }
+
+    const leftover = Math.round((remaining - tenderTotal) * 100) / 100;
+    const resolvedDueHolder = (dueHolderName || '').trim() || booking.due_holder_name || null;
+
+    // 8. If a balance is being left as due, a responsible person is required
+    if (leftover > 0 && !resolvedDueHolder) {
+      return { data: null, error: { code: 'DUE_HOLDER_REQUIRED', message: 'Enter who the remaining due is under before leaving a balance unpaid.' } };
+    }
+
+    // 9. Insert tenders (notes attached to the first row)
+    const insertRows = tenderList.map((t, i) => ({
+      booking_id: bookingId,
+      amount: t.amount,
+      payment_mode: t.paymentMode,
+      recorded_by: user.id,
+      notes: i === 0 ? (notes || null) : null,
+    }));
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('payments')
+      .insert(insertRows)
+      .select('id');
+
+    if (insertError) throw insertError;
+
+    // 10. Maintain due_holder_name: set when a due remains, clear when fully settled
+    const newDueHolder = leftover > 0 ? resolvedDueHolder : null;
+    if (newDueHolder !== (booking.due_holder_name || null)) {
+      const { error: updateError } = await supabase
+        .from('bookings')
+        .update({ due_holder_name: newDueHolder })
+        .eq('id', bookingId);
+      if (updateError) throw updateError;
+    }
+
+    return {
+      data: {
+        success: true,
+        paymentIds: (inserted || []).map(r => r.id),
+        bookingId,
+        amountPaid: tenderTotal,
+        amountDue: leftover,
+        fullyPaid: leftover === 0,
+      },
+      error: null,
+    };
   } catch (error) {
     console.error('[API] recordPayment error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Distinct previously-used due-holder names for the settlement typeahead.
+export async function fetchDueHolderNames(branchId) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('due_holder_name')
+      .not('due_holder_name', 'is', null);
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    const names = [...new Set((data || []).map(b => (b.due_holder_name || '').trim()).filter(Boolean))].sort();
+    return { data: names, error: null };
+  } catch (error) {
+    console.error('[API] fetchDueHolderNames error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Assign / change the responsible person for a booking's outstanding balance.
+export async function setDueHolder({ bookingId, dueHolderName }) {
+  try {
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, is_locked')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    }
+    const name = (dueHolderName || '').trim() || null;
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update({ due_holder_name: name })
+      .eq('id', bookingId);
+    if (updateError) throw updateError;
+    return { data: { success: true, bookingId, dueHolderName: name }, error: null };
+  } catch (error) {
+    console.error('[API] setDueHolder error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Outstanding (unpaid + partial) balances grouped by responsible person.
+// from/to are ISO dates (inclusive); omit for all-time.
+export async function getOutstandingByStaff({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, date, final_amount, payment_status, due_holder_name, service_name_snapshot')
+      .in('payment_status', ['unpaid', 'partial'])
+      .not('status', 'in', '("Cancelled","No Show")');
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const all = bookings || [];
+    const bookingIds = all.map(b => b.id);
+    const paidMap = {};
+    if (bookingIds.length > 0) {
+      const { data: payments, error: payError } = await supabase
+        .from('payments')
+        .select('booking_id, amount')
+        .in('booking_id', bookingIds);
+      if (payError) throw payError;
+      for (const p of (payments || [])) {
+        paidMap[p.booking_id] = (paidMap[p.booking_id] || 0) + Number(p.amount);
+      }
+    }
+
+    const groups = {};
+    for (const b of all) {
+      const collected = paidMap[b.id] || 0;
+      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
+      if (due <= 0) continue;
+      const rawName = (b.due_holder_name || '').trim();
+      const key = rawName || '__unassigned__';
+      if (!groups[key]) {
+        groups[key] = { dueHolderName: rawName || null, totalDue: 0, bookingCount: 0, bookings: [] };
+      }
+      groups[key].totalDue = Math.round((groups[key].totalDue + due) * 100) / 100;
+      groups[key].bookingCount += 1;
+      groups[key].bookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        serviceName: b.service_name_snapshot || '—',
+        finalAmount: Number(b.final_amount),
+        amountPaid: collected,
+        amountDue: due,
+        paymentStatus: b.payment_status,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalDue - a.totalDue);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getOutstandingByStaff error:', error.message);
     return { data: null, error };
   }
 }
@@ -1333,38 +1512,42 @@ export async function getDailySummary(branchId, date) {
     const completedBookings = all.filter(b => b.status === 'Completed').length;
     const cancelledBookings = all.filter(b => b.status === 'Cancelled').length;
 
-    // 2. Revenue from paid bookings only
+    // 2. Gross/discount from fully-paid (settled) bookings
     const paid = all.filter(b => b.payment_status === 'paid');
     const grossRevenue = paid.reduce((sum, b) => sum + Number(b.base_amount), 0);
     const totalDiscounts = paid.reduce((sum, b) => sum + Number(b.discount_amount), 0);
-    const netRevenue = paid.reduce((sum, b) => sum + Number(b.final_amount), 0);
 
-    // 3. Unpaid count (Confirmed or Completed but unpaid)
+    // 3. Outstanding count (Confirmed/Completed not fully paid — unpaid or partial)
     const unpaidCount = all.filter(
-      b => b.payment_status === 'unpaid' && ['Confirmed', 'Completed'].includes(b.status)
+      b => ['unpaid', 'partial'].includes(b.payment_status) && ['Confirmed', 'Completed'].includes(b.status)
     ).length;
 
-    // 4. Payment mode breakdown — need to join payments table
-    const paidBookingIds = paid.map(b => b.id);
+    // 4. Net revenue = cash actually collected today (full + partial payments),
+    //    plus the payment-mode breakdown — both from the payments rows.
+    const settledBookingIds = all
+      .filter(b => ['paid', 'partial'].includes(b.payment_status))
+      .map(b => b.id);
+    let netRevenue = 0;
     let paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
 
-    if (paidBookingIds.length > 0) {
+    if (settledBookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
         .from('payments')
         .select('amount, payment_mode')
-        .in('booking_id', paidBookingIds);
+        .in('booking_id', settledBookingIds);
 
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
         const amount = Number(p.amount);
+        netRevenue += amount;
         if (p.payment_mode === 'Cash') {
           paymentBreakdown.cash += amount;
-        } else if (p.payment_mode === 'Fonepay') {
-          paymentBreakdown.fonepay += amount;
-        } else {
-          // Nabil, GlobalIME, NICAsia → card
+        } else if (p.payment_mode === 'Card') {
           paymentBreakdown.card += amount;
+        } else {
+          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
+          paymentBreakdown.fonepay += amount;
         }
       }
     }
@@ -1543,9 +1726,11 @@ export async function getDailyOperationalReport(branchId, date) {
 
     const all = bookings || [];
 
-    // Fetch payments for all bookings in one query
+    // Fetch payments for all bookings in one query. A booking may have multiple
+    // tenders (split payment), so aggregate per booking AND keep the raw rows.
     const bookingIds = all.map(b => b.id);
-    let paymentsMap = {};
+    let paymentRows = [];
+    let paymentsMap = {}; // booking_id -> { amount: total collected, modes: [] }
 
     if (bookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
@@ -1555,14 +1740,20 @@ export async function getDailyOperationalReport(branchId, date) {
 
       if (paymentsError) throw paymentsError;
 
-      for (const p of (payments || [])) {
-        paymentsMap[p.booking_id] = p;
+      paymentRows = payments || [];
+      for (const p of paymentRows) {
+        const e = paymentsMap[p.booking_id] || { amount: 0, modes: [] };
+        e.amount += Number(p.amount);
+        if (p.payment_mode) e.modes.push(p.payment_mode);
+        paymentsMap[p.booking_id] = e;
       }
     }
 
     // Build bookings list — Phase 9A: use snapshot fields for display
     const bookingsList = all.map(b => {
       const payment = paymentsMap[b.id];
+      const collected = payment ? payment.amount : 0;
+      const uniqueModes = payment ? [...new Set(payment.modes)] : [];
       return {
         bookingId: b.id,
         bookingNumber: b.booking_number,
@@ -1573,7 +1764,9 @@ export async function getDailyOperationalReport(branchId, date) {
         baseAmount: Number(b.base_amount),
         discountAmount: Number(b.discount_amount),
         finalAmount: Number(b.final_amount),
-        paymentMode: payment?.payment_mode || null,
+        amountPaid: collected,
+        amountDue: Math.max(Number(b.final_amount) - collected, 0),
+        paymentMode: uniqueModes.length > 1 ? 'Split' : (uniqueModes[0] || null),
         paymentStatus: b.payment_status,
         status: b.status,
       };
@@ -1597,7 +1790,6 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       // Live compute — revenue from payments only
       const paidBookings = all.filter(b => b.payment_status === 'paid');
-      const paymentsArr = Object.values(paymentsMap);
 
       totals = {
         totalBookings: all.length,
@@ -1606,8 +1798,8 @@ export async function getDailyOperationalReport(branchId, date) {
         noShowBookings: all.filter(b => b.status === 'No Show').length,
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
-        // REVENUE LAW: netRevenue = SUM(payments.amount)
-        netRevenue: paymentsArr.reduce((sum, p) => sum + Number(p.amount), 0),
+        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections
+        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0),
       };
     }
 
@@ -1622,14 +1814,15 @@ export async function getDailyOperationalReport(branchId, date) {
       };
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
-      for (const p of Object.values(paymentsMap)) {
+      for (const p of paymentRows) {
         const amount = Number(p.amount);
         if (p.payment_mode === 'Cash') {
           paymentBreakdown.cash += amount;
-        } else if (p.payment_mode === 'Fonepay') {
-          paymentBreakdown.fonepay += amount;
-        } else {
+        } else if (p.payment_mode === 'Card') {
           paymentBreakdown.card += amount;
+        } else {
+          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
+          paymentBreakdown.fonepay += amount;
         }
       }
     }
@@ -1693,16 +1886,20 @@ export async function getDailyOperationalReport(branchId, date) {
 
     const therapistRevenueSummary = Object.values(revenueByTherapist);
 
-    // Step 7 — Unpaid bookings
+    // Step 7 — Unpaid / partially-paid bookings (outstanding balance)
     const unpaidBookings = all
-      .filter(b => b.payment_status === 'unpaid' && ['Confirmed', 'Completed'].includes(b.status))
-      .map(b => ({
-        bookingNumber: b.booking_number,
-        customerName: b.customer_name,
-        serviceName: b.service_name_snapshot || '—',
-        finalAmount: Number(b.final_amount),
-        status: b.status,
-      }));
+      .filter(b => ['unpaid', 'partial'].includes(b.payment_status) && ['Confirmed', 'Completed'].includes(b.status))
+      .map(b => {
+        const collected = paymentsMap[b.id]?.amount || 0;
+        return {
+          bookingNumber: b.booking_number,
+          customerName: b.customer_name,
+          serviceName: b.service_name_snapshot || '—',
+          finalAmount: Number(b.final_amount),
+          amountDue: Math.max(Number(b.final_amount) - collected, 0),
+          status: b.status,
+        };
+      });
 
     return {
       data: {
@@ -1768,8 +1965,8 @@ export function exportDailyReportCSV(reportData) {
   rows.push('');
   rows.push('PAYMENT BREAKDOWN');
   rows.push(`Cash,${paymentBreakdown.cash.toFixed(2)}`);
-  rows.push(`Card (Nabil/GlobalIME/NIC Asia),${paymentBreakdown.card.toFixed(2)}`);
-  rows.push(`Fonepay,${paymentBreakdown.fonepay.toFixed(2)}`);
+  rows.push(`Card,${paymentBreakdown.card.toFixed(2)}`);
+  rows.push(`Mobile/Other,${paymentBreakdown.fonepay.toFixed(2)}`);
 
   // Section 4: Staff Discount Summary
   if (staffDiscountSummary.length > 0) {
@@ -2162,6 +2359,7 @@ export async function fetchBookingById(bookingId) {
         service:services(id, name, duration_minutes, price_npr),
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
+        payments(amount, payment_mode, created_at),
         booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name, gender))
       `)
       .eq('id', bookingId)
