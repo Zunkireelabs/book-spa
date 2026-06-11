@@ -48,6 +48,11 @@ const ReferralsReportPanel = ({ branchId }) => {
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [selectedGroups, setSelectedGroups] = useState(() => new Set());
+  const [bulkType, setBulkType] = useState('percentage');
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
+
   const isPreset = mode === 'preset';
 
   const range = useMemo(() => {
@@ -115,6 +120,50 @@ const ReferralsReportPanel = ({ branchId }) => {
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
+  };
+
+  const selectedInView = useMemo(
+    () => filtered.filter(g => selectedGroups.has(g.referredBy)).length,
+    [filtered, selectedGroups]
+  );
+  const allSelected = filtered.length > 0 && selectedInView === filtered.length;
+
+  const toggleSelect = (key) => {
+    setSelectedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedGroups(allSelected ? new Set() : new Set(filtered.map(g => g.referredBy)));
+  };
+
+  const applyBulk = async () => {
+    const v = Number(bulkValue);
+    if (!(v >= 0) || (bulkType === 'percentage' && v > 100)) {
+      setError(bulkType === 'percentage' ? 'Percentage must be between 0 and 100.' : 'Amount must be zero or more.');
+      return;
+    }
+    const ids = [];
+    filtered.forEach(g => {
+      if (selectedGroups.has(g.referredBy)) g.bookings.forEach(b => ids.push(b.bookingId));
+    });
+    if (ids.length === 0) return;
+    setBulkSaving(true);
+    setError(null);
+    const results = await Promise.all(
+      ids.map(id => setReferralCommission({ bookingId: id, commissionType: bulkType, commissionValue: v }))
+    );
+    setBulkSaving(false);
+    const failed = results.filter(r => r.error).length;
+    if (failed > 0) {
+      setError(`Updated ${ids.length - failed} of ${ids.length} booking(s). ${failed} could not be changed (the day may be closed).`);
+    }
+    setSelectedGroups(new Set());
+    setBulkValue('');
+    await load();
   };
 
   const startEdit = (b) => {
@@ -231,6 +280,42 @@ const ReferralsReportPanel = ({ branchId }) => {
         onClear={() => setSearchQuery('')}
       />
 
+      {/* Bulk-apply bar */}
+      {selectedGroups.size > 0 && (
+        <div className="flex items-center gap-3 flex-wrap p-3 bg-primary/5 border border-primary/20 rounded-spa">
+          <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
+            {selectedInView} referrer{selectedInView !== 1 ? 's' : ''} selected
+          </span>
+          <span className="font-body text-xs text-text-secondary">Apply commission to all their paid bookings:</span>
+          <div className="w-20">
+            <CustomSelect options={TYPE_OPTIONS} value={bulkType} onChange={setBulkType} size="sm" />
+          </div>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={bulkValue}
+            onChange={(e) => setBulkValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') applyBulk(); }}
+            placeholder={bulkType === 'percentage' ? '%' : 'NPR'}
+            className="w-24 rounded-spa border border-border bg-surface px-2 py-1.5 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+          />
+          <button
+            onClick={applyBulk}
+            disabled={bulkSaving || bulkValue === ''}
+            className="px-3 py-1.5 rounded-spa bg-primary text-white text-sm font-body-medium disabled:opacity-50"
+          >
+            {bulkSaving ? 'Applying…' : 'Apply'}
+          </button>
+          <button
+            onClick={() => setSelectedGroups(new Set())}
+            className="px-3 py-1.5 rounded-spa border border-border text-sm font-body-medium text-text-secondary hover:bg-background"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* Error */}
       {error && (
         <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
@@ -260,6 +345,15 @@ const ReferralsReportPanel = ({ branchId }) => {
             <table className="w-full">
               <thead>
                 <tr className="bg-background border-b border-border">
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = selectedInView > 0 && !allSelected; }}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 align-middle cursor-pointer accent-primary"
+                    />
+                  </th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Referred By</th>
                   <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Commission</th>
                   <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary"># Bookings</th>
@@ -276,6 +370,14 @@ const ReferralsReportPanel = ({ branchId }) => {
                         className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast cursor-pointer"
                         onClick={() => toggleExpand(key)}
                       >
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedGroups.has(key)}
+                            onChange={() => toggleSelect(key)}
+                            className="w-4 h-4 align-middle cursor-pointer accent-primary"
+                          />
+                        </td>
                         <td className="px-4 py-3">
                           <span className="inline-flex items-center gap-1.5 font-body font-body-medium text-sm text-text-primary">
                             <Icon name="UserCheck" size={15} className="text-primary" />
@@ -295,7 +397,7 @@ const ReferralsReportPanel = ({ branchId }) => {
 
                       {isOpen && g.bookings.map((b) => (
                         <tr key={b.bookingId} className="border-b border-border last:border-b-0 bg-background/30">
-                          <td colSpan={4} className="px-4 py-2.5">
+                          <td colSpan={5} className="px-4 py-2.5">
                             <div className="flex items-center justify-between gap-3 flex-wrap pl-4">
                               <div className="min-w-0">
                                 <span className="font-body font-body-medium text-sm text-text-primary">{b.customerName}</span>
@@ -371,6 +473,7 @@ const ReferralsReportPanel = ({ branchId }) => {
               </tbody>
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
+                  <td />
                   <td className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-success whitespace-nowrap">
                     {formatNPR(totalCommission)}
