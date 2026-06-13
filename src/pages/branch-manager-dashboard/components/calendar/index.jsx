@@ -29,14 +29,21 @@ import { useAuth } from '../../../../contexts/AuthContext';
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function todayStr() {
-  return new Date().toISOString().split('T')[0];
+function toLocalISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function todayStr() {
+  return toLocalISO(new Date());
+}
+
+// Local-time date math. We can't use toISOString here: in Nepal (UTC+5:45)
+// local midnight is the previous UTC day, so toISOString().split('T')[0]
+// strips off the day-increment we just applied.
 function addDays(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return toLocalISO(d);
 }
 
 function formatDateTitle(dateStr, viewMode) {
