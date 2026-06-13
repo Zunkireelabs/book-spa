@@ -215,3 +215,4 @@ flowchart TD
 ⇒ Customers first unblocks the outstanding/credit ledger (its only destructive step). The staff
 transfer model is **additive-only** (add `org_id` + audit table + a Transfer UI action), so it
 carries far less risk than a row-merge campaign and can ship whenever convenient after Phase 1.
+    

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
@@ -9,6 +10,39 @@ const STAFF_TYPE_OPTIONS = [
   { value: 'service', label: 'Service' },
   { value: 'support', label: 'Support' },
 ];
+
+const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+// Parse 'YYYY-MM-DD' as a LOCAL date (avoids UTC-midnight timezone shift).
+function parseLocalDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Build ordered list of ISO date strings in [startDate, endDate].
+function getDatesInRange(startDate, endDate) {
+  const dates = [];
+  const end = parseLocalDate(endDate);
+  const cur = parseLocalDate(startDate);
+  while (cur <= end) {
+    dates.push(cur.toISOString().split('T')[0].slice(0, 10)); // 'YYYY-MM-DD'
+    // Reconstruct from parts to avoid DST oddities
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+// Return display config for an attendance status.
+function statusCell(status) {
+  switch (status) {
+    case 'Present':      return { bg: 'bg-success',     title: 'Present' };
+    case 'Absent':       return { bg: 'bg-error',       title: 'Absent' };
+    case 'Leave':        return { bg: 'bg-warning',     title: 'Leave' };
+    case '1st-Half Day': return { bg: 'bg-primary/60',  title: '1st Half Day' };
+    case '2nd-Half Day': return { bg: 'bg-primary/60',  title: '2nd Half Day' };
+    default:             return { bg: 'bg-border/50',   title: 'No record' };
+  }
+}
 
 function formatDate(d) {
   if (!d) return '—';
@@ -31,24 +65,170 @@ function SummaryCard({ label, value, tone }) {
   );
 }
 
+// ── Grid view ─────────────────────────────────────────────────────────────────
+
+const AttendanceGrid = ({ rankedStaff, data }) => {
+  const dates = useMemo(
+    () => getDatesInRange(data.startDate, data.endDate),
+    [data.startDate, data.endDate]
+  );
+
+  // Build lookup: { [therapistId]: { [date]: status } }
+  const lookup = useMemo(() => {
+    const map = {};
+    for (const r of (data.dayRecords || [])) {
+      if (!map[r.therapistId]) map[r.therapistId] = {};
+      map[r.therapistId][r.date] = r.status;
+    }
+    return map;
+  }, [data.dayRecords]);
+
+  const tooManyDays = dates.length > 62;
+
+  if (tooManyDays) {
+    return (
+      <div className="bg-surface border border-border rounded-spa p-8 text-center">
+        <Icon name="CalendarRange" size={32} className="text-text-tertiary mx-auto mb-3" />
+        <p className="font-body text-sm text-text-secondary">
+          Grid view is available for periods up to 2 months ({dates.length} days selected).
+        </p>
+        <p className="font-body text-xs text-text-tertiary mt-1">Switch to Table view or narrow the date range.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-spa overflow-hidden">
+      {/* Legend */}
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-background border-b border-border flex-wrap">
+        {[
+          { label: 'Present', cls: 'bg-success' },
+          { label: 'Absent', cls: 'bg-error' },
+          { label: 'Leave', cls: 'bg-warning' },
+          { label: 'Half Day', cls: 'bg-primary/60' },
+          { label: 'No record', cls: 'bg-border/50' },
+        ].map((l) => (
+          <span key={l.label} className="inline-flex items-center gap-1.5 font-body text-xs text-text-secondary">
+            <span className={`inline-block w-4 h-4 rounded-sm ${l.cls}`} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="border-collapse" style={{ minWidth: `${200 + dates.length * 44}px` }}>
+          <thead>
+            {/* Day-of-week row */}
+            <tr className="bg-background border-b border-border">
+              <th className="sticky left-0 z-10 bg-background px-4 py-2 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide whitespace-nowrap min-w-[180px]">
+                Staff
+              </th>
+              {dates.map((iso) => {
+                const d = parseLocalDate(iso);
+                const dayIdx = d.getDay();
+                const isWeekend = dayIdx === 0 || dayIdx === 6;
+                return (
+                  <th
+                    key={iso}
+                    className={`px-1 py-2 text-center min-w-[40px] ${isWeekend ? 'bg-background/60' : 'bg-background'}`}
+                  >
+                    <div className={`font-caption text-[10px] font-semibold uppercase ${isWeekend ? 'text-text-tertiary' : 'text-text-secondary'}`}>
+                      {DAY_ABBR[dayIdx]}
+                    </div>
+                    <div className={`font-data text-xs mt-0.5 ${isWeekend ? 'text-text-tertiary' : 'text-text-primary'}`}>
+                      {d.getDate()}
+                    </div>
+                  </th>
+                );
+              })}
+              {/* Attendance % column */}
+              <th className="sticky right-0 bg-background px-3 py-2 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide whitespace-nowrap">
+                Rate
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rankedStaff.length === 0 ? (
+              <tr>
+                <td colSpan={dates.length + 2} className="px-4 py-8 text-center">
+                  <Icon name="CalendarX" size={28} className="text-text-tertiary mx-auto mb-2" />
+                  <p className="font-body text-sm text-text-tertiary">No attendance data for this period.</p>
+                </td>
+              </tr>
+            ) : (
+              rankedStaff.map((s, rowIdx) => {
+                const byDate = lookup[s.therapistId] || {};
+                return (
+                  <tr
+                    key={s.therapistId}
+                    className={`border-b border-border last:border-b-0 ${rowIdx % 2 === 1 ? 'bg-background/30' : ''}`}
+                  >
+                    {/* Sticky staff name */}
+                    <td className={`sticky left-0 z-10 px-4 py-2.5 min-w-[180px] ${rowIdx % 2 === 1 ? 'bg-background/30' : 'bg-surface'}`}>
+                      <p className="font-body font-body-medium text-sm text-text-primary truncate max-w-[160px]" title={s.therapistName}>
+                        {s.therapistName}
+                      </p>
+                      <p className="font-caption text-[10px] text-text-tertiary">
+                        {s.isServiceStaff ? 'Service' : 'Support'}
+                      </p>
+                    </td>
+
+                    {/* Day cells */}
+                    {dates.map((iso) => {
+                      const st = byDate[iso];
+                      const cell = statusCell(st);
+                      const d = parseLocalDate(iso);
+                      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                      return (
+                        <td
+                          key={iso}
+                          className={`px-1 py-2 text-center ${isWeekend ? 'bg-background/20' : ''}`}
+                          title={`${s.therapistName} · ${iso} · ${cell.title}`}
+                        >
+                          <span
+                            className={`inline-block w-7 h-7 rounded-sm ${cell.bg}`}
+                          />
+                        </td>
+                      );
+                    })}
+
+                    {/* Sticky rate column */}
+                    <td className={`sticky right-0 px-3 py-2.5 text-center ${rowIdx % 2 === 1 ? 'bg-background/30' : 'bg-surface'}`}>
+                      <span className="font-data text-sm text-text-primary">
+                        {s.marked > 0 ? `${s.attendanceRate}%` : '—'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ── Main panel ────────────────────────────────────────────────────────────────
+
 const AttendanceReportPanel = ({ branchId }) => {
+  const { orgSlug } = useParams();
   const today = getTodayISO();
 
   const [activePreset, setActivePreset] = useState('monthly');
   const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
-  const [customFrom, setCustomFrom] = useState('');   // live input value
-  const [customTo, setCustomTo] = useState('');       // live input value
-  const [appliedFrom, setAppliedFrom] = useState(''); // committed on Apply
-  const [appliedTo, setAppliedTo] = useState('');     // committed on Apply
-  const [staffType, setStaffType] = useState('all'); // 'all' | 'service' | 'support'
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [appliedFrom, setAppliedFrom] = useState('');
+  const [appliedTo, setAppliedTo] = useState('');
+  const [staffType, setStaffType] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [displayMode, setDisplayMode] = useState('table'); // 'table' | 'grid'
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Range is driven by the APPLIED dates, never the live inputs, so editing the
-  // date pickers does not re-fetch until the user clicks Apply.
   const range = useMemo(() => {
     if (mode === 'custom' && appliedFrom) {
       return { startDate: appliedFrom, endDate: appliedTo || today };
@@ -56,7 +236,6 @@ const AttendanceReportPanel = ({ branchId }) => {
     return getPeriodRange(activePreset);
   }, [mode, activePreset, appliedFrom, appliedTo, today]);
 
-  // True when the inputs differ from what's currently applied (pending Apply).
   const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
 
   const loadData = useCallback(async () => {
@@ -176,7 +355,6 @@ const AttendanceReportPanel = ({ branchId }) => {
   const perStaff = allStaff.filter((s) =>
     staffType === 'all' ? true : staffType === 'service' ? s.isServiceStaff : !s.isServiceStaff
   );
-  // Recompute totals from the filtered set so summary cards match the table.
   const totals = perStaff.reduce(
     (acc, s) => {
       acc.present += s.present;
@@ -206,7 +384,42 @@ const AttendanceReportPanel = ({ branchId }) => {
             Staff attendance over a period. Period: {formatDate(data?.startDate)} – {formatDate(data?.endDate)}
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start">
+        <div className="flex items-center gap-2 self-start flex-wrap">
+          {/* View toggle */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-background border border-border rounded-spa">
+            <button
+              onClick={() => setDisplayMode('table')}
+              title="Table view"
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-body-medium transition-colors ${
+                displayMode === 'table' ? 'bg-surface text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <Icon name="List" size={14} />
+              Table
+            </button>
+            <button
+              onClick={() => setDisplayMode('grid')}
+              title="Calendar grid view"
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-body-medium transition-colors ${
+                displayMode === 'grid' ? 'bg-surface text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <Icon name="LayoutGrid" size={14} />
+              Grid
+            </button>
+          </div>
+
+          {orgSlug && (
+            <Link
+              to={`/${orgSlug}/attendance-calendar`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-surface font-body font-body-medium text-sm text-text-secondary hover:bg-background spa-transition-fast"
+              title="Open attendance calendar in full page"
+            >
+              <Icon name="ExternalLink" size={14} />
+              Full page
+            </Link>
+          )}
+
           <button
             onClick={handleExportCSV}
             disabled={!data || totals.marked === 0}
@@ -264,69 +477,76 @@ const AttendanceReportPanel = ({ branchId }) => {
         <SummaryCard label="Half Day" value={totals.halfDay} tone="secondary" />
       </div>
 
-      {/* Per-staff table */}
-      <div className={`bg-surface rounded-spa-lg border border-border ${rankedStaff.length > 10 ? 'max-h-[640px] overflow-y-auto' : ''}`}>
-        <div className="hidden lg:grid lg:grid-cols-[1.6fr_90px_90px_90px_110px_110px_110px] gap-3 px-5 py-3 bg-background border-b border-border rounded-t-spa-lg sticky top-0 z-sticky-filter">
-          {['Staff', 'Present', 'Absent', 'Leave', 'Half Day', 'Days Marked', 'Attendance %'].map((h, i) => (
-            <span key={h} className={`font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide ${i === 0 ? '' : 'text-center'}`}>{h}</span>
-          ))}
-        </div>
-
-        {perStaff.length === 0 ? (
-          <div className="p-8 text-center">
-            <Icon name="CalendarCheck" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body text-sm text-text-tertiary">No active staff for this branch.</p>
-          </div>
-        ) : totals.marked === 0 ? (
-          <div className="p-8 text-center">
-            <Icon name="CalendarX" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body text-sm text-text-tertiary">No attendance recorded in this period.</p>
-          </div>
-        ) : rankedStaff.length === 0 ? (
-          <div className="p-8 text-center">
-            <Icon name="SearchX" size={32} className="text-text-tertiary mx-auto mb-3" />
-            <p className="font-body text-sm text-text-tertiary">No staff match "{searchQuery.trim()}".</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {rankedStaff.map(s => (
-              <div
-                key={s.therapistId}
-                className="grid grid-cols-2 lg:grid-cols-[1.6fr_90px_90px_90px_110px_110px_110px] gap-2 lg:gap-3 px-5 py-3 lg:items-center"
-              >
-                <div className="min-w-0 col-span-2 lg:col-span-1">
-                  <p className="font-body font-body-medium text-sm text-text-primary truncate">{s.therapistName}</p>
-                  <p className="font-caption text-[11px] text-text-tertiary">{s.isServiceStaff ? 'Service staff' : 'Support staff'}</p>
-                </div>
-                <div className="lg:text-center">
-                  <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Present:</span>
-                  <span className="font-data text-sm text-success">{s.present}</span>
-                </div>
-                <div className="lg:text-center">
-                  <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Absent:</span>
-                  <span className="font-data text-sm text-error">{s.absent}</span>
-                </div>
-                <div className="lg:text-center">
-                  <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Leave:</span>
-                  <span className="font-data text-sm text-warning">{s.leave}</span>
-                </div>
-                <div className="lg:text-center">
-                  <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Half Day:</span>
-                  <span className="font-data text-sm text-secondary">{s.halfDay}</span>
-                </div>
-                <div className="lg:text-center">
-                  <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Days:</span>
-                  <span className="font-data text-sm text-text-primary">{s.marked}</span>
-                </div>
-                <div className="lg:text-center">
-                  <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Rate:</span>
-                  <span className="font-data text-sm text-text-primary">{s.marked > 0 ? `${s.attendanceRate}%` : '—'}</span>
-                </div>
-              </div>
+      {/* Table view */}
+      {displayMode === 'table' && (
+        <div className={`bg-surface rounded-spa-lg border border-border ${rankedStaff.length > 10 ? 'max-h-[640px] overflow-y-auto' : ''}`}>
+          <div className="hidden lg:grid lg:grid-cols-[1.6fr_90px_90px_90px_110px_110px_110px] gap-3 px-5 py-3 bg-background border-b border-border rounded-t-spa-lg sticky top-0 z-sticky-filter">
+            {['Staff', 'Present', 'Absent', 'Leave', 'Half Day', 'Days Marked', 'Attendance %'].map((h, i) => (
+              <span key={h} className={`font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide ${i === 0 ? '' : 'text-center'}`}>{h}</span>
             ))}
           </div>
-        )}
-      </div>
+
+          {perStaff.length === 0 ? (
+            <div className="p-8 text-center">
+              <Icon name="CalendarCheck" size={32} className="text-text-tertiary mx-auto mb-3" />
+              <p className="font-body text-sm text-text-tertiary">No active staff for this branch.</p>
+            </div>
+          ) : totals.marked === 0 ? (
+            <div className="p-8 text-center">
+              <Icon name="CalendarX" size={32} className="text-text-tertiary mx-auto mb-3" />
+              <p className="font-body text-sm text-text-tertiary">No attendance recorded in this period.</p>
+            </div>
+          ) : rankedStaff.length === 0 ? (
+            <div className="p-8 text-center">
+              <Icon name="SearchX" size={32} className="text-text-tertiary mx-auto mb-3" />
+              <p className="font-body text-sm text-text-tertiary">No staff match "{searchQuery.trim()}".</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {rankedStaff.map(s => (
+                <div
+                  key={s.therapistId}
+                  className="grid grid-cols-2 lg:grid-cols-[1.6fr_90px_90px_90px_110px_110px_110px] gap-2 lg:gap-3 px-5 py-3 lg:items-center"
+                >
+                  <div className="min-w-0 col-span-2 lg:col-span-1">
+                    <p className="font-body font-body-medium text-sm text-text-primary truncate">{s.therapistName}</p>
+                    <p className="font-caption text-[11px] text-text-tertiary">{s.isServiceStaff ? 'Service staff' : 'Support staff'}</p>
+                  </div>
+                  <div className="lg:text-center">
+                    <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Present:</span>
+                    <span className="font-data text-sm text-success">{s.present}</span>
+                  </div>
+                  <div className="lg:text-center">
+                    <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Absent:</span>
+                    <span className="font-data text-sm text-error">{s.absent}</span>
+                  </div>
+                  <div className="lg:text-center">
+                    <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Leave:</span>
+                    <span className="font-data text-sm text-warning">{s.leave}</span>
+                  </div>
+                  <div className="lg:text-center">
+                    <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Half Day:</span>
+                    <span className="font-data text-sm text-secondary">{s.halfDay}</span>
+                  </div>
+                  <div className="lg:text-center">
+                    <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Days:</span>
+                    <span className="font-data text-sm text-text-primary">{s.marked}</span>
+                  </div>
+                  <div className="lg:text-center">
+                    <span className="lg:hidden font-caption text-[11px] text-text-tertiary uppercase mr-1">Rate:</span>
+                    <span className="font-data text-sm text-text-primary">{s.marked > 0 ? `${s.attendanceRate}%` : '—'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Grid view */}
+      {displayMode === 'grid' && data && (
+        <AttendanceGrid rankedStaff={rankedStaff} data={data} />
+      )}
     </div>
   );
 };

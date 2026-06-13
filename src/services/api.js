@@ -4951,6 +4951,12 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
         totalStaff: therapists.length,
         totals: { ...totals, attendanceRate: overallRate },
         perStaff,
+        // Raw per-day records for the calendar grid view.
+        dayRecords: records.map((r) => ({
+          therapistId: r.therapist_id,
+          date: r.date,
+          status: r.status,
+        })),
       },
       error: null,
     };
@@ -5557,6 +5563,359 @@ export async function deleteCategory({ categoryId }) {
     return { data: { deleted: true }, error: null };
   } catch (error) {
     console.error('[API] deleteCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// PAYROLL
+// ============================================================
+
+// Returns active therapists for a branch with their current compensation config.
+// Unauthenticated / non-admin callers will receive an empty array (RLS on
+// staff_compensation blocks reads; therapists are returned but compensation nulled).
+export async function fetchStaffCompensation(branchId) {
+  try {
+    let query = supabase
+      .from('therapists')
+      .select('id, name, position, is_service_staff, staff_compensation(monthly_salary, commission_rate)')
+      .eq('is_active', true)
+      .order('name');
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return {
+      data: (data || []).map((t) => ({
+        therapistId: t.id,
+        name: t.name,
+        position: t.position,
+        isServiceStaff: t.is_service_staff,
+        monthlySalary: t.staff_compensation?.monthly_salary != null
+          ? Number(t.staff_compensation.monthly_salary)
+          : 0,
+        commissionRate: t.staff_compensation?.commission_rate != null
+          ? Number(t.staff_compensation.commission_rate)
+          : 0,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchStaffCompensation error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Upsert a staff member's compensation. Admin-only (enforced by RLS).
+export async function setStaffCompensation({ therapistId, monthlySalary, commissionRate }) {
+  try {
+    const salary = Number(monthlySalary);
+    const rate = Number(commissionRate);
+    if (!(salary >= 0)) {
+      return { data: null, error: { code: 'INVALID_VALUE', message: 'Monthly salary must be zero or more.' } };
+    }
+    if (!(rate >= 0) || rate > 100) {
+      return { data: null, error: { code: 'INVALID_VALUE', message: 'Commission rate must be between 0 and 100.' } };
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('staff_compensation')
+      .upsert(
+        {
+          therapist_id: therapistId,
+          monthly_salary: salary,
+          commission_rate: rate,
+          updated_by: user?.id ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'therapist_id' }
+      );
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] setStaffCompensation error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Fetch an existing payroll run + its items for a branch+month.
+// periodMonth: 'YYYY-MM' string (e.g. '2026-06').
+export async function getPayrollRun({ branchId, periodMonth }) {
+  try {
+    const firstDay = `${periodMonth}-01`;
+    const { data: run, error: runErr } = await supabase
+      .from('payroll_runs')
+      .select('*')
+      .eq('branch_id', branchId)
+      .eq('period_month', firstDay)
+      .maybeSingle();
+    if (runErr) throw runErr;
+    if (!run) return { data: null, error: null };
+
+    const { data: items, error: itemErr } = await supabase
+      .from('payroll_items')
+      .select('*')
+      .eq('payroll_run_id', run.id)
+      .order('therapist_name');
+    if (itemErr) throw itemErr;
+
+    return {
+      data: {
+        run: {
+          id: run.id,
+          branchId: run.branch_id,
+          periodMonth: run.period_month,
+          status: run.status,
+          totalNet: Number(run.total_net),
+          generatedAt: run.generated_at,
+          finalizedAt: run.finalized_at,
+        },
+        items: (items || []).map((i) => ({
+          id: i.id,
+          therapistId: i.therapist_id,
+          therapistName: i.therapist_name,
+          monthlySalary: Number(i.monthly_salary),
+          commissionRate: Number(i.commission_rate),
+          daysInMonth: i.days_in_month,
+          presentDays: i.present_days,
+          absentDays: Number(i.absent_days),
+          halfDays: i.half_days,
+          leaveDays: i.leave_days,
+          attendanceDeduction: Number(i.attendance_deduction),
+          serviceRevenue: Number(i.service_revenue),
+          serviceCommission: Number(i.service_commission),
+          referralCommission: Number(i.referral_commission),
+          netPay: Number(i.net_pay),
+        })),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getPayrollRun error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Compute and persist a draft payroll run for a branch + month.
+// If a draft run already exists it is deleted and regenerated.
+// Blocks if a finalized run already exists for the same branch+month.
+// periodMonth: 'YYYY-MM' string.
+export async function generatePayroll({ branchId, periodMonth }) {
+  try {
+    const firstDay = `${periodMonth}-01`;
+    // Parse year/month for date math
+    const [year, month] = periodMonth.split('-').map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const lastDay = `${periodMonth}-${String(daysInMonth).padStart(2, '0')}`;
+
+    // Check for a finalized run — if found, block.
+    const { data: existing, error: checkErr } = await supabase
+      .from('payroll_runs')
+      .select('id, status')
+      .eq('branch_id', branchId)
+      .eq('period_month', firstDay)
+      .maybeSingle();
+    if (checkErr) throw checkErr;
+    if (existing?.status === 'finalized') {
+      return {
+        data: null,
+        error: {
+          code: 'PAYROLL_FINALIZED',
+          message: 'This payroll run has already been finalized and cannot be regenerated.',
+        },
+      };
+    }
+
+    // Delete any existing draft so we start fresh (cascade clears items).
+    if (existing) {
+      const { error: delErr } = await supabase
+        .from('payroll_runs')
+        .delete()
+        .eq('id', existing.id);
+      if (delErr) throw delErr;
+    }
+
+    // Fetch active therapists with compensation.
+    let therapistQuery = supabase
+      .from('therapists')
+      .select('id, name, staff_compensation(monthly_salary, commission_rate)')
+      .eq('is_active', true)
+      .order('name');
+    therapistQuery = withBranch(therapistQuery, branchId);
+    const { data: therapists, error: tErr } = await therapistQuery;
+    if (tErr) throw tErr;
+    if (!therapists || therapists.length === 0) {
+      return { data: null, error: { code: 'NO_STAFF', message: 'No active staff found for this branch.' } };
+    }
+
+    const therapistIds = therapists.map((t) => t.id);
+    const therapistByName = {};
+    for (const t of therapists) {
+      therapistByName[t.name.trim().toLowerCase()] = t.id;
+    }
+
+    // Fetch attendance in the period.
+    const { data: attendance, error: attErr } = await supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .in('therapist_id', therapistIds)
+      .gte('date', firstDay)
+      .lte('date', lastDay);
+    if (attErr) throw attErr;
+
+    // Tally attendance per therapist.
+    const attMap = {};
+    for (const therapistId of therapistIds) {
+      attMap[therapistId] = { present: 0, absent: 0, halfDay: 0, leave: 0 };
+    }
+    for (const row of (attendance || [])) {
+      const t = attMap[row.therapist_id];
+      if (!t) continue;
+      if (row.status === 'Present') t.present += 1;
+      else if (row.status === 'Absent') t.absent += 1;
+      else if (row.status === '1st-Half Day' || row.status === '2nd-Half Day') t.halfDay += 1;
+      else if (row.status === 'Leave') t.leave += 1;
+    }
+
+    // Fetch completed+paid bookings in the period to compute service revenue.
+    let bookingQuery = supabase
+      .from('bookings')
+      .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value')
+      .eq('status', 'Completed')
+      .eq('payment_status', 'paid')
+      .gte('date', firstDay)
+      .lte('date', lastDay);
+    bookingQuery = withBranch(bookingQuery, branchId);
+    const { data: bookings, error: bErr } = await bookingQuery;
+    if (bErr) throw bErr;
+
+    // Sum service revenue per therapist, and referral commission per therapist name.
+    const serviceRevenueMap = {};
+    const referralCommissionMap = {};
+    for (const therapistId of therapistIds) {
+      serviceRevenueMap[therapistId] = 0;
+      referralCommissionMap[therapistId] = 0;
+    }
+    for (const b of (bookings || [])) {
+      if (b.therapist_id && serviceRevenueMap[b.therapist_id] !== undefined) {
+        serviceRevenueMap[b.therapist_id] = Math.round(
+          (serviceRevenueMap[b.therapist_id] + Number(b.final_amount)) * 100
+        ) / 100;
+      }
+      // Attribute referral commission by name match.
+      if (b.referred_by) {
+        const refKey = b.referred_by.trim().toLowerCase();
+        const matchedId = therapistByName[refKey];
+        if (matchedId !== undefined) {
+          const earned = computeReferralCommission(
+            b.final_amount,
+            b.referral_commission_type,
+            b.referral_commission_value
+          );
+          referralCommissionMap[matchedId] = Math.round(
+            (referralCommissionMap[matchedId] + earned) * 100
+          ) / 100;
+        }
+      }
+    }
+
+    // Build payroll items.
+    const { data: { user } } = await supabase.auth.getUser();
+    const itemsPayload = [];
+    let totalNet = 0;
+
+    for (const t of therapists) {
+      const comp = t.staff_compensation;
+      const salary = comp?.monthly_salary != null ? Number(comp.monthly_salary) : 0;
+      const rate = comp?.commission_rate != null ? Number(comp.commission_rate) : 0;
+      const att = attMap[t.id];
+      const perDay = daysInMonth > 0 ? salary / daysInMonth : 0;
+      const deduction = Math.round(perDay * (att.absent + 0.5 * att.halfDay) * 100) / 100;
+      const serviceRev = serviceRevenueMap[t.id] || 0;
+      const svcCommission = Math.round(serviceRev * (rate / 100) * 100) / 100;
+      const refCommission = referralCommissionMap[t.id] || 0;
+      const netPay = Math.round(
+        (salary - deduction + svcCommission + refCommission) * 100
+      ) / 100;
+      totalNet = Math.round((totalNet + netPay) * 100) / 100;
+
+      itemsPayload.push({
+        therapist_id: t.id,
+        therapist_name: t.name,
+        monthly_salary: salary,
+        commission_rate: rate,
+        days_in_month: daysInMonth,
+        present_days: att.present,
+        absent_days: att.absent,
+        half_days: att.halfDay,
+        leave_days: att.leave,
+        attendance_deduction: deduction,
+        service_revenue: serviceRev,
+        service_commission: svcCommission,
+        referral_commission: refCommission,
+        net_pay: netPay,
+      });
+    }
+
+    // Insert the run.
+    const { data: run, error: runErr } = await supabase
+      .from('payroll_runs')
+      .insert({
+        branch_id: branchId,
+        period_month: firstDay,
+        status: 'draft',
+        total_net: totalNet,
+        generated_by: user?.id ?? null,
+        generated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (runErr) throw runErr;
+
+    // Insert items.
+    const { error: itemErr } = await supabase
+      .from('payroll_items')
+      .insert(itemsPayload.map((i) => ({ ...i, payroll_run_id: run.id })));
+    if (itemErr) throw itemErr;
+
+    return getPayrollRun({ branchId, periodMonth });
+  } catch (error) {
+    console.error('[API] generatePayroll error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Finalize a payroll run. Once finalized the run and its items are immutable
+// (enforced by DB trigger and this guard).
+export async function finalizePayroll({ runId }) {
+  try {
+    const { data: run, error: fetchErr } = await supabase
+      .from('payroll_runs')
+      .select('id, status')
+      .eq('id', runId)
+      .single();
+    if (fetchErr) throw fetchErr;
+    if (run.status === 'finalized') {
+      return {
+        data: null,
+        error: { code: 'PAYROLL_FINALIZED', message: 'This run is already finalized.' },
+      };
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error: updateErr } = await supabase
+      .from('payroll_runs')
+      .update({
+        status: 'finalized',
+        finalized_by: user?.id ?? null,
+        finalized_at: new Date().toISOString(),
+      })
+      .eq('id', runId);
+    if (updateErr) throw updateErr;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] finalizePayroll error:', error.message);
     return { data: null, error };
   }
 }

@@ -134,6 +134,12 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['manager', 'admin']
         },
         {
+          id: 'attendance-calendar',
+          label: 'Attendance Calendar',
+          path: orgSlug ? `/${orgSlug}/attendance-calendar` : '/attendance-calendar',
+          roles: ['manager', 'admin']
+        },
+        {
           id: 'transfer-report',
           label: 'Transfer Report',
           path: `${basePath}?view=transfer-report`,
@@ -173,6 +179,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           overallHidden: true
         },
       ]
+    },
+    {
+      id: 'payroll',
+      label: 'Payroll',
+      icon: 'Wallet',
+      path: `${basePath}?view=payroll`,
+      roles: ['admin'],
     },
     {
       id: 'infrastructure',
