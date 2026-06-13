@@ -2078,14 +2078,8 @@ const OperationalCalendar = ({ branchId }) => {
               </button>
             </div>
 
-            {/* Right: Position filter + View toggle + loading */}
+            {/* Right: Position filter + View toggle */}
             <div className="flex items-center space-x-3">
-              {(loading || isRescheduling) && (
-                <div className="flex items-center space-x-1.5 text-text-secondary">
-                  <div className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />
-                  <span className="font-caption text-xs">{isRescheduling ? 'Updating...' : 'Loading...'}</span>
-                </div>
-              )}
               {columnMode === 'therapist' && calendarPositionOptions.length > 0 && (
                 <div className="relative" ref={positionDropdownRef}>
                   <button
