@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../AppIcon';
-import { useBranch } from 'contexts/BranchContext';
+import { useBranch, OVERALL_BRANCH_ID } from 'contexts/BranchContext';
 
 const BranchSwitcher = () => {
-  const { branchId, branchName, branches, isAdmin, switchBranch } = useBranch();
+  const { branchId, branchName, branches, isAdmin, isOverall, switchBranch } = useBranch();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   const selectedBranch = branches.find(b => b.id === branchId);
-  const selectedName = selectedBranch?.name || 'Select Branch';
+  const selectedName = isOverall ? 'Overall' : (selectedBranch?.name || 'Select Branch');
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -44,6 +44,21 @@ const BranchSwitcher = () => {
           </button>
           {isOpen && (
             <div className="absolute left-0 top-full mt-1 min-w-full bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+              {/* Overall — org-wide aggregate (read-only, no booking creation) */}
+              <button
+                type="button"
+                onClick={() => {
+                  switchBranch(OVERALL_BRANCH_ID);
+                  setIsOpen(false);
+                }}
+                className={`w-full flex items-center gap-2 text-left px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap ${
+                  isOverall ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
+                }`}
+              >
+                <Icon name="Globe" size={14} className="flex-shrink-0" />
+                Overall
+              </button>
+              <div className="my-1 h-px bg-gray-100" />
               {branches.map((b) => (
                 <button
                   key={b.id}
@@ -53,7 +68,7 @@ const BranchSwitcher = () => {
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap ${
-                    branchId === b.id ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
+                    !isOverall && branchId === b.id ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
                   }`}
                 >
                   {b.name}{!b.is_active ? ' (Inactive)' : ''}

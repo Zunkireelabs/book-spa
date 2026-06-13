@@ -26,6 +26,8 @@ import {
   toggleTherapistActive,
   deleteTherapist,
   updateTherapistOrder,
+  fetchAllBranches,
+  fetchStaffTransfers,
 } from '../../../../services/api';
 
 const GENDER_OPTIONS = [
@@ -33,7 +35,7 @@ const GENDER_OPTIONS = [
   { value: 'Female', label: 'Female' },
 ];
 
-const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle }) => {
+const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, onEdit, onDelete, onToggle }) => {
   const {
     attributes,
     listeners,
@@ -69,6 +71,9 @@ const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle }) => {
         )}
       </td>
       <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{therapist.name}</td>
+      {showBranch && (
+        <td className="px-4 py-3 font-body text-sm text-text-secondary">{branchName || '—'}</td>
+      )}
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="font-body text-sm text-text-secondary">{therapist.position || '—'}</span>
@@ -103,39 +108,43 @@ const SortableRow = ({ therapist, disabled, onEdit, onDelete, onToggle }) => {
         </span>
       </td>
       <td className="px-4 py-3">
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={() => onEdit(therapist)}
-            className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
-            title="Edit"
-          >
-            <Icon name="Pencil" size={16} />
-          </button>
-          <button
-            onClick={() => onDelete(therapist)}
-            className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
-            title="Delete"
-          >
-            <Icon name="Trash2" size={16} />
-          </button>
-          <button
-            onClick={() => onToggle(therapist)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-              therapist.is_active ? 'bg-success' : 'bg-border'
-            }`}
-            title={therapist.is_active ? 'Deactivate' : 'Activate'}
-          >
-            <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-              therapist.is_active ? 'translate-x-6' : 'translate-x-1'
-            }`} />
-          </button>
-        </div>
+        {readOnly ? (
+          <div className="flex items-center justify-end text-text-secondary text-sm">—</div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => onEdit(therapist)}
+              className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+              title="Edit"
+            >
+              <Icon name="Pencil" size={16} />
+            </button>
+            <button
+              onClick={() => onDelete(therapist)}
+              className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
+              title="Delete"
+            >
+              <Icon name="Trash2" size={16} />
+            </button>
+            <button
+              onClick={() => onToggle(therapist)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                therapist.is_active ? 'bg-success' : 'bg-border'
+              }`}
+              title={therapist.is_active ? 'Deactivate' : 'Activate'}
+            >
+              <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                therapist.is_active ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+        )}
       </td>
     </tr>
   );
 };
 
-const TherapistManagementPanel = ({ branchId }) => {
+const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
   const { staffLabel, staffLabelPlural } = useIndustry();
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +157,10 @@ const TherapistManagementPanel = ({ branchId }) => {
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [orgBranches, setOrgBranches] = useState([]);
+  const [showTransferLog, setShowTransferLog] = useState(false);
+  const [transferLog, setTransferLog] = useState([]);
+  const [transferLogLoading, setTransferLogLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPosition, setSelectedPosition] = useState('all');
   const [selectedStaffType, setSelectedStaffType] = useState('all');
@@ -182,6 +195,12 @@ const TherapistManagementPanel = ({ branchId }) => {
     ];
   }, [therapists, customPositions]);
 
+  const branchNameById = useMemo(() => {
+    const map = {};
+    orgBranches.forEach(b => { map[b.id] = b.name; });
+    return map;
+  }, [orgBranches]);
+
   const hasActiveFilters = searchQuery.trim().length > 0 || selectedPosition !== 'all' || selectedStaffType !== 'all';
 
   const filteredTherapists = useMemo(() => {
@@ -210,6 +229,18 @@ const TherapistManagementPanel = ({ branchId }) => {
   }, [branchId]);
 
   useEffect(() => { loadTherapists(); }, [loadTherapists]);
+
+  useEffect(() => {
+    fetchAllBranches().then(({ data }) => setOrgBranches(data || []));
+  }, []);
+
+  const handleOpenTransferLog = async () => {
+    setShowTransferLog(true);
+    setTransferLogLoading(true);
+    const { data } = await fetchStaffTransfers();
+    setTransferLog(data || []);
+    setTransferLogLoading(false);
+  };
 
   const handleDragEnd = async (event) => {
     const { active, over } = event;
@@ -393,12 +424,19 @@ const TherapistManagementPanel = ({ branchId }) => {
           <p className="font-body text-sm text-text-secondary">{countLabel}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="primary" size="sm" iconName="Plus" onClick={() => { setShowPositionModal(true); setNewPosition(''); setPositionError(null); }}>
-            Add Position
+          <Button variant="outline" size="sm" iconName="History" onClick={handleOpenTransferLog}>
+            Transfer Log
           </Button>
-          <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
-            Add {staffLabel}
-          </Button>
+          {!readOnly && (
+            <>
+              <Button variant="primary" size="sm" iconName="Plus" onClick={() => { setShowPositionModal(true); setNewPosition(''); setPositionError(null); }}>
+                Add Position
+              </Button>
+              <Button variant="primary" size="sm" iconName="Plus" onClick={handleOpenCreate}>
+                Add {staffLabel}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -446,6 +484,7 @@ const TherapistManagementPanel = ({ branchId }) => {
               <tr className="bg-background border-b border-border">
                 <th className="w-8 px-2 py-3" />
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Name</th>
+                {readOnly && <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Branch</th>}
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Position</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Gender</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden md:table-cell">Specialties</th>
@@ -456,7 +495,7 @@ const TherapistManagementPanel = ({ branchId }) => {
             <tbody>
               {filteredTherapists.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
+                  <td colSpan={readOnly ? 8 : 7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
                     {isSearching
                       ? `No ${staffLabelPlural.toLowerCase()} match "${searchQuery}"`
                       : `No ${staffLabelPlural.toLowerCase()} found. Add your first ${staffLabel.toLowerCase()}.`
@@ -469,7 +508,10 @@ const TherapistManagementPanel = ({ branchId }) => {
                     <SortableRow
                       key={t.id}
                       therapist={t}
-                      disabled={isSearching}
+                      disabled={isSearching || readOnly}
+                      readOnly={readOnly}
+                      showBranch={readOnly}
+                      branchName={branchNameById[t.branch_id]}
                       onEdit={handleOpenEdit}
                       onDelete={setConfirmDelete}
                       onToggle={handleToggle}
@@ -633,6 +675,76 @@ const TherapistManagementPanel = ({ branchId }) => {
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
               <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Log Modal */}
+      {showTransferLog && (
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowTransferLog(false)}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-2xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-heading-semibold text-lg text-text-primary">{staffLabel} Transfer Log</h3>
+              <button onClick={() => setShowTransferLog(false)} className="p-1 rounded hover:bg-background">
+                <Icon name="X" size={20} className="text-text-secondary" />
+              </button>
+            </div>
+
+            {transferLogLoading ? (
+              <div className="py-10 text-center">
+                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+                <p className="font-body text-sm text-text-secondary">Loading transfer history...</p>
+              </div>
+            ) : transferLog.length === 0 ? (
+              <div className="py-10 text-center">
+                <Icon name="ArrowRightLeft" size={32} className="text-text-secondary mx-auto mb-3" />
+                <p className="font-body text-sm text-text-secondary">No transfers recorded yet.</p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-spa overflow-hidden max-h-[60vh] overflow-y-auto">
+                <table className="w-full">
+                  <thead className="sticky top-0">
+                    <tr className="bg-background border-b border-border">
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Recorded</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">{staffLabel}</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">From → To</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Effective</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">By</th>
+                      <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transferLog.map(t => (
+                      <tr key={t.id} className="border-b border-border last:border-b-0">
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                          {new Date(t.transferredAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{t.therapistName}</td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                          {t.fromBranch} <span className="text-text-tertiary">→</span> {t.toBranch}
+                        </td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                          {t.effectiveDate
+                            ? (() => { const [y, m, d] = t.effectiveDate.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); })()
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
+                            t.applied ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
+                          }`}>
+                            <Icon name={t.applied ? 'CheckCircle' : 'Clock'} size={12} />
+                            {t.applied ? 'Applied' : 'Scheduled'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.transferredBy}</td>
+                        <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.note || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -10,7 +10,7 @@ import BookingTimelinePanel from './components/BookingTimelinePanel';
 import CustomerCommunicationPanel from './components/CustomerCommunicationPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist } from '../../services/api';
+import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist, fetchDueHolderNames } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
 
 const BookingDetailsAssignmentModal = () => {
@@ -29,6 +29,7 @@ const BookingDetailsAssignmentModal = () => {
   const [therapists, setTherapists] = useState([]);
   const [error, setError] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -140,11 +141,11 @@ const BookingDetailsAssignmentModal = () => {
     // Communication not implemented yet
   };
 
-  const handleRecordPayment = async ({ paymentMode, notes }) => {
+  const handleRecordPayment = async (opts) => {
     if (!booking) return { error: { message: 'No booking loaded.' } };
     setPaymentSubmitting(true);
 
-    const result = await recordPayment({ bookingId: booking.bookingId, paymentMode, notes });
+    const result = await recordPayment({ bookingId: booking.bookingId, ...opts });
 
     if (result.error) {
       setPaymentSubmitting(false);
@@ -157,6 +158,15 @@ const BookingDetailsAssignmentModal = () => {
     await loadBooking();
     return { error: null };
   };
+
+  useEffect(() => {
+    if (!showPaymentModal) return;
+    let cancelled = false;
+    fetchDueHolderNames(branchId).then(({ data }) => {
+      if (!cancelled && Array.isArray(data)) setDueHolderSuggestions(data);
+    });
+    return () => { cancelled = true; };
+  }, [showPaymentModal, branchId]);
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -382,7 +392,10 @@ const BookingDetailsAssignmentModal = () => {
             base_amount: booking.baseAmount,
             discount_amount: booking.discountAmount,
             final_amount: booking.finalAmount,
+            amountPaid: booking.amountPaid,
+            dueHolderName: booking.dueHolderName,
           }}
+          dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handleRecordPayment}
           onClose={() => setShowPaymentModal(false)}
           isSubmitting={paymentSubmitting}

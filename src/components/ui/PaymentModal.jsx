@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -16,33 +16,97 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-const PaymentModal = ({ booking, additionalBookings = [], onConfirm, onClose, isSubmitting }) => {
-  const [paymentMode, setPaymentMode] = useState('');
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
+const PaymentModal = ({
+  booking,
+  additionalBookings = [],
+  onConfirm,
+  onClose,
+  isSubmitting,
+  dueHolderSuggestions = [],
+}) => {
+  const isBatch = additionalBookings.length > 0;
+
+  const allBookings = [booking, ...additionalBookings];
+  const totalFinal = allBookings.reduce(
+    (s, b) => s + Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0), 0
+  );
+
+  // Single-booking split context
+  const finalAmount = Number(booking.final_amount || booking.finalAmount || 0);
+  const alreadyPaid = round2(booking.amountPaid || booking.amount_paid || 0);
+  const remaining = round2(Math.max(finalAmount - alreadyPaid, 0));
+
+  // --- shared state ---
   const [notes, setNotes] = useState('');
   const [error, setError] = useState(null);
 
-  const allBookings = [booking, ...additionalBookings];
-  const totalBase = allBookings.reduce((s, b) => s + Number(b.base_amount || b.baseAmount || 0), 0);
-  const totalDiscount = allBookings.reduce((s, b) => s + Number(b.discount_amount || b.discountAmount || 0), 0);
-  const totalFinal = allBookings.reduce((s, b) => s + Number(b.final_amount || b.finalAmount || 0), 0);
+  // --- batch state ---
+  const [batchMode, setBatchMode] = useState('');
 
-  const handleSubmit = async () => {
-    if (!paymentMode) {
+  // --- split state ---
+  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: 'Cash' }]);
+  const [dueHolderName, setDueHolderName] = useState(booking.dueHolderName || booking.due_holder_name || '');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const entered = useMemo(
+    () => round2(tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0)),
+    [tenders]
+  );
+  const leftover = round2(Math.max(remaining - entered, 0));
+
+  const filteredSuggestions = useMemo(() => {
+    const q = dueHolderName.trim().toLowerCase();
+    return dueHolderSuggestions
+      .filter(n => n && n.toLowerCase().includes(q) && n.toLowerCase() !== q)
+      .slice(0, 6);
+  }, [dueHolderName, dueHolderSuggestions]);
+
+  const updateTender = (i, patch) => {
+    setTenders(prev => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  };
+  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: 'Cash' }]);
+  const removeTender = (i) => setTenders(prev => prev.filter((_, idx) => idx !== i));
+
+  const handleBatchSubmit = async () => {
+    if (!batchMode) {
       setError('Please select a payment mode.');
       return;
     }
     setError(null);
+    const result = await onConfirm({ paymentMode: batchMode, notes });
+    if (result?.error) setError(result.error.message || 'Failed to record payment.');
+  };
 
-    const result = await onConfirm({ paymentMode, notes });
-
-    if (result?.error) {
-      setError(result.error.message || 'Failed to record payment.');
+  const handleSplitSubmit = async () => {
+    if (entered <= 0) {
+      setError('Enter a payment amount.');
+      return;
     }
+    if (entered > remaining) {
+      setError(`Entered amount (${formatNPR(entered)}) exceeds the remaining balance (${formatNPR(remaining)}).`);
+      return;
+    }
+    if (leftover > 0 && !dueHolderName.trim()) {
+      setError('Enter who the remaining due is under before leaving a balance unpaid.');
+      return;
+    }
+    setError(null);
+    const cleanedTenders = tenders
+      .filter(t => Number(t.amount) > 0)
+      .map(t => ({ amount: round2(t.amount), paymentMode: t.paymentMode }));
+    const result = await onConfirm({
+      tenders: cleanedTenders,
+      dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
+      notes,
+    });
+    if (result?.error) setError(result.error.message || 'Failed to record payment.');
   };
 
   return (
     <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-      <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in">
+      <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div className="flex items-center space-x-3">
@@ -85,38 +149,131 @@ const PaymentModal = ({ booking, additionalBookings = [], onConfirm, onClose, is
                   </span>
                 </div>
               ))}
-              {totalDiscount > 0 && (
+              {!isBatch && alreadyPaid > 0 && (
                 <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">
-                    Total Discount
-                  </span>
-                  <span className="font-body font-body-medium text-sm text-error">
-                    - {formatNPR(totalDiscount)}
-                  </span>
+                  <span className="font-body font-body-normal text-sm text-text-secondary">Already paid</span>
+                  <span className="font-body font-body-medium text-sm text-success">- {formatNPR(alreadyPaid)}</span>
                 </div>
               )}
               <div className="border-t border-border pt-2 flex items-center justify-between">
                 <span className="font-body font-body-semibold text-base text-text-primary">
-                  Total Due
+                  {isBatch ? 'Total Due' : 'Balance Due'}
                 </span>
                 <span className="font-heading font-heading-semibold text-lg text-success">
-                  {formatNPR(totalFinal)}
+                  {formatNPR(isBatch ? totalFinal : remaining)}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Payment Mode */}
-          <div className="space-y-1">
-            <label className="block font-body font-body-medium text-sm text-text-primary">Payment Mode</label>
-            <CustomSelect
-              options={PAYMENT_MODES}
-              value={paymentMode}
-              onChange={setPaymentMode}
-              placeholder="Select payment mode..."
-              size="md"
-            />
-          </div>
+          {isBatch ? (
+            /* Batch pay — single method, full amount per booking */
+            <div className="space-y-1">
+              <label className="block font-body font-body-medium text-sm text-text-primary">Payment Mode</label>
+              <CustomSelect
+                options={PAYMENT_MODES}
+                value={batchMode}
+                onChange={setBatchMode}
+                placeholder="Select payment mode..."
+                size="md"
+              />
+            </div>
+          ) : (
+            /* Split payment — one or more tenders */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block font-body font-body-medium text-sm text-text-primary">
+                  Payment Method{tenders.length > 1 ? 's' : ''}
+                </label>
+                <button
+                  type="button"
+                  onClick={addTender}
+                  className="flex items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  <Icon name="Plus" size={14} /> Add method
+                </button>
+              </div>
+
+              {tenders.map((t, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="w-32 flex-shrink-0">
+                    <CustomSelect
+                      options={PAYMENT_MODES}
+                      value={t.paymentMode}
+                      onChange={(v) => updateTender(i, { paymentMode: v })}
+                      size="md"
+                    />
+                  </div>
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={t.amount}
+                      onChange={(e) => updateTender(i, { amount: e.target.value })}
+                      placeholder="0"
+                      className="w-full rounded-spa border border-border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
+                    />
+                  </div>
+                  {tenders.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeTender(i)}
+                      className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                      aria-label="Remove method"
+                    >
+                      <Icon name="Trash2" size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {/* Entered / leftover */}
+              <div className="flex items-center justify-between text-sm pt-1">
+                <span className="text-text-secondary">Entered</span>
+                <span className="font-data text-text-primary">{formatNPR(entered)}</span>
+              </div>
+              {leftover > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-warning font-body-medium">Leave as due</span>
+                  <span className="font-data text-warning font-body-medium">{formatNPR(leftover)}</span>
+                </div>
+              )}
+
+              {/* Due holder (required when leaving a balance) */}
+              {leftover > 0 && (
+                <div className="space-y-1 relative">
+                  <label className="block font-body font-body-medium text-sm text-text-primary">
+                    Due under <span className="text-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={dueHolderName}
+                    onChange={(e) => { setDueHolderName(e.target.value); setShowSuggestions(true); }}
+                    onFocus={() => setShowSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                    placeholder="Type the responsible person's name..."
+                    className="w-full rounded-spa border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
+                  />
+                  {showSuggestions && filteredSuggestions.length > 0 && (
+                    <div className="absolute z-dropdown left-0 right-0 mt-1 bg-surface border border-border rounded-spa shadow-spa-elevated max-h-44 overflow-y-auto">
+                      {filteredSuggestions.map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          onMouseDown={() => { setDueHolderName(name); setShowSuggestions(false); }}
+                          className="w-full text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Notes */}
           <div className="space-y-1">
@@ -127,7 +284,7 @@ const PaymentModal = ({ booking, additionalBookings = [], onConfirm, onClose, is
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Any notes about this payment..."
-              rows={3}
+              rows={2}
               className="w-full rounded-spa border border-border bg-surface px-3 py-2 font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast resize-none"
             />
           </div>
@@ -143,22 +300,18 @@ const PaymentModal = ({ booking, additionalBookings = [], onConfirm, onClose, is
 
         {/* Footer */}
         <div className="flex items-center justify-end space-x-3 p-5 border-t border-border">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button
             variant="success"
-            onClick={handleSubmit}
+            onClick={isBatch ? handleBatchSubmit : handleSplitSubmit}
             loading={isSubmitting}
-            disabled={!paymentMode}
+            disabled={isBatch ? !batchMode : entered <= 0}
             iconName="Check"
             iconPosition="left"
           >
-            Confirm Payment
+            {!isBatch && leftover > 0 ? 'Record & Leave Due' : 'Confirm Payment'}
           </Button>
         </div>
       </div>

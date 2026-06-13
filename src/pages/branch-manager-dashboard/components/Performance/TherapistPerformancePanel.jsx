@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
+import FilterBar from '../../../../components/ui/FilterBar';
+import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getTherapistPerformance } from '../../../../services/api';
 
 function getTier(score) {
@@ -21,46 +23,37 @@ function ScoreBadge({ score }) {
   );
 }
 
-const QUICK_FILTERS = [
-  { label: 'Last 7 Days', days: 7 },
-  { label: 'Last 30 Days', days: 30 },
-  { label: 'This Month', days: 'month' },
-];
-
-function getDateRange(filter) {
-  const today = new Date();
-  const endDate = today.toISOString().split('T')[0];
-
-  if (filter === 'month') {
-    const startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    return { fromDate: startDate, toDate: endDate };
-  }
-
-  const startDate = new Date(today.getTime() - filter * 86400000).toISOString().split('T')[0];
-  return { fromDate: startDate, toDate: endDate };
-}
-
 const TherapistPerformancePanel = ({ branchId }) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayISO();
 
-  const [activeFilter, setActiveFilter] = useState(30);
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [activePreset, setActivePreset] = useState('monthly');
+  const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
+  const [customFrom, setCustomFrom] = useState('');   // live input value
+  const [customTo, setCustomTo] = useState('');       // live input value
+  const [appliedFrom, setAppliedFrom] = useState(''); // committed on Apply
+  const [appliedTo, setAppliedTo] = useState('');     // committed on Apply
+  const [searchQuery, setSearchQuery] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Range is driven by APPLIED dates so editing the pickers doesn't re-fetch
+  // until the user clicks Apply.
+  const range = useMemo(() => {
+    if (mode === 'custom' && appliedFrom) {
+      return { fromDate: appliedFrom, toDate: appliedTo || today };
+    }
+    const { startDate, endDate } = getPeriodRange(activePreset);
+    return { fromDate: startDate, toDate: endDate };
+  }, [mode, activePreset, appliedFrom, appliedTo, today]);
+
+  // True when the inputs differ from what's currently applied (pending Apply).
+  const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
 
   const loadData = useCallback(async () => {
     if (!branchId) return;
     setLoading(true);
     setError(null);
-
-    let range;
-    if (activeFilter === 'custom') {
-      range = { fromDate: customFrom, toDate: customTo || today };
-    } else {
-      range = getDateRange(activeFilter);
-    }
 
     const result = await getTherapistPerformance({ branchId, ...range });
 
@@ -72,18 +65,57 @@ const TherapistPerformancePanel = ({ branchId }) => {
 
     setData(result.data);
     setLoading(false);
-  }, [branchId, activeFilter, customFrom, customTo, today]);
+  }, [branchId, range]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const handleQuickFilter = (days) => {
-    setActiveFilter(days);
+  const handlePreset = (id) => {
+    setMode('preset');
+    setActivePreset(id);
   };
 
   const handleCustomApply = () => {
-    if (customFrom) {
-      setActiveFilter('custom');
-    }
+    if (!customFrom) return;
+    setAppliedFrom(customFrom);
+    setAppliedTo(customTo);
+    setMode('custom');
+  };
+
+  const visibleTherapists = useMemo(() => {
+    const all = data?.therapists || [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((t) => (t.therapistName || '').toLowerCase().includes(q));
+  }, [data, searchQuery]);
+
+  const handleExportCSV = () => {
+    const rows = visibleTherapists;
+    if (!rows.length) return;
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Rank', 'Therapist', 'Score', 'Tier', 'Revenue', 'Completed', 'Total Assigned', 'Completion %', 'Attendance %', 'Utilization %', 'Avg/Booking'];
+    let csv = header.join(',') + '\n';
+    rows.forEach((t, idx) => {
+      csv += [
+        idx + 1,
+        esc(t.therapistName),
+        t.performanceScore,
+        esc(getTier(t.performanceScore).label),
+        t.paidRevenue,
+        t.completedBookings,
+        t.totalAssigned,
+        t.completionRate,
+        t.attendanceRate,
+        t.utilizationRate,
+        t.avgRevenuePerBooking,
+      ].join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `performance-report-${data?.periodStart || ''}-to-${data?.periodEnd || ''}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // ── Loading ────────────────────────────────────────────────
@@ -115,62 +147,50 @@ const TherapistPerformancePanel = ({ branchId }) => {
     );
   }
 
-  const therapists = data?.therapists || [];
+  const therapists = visibleTherapists;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Performance Index</h2>
-        <p className="font-body text-sm text-text-secondary">
-          Ranked by weighted performance score.
-          {data && ` Period: ${data.periodStart} to ${data.periodEnd}`}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Performance Index</h2>
+          <p className="font-body text-sm text-text-secondary">
+            Ranked by weighted performance score.
+            {data && ` Period: ${data.periodStart} to ${data.periodEnd}`}
+          </p>
+        </div>
+        {therapists.length > 0 && (
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-surface font-body font-body-medium text-sm text-text-secondary hover:bg-background spa-transition-fast flex-shrink-0"
+          >
+            <Icon name="Download" size={16} />
+            <span>Export CSV</span>
+          </button>
+        )}
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-center space-x-2">
-          {QUICK_FILTERS.map(f => (
-            <button
-              key={f.days}
-              onClick={() => handleQuickFilter(f.days)}
-              className={`px-3 py-1.5 rounded-spa font-body font-body-medium text-sm spa-transition-fast ${
-                activeFilter === f.days
-                  ? 'bg-primary text-white'
-                  : 'bg-background text-text-secondary hover:bg-border/50'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <input
-            type="date"
-            value={customFrom}
-            max={today}
-            onChange={(e) => setCustomFrom(e.target.value)}
-            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <span className="font-body text-xs text-text-tertiary">to</span>
-          <input
-            type="date"
-            value={customTo}
-            max={today}
-            onChange={(e) => setCustomTo(e.target.value)}
-            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <button
-            onClick={handleCustomApply}
-            disabled={!customFrom}
-            className="px-3 py-1.5 rounded-spa font-body font-body-medium text-sm bg-background text-text-secondary hover:bg-border/50 disabled:opacity-50 disabled:cursor-not-allowed spa-transition-fast"
-          >
-            Apply
-          </button>
-        </div>
-      </div>
+      <FilterBar
+        count={{ value: therapists.length, label: therapists.length === 1 ? 'Therapist' : 'Therapists' }}
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search therapist by name…' }}
+        presets={PERIOD_PRESETS.map((p) => ({
+          label: p.label,
+          active: mode === 'preset' && activePreset === p.id,
+          onClick: () => handlePreset(p.id),
+        }))}
+        dateRange={{
+          from: customFrom,
+          onFromChange: setCustomFrom,
+          to: customTo,
+          onToChange: setCustomTo,
+          max: today,
+          onApply: handleCustomApply,
+          applyDisabled: !customFrom || !customDirty,
+          applyActive: mode === 'custom',
+        }}
+      />
 
       {/* Tier Legend */}
       <div className="flex flex-wrap items-center gap-3">

@@ -1,11 +1,24 @@
 import { supabase } from '../lib/supabase';
 
+// Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
+// Admin RLS is already org-scoped, so dropping the per-branch filter for this value
+// returns exactly the org's rows across every branch (never other orgs).
+export const OVERALL_BRANCH_ID = '__overall__';
+export const isOverallBranch = (branchId) => branchId === OVERALL_BRANCH_ID;
+
 // MVP: single branch — resolve mock branch IDs to real DB UUID
 function resolveBranchId(branchId) {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(branchId)) {
     return branchId;
   }
   return 'b0000000-0000-0000-0000-000000000001';
+}
+
+// Conditionally apply a branch_id equality filter to a Supabase query builder.
+// In the Overall view (sentinel branchId) the filter is omitted so org-wide RLS applies.
+// NOTE: never route the sentinel through resolveBranchId — it would coerce to a default branch.
+function withBranch(query, branchId, col = 'branch_id') {
+  return isOverallBranch(branchId) ? query : query.eq(col, resolveBranchId(branchId));
 }
 
 function addMinutesToTime(timeStr, minutes) {
@@ -155,22 +168,30 @@ export async function fetchRooms(branchId) {
 
 export async function fetchTherapists(branchId, { date } = {}) {
   try {
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, gender, specialties, position, is_service_staff')
+      .eq('is_active', true)
+      .eq('is_service_staff', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+
+    let attendancePromise;
+    if (date) {
+      let attendanceQuery = supabase
+        .from('therapist_attendance')
+        .select('therapist_id, status')
+        .eq('date', date)
+        .in('status', ['Absent', 'Leave']);
+      attendanceQuery = withBranch(attendanceQuery, branchId);
+      attendancePromise = attendanceQuery;
+    } else {
+      attendancePromise = Promise.resolve({ data: [] });
+    }
+
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, gender, specialties, position, is_service_staff')
-        .eq('branch_id', branchId)
-        .eq('is_active', true)
-        .eq('is_service_staff', true)
-        .order('name'),
-      date
-        ? supabase
-            .from('therapist_attendance')
-            .select('therapist_id, status')
-            .eq('branch_id', branchId)
-            .eq('date', date)
-            .in('status', ['Absent', 'Leave'])
-        : Promise.resolve({ data: [] }),
+      therapistsQuery,
+      attendancePromise,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -197,10 +218,11 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
         *,
         service:services(id, name, duration_minutes),
         therapist:therapists(id, name, gender),
-        room:rooms(id, name)
+        room:rooms(id, name),
+        payments(amount)
       `)
-      .eq('branch_id', branchId)
       .order('start_time');
+    query = withBranch(query, branchId);
 
     if (date) {
       query = query.eq('date', date);
@@ -253,12 +275,19 @@ export async function fetchBookingCreator(bookingId) {
 // Booking Mutations (Phase 4 + Phase 6 hardened)
 // ============================================================
 
-export async function recordPayment({ bookingId, paymentMode, notes }) {
+export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti'];
+
+// Record one or more payment tenders against a booking. Supports split payments
+// (e.g. part cash + part card) and leaving a remaining balance as a due, which is
+// attributed to a free-typed responsible person (dueHolderName).
+//   recordPayment({ bookingId, tenders: [{ amount, paymentMode }], dueHolderName, notes })
+// Backward-compatible single full payment: { bookingId, paymentMode, notes }.
+export async function recordPayment({ bookingId, tenders, paymentMode, dueHolderName, notes }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, payment_status, final_amount, is_locked')
+      .select('id, status, payment_status, final_amount, is_locked, due_holder_name')
       .eq('id', bookingId)
       .single();
 
@@ -274,7 +303,7 @@ export async function recordPayment({ bookingId, paymentMode, notes }) {
       return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
     }
 
-    // 3. Already paid check
+    // 3. Already fully paid check (partial/unpaid may still receive tenders)
     if (booking.payment_status === 'paid') {
       return { data: null, error: { code: 'ALREADY_PAID', message: 'Payment has already been recorded for this booking.' } };
     }
@@ -288,29 +317,313 @@ export async function recordPayment({ bookingId, paymentMode, notes }) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    // 6. Insert payment
-    const { data: payment, error: insertError } = await supabase
+    // 6. Determine already-collected and remaining
+    const finalAmount = Number(booking.final_amount);
+    const { data: existing, error: sumError } = await supabase
       .from('payments')
-      .insert({
-        booking_id: bookingId,
-        amount: Number(booking.final_amount),
-        payment_mode: paymentMode,
-        recorded_by: user.id,
-        notes: notes || null,
-      })
-      .select('id')
-      .single();
+      .select('amount')
+      .eq('booking_id', bookingId);
+    if (sumError) throw sumError;
+    const collected = (existing || []).reduce((s, p) => s + Number(p.amount), 0);
+    const remaining = Math.round((finalAmount - collected) * 100) / 100;
 
-    if (insertError) {
-      if (insertError.code === '23505') {
-        return { data: null, error: { code: 'ALREADY_PAID', message: 'Payment has already been recorded for this booking.' } };
-      }
-      throw insertError;
+    if (remaining <= 0) {
+      return { data: null, error: { code: 'ALREADY_PAID', message: 'This booking is already fully paid.' } };
     }
 
-    return { data: { success: true, paymentId: payment.id, bookingId }, error: null };
+    // 7. Normalize tenders (fall back to a single full-remaining tender)
+    let tenderList = Array.isArray(tenders) && tenders.length > 0
+      ? tenders
+      : [{ amount: remaining, paymentMode }];
+
+    tenderList = tenderList
+      .map(t => ({ amount: Math.round(Number(t.amount) * 100) / 100, paymentMode: t.paymentMode }))
+      .filter(t => t.amount > 0);
+
+    if (tenderList.length === 0) {
+      return { data: null, error: { code: 'NO_TENDER', message: 'Enter at least one payment amount.' } };
+    }
+    for (const t of tenderList) {
+      if (!PAYMENT_MODES.includes(t.paymentMode)) {
+        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: `Invalid payment method: ${t.paymentMode}.` } };
+      }
+    }
+
+    const tenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    if (tenderTotal > remaining) {
+      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${tenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
+    }
+
+    const leftover = Math.round((remaining - tenderTotal) * 100) / 100;
+    const resolvedDueHolder = (dueHolderName || '').trim() || booking.due_holder_name || null;
+
+    // 8. If a balance is being left as due, a responsible person is required
+    if (leftover > 0 && !resolvedDueHolder) {
+      return { data: null, error: { code: 'DUE_HOLDER_REQUIRED', message: 'Enter who the remaining due is under before leaving a balance unpaid.' } };
+    }
+
+    // 9. Insert tenders (notes attached to the first row)
+    const insertRows = tenderList.map((t, i) => ({
+      booking_id: bookingId,
+      amount: t.amount,
+      payment_mode: t.paymentMode,
+      recorded_by: user.id,
+      notes: i === 0 ? (notes || null) : null,
+    }));
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('payments')
+      .insert(insertRows)
+      .select('id');
+
+    if (insertError) throw insertError;
+
+    // 10. Maintain due_holder_name: set when a due remains, clear when fully settled
+    const newDueHolder = leftover > 0 ? resolvedDueHolder : null;
+    if (newDueHolder !== (booking.due_holder_name || null)) {
+      const { error: updateError } = await supabase
+        .from('bookings')
+        .update({ due_holder_name: newDueHolder })
+        .eq('id', bookingId);
+      if (updateError) throw updateError;
+    }
+
+    return {
+      data: {
+        success: true,
+        paymentIds: (inserted || []).map(r => r.id),
+        bookingId,
+        amountPaid: tenderTotal,
+        amountDue: leftover,
+        fullyPaid: leftover === 0,
+      },
+      error: null,
+    };
   } catch (error) {
     console.error('[API] recordPayment error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Distinct previously-used due-holder names for the settlement typeahead.
+export async function fetchDueHolderNames(branchId) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('due_holder_name')
+      .not('due_holder_name', 'is', null);
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    const names = [...new Set((data || []).map(b => (b.due_holder_name || '').trim()).filter(Boolean))].sort();
+    return { data: names, error: null };
+  } catch (error) {
+    console.error('[API] fetchDueHolderNames error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Assign / change the responsible person for a booking's outstanding balance.
+export async function setDueHolder({ bookingId, dueHolderName }) {
+  try {
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, is_locked')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    }
+    const name = (dueHolderName || '').trim() || null;
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update({ due_holder_name: name })
+      .eq('id', bookingId);
+    if (updateError) throw updateError;
+    return { data: { success: true, bookingId, dueHolderName: name }, error: null };
+  } catch (error) {
+    console.error('[API] setDueHolder error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Outstanding (unpaid + partial) balances grouped by responsible person.
+// from/to are ISO dates (inclusive); omit for all-time.
+export async function getOutstandingByStaff({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, date, final_amount, payment_status, due_holder_name, service_name_snapshot')
+      .in('payment_status', ['unpaid', 'partial'])
+      .not('status', 'in', '("Cancelled","No Show")');
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const all = bookings || [];
+    const bookingIds = all.map(b => b.id);
+    const paidMap = {};
+    if (bookingIds.length > 0) {
+      const { data: payments, error: payError } = await supabase
+        .from('payments')
+        .select('booking_id, amount')
+        .in('booking_id', bookingIds);
+      if (payError) throw payError;
+      for (const p of (payments || [])) {
+        paidMap[p.booking_id] = (paidMap[p.booking_id] || 0) + Number(p.amount);
+      }
+    }
+
+    const groups = {};
+    for (const b of all) {
+      const collected = paidMap[b.id] || 0;
+      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
+      if (due <= 0) continue;
+      const rawName = (b.due_holder_name || '').trim();
+      const key = rawName || '__unassigned__';
+      if (!groups[key]) {
+        groups[key] = { dueHolderName: rawName || null, totalDue: 0, bookingCount: 0, bookings: [] };
+      }
+      groups[key].totalDue = Math.round((groups[key].totalDue + due) * 100) / 100;
+      groups[key].bookingCount += 1;
+      groups[key].bookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        serviceName: b.service_name_snapshot || '—',
+        finalAmount: Number(b.final_amount),
+        amountPaid: collected,
+        amountDue: due,
+        paymentStatus: b.payment_status,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalDue - a.totalDue);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getOutstandingByStaff error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export const REFERRAL_COMMISSION_TYPES = ['percentage', 'amount'];
+
+// Earned commission for a booking from its per-booking commission config.
+// percentage -> final_amount * value / 100 ; amount -> flat value.
+function computeReferralCommission(finalAmount, type, value) {
+  const v = Number(value);
+  if (!type || !(v >= 0)) return 0;
+  if (type === 'percentage') {
+    return Math.round(((Number(finalAmount) * v) / 100) * 100) / 100;
+  }
+  if (type === 'amount') {
+    return Math.round(v * 100) / 100;
+  }
+  return 0;
+}
+
+// Set / change a booking's per-booking referral commission. Pass a null type to
+// clear it. Allowed while the booking's day is not locked.
+export async function setReferralCommission({ bookingId, commissionType, commissionValue }) {
+  try {
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, is_locked')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+    if (booking.is_locked) {
+      return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
+    }
+
+    const clearing = !commissionType;
+    if (!clearing) {
+      if (!REFERRAL_COMMISSION_TYPES.includes(commissionType)) {
+        return { data: null, error: { code: 'INVALID_COMMISSION_TYPE', message: `Invalid commission type: ${commissionType}.` } };
+      }
+      const v = Number(commissionValue);
+      if (!(v >= 0)) {
+        return { data: null, error: { code: 'INVALID_COMMISSION_VALUE', message: 'Commission value must be zero or more.' } };
+      }
+      if (commissionType === 'percentage' && v > 100) {
+        return { data: null, error: { code: 'INVALID_COMMISSION_VALUE', message: 'Percentage commission cannot exceed 100%.' } };
+      }
+    }
+
+    const payload = clearing
+      ? { referral_commission_type: null, referral_commission_value: null }
+      : { referral_commission_type: commissionType, referral_commission_value: Math.round(Number(commissionValue) * 100) / 100 };
+
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update(payload)
+      .eq('id', bookingId);
+    if (updateError) throw updateError;
+
+    return { data: { success: true, bookingId, ...payload }, error: null };
+  } catch (error) {
+    console.error('[API] setReferralCommission error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Referral commissions grouped by the referring person. Counts PAID bookings
+// only (commission is earned once the money is collected). from/to are ISO
+// dates (inclusive); omit for all-time.
+export async function getReferralsReport({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, date, final_amount, referred_by, referral_commission_type, referral_commission_value, service_name_snapshot')
+      .eq('payment_status', 'paid')
+      .not('referred_by', 'is', null);
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const groups = {};
+    for (const b of (bookings || [])) {
+      const name = (b.referred_by || '').trim();
+      if (!name) continue;
+      const commission = computeReferralCommission(b.final_amount, b.referral_commission_type, b.referral_commission_value);
+      if (!groups[name]) {
+        groups[name] = { referredBy: name, totalCommission: 0, bookingCount: 0, bookings: [] };
+      }
+      groups[name].totalCommission = Math.round((groups[name].totalCommission + commission) * 100) / 100;
+      groups[name].bookingCount += 1;
+      groups[name].bookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        serviceName: b.service_name_snapshot || '—',
+        finalAmount: Number(b.final_amount),
+        commissionType: b.referral_commission_type || null,
+        commissionValue: b.referral_commission_value != null ? Number(b.referral_commission_value) : null,
+        commission,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalCommission - a.totalCommission);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getReferralsReport error:', error.message);
     return { data: null, error };
   }
 }
@@ -759,9 +1072,7 @@ export async function fetchPendingDiscounts(branchId) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select(`
         id, booking_number, customer_name, date, start_time,
@@ -769,11 +1080,13 @@ export async function fetchPendingDiscounts(branchId) {
         status, service_id, services:service_id(name),
         requester:users!discount_requested_by(full_name)
       `)
-      .eq('branch_id', resolvedBranchId)
       .eq('discount_status', 'pending')
       .eq('discount_requested_to', user.id)
       .eq('is_locked', false)
       .order('created_at', { ascending: false });
+    query = withBranch(query, branchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -812,15 +1125,15 @@ export async function fetchPendingApprovalCount(branchId) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { count: 0, error: authError };
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
-    const { count, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select('id', { count: 'exact', head: true })
-      .eq('branch_id', resolvedBranchId)
       .eq('discount_status', 'pending')
       .eq('discount_requested_to', user.id)
       .eq('is_locked', false);
+    query = withBranch(query, branchId);
+
+    const { count, error } = await query;
 
     if (error) throw error;
     return { count: count || 0, error: null };
@@ -854,9 +1167,7 @@ export async function fetchDiscountApprovers() {
  */
 export async function fetchAllDiscounts(branchId) {
   try {
-    const resolvedBranchId = resolveBranchId(branchId);
-
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select(`
         id, booking_number, customer_name, date, start_time,
@@ -867,9 +1178,11 @@ export async function fetchAllDiscounts(branchId) {
         approver:users!discount_approved_by(full_name),
         requestedTo:users!discount_requested_to(full_name)
       `)
-      .eq('branch_id', resolvedBranchId)
       .neq('discount_status', 'none')
       .order('created_at', { ascending: false });
+    query = withBranch(query, branchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1295,14 +1608,15 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
 
 export async function getDailySummary(branchId, date) {
   try {
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
 
     // 1. Fetch all bookings for the branch + date
-    const { data: bookings, error: bookingsError } = await supabase
+    let bookingsQuery = supabase
       .from('bookings')
       .select('id, status, payment_status, base_amount, discount_amount, final_amount')
-      .eq('branch_id', resolvedBranchId)
       .eq('date', date);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
 
     if (bookingsError) throw bookingsError;
 
@@ -1311,49 +1625,57 @@ export async function getDailySummary(branchId, date) {
     const completedBookings = all.filter(b => b.status === 'Completed').length;
     const cancelledBookings = all.filter(b => b.status === 'Cancelled').length;
 
-    // 2. Revenue from paid bookings only
+    // 2. Gross/discount from fully-paid (settled) bookings
     const paid = all.filter(b => b.payment_status === 'paid');
     const grossRevenue = paid.reduce((sum, b) => sum + Number(b.base_amount), 0);
     const totalDiscounts = paid.reduce((sum, b) => sum + Number(b.discount_amount), 0);
-    const netRevenue = paid.reduce((sum, b) => sum + Number(b.final_amount), 0);
 
-    // 3. Unpaid count (Confirmed or Completed but unpaid)
+    // 3. Outstanding count (Confirmed/Completed not fully paid — unpaid or partial)
     const unpaidCount = all.filter(
-      b => b.payment_status === 'unpaid' && ['Confirmed', 'Completed'].includes(b.status)
+      b => ['unpaid', 'partial'].includes(b.payment_status) && ['Confirmed', 'Completed'].includes(b.status)
     ).length;
 
-    // 4. Payment mode breakdown — need to join payments table
-    const paidBookingIds = paid.map(b => b.id);
+    // 4. Net revenue = cash actually collected today (full + partial payments),
+    //    plus the payment-mode breakdown — both from the payments rows.
+    const settledBookingIds = all
+      .filter(b => ['paid', 'partial'].includes(b.payment_status))
+      .map(b => b.id);
+    let netRevenue = 0;
     let paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
 
-    if (paidBookingIds.length > 0) {
+    if (settledBookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
         .from('payments')
         .select('amount, payment_mode')
-        .in('booking_id', paidBookingIds);
+        .in('booking_id', settledBookingIds);
 
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
         const amount = Number(p.amount);
+        netRevenue += amount;
         if (p.payment_mode === 'Cash') {
           paymentBreakdown.cash += amount;
-        } else if (p.payment_mode === 'Fonepay') {
-          paymentBreakdown.fonepay += amount;
-        } else {
-          // Nabil, GlobalIME, NICAsia → card
+        } else if (p.payment_mode === 'Card') {
           paymentBreakdown.card += amount;
+        } else {
+          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
+          paymentBreakdown.fonepay += amount;
         }
       }
     }
 
-    // 5. Check if day is already closed
-    const { data: existingReport } = await supabase
-      .from('daily_reports')
-      .select('id, closed_at, closed_by')
-      .eq('branch_id', resolvedBranchId)
-      .eq('report_date', date)
-      .maybeSingle();
+    // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
+    let existingReport = null;
+    if (!overall) {
+      const { data } = await supabase
+        .from('daily_reports')
+        .select('id, closed_at, closed_by')
+        .eq('branch_id', resolveBranchId(branchId))
+        .eq('report_date', date)
+        .maybeSingle();
+      existingReport = data;
+    }
 
     return {
       data: {
@@ -1479,23 +1801,27 @@ export async function getDailyOperationalReport(branchId, date) {
       return { data: null, error: { code: 'INVALID_DATE', message: 'Date is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
 
-    // Step 1 — Check if day is closed (stored snapshot)
-    const { data: closedReport, error: closedError } = await supabase
-      .from('daily_reports')
-      .select('*')
-      .eq('branch_id', resolvedBranchId)
-      .eq('report_date', date)
-      .maybeSingle();
+    // Step 1 — Check if day is closed (stored snapshot) — Overall always live-computes
+    let closedReport = null;
+    if (!overall) {
+      const { data, error: closedError } = await supabase
+        .from('daily_reports')
+        .select('*')
+        .eq('branch_id', resolveBranchId(branchId))
+        .eq('report_date', date)
+        .maybeSingle();
 
-    if (closedError) throw closedError;
+      if (closedError) throw closedError;
+      closedReport = data;
+    }
 
     const isClosed = !!closedReport;
 
     // Step 2 — Fetch all bookings for branch + date
     // Phase 9A: Use snapshot fields for display instead of JOINed live data
-    const { data: bookings, error: bookingsError } = await supabase
+    let bookingsQuery = supabase
       .from('bookings')
       .select(`
         id, booking_number, customer_name, status, payment_status,
@@ -1504,17 +1830,20 @@ export async function getDailyOperationalReport(branchId, date) {
         service_name_snapshot, service_duration_snapshot, service_price_snapshot,
         therapist_name_snapshot, room_name_snapshot
       `)
-      .eq('branch_id', resolvedBranchId)
       .eq('date', date)
       .order('start_time');
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
 
     if (bookingsError) throw bookingsError;
 
     const all = bookings || [];
 
-    // Fetch payments for all bookings in one query
+    // Fetch payments for all bookings in one query. A booking may have multiple
+    // tenders (split payment), so aggregate per booking AND keep the raw rows.
     const bookingIds = all.map(b => b.id);
-    let paymentsMap = {};
+    let paymentRows = [];
+    let paymentsMap = {}; // booking_id -> { amount: total collected, modes: [] }
 
     if (bookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
@@ -1524,14 +1853,20 @@ export async function getDailyOperationalReport(branchId, date) {
 
       if (paymentsError) throw paymentsError;
 
-      for (const p of (payments || [])) {
-        paymentsMap[p.booking_id] = p;
+      paymentRows = payments || [];
+      for (const p of paymentRows) {
+        const e = paymentsMap[p.booking_id] || { amount: 0, modes: [] };
+        e.amount += Number(p.amount);
+        if (p.payment_mode) e.modes.push(p.payment_mode);
+        paymentsMap[p.booking_id] = e;
       }
     }
 
     // Build bookings list — Phase 9A: use snapshot fields for display
     const bookingsList = all.map(b => {
       const payment = paymentsMap[b.id];
+      const collected = payment ? payment.amount : 0;
+      const uniqueModes = payment ? [...new Set(payment.modes)] : [];
       return {
         bookingId: b.id,
         bookingNumber: b.booking_number,
@@ -1542,7 +1877,9 @@ export async function getDailyOperationalReport(branchId, date) {
         baseAmount: Number(b.base_amount),
         discountAmount: Number(b.discount_amount),
         finalAmount: Number(b.final_amount),
-        paymentMode: payment?.payment_mode || null,
+        amountPaid: collected,
+        amountDue: Math.max(Number(b.final_amount) - collected, 0),
+        paymentMode: uniqueModes.length > 1 ? 'Split' : (uniqueModes[0] || null),
         paymentStatus: b.payment_status,
         status: b.status,
       };
@@ -1566,7 +1903,6 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       // Live compute — revenue from payments only
       const paidBookings = all.filter(b => b.payment_status === 'paid');
-      const paymentsArr = Object.values(paymentsMap);
 
       totals = {
         totalBookings: all.length,
@@ -1575,8 +1911,8 @@ export async function getDailyOperationalReport(branchId, date) {
         noShowBookings: all.filter(b => b.status === 'No Show').length,
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
-        // REVENUE LAW: netRevenue = SUM(payments.amount)
-        netRevenue: paymentsArr.reduce((sum, p) => sum + Number(p.amount), 0),
+        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections
+        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0),
       };
     }
 
@@ -1591,14 +1927,15 @@ export async function getDailyOperationalReport(branchId, date) {
       };
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
-      for (const p of Object.values(paymentsMap)) {
+      for (const p of paymentRows) {
         const amount = Number(p.amount);
         if (p.payment_mode === 'Cash') {
           paymentBreakdown.cash += amount;
-        } else if (p.payment_mode === 'Fonepay') {
-          paymentBreakdown.fonepay += amount;
-        } else {
+        } else if (p.payment_mode === 'Card') {
           paymentBreakdown.card += amount;
+        } else {
+          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
+          paymentBreakdown.fonepay += amount;
         }
       }
     }
@@ -1662,16 +1999,20 @@ export async function getDailyOperationalReport(branchId, date) {
 
     const therapistRevenueSummary = Object.values(revenueByTherapist);
 
-    // Step 7 — Unpaid bookings
+    // Step 7 — Unpaid / partially-paid bookings (outstanding balance)
     const unpaidBookings = all
-      .filter(b => b.payment_status === 'unpaid' && ['Confirmed', 'Completed'].includes(b.status))
-      .map(b => ({
-        bookingNumber: b.booking_number,
-        customerName: b.customer_name,
-        serviceName: b.service_name_snapshot || '—',
-        finalAmount: Number(b.final_amount),
-        status: b.status,
-      }));
+      .filter(b => ['unpaid', 'partial'].includes(b.payment_status) && ['Confirmed', 'Completed'].includes(b.status))
+      .map(b => {
+        const collected = paymentsMap[b.id]?.amount || 0;
+        return {
+          bookingNumber: b.booking_number,
+          customerName: b.customer_name,
+          serviceName: b.service_name_snapshot || '—',
+          finalAmount: Number(b.final_amount),
+          amountDue: Math.max(Number(b.final_amount) - collected, 0),
+          status: b.status,
+        };
+      });
 
     return {
       data: {
@@ -1737,8 +2078,8 @@ export function exportDailyReportCSV(reportData) {
   rows.push('');
   rows.push('PAYMENT BREAKDOWN');
   rows.push(`Cash,${paymentBreakdown.cash.toFixed(2)}`);
-  rows.push(`Card (Nabil/GlobalIME/NIC Asia),${paymentBreakdown.card.toFixed(2)}`);
-  rows.push(`Fonepay,${paymentBreakdown.fonepay.toFixed(2)}`);
+  rows.push(`Card,${paymentBreakdown.card.toFixed(2)}`);
+  rows.push(`Mobile/Other,${paymentBreakdown.fonepay.toFixed(2)}`);
 
   // Section 4: Staff Discount Summary
   if (staffDiscountSummary.length > 0) {
@@ -1790,17 +2131,21 @@ function getMonthStart(date) {
 }
 
 async function computeRevenueForRange(branchId, startDate, endDate) {
-  const resolvedBranchId = resolveBranchId(branchId);
+  const overall = isOverallBranch(branchId);
 
-  // 1. Fetch closed-day snapshots in range
-  const { data: reports, error: reportsError } = await supabase
-    .from('daily_reports')
-    .select('report_date, gross_revenue, total_discounts, net_revenue')
-    .eq('branch_id', resolvedBranchId)
-    .gte('report_date', startDate)
-    .lte('report_date', endDate);
+  // 1. Fetch closed-day snapshots in range — Overall computes purely live (no snapshots)
+  let reports = [];
+  if (!overall) {
+    const { data, error: reportsError } = await supabase
+      .from('daily_reports')
+      .select('report_date, gross_revenue, total_discounts, net_revenue')
+      .eq('branch_id', resolveBranchId(branchId))
+      .gte('report_date', startDate)
+      .lte('report_date', endDate);
 
-  if (reportsError) throw reportsError;
+    if (reportsError) throw reportsError;
+    reports = data || [];
+  }
 
   const closedDates = new Set((reports || []).map(r => r.report_date));
 
@@ -1812,13 +2157,14 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
   }
 
   // 2. Fetch paid bookings in range
-  const { data: bookings, error: bookingsError } = await supabase
+  let bookingsQuery = supabase
     .from('bookings')
     .select('date, base_amount, discount_amount, final_amount')
-    .eq('branch_id', resolvedBranchId)
     .eq('payment_status', 'paid')
     .gte('date', startDate)
     .lte('date', endDate);
+  bookingsQuery = withBranch(bookingsQuery, branchId);
+  const { data: bookings, error: bookingsError } = await bookingsQuery;
 
   if (bookingsError) throw bookingsError;
 
@@ -1892,40 +2238,59 @@ export async function getUtilizationIntelligence({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
 
-    // 1. Fetch branch operating hours
-    const { data: branch, error: branchError } = await supabase
-      .from('branches')
-      .select('open_time, close_time')
-      .eq('id', resolvedBranchId)
-      .single();
+    // 1. Fetch branch operating hours. Overall: build a per-branch window map across the org.
+    let branch = null;
+    let operatingMinutes = 0;
+    const branchWindow = {};
+    if (overall) {
+      const { data: branches, error: branchesError } = await supabase
+        .from('branches')
+        .select('id, open_time, close_time');
+      if (branchesError) throw branchesError;
+      for (const br of (branches || [])) {
+        branchWindow[br.id] = timeToMinutes(br.close_time) - timeToMinutes(br.open_time);
+      }
+    } else {
+      const { data: branchRow, error: branchError } = await supabase
+        .from('branches')
+        .select('open_time, close_time')
+        .eq('id', resolveBranchId(branchId))
+        .single();
 
-    if (branchError) throw branchError;
+      if (branchError) throw branchError;
+      branch = branchRow;
+      const openMin = timeToMinutes(branch.open_time);
+      const closeMin = timeToMinutes(branch.close_time);
+      operatingMinutes = closeMin - openMin; // e.g. 720 for 9:00–21:00
+    }
 
-    const openMin = timeToMinutes(branch.open_time);
-    const closeMin = timeToMinutes(branch.close_time);
-    const operatingMinutes = closeMin - openMin; // e.g. 720 for 9:00–21:00
+    // Operating window (minutes) attributable to a given resource's branch.
+    const windowFor = (bid) => overall ? (branchWindow[bid] || 0) : operatingMinutes;
 
     // 2. Fetch active rooms + therapists + attendance (parallel)
+    let roomsQuery = supabase
+      .from('rooms')
+      .select('id, name, branch_id')
+      .eq('is_active', true);
+    roomsQuery = withBranch(roomsQuery, branchId);
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, branch_id')
+      .eq('is_active', true);
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .eq('date', targetDate)
+      .in('status', ['Absent', 'Leave']);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [roomsResult, therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('rooms')
-        .select('id, name')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true),
-      supabase
-        .from('therapists')
-        .select('id, name')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', targetDate)
-        .in('status', ['Absent', 'Leave']),
+      roomsQuery,
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (roomsResult.error) throw roomsResult.error;
@@ -1944,12 +2309,13 @@ export async function getUtilizationIntelligence({ branchId, date }) {
     const availableTherapists = therapists.filter(t => !absentIds.has(t.id));
 
     // 3. Fetch qualifying bookings: Confirmed, In-Progress, Completed only
-    const { data: bookings, error: bookingsError } = await supabase
+    let bookingsQuery = supabase
       .from('bookings')
       .select('id, room_id, therapist_id, start_time, end_time, service_duration_snapshot, status')
-      .eq('branch_id', resolvedBranchId)
       .eq('date', targetDate)
       .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
 
     if (bookingsError) throw bookingsError;
 
@@ -1969,12 +2335,13 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     const roomUtilization = rooms.map(r => {
       const booked = roomMinutesMap[r.id]?.bookedMinutes || 0;
+      const total = windowFor(r.branch_id);
       return {
         id: r.id,
         name: r.name,
         bookedMinutes: booked,
-        totalMinutes: operatingMinutes,
-        percent: operatingMinutes > 0 ? Math.round((booked / operatingMinutes) * 100) : 0,
+        totalMinutes: total,
+        percent: total > 0 ? Math.round((booked / total) * 100) : 0,
       };
     });
 
@@ -1992,12 +2359,13 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     const therapistUtilization = availableTherapists.map(t => {
       const booked = therapistMinutesMap[t.id]?.bookedMinutes || 0;
+      const total = windowFor(t.branch_id);
       return {
         id: t.id,
         name: t.name,
         bookedMinutes: booked,
-        totalMinutes: operatingMinutes,
-        percent: operatingMinutes > 0 ? Math.round((booked / operatingMinutes) * 100) : 0,
+        totalMinutes: total,
+        percent: total > 0 ? Math.round((booked / total) * 100) : 0,
       };
     });
 
@@ -2013,8 +2381,8 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     // 7. Summary stats
     const totalBookedMinutes = allBookings.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
-    const totalRoomCapacity = rooms.length * operatingMinutes;
-    const totalTherapistCapacity = availableTherapists.length * operatingMinutes;
+    const totalRoomCapacity = rooms.reduce((sum, r) => sum + windowFor(r.branch_id), 0);
+    const totalTherapistCapacity = availableTherapists.reduce((sum, t) => sum + windowFor(t.branch_id), 0);
 
     const avgRoomUtilization = totalRoomCapacity > 0
       ? Math.round((roomUtilization.reduce((sum, r) => sum + r.bookedMinutes, 0) / totalRoomCapacity) * 100)
@@ -2031,10 +2399,12 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     return {
       data: {
-        operatingMinutes,
-        operatingHours: branch.open_time && branch.close_time
-          ? `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`
-          : 'Not set',
+        operatingMinutes: overall ? null : operatingMinutes,
+        operatingHours: overall
+          ? 'Multiple branches'
+          : (branch.open_time && branch.close_time
+            ? `${branch.open_time.slice(0, 5)}–${branch.close_time.slice(0, 5)}`
+            : 'Not set'),
         roomUtilization,
         therapistUtilization,
         hourlyDistribution,
@@ -2102,6 +2472,7 @@ export async function fetchBookingById(bookingId) {
         service:services(id, name, duration_minutes, price_npr),
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
+        payments(amount, payment_mode, created_at),
         booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name, gender))
       `)
       .eq('id', bookingId)
@@ -2334,29 +2705,32 @@ export async function createBooking({
     }
     // End of room handling - industries without rooms skip the above block
 
-    // 6. Look up or create customer record for CRM linking
+    // 6. Look up or create customer record for CRM linking.
+    // Identity is org-wide (org_id + normalized phone), so a returning customer first
+    // seen at another branch links to their single profile instead of duplicating.
     let customerId = null;
+    const orgId = branchData?.org_id || null;
     try {
       const phone = customerPhone?.replace(/\D/g, '') || null;
       const email = customerEmail?.trim().toLowerCase() || null;
 
-      // Try to find existing customer by phone or email within the branch
+      // Try to find existing customer by phone or email across the whole org
       let existingCustomer = null;
-      if (phone) {
+      if (orgId && phone) {
         const { data } = await supabase
           .from('customers')
           .select('id')
-          .eq('branch_id', resolvedBranchId)
+          .eq('org_id', orgId)
           .eq('phone', phone)
           .limit(1)
           .maybeSingle();
         existingCustomer = data;
       }
-      if (!existingCustomer && email) {
+      if (!existingCustomer && orgId && email) {
         const { data } = await supabase
           .from('customers')
           .select('id')
-          .eq('branch_id', resolvedBranchId)
+          .eq('org_id', orgId)
           .eq('email', email)
           .limit(1)
           .maybeSingle();
@@ -2371,10 +2745,11 @@ export async function createBooking({
           .update({ full_name: customerName, phone: phone || undefined, email: email || undefined })
           .eq('id', customerId);
       } else {
-        // Create new customer record
-        const { data: newCustomer } = await supabase
+        // Create new customer record (org-wide identity; branch_id kept as origin)
+        const { data: newCustomer, error: insertCustErr } = await supabase
           .from('customers')
           .insert({
+            org_id: orgId,
             branch_id: resolvedBranchId,
             full_name: customerName,
             phone: phone || null,
@@ -2382,7 +2757,19 @@ export async function createBooking({
           })
           .select('id')
           .single();
-        if (newCustomer) customerId = newCustomer.id;
+        if (newCustomer) {
+          customerId = newCustomer.id;
+        } else if (insertCustErr?.code === '23505' && orgId && phone) {
+          // Lost a race against customers_org_nphone_uniq — re-fetch the winner
+          const { data } = await supabase
+            .from('customers')
+            .select('id')
+            .eq('org_id', orgId)
+            .eq('phone', phone)
+            .limit(1)
+            .maybeSingle();
+          if (data) customerId = data.id;
+        }
       }
     } catch (custErr) {
       // Non-blocking: booking still proceeds without customer link
@@ -2744,12 +3131,14 @@ export async function fetchTherapistsForManagement(branchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('therapists')
       .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
-      .eq('branch_id', effectiveBranchId)
       .order('display_order')
       .order('name');
+    query = withBranch(query, effectiveBranchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
     return { data, error: null };
@@ -2805,6 +3194,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
         position: position || null,
         is_service_staff: isServiceStaff,
         branch_id: effectiveBranchId,
+        org_id: profile.org_id,
         is_active: true,
         display_order: nextOrder,
       })
@@ -2999,6 +3389,134 @@ export async function deleteTherapist({ therapistId }) {
     return { data: { deleted: true, therapistId, therapistName: therapist.name }, error: null };
   } catch (error) {
     console.error('[API] deleteTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Transfer a staffer to another branch in the same org.
+ * Authorization + the audit row are enforced server-side by the
+ * SECURITY DEFINER transfer_therapist() function (migration-039):
+ * only an admin, or the manager of the staffer's CURRENT branch, may transfer.
+ */
+export async function transferTherapist({ therapistId, toBranchId, note = null, effectiveDate = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('transfer_therapist', {
+      p_therapist_id: therapistId,
+      p_to_branch_id: toBranchId,
+      p_note: note,
+      p_effective_date: effectiveDate,
+    });
+
+    if (error) throw error;
+    return { data: { transferId: data }, error: null };
+  } catch (error) {
+    console.error('[API] transferTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Org-wide staff transfer history. RLS scopes rows to the caller's org.
+export async function fetchStaffTransfers() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('staff_transfers')
+      .select(`
+        id, transferred_at, effective_date, applied, note,
+        therapist:therapists!staff_transfers_therapist_id_fkey(name),
+        fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
+        toBranch:branches!staff_transfers_to_branch_id_fkey(name),
+        transferredBy:users!staff_transfers_transferred_by_fkey(full_name)
+      `)
+      .order('transferred_at', { ascending: false });
+
+    if (error) throw error;
+
+    const transfers = (data || []).map(t => ({
+      id: t.id,
+      transferredAt: t.transferred_at,
+      effectiveDate: t.effective_date,
+      applied: t.applied,
+      note: t.note,
+      therapistName: t.therapist?.name || '—',
+      fromBranch: t.fromBranch?.name || '—',
+      toBranch: t.toBranch?.name || '—',
+      transferredBy: t.transferredBy?.full_name || 'System',
+    }));
+
+    return { data: transfers, error: null };
+  } catch (error) {
+    console.error('[API] fetchStaffTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Pending (scheduled, not-yet-applied) transfers. When branchId is given, returns
+// only those moving a staffer OUT of that branch (the source branch's manager view).
+export async function fetchPendingTransfers(branchId = null) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    let query = supabase
+      .from('staff_transfers')
+      .select(`
+        id, transferred_at, effective_date, applied, note, therapist_id,
+        therapist:therapists!staff_transfers_therapist_id_fkey(name),
+        fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
+        toBranch:branches!staff_transfers_to_branch_id_fkey(name),
+        transferredBy:users!staff_transfers_transferred_by_fkey(full_name)
+      `)
+      .eq('applied', false)
+      .order('effective_date', { ascending: true });
+
+    if (branchId && !isOverallBranch(branchId)) {
+      query = query.eq('from_branch_id', branchId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const transfers = (data || []).map(t => ({
+      id: t.id,
+      therapistId: t.therapist_id,
+      transferredAt: t.transferred_at,
+      effectiveDate: t.effective_date,
+      applied: t.applied,
+      note: t.note,
+      therapistName: t.therapist?.name || '—',
+      fromBranch: t.fromBranch?.name || '—',
+      toBranch: t.toBranch?.name || '—',
+      transferredBy: t.transferredBy?.full_name || 'System',
+    }));
+
+    return { data: transfers, error: null };
+  } catch (error) {
+    console.error('[API] fetchPendingTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Cancel a scheduled (not-yet-applied) transfer. Org/role checked server-side.
+export async function cancelScheduledTransfer(transferId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('cancel_scheduled_transfer', {
+      p_id: transferId,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] cancelScheduledTransfer error:', error.message);
     return { data: null, error };
   }
 }
@@ -3411,8 +3929,8 @@ export async function fetchAuditLogs({
       .from('audit_logs')
       .select('id, branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, changed_at', { count: 'exact' });
 
-    // Branch filter (manager always scoped; admin optional)
-    if (effectiveBranchId) {
+    // Branch filter (manager always scoped; admin optional; skipped in Overall view)
+    if (effectiveBranchId && !isOverallBranch(effectiveBranchId)) {
       query = query.eq('branch_id', effectiveBranchId);
     }
 
@@ -3556,10 +4074,19 @@ export async function fetchCustomersLightweight(branchId) {
 
     const resolvedBranchId = resolveBranchId(branchId);
 
+    // Resolve the branch's org so autocomplete suggests the whole org's customers
+    // (a returning cross-branch customer appears instead of being invisible).
+    const { data: branch, error: branchErr } = await supabase
+      .from('branches')
+      .select('org_id')
+      .eq('id', resolvedBranchId)
+      .single();
+    if (branchErr) throw branchErr;
+
     const { data, error } = await supabase
       .from('customers')
       .select('id, full_name, phone')
-      .eq('branch_id', resolvedBranchId)
+      .eq('org_id', branch.org_id)
       .eq('is_active', true)
       .order('full_name');
 
@@ -3592,7 +4119,8 @@ export async function fetchCustomerProfile(customerId) {
       throw custError;
     }
 
-    // 2. Fetch all bookings for this customer (branch-scoped via customer's branch_id)
+    // 2. Fetch all bookings for this customer org-wide (history follows the person across
+    //    branches — the merge repointed cross-branch bookings to this canonical id).
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
@@ -3602,7 +4130,6 @@ export async function fetchCustomerProfile(customerId) {
         is_locked
       `)
       .eq('customer_id', customerId)
-      .eq('branch_id', customer.branch_id)
       .order('date', { ascending: false });
 
     if (bookingsError) throw bookingsError;
@@ -3731,20 +4258,20 @@ export async function getCustomerIntelligence({ branchId }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
     // 1. Parallel fetch: customers + bookings
+    let custQuery = supabase
+      .from('customers')
+      .select('id, full_name, phone, email, is_active, created_at')
+      .order('full_name');
+    custQuery = withBranch(custQuery, branchId);
+    let bookQuery = supabase
+      .from('bookings')
+      .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
+      .not('customer_id', 'is', null);
+    bookQuery = withBranch(bookQuery, branchId);
     const [custResult, bookResult] = await Promise.all([
-      supabase
-        .from('customers')
-        .select('id, full_name, phone, email, is_active, created_at')
-        .eq('branch_id', resolvedBranchId)
-        .order('full_name'),
-      supabase
-        .from('bookings')
-        .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
-        .eq('branch_id', resolvedBranchId)
-        .not('customer_id', 'is', null),
+      custQuery,
+      bookQuery,
     ]);
 
     if (custResult.error) throw custResult.error;
@@ -3905,7 +4432,6 @@ export async function getRiskIndicators({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
     const today = date || new Date().toISOString().split('T')[0];
 
     // Date windows
@@ -3913,6 +4439,45 @@ export async function getRiskIndicators({ branchId, date }) {
     const fourteenDaysAgo = new Date(new Date(today).getTime() - 14 * 86400000).toISOString().split('T')[0];
     const thirtyDaysAgo = new Date(new Date(today).getTime() - 30 * 86400000).toISOString().split('T')[0];
     const sixtyDaysAgo = new Date(new Date(today).getTime() - 60 * 86400000).toISOString().split('T')[0];
+
+    // 1. Unpaid risk: Confirmed/Completed + unpaid
+    let unpaidQuery = supabase
+      .from('bookings')
+      .select('id, final_amount')
+      .in('status', ['Confirmed', 'Completed'])
+      .eq('payment_status', 'unpaid');
+    unpaidQuery = withBranch(unpaidQuery, branchId);
+
+    // 2. Last 7 days bookings (for cancellation/no-show rates)
+    let last7dQuery = supabase
+      .from('bookings')
+      .select('id, status')
+      .gte('date', sevenDaysAgo)
+      .lte('date', today);
+    last7dQuery = withBranch(last7dQuery, branchId);
+
+    // 3. Previous 7 days (days 8-14 ago, for trend delta)
+    let prev7dQuery = supabase
+      .from('bookings')
+      .select('id, status')
+      .gte('date', fourteenDaysAgo)
+      .lt('date', sevenDaysAgo);
+    prev7dQuery = withBranch(prev7dQuery, branchId);
+
+    // 4. Last 30 days bookings (for discount analysis)
+    let last30dQuery = supabase
+      .from('bookings')
+      .select('id, base_amount, discount_amount, discount_approved_by')
+      .gte('date', thirtyDaysAgo)
+      .lte('date', today);
+    last30dQuery = withBranch(last30dQuery, branchId);
+
+    // 5. All completed bookings per customer (for retention risk)
+    let allCustomerQuery = supabase
+      .from('bookings')
+      .select('customer_phone, date')
+      .eq('status', 'Completed');
+    allCustomerQuery = withBranch(allCustomerQuery, branchId);
 
     // Run all queries in parallel
     const [
@@ -3922,44 +4487,11 @@ export async function getRiskIndicators({ branchId, date }) {
       last30dResult,
       allCustomerResult,
     ] = await Promise.all([
-      // 1. Unpaid risk: Confirmed/Completed + unpaid
-      supabase
-        .from('bookings')
-        .select('id, final_amount')
-        .eq('branch_id', resolvedBranchId)
-        .in('status', ['Confirmed', 'Completed'])
-        .eq('payment_status', 'unpaid'),
-
-      // 2. Last 7 days bookings (for cancellation/no-show rates)
-      supabase
-        .from('bookings')
-        .select('id, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', sevenDaysAgo)
-        .lte('date', today),
-
-      // 3. Previous 7 days (days 8-14 ago, for trend delta)
-      supabase
-        .from('bookings')
-        .select('id, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', fourteenDaysAgo)
-        .lt('date', sevenDaysAgo),
-
-      // 4. Last 30 days bookings (for discount analysis)
-      supabase
-        .from('bookings')
-        .select('id, base_amount, discount_amount, discount_approved_by')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', thirtyDaysAgo)
-        .lte('date', today),
-
-      // 5. All completed bookings per customer (for retention risk)
-      supabase
-        .from('bookings')
-        .select('customer_phone, date')
-        .eq('branch_id', resolvedBranchId)
-        .eq('status', 'Completed'),
+      unpaidQuery,
+      last7dQuery,
+      prev7dQuery,
+      last30dQuery,
+      allCustomerQuery,
     ]);
 
     if (unpaidResult.error) throw unpaidResult.error;
@@ -4114,22 +4646,23 @@ export async function fetchAttendance({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     // Parallel: active therapists + attendance records
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, is_service_staff')
+      .eq('is_active', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status, check_in_time, check_out_time, notes')
+      .eq('date', targetDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, is_service_staff')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name'),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status, check_in_time, check_out_time, notes')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', targetDate),
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4276,21 +4809,22 @@ export async function fetchAttendanceSummary({ branchId, date }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     // Parallel: active therapist count + attendance records
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id')
+      .eq('is_active', true);
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('status')
+      .eq('date', targetDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true),
-      supabase
-        .from('therapist_attendance')
-        .select('status')
-        .eq('branch_id', resolvedBranchId)
-        .eq('date', targetDate),
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4348,21 +4882,21 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
       return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Start and end dates are required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select('id, name, is_service_staff')
+      .eq('is_active', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, date, status')
+      .gte('date', startDate)
+      .lte('date', endDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [therapistsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, is_service_staff')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name'),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, date, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate),
+      therapistsQuery,
+      attendanceQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4417,6 +4951,12 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
         totalStaff: therapists.length,
         totals: { ...totals, attendanceRate: overallRate },
         perStaff,
+        // Raw per-day records for the calendar grid view.
+        dayRecords: records.map((r) => ({
+          therapistId: r.therapist_id,
+          date: r.date,
+          status: r.status,
+        })),
       },
       error: null,
     };
@@ -4436,24 +4976,25 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
+    const overall = isOverallBranch(branchId);
     const today = new Date().toISOString().split('T')[0];
     const endDate = toDate || today;
     const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
 
-    // 1. Fetch active therapists + branch hours
+    // 1. Fetch active therapists + branch hours.
+    // Overall: build a branch_id → operating-window map across the org instead of one branch row.
+    let therapistsQuery = supabase
+      .from('therapists')
+      .select(overall ? 'id, name, gender, specialties, branch_id' : 'id, name, gender, specialties')
+      .eq('is_active', true)
+      .order('name');
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    const branchQuery = overall
+      ? supabase.from('branches').select('id, open_time, close_time')
+      : supabase.from('branches').select('open_time, close_time').eq('id', resolveBranchId(branchId)).single();
     const [therapistsResult, branchResult] = await Promise.all([
-      supabase
-        .from('therapists')
-        .select('id, name, gender, specialties')
-        .eq('branch_id', resolvedBranchId)
-        .eq('is_active', true)
-        .order('name'),
-      supabase
-        .from('branches')
-        .select('open_time, close_time')
-        .eq('id', resolvedBranchId)
-        .single(),
+      therapistsQuery,
+      branchQuery,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4464,29 +5005,42 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       return { data: { therapists: [], periodStart: startDate, periodEnd: endDate }, error: null };
     }
 
-    const openMin = timeToMinutes(branchResult.data.open_time);
-    const closeMin = timeToMinutes(branchResult.data.close_time);
-    const operatingMinutesPerDay = closeMin - openMin;
+    let operatingMinutesPerDay = 0;
+    const branchWindow = {};
+    if (overall) {
+      for (const br of (branchResult.data || [])) {
+        branchWindow[br.id] = timeToMinutes(br.close_time) - timeToMinutes(br.open_time);
+      }
+    } else {
+      const openMin = timeToMinutes(branchResult.data.open_time);
+      const closeMin = timeToMinutes(branchResult.data.close_time);
+      operatingMinutesPerDay = closeMin - openMin;
+    }
+
+    // Operating minutes per day for a given therapist's branch.
+    const dayWindowFor = (bid) => overall ? (branchWindow[bid] || 0) : operatingMinutesPerDay;
 
     const therapistIds = therapists.map(t => t.id);
 
     // 2. Fetch bookings + attendance in parallel
+    let bookingsQuery = supabase
+      .from('bookings')
+      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('therapist_id', therapistIds)
+      .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('therapist_id', therapistIds);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
     const [bookingsResult, attendanceResult] = await Promise.all([
-      supabase
-        .from('bookings')
-        .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .in('therapist_id', therapistIds)
-        .in('status', ['Confirmed', 'In-Progress', 'Completed']),
-      supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status')
-        .eq('branch_id', resolvedBranchId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .in('therapist_id', therapistIds),
+      bookingsQuery,
+      attendanceQuery,
     ]);
 
     if (bookingsResult.error) throw bookingsResult.error;
@@ -4546,7 +5100,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       // Present = 1.0 day, Half-Day = 0.5 day, Absent/Leave = 0.0 day
       const totalBookedMinutes = bookings.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
       const daysWorked = att.total > 0 ? att.daysWorked : totalDaysInRange;
-      const totalAvailableMinutes = daysWorked * operatingMinutesPerDay;
+      const totalAvailableMinutes = daysWorked * dayWindowFor(t.branch_id);
       const utilizationRate = totalAvailableMinutes > 0 ? totalBookedMinutes / totalAvailableMinutes : 0;
 
       return {
@@ -5009,6 +5563,359 @@ export async function deleteCategory({ categoryId }) {
     return { data: { deleted: true }, error: null };
   } catch (error) {
     console.error('[API] deleteCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// PAYROLL
+// ============================================================
+
+// Returns active therapists for a branch with their current compensation config.
+// Unauthenticated / non-admin callers will receive an empty array (RLS on
+// staff_compensation blocks reads; therapists are returned but compensation nulled).
+export async function fetchStaffCompensation(branchId) {
+  try {
+    let query = supabase
+      .from('therapists')
+      .select('id, name, position, is_service_staff, staff_compensation(monthly_salary, commission_rate)')
+      .eq('is_active', true)
+      .order('name');
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return {
+      data: (data || []).map((t) => ({
+        therapistId: t.id,
+        name: t.name,
+        position: t.position,
+        isServiceStaff: t.is_service_staff,
+        monthlySalary: t.staff_compensation?.monthly_salary != null
+          ? Number(t.staff_compensation.monthly_salary)
+          : 0,
+        commissionRate: t.staff_compensation?.commission_rate != null
+          ? Number(t.staff_compensation.commission_rate)
+          : 0,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchStaffCompensation error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Upsert a staff member's compensation. Admin-only (enforced by RLS).
+export async function setStaffCompensation({ therapistId, monthlySalary, commissionRate }) {
+  try {
+    const salary = Number(monthlySalary);
+    const rate = Number(commissionRate);
+    if (!(salary >= 0)) {
+      return { data: null, error: { code: 'INVALID_VALUE', message: 'Monthly salary must be zero or more.' } };
+    }
+    if (!(rate >= 0) || rate > 100) {
+      return { data: null, error: { code: 'INVALID_VALUE', message: 'Commission rate must be between 0 and 100.' } };
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('staff_compensation')
+      .upsert(
+        {
+          therapist_id: therapistId,
+          monthly_salary: salary,
+          commission_rate: rate,
+          updated_by: user?.id ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'therapist_id' }
+      );
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] setStaffCompensation error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Fetch an existing payroll run + its items for a branch+month.
+// periodMonth: 'YYYY-MM' string (e.g. '2026-06').
+export async function getPayrollRun({ branchId, periodMonth }) {
+  try {
+    const firstDay = `${periodMonth}-01`;
+    const { data: run, error: runErr } = await supabase
+      .from('payroll_runs')
+      .select('*')
+      .eq('branch_id', branchId)
+      .eq('period_month', firstDay)
+      .maybeSingle();
+    if (runErr) throw runErr;
+    if (!run) return { data: null, error: null };
+
+    const { data: items, error: itemErr } = await supabase
+      .from('payroll_items')
+      .select('*')
+      .eq('payroll_run_id', run.id)
+      .order('therapist_name');
+    if (itemErr) throw itemErr;
+
+    return {
+      data: {
+        run: {
+          id: run.id,
+          branchId: run.branch_id,
+          periodMonth: run.period_month,
+          status: run.status,
+          totalNet: Number(run.total_net),
+          generatedAt: run.generated_at,
+          finalizedAt: run.finalized_at,
+        },
+        items: (items || []).map((i) => ({
+          id: i.id,
+          therapistId: i.therapist_id,
+          therapistName: i.therapist_name,
+          monthlySalary: Number(i.monthly_salary),
+          commissionRate: Number(i.commission_rate),
+          daysInMonth: i.days_in_month,
+          presentDays: i.present_days,
+          absentDays: Number(i.absent_days),
+          halfDays: i.half_days,
+          leaveDays: i.leave_days,
+          attendanceDeduction: Number(i.attendance_deduction),
+          serviceRevenue: Number(i.service_revenue),
+          serviceCommission: Number(i.service_commission),
+          referralCommission: Number(i.referral_commission),
+          netPay: Number(i.net_pay),
+        })),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getPayrollRun error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Compute and persist a draft payroll run for a branch + month.
+// If a draft run already exists it is deleted and regenerated.
+// Blocks if a finalized run already exists for the same branch+month.
+// periodMonth: 'YYYY-MM' string.
+export async function generatePayroll({ branchId, periodMonth }) {
+  try {
+    const firstDay = `${periodMonth}-01`;
+    // Parse year/month for date math
+    const [year, month] = periodMonth.split('-').map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const lastDay = `${periodMonth}-${String(daysInMonth).padStart(2, '0')}`;
+
+    // Check for a finalized run — if found, block.
+    const { data: existing, error: checkErr } = await supabase
+      .from('payroll_runs')
+      .select('id, status')
+      .eq('branch_id', branchId)
+      .eq('period_month', firstDay)
+      .maybeSingle();
+    if (checkErr) throw checkErr;
+    if (existing?.status === 'finalized') {
+      return {
+        data: null,
+        error: {
+          code: 'PAYROLL_FINALIZED',
+          message: 'This payroll run has already been finalized and cannot be regenerated.',
+        },
+      };
+    }
+
+    // Delete any existing draft so we start fresh (cascade clears items).
+    if (existing) {
+      const { error: delErr } = await supabase
+        .from('payroll_runs')
+        .delete()
+        .eq('id', existing.id);
+      if (delErr) throw delErr;
+    }
+
+    // Fetch active therapists with compensation.
+    let therapistQuery = supabase
+      .from('therapists')
+      .select('id, name, staff_compensation(monthly_salary, commission_rate)')
+      .eq('is_active', true)
+      .order('name');
+    therapistQuery = withBranch(therapistQuery, branchId);
+    const { data: therapists, error: tErr } = await therapistQuery;
+    if (tErr) throw tErr;
+    if (!therapists || therapists.length === 0) {
+      return { data: null, error: { code: 'NO_STAFF', message: 'No active staff found for this branch.' } };
+    }
+
+    const therapistIds = therapists.map((t) => t.id);
+    const therapistByName = {};
+    for (const t of therapists) {
+      therapistByName[t.name.trim().toLowerCase()] = t.id;
+    }
+
+    // Fetch attendance in the period.
+    const { data: attendance, error: attErr } = await supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .in('therapist_id', therapistIds)
+      .gte('date', firstDay)
+      .lte('date', lastDay);
+    if (attErr) throw attErr;
+
+    // Tally attendance per therapist.
+    const attMap = {};
+    for (const therapistId of therapistIds) {
+      attMap[therapistId] = { present: 0, absent: 0, halfDay: 0, leave: 0 };
+    }
+    for (const row of (attendance || [])) {
+      const t = attMap[row.therapist_id];
+      if (!t) continue;
+      if (row.status === 'Present') t.present += 1;
+      else if (row.status === 'Absent') t.absent += 1;
+      else if (row.status === '1st-Half Day' || row.status === '2nd-Half Day') t.halfDay += 1;
+      else if (row.status === 'Leave') t.leave += 1;
+    }
+
+    // Fetch completed+paid bookings in the period to compute service revenue.
+    let bookingQuery = supabase
+      .from('bookings')
+      .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value')
+      .eq('status', 'Completed')
+      .eq('payment_status', 'paid')
+      .gte('date', firstDay)
+      .lte('date', lastDay);
+    bookingQuery = withBranch(bookingQuery, branchId);
+    const { data: bookings, error: bErr } = await bookingQuery;
+    if (bErr) throw bErr;
+
+    // Sum service revenue per therapist, and referral commission per therapist name.
+    const serviceRevenueMap = {};
+    const referralCommissionMap = {};
+    for (const therapistId of therapistIds) {
+      serviceRevenueMap[therapistId] = 0;
+      referralCommissionMap[therapistId] = 0;
+    }
+    for (const b of (bookings || [])) {
+      if (b.therapist_id && serviceRevenueMap[b.therapist_id] !== undefined) {
+        serviceRevenueMap[b.therapist_id] = Math.round(
+          (serviceRevenueMap[b.therapist_id] + Number(b.final_amount)) * 100
+        ) / 100;
+      }
+      // Attribute referral commission by name match.
+      if (b.referred_by) {
+        const refKey = b.referred_by.trim().toLowerCase();
+        const matchedId = therapistByName[refKey];
+        if (matchedId !== undefined) {
+          const earned = computeReferralCommission(
+            b.final_amount,
+            b.referral_commission_type,
+            b.referral_commission_value
+          );
+          referralCommissionMap[matchedId] = Math.round(
+            (referralCommissionMap[matchedId] + earned) * 100
+          ) / 100;
+        }
+      }
+    }
+
+    // Build payroll items.
+    const { data: { user } } = await supabase.auth.getUser();
+    const itemsPayload = [];
+    let totalNet = 0;
+
+    for (const t of therapists) {
+      const comp = t.staff_compensation;
+      const salary = comp?.monthly_salary != null ? Number(comp.monthly_salary) : 0;
+      const rate = comp?.commission_rate != null ? Number(comp.commission_rate) : 0;
+      const att = attMap[t.id];
+      const perDay = daysInMonth > 0 ? salary / daysInMonth : 0;
+      const deduction = Math.round(perDay * (att.absent + 0.5 * att.halfDay) * 100) / 100;
+      const serviceRev = serviceRevenueMap[t.id] || 0;
+      const svcCommission = Math.round(serviceRev * (rate / 100) * 100) / 100;
+      const refCommission = referralCommissionMap[t.id] || 0;
+      const netPay = Math.round(
+        (salary - deduction + svcCommission + refCommission) * 100
+      ) / 100;
+      totalNet = Math.round((totalNet + netPay) * 100) / 100;
+
+      itemsPayload.push({
+        therapist_id: t.id,
+        therapist_name: t.name,
+        monthly_salary: salary,
+        commission_rate: rate,
+        days_in_month: daysInMonth,
+        present_days: att.present,
+        absent_days: att.absent,
+        half_days: att.halfDay,
+        leave_days: att.leave,
+        attendance_deduction: deduction,
+        service_revenue: serviceRev,
+        service_commission: svcCommission,
+        referral_commission: refCommission,
+        net_pay: netPay,
+      });
+    }
+
+    // Insert the run.
+    const { data: run, error: runErr } = await supabase
+      .from('payroll_runs')
+      .insert({
+        branch_id: branchId,
+        period_month: firstDay,
+        status: 'draft',
+        total_net: totalNet,
+        generated_by: user?.id ?? null,
+        generated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (runErr) throw runErr;
+
+    // Insert items.
+    const { error: itemErr } = await supabase
+      .from('payroll_items')
+      .insert(itemsPayload.map((i) => ({ ...i, payroll_run_id: run.id })));
+    if (itemErr) throw itemErr;
+
+    return getPayrollRun({ branchId, periodMonth });
+  } catch (error) {
+    console.error('[API] generatePayroll error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Finalize a payroll run. Once finalized the run and its items are immutable
+// (enforced by DB trigger and this guard).
+export async function finalizePayroll({ runId }) {
+  try {
+    const { data: run, error: fetchErr } = await supabase
+      .from('payroll_runs')
+      .select('id, status')
+      .eq('id', runId)
+      .single();
+    if (fetchErr) throw fetchErr;
+    if (run.status === 'finalized') {
+      return {
+        data: null,
+        error: { code: 'PAYROLL_FINALIZED', message: 'This run is already finalized.' },
+      };
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error: updateErr } = await supabase
+      .from('payroll_runs')
+      .update({
+        status: 'finalized',
+        finalized_by: user?.id ?? null,
+        finalized_at: new Date().toISOString(),
+      })
+      .eq('id', runId);
+    if (updateErr) throw updateErr;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] finalizePayroll error:', error.message);
     return { data: null, error };
   }
 }

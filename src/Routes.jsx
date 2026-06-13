@@ -11,6 +11,7 @@ import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingManagementPortal from "pages/booking-management-portal";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
+import AttendanceCalendarPage from "pages/attendance-calendar";
 import OrgFinder from "pages/org-finder";
 import NotFound from "pages/NotFound";
 
@@ -122,6 +123,15 @@ const AppRoutes = () => {
           <TenantWrapper>
             <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
               <UnifiedDashboard />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Attendance calendar — dedicated full-page grid view */}
+        <Route path="/:orgSlug/attendance-calendar" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+              <AttendanceCalendarPage />
             </ProtectedRoute>
           </TenantWrapper>
         } />

@@ -304,12 +304,42 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
               {formatNPR(booking.final_amount ?? booking.finalAmount ?? 0)}
             </span>
           </div>
+          {(booking.amountPaid ?? 0) > 0 && booking.paymentStatus !== 'paid' && (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="font-body font-body-medium text-sm text-text-secondary">Paid</span>
+                <span className="font-data font-data-normal text-sm text-success">
+                  {formatNPR(booking.amountPaid ?? 0)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-body font-body-medium text-sm text-text-secondary">Due</span>
+                <span className="font-data font-data-normal text-sm text-warning font-semibold">
+                  {formatNPR(booking.amountDue ?? 0)}
+                </span>
+              </div>
+              {booking.dueHolderName && (
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-medium text-sm text-text-secondary">Due under</span>
+                  <span className="font-body font-body-medium text-sm text-text-primary">
+                    {booking.dueHolderName}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <span className="font-body font-body-medium text-sm text-text-secondary">Payment Status</span>
             {booking.paymentStatus === 'paid' ? (
               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-success/10 text-success text-xs font-caption font-caption-medium">
                 <Icon name="CheckCircle" size={12} />
                 <span>Paid</span>
+              </span>
+            ) : booking.paymentStatus === 'partial' ? (
+              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-accent/10 text-accent text-xs font-caption font-caption-medium">
+                <Icon name="CircleDashed" size={12} />
+                <span>Partial</span>
               </span>
             ) : (
               <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-warning/10 text-warning text-xs font-caption font-caption-medium">

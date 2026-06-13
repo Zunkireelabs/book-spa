@@ -1,8 +1,29 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import Select from '../../../../components/ui/Select';
+import Input from '../../../../components/ui/Input';
+import Button from '../../../../components/ui/Button';
 import FilterBar from '../../../../components/ui/FilterBar';
-import { fetchAttendance, fetchAttendanceSummary, markAttendance } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
+import {
+  fetchAttendance,
+  fetchAttendanceSummary,
+  markAttendance,
+  transferTherapist,
+  fetchPendingTransfers,
+  cancelScheduledTransfer,
+  fetchAllBranches,
+} from '../../../../services/api';
+
+function formatPrettyDate(d) {
+  if (!d) return '—';
+  // d is a YYYY-MM-DD string; parse as local to avoid TZ shift.
+  const [y, m, day] = d.split('-').map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
 
 const ATTENDANCE_OPTIONS = [
   { value: '', label: 'Not Marked' },
@@ -47,6 +68,7 @@ function SummaryCard({ icon, iconBg, iconColor, label, value, highlight }) {
 
 const AttendancePanel = ({ branchId }) => {
   const today = new Date().toISOString().split('T')[0];
+  const { staffLabel } = useIndustry();
 
   const [selectedDate, setSelectedDate] = useState(today);
   const [therapists, setTherapists] = useState([]);
@@ -55,6 +77,16 @@ const AttendancePanel = ({ branchId }) => {
   const [error, setError] = useState(null);
   const [dayLocked, setDayLocked] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // Transfer feature
+  const [orgBranches, setOrgBranches] = useState([]);
+  const [pendingByTherapist, setPendingByTherapist] = useState({});
+  const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
+  const [transferToBranch, setTransferToBranch] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+  const [transferError, setTransferError] = useState(null);
+  const [transferring, setTransferring] = useState(false);
+  const [cancellingTransfer, setCancellingTransfer] = useState(null);
 
   // Track local edits per therapist: { [therapistId]: { status, checkInTime, checkOutTime, notes, dirty } }
   const [edits, setEdits] = useState({});
@@ -102,6 +134,18 @@ const AttendancePanel = ({ branchId }) => {
     setTimeout(() => setToast(null), 3000);
   };
 
+  useEffect(() => {
+    fetchAllBranches().then(({ data }) => setOrgBranches(data || []));
+  }, []);
+
+  const loadPendingTransfers = useCallback(async () => {
+    if (!branchId) return;
+    const { data } = await fetchPendingTransfers(branchId);
+    const map = {};
+    (data || []).forEach(t => { map[t.therapistId] = t; });
+    setPendingByTherapist(map);
+  }, [branchId]);
+
   const loadData = useCallback(async () => {
     if (!branchId) return;
     setLoading(true);
@@ -111,6 +155,7 @@ const AttendancePanel = ({ branchId }) => {
     const [attendanceResult, summaryResult] = await Promise.all([
       fetchAttendance({ branchId, date: selectedDate }),
       fetchAttendanceSummary({ branchId, date: selectedDate }),
+      loadPendingTransfers(),
     ]);
 
     if (attendanceResult.error) {
@@ -141,7 +186,7 @@ const AttendancePanel = ({ branchId }) => {
     }
 
     setLoading(false);
-  }, [branchId, selectedDate]);
+  }, [branchId, selectedDate, loadPendingTransfers]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -313,6 +358,58 @@ const AttendancePanel = ({ branchId }) => {
     }
   };
 
+  const openTransfer = (t) => {
+    setTransferTarget({ therapistId: t.therapistId, therapistName: t.therapistName });
+    setTransferToBranch('');
+    setTransferNote('');
+    setTransferError(null);
+  };
+
+  const handleTransfer = async () => {
+    if (!transferToBranch) {
+      setTransferError('Select a destination branch.');
+      return;
+    }
+    setTransferring(true);
+    setTransferError(null);
+
+    const isFuture = selectedDate > today;
+    const result = await transferTherapist({
+      therapistId: transferTarget.therapistId,
+      toBranchId: transferToBranch,
+      note: transferNote.trim() || null,
+      effectiveDate: selectedDate,
+    });
+
+    if (result.error) {
+      setTransferError(result.error.message || 'Transfer failed.');
+      setTransferring(false);
+      return;
+    }
+
+    const name = transferTarget.therapistName;
+    setTransferTarget(null);
+    setTransferring(false);
+    showToast(
+      isFuture
+        ? `Transfer scheduled for ${name} on ${formatPrettyDate(selectedDate)}.`
+        : `${name} transferred.`
+    );
+    await loadData();
+  };
+
+  const handleCancelTransfer = async (transferId) => {
+    setCancellingTransfer(transferId);
+    const { error: cancelError } = await cancelScheduledTransfer(transferId);
+    setCancellingTransfer(null);
+    if (cancelError) {
+      showToast(cancelError.message || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast('Scheduled transfer cancelled.');
+    await loadPendingTransfers();
+  };
+
   const dirtyCount = Object.values(edits).filter(e => e.dirty && e.status).length;
 
   // ── Loading state ──────────────────────────────────────────
@@ -364,7 +461,6 @@ const AttendancePanel = ({ branchId }) => {
           <input
             type="date"
             value={selectedDate}
-            max={today}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="px-3 py-2 rounded-spa border border-border bg-surface font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
@@ -490,7 +586,7 @@ const AttendancePanel = ({ branchId }) => {
       {/* Therapist Table */}
       <div className="bg-surface rounded-spa-lg border border-border">
         {/* Table header */}
-        <div className="hidden md:grid md:grid-cols-[1fr_140px_110px_110px_1fr_80px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
+        <div className="hidden md:grid md:grid-cols-[1fr_140px_110px_110px_1fr_120px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide flex items-center gap-2">
             <input
               type="checkbox"
@@ -530,12 +626,12 @@ const AttendancePanel = ({ branchId }) => {
               return (
                 <div
                   key={t.therapistId}
-                  className={`grid grid-cols-1 md:grid-cols-[1fr_140px_110px_110px_1fr_80px] gap-3 px-5 py-3 items-center ${
+                  className={`grid grid-cols-1 md:grid-cols-[1fr_140px_110px_110px_1fr_120px] gap-3 px-5 py-3 items-center ${
                     isDirty ? 'bg-primary/5' : ''
                   }`}
                 >
                   {/* Therapist name */}
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 min-w-0">
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(t.therapistId)}
@@ -546,17 +642,37 @@ const AttendancePanel = ({ branchId }) => {
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <Icon name="User" size={14} className="text-primary" />
                     </div>
-                    <span className="font-body font-body-medium text-sm text-text-primary">{t.therapistName}</span>
-                    {edit.status && (
-                      <span className={`md:hidden inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium ${
-                        edit.status === 'Present' ? 'bg-success/10 text-success' :
-                        edit.status === 'Absent' ? 'bg-error/10 text-error' :
-                        edit.status === 'Leave' ? 'bg-warning/10 text-warning' :
-                        'bg-accent/10 text-accent'
-                      }`}>
-                        {edit.status}
-                      </span>
-                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
+                        {edit.status && (
+                          <span className={`md:hidden inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium ${
+                            edit.status === 'Present' ? 'bg-success/10 text-success' :
+                            edit.status === 'Absent' ? 'bg-error/10 text-error' :
+                            edit.status === 'Leave' ? 'bg-warning/10 text-warning' :
+                            'bg-accent/10 text-accent'
+                          }`}>
+                            {edit.status}
+                          </span>
+                        )}
+                      </div>
+                      {pendingByTherapist[t.therapistId] && (
+                        <div className="mt-0.5 flex items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-caption font-caption-medium">
+                            <Icon name="ArrowRightLeft" size={11} />
+                            Transfer → {pendingByTherapist[t.therapistId].toBranch} on {formatPrettyDate(pendingByTherapist[t.therapistId].effectiveDate)}
+                          </span>
+                          <button
+                            onClick={() => handleCancelTransfer(pendingByTherapist[t.therapistId].id)}
+                            disabled={cancellingTransfer === pendingByTherapist[t.therapistId].id}
+                            className="text-text-tertiary hover:text-error spa-transition-fast disabled:opacity-50"
+                            title="Cancel scheduled transfer"
+                          >
+                            <Icon name="X" size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Status dropdown */}
@@ -603,8 +719,8 @@ const AttendancePanel = ({ branchId }) => {
                     className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
 
-                  {/* Save button */}
-                  <div className="flex justify-center">
+                  {/* Actions */}
+                  <div className="flex justify-center items-center gap-1.5">
                     <button
                       onClick={() => handleSave(t.therapistId)}
                       disabled={isDisabled || !isDirty}
@@ -621,6 +737,14 @@ const AttendancePanel = ({ branchId }) => {
                         <Icon name="Check" size={16} />
                       )}
                     </button>
+                    <button
+                      onClick={() => openTransfer(t)}
+                      disabled={!!pendingByTherapist[t.therapistId]}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-spa bg-background text-text-secondary hover:bg-accent/10 hover:text-accent spa-transition-fast disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-text-secondary"
+                      title={pendingByTherapist[t.therapistId] ? 'A transfer is already scheduled' : `Transfer ${staffLabel.toLowerCase()}`}
+                    >
+                      <Icon name="ArrowRightLeft" size={16} />
+                    </button>
                   </div>
                 </div>
               );
@@ -628,6 +752,70 @@ const AttendancePanel = ({ branchId }) => {
           </div>
         )}
       </div>
+
+      {/* Transfer Modal */}
+      {transferTarget && (
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !transferring && setTransferTarget(null)}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
+                Transfer {staffLabel}
+              </h3>
+              <button onClick={() => !transferring && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
+                <Icon name="X" size={20} className="text-text-secondary" />
+              </button>
+            </div>
+
+            <p className="font-body text-sm text-text-secondary">
+              Move <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> to another branch.
+            </p>
+
+            <div className={`flex items-center gap-2 p-3 rounded-spa text-sm ${
+              selectedDate > today ? 'bg-accent/10 text-accent' : 'bg-primary/5 text-text-secondary'
+            }`}>
+              <Icon name="Calendar" size={16} className="flex-shrink-0" />
+              <span>
+                {selectedDate > today
+                  ? <>Scheduled for <span className="font-body-medium">{formatPrettyDate(selectedDate)}</span>. The {staffLabel.toLowerCase()} stays at the current branch until then.</>
+                  : <>Effective <span className="font-body-medium">{formatPrettyDate(selectedDate)}</span> (applies immediately).</>}
+              </span>
+            </div>
+
+            {transferError && (
+              <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                <Icon name="AlertCircle" size={16} />
+                <span>{transferError}</span>
+              </div>
+            )}
+
+            <Select
+              label="Destination Branch"
+              placeholder="Select a branch..."
+              options={orgBranches
+                .filter(b => b.id !== branchId)
+                .map(b => ({ value: b.id, label: b.name }))}
+              value={transferToBranch}
+              onChange={setTransferToBranch}
+            />
+
+            <div className="space-y-1">
+              <label className="block font-body font-body-medium text-sm text-text-primary">Note (optional)</label>
+              <Input
+                value={transferNote}
+                onChange={(e) => setTransferNote(e.target.value)}
+                placeholder="Reason for transfer..."
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={transferring}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={handleTransfer} loading={transferring}>
+                {selectedDate > today ? 'Schedule Transfer' : 'Transfer'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
