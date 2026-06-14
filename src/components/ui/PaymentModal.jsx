@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
+import { fetchMembershipForBooking } from '../../services/api';
 
-const PAYMENT_MODES = [
+const BASE_PAYMENT_MODES = [
   { value: 'Cash', label: 'Cash' },
   { value: 'Card', label: 'Card' },
   { value: 'MobileBanking', label: 'Mobile Banking' },
@@ -11,6 +12,13 @@ const PAYMENT_MODES = [
   { value: 'Esewa', label: 'Esewa' },
   { value: 'Khalti', label: 'Khalti' },
 ];
+
+const MEMBERSHIP_STATUS_STYLES = {
+  active:   { container: 'bg-primary/5 border-primary/20',    pill: 'bg-success/10 text-success',  label: 'Active' },
+  pending:  { container: 'bg-amber-50 border-amber-200',      pill: 'bg-amber-100 text-amber-800', label: 'Pending' },
+  lapsed:   { container: 'bg-warning/5 border-warning/20',    pill: 'bg-warning/10 text-warning',  label: 'Lapsed' },
+  depleted: { container: 'bg-gray-50 border-gray-200',        pill: 'bg-gray-100 text-gray-600',   label: 'Depleted' },
+};
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
@@ -49,6 +57,37 @@ const PaymentModal = ({
   const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: 'Cash' }]);
   const [dueHolderName, setDueHolderName] = useState(booking.dueHolderName || booking.due_holder_name || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // --- membership wallet (Phase 3) ---
+  const [membership, setMembership] = useState(null);
+  const bookingId = booking.bookingId || booking.id;
+  useEffect(() => {
+    if (!bookingId || isBatch) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchMembershipForBooking(bookingId);
+      if (!cancelled) setMembership(data || null);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId, isBatch]);
+
+  // The Membership option is added to the mode dropdown only when there's a
+  // wallet attached to this booking's customer AND the wallet still has balance.
+  const membershipUsable = membership && membership.balance > 0 && membership.status !== 'depleted';
+  const paymentModeOptions = useMemo(() => {
+    if (!membershipUsable) return BASE_PAYMENT_MODES;
+    return [...BASE_PAYMENT_MODES, { value: 'Membership', label: `Membership (${membership.tierName})` }];
+  }, [membershipUsable, membership]);
+
+  // How much of the Membership wallet is already committed by other tenders in
+  // this submission. Used to cap each Membership tender input.
+  const membershipCommitted = useMemo(() => {
+    if (!membershipUsable) return 0;
+    return round2(
+      tenders.reduce((s, t) => s + (t.paymentMode === 'Membership' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)
+    );
+  }, [tenders, membershipUsable]);
+  const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
 
   const entered = useMemo(
     () => round2(tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0)),
@@ -90,6 +129,10 @@ const PaymentModal = ({
     }
     if (leftover > 0 && !dueHolderName.trim()) {
       setError('Enter who the remaining due is under before leaving a balance unpaid.');
+      return;
+    }
+    if (membershipUsable && membershipCommitted > membership.balance) {
+      setError(`Membership tenders total ${formatNPR(membershipCommitted)} but the wallet balance is only ${formatNPR(membership.balance)}.`);
       return;
     }
     setError(null);
@@ -166,12 +209,52 @@ const PaymentModal = ({
             </div>
           </div>
 
+          {/* Membership wallet banner (Phase 3) — surfaces when this booking's
+              customer has a wallet. Active = primary color, lapsed = warning, depleted = gray. */}
+          {!isBatch && membership && (() => {
+            const styleKey = membership.status || 'pending';
+            const styles = MEMBERSHIP_STATUS_STYLES[styleKey] || MEMBERSHIP_STATUS_STYLES.pending;
+            return (
+              <div className={`rounded-spa border ${styles.container} px-3 py-2.5`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <Icon name="Wallet" size={14} className="text-primary flex-shrink-0" />
+                    <span className="font-body font-body-medium text-sm text-text-primary truncate">{membership.tierName}</span>
+                    {membership.membershipNumber && (
+                      <span className="font-data font-data-medium text-[11px] tracking-widest text-text-secondary">{membership.membershipNumber}</span>
+                    )}
+                    <span className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${styles.pill}`}>
+                      {styles.label}
+                    </span>
+                  </div>
+                  <span className="font-data font-data-medium text-sm text-primary flex-shrink-0">{formatNPR(membership.balance)}</span>
+                </div>
+                {membership.status === 'lapsed' && (
+                  <p className="mt-1.5 font-caption text-[11px] text-warning">
+                    Membership expired on {membership.expiryDate || '—'}. Wallet balance is still spendable but
+                    discount privileges no longer apply.
+                  </p>
+                )}
+                {membership.status === 'pending' && (
+                  <p className="mt-1.5 font-caption text-[11px] text-amber-700">
+                    Pending activation — wallet is not yet usable for booking payments. Top up to NPR {Number(membership.tierAdvanceAmount).toLocaleString('en-IN')} to activate.
+                  </p>
+                )}
+                {membership.status === 'depleted' && (
+                  <p className="mt-1.5 font-caption text-[11px] text-text-tertiary">
+                    Wallet is depleted.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
           {isBatch ? (
             /* Batch pay — single method, full amount per booking */
             <div className="space-y-1">
               <label className="block font-body font-body-medium text-sm text-text-primary">Payment Mode</label>
               <CustomSelect
-                options={PAYMENT_MODES}
+                options={BASE_PAYMENT_MODES}
                 value={batchMode}
                 onChange={setBatchMode}
                 placeholder="Select payment mode..."
@@ -194,40 +277,53 @@ const PaymentModal = ({
                 </button>
               </div>
 
-              {tenders.map((t, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className="w-32 flex-shrink-0">
-                    <CustomSelect
-                      options={PAYMENT_MODES}
-                      value={t.paymentMode}
-                      onChange={(v) => updateTender(i, { paymentMode: v })}
-                      size="md"
-                    />
+              {tenders.map((t, i) => {
+                const isMembership = t.paymentMode === 'Membership';
+                const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
+                return (
+                  <div key={i} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-32 flex-shrink-0">
+                        <CustomSelect
+                          options={paymentModeOptions}
+                          value={t.paymentMode}
+                          onChange={(v) => updateTender(i, { paymentMode: v })}
+                          size="md"
+                        />
+                      </div>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={t.amount}
+                          onChange={(e) => updateTender(i, { amount: e.target.value })}
+                          placeholder="0"
+                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
+                        />
+                      </div>
+                      {tenders.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTender(i)}
+                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                          aria-label="Remove method"
+                        >
+                          <Icon name="Trash2" size={16} />
+                        </button>
+                      )}
+                    </div>
+                    {isMembership && (
+                      <p className={`text-[11px] font-caption ml-[8.5rem] ${overWallet ? 'text-error' : 'text-text-tertiary'}`}>
+                        {overWallet
+                          ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
+                          : `Wallet available: ${formatNPR(walletRemaining)}`}
+                      </p>
+                    )}
                   </div>
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={t.amount}
-                      onChange={(e) => updateTender(i, { amount: e.target.value })}
-                      placeholder="0"
-                      className="w-full rounded-spa border border-border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
-                    />
-                  </div>
-                  {tenders.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeTender(i)}
-                      className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                      aria-label="Remove method"
-                    >
-                      <Icon name="Trash2" size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
 
               {/* Entered / leftover */}
               <div className="flex items-center justify-between text-sm pt-1">

@@ -48,11 +48,18 @@ as you create it.
 ```sql
 SELECT v AS pending
 FROM (VALUES
-  -- manifest: every migration version that should exist, in order
+  -- manifest: every migration version that should exist, in order.
+  -- !!! WHEN YOU ADD A MIGRATION, APPEND ITS VERSION HERE !!!
+  -- (an out-of-date manifest silently hides pending migrations — this is how the
+  --  2026-06-13 prod "staff_transfers missing" outage happened; 038–041 were live
+  --  on staging for days but the manifest still ended at 027.)
   ('001'),('002'),('003'),('004'),('005'),('006'),('007'),('008a'),('008b'),
   ('009'),('010'),('011'),('012'),('014'),('015'),('016'),('017'),('018'),
-  ('019'),('020'),('021'),('022'),('023'),('024'),('025'),('026'),('027')
-  -- ,('028')  <-- add new versions here
+  ('019'),('020'),('021'),('022'),('023'),('024'),('025'),('026'),('027'),
+  ('028'),('029'),('030'),('031'),('032'),('033'),('034'),('035'),('036'),
+  ('037'),('038'),('039'),('040'),('041'),('042'),('043'),('044'),('045'),
+  ('046'),('047')
+  -- ,('048')  <-- add new versions here
 ) t(v)
 WHERE v NOT IN (SELECT version FROM public.schema_migrations)
 ORDER BY v;

@@ -110,6 +110,17 @@ runbook and the `schema_migrations` "what's pending on prod?" check.
 >    name/email, not UUID) per `supabase/PROMOTION.md`.
 > 3. **Do not consider the promotion complete** until the production DB script has been handed off
 >    (and ideally verified). If a change is frontend-only with no DB impact, say so explicitly.
+> 4. **When adding a new migration**, append its version to the manifest in
+>    `supabase/PROMOTION.md`'s pending-check query — an out-of-date manifest silently hides pending
+>    migrations.
+>
+> **Past incident (2026-06-13):** Migrations 038–041 shipped to `main` with the frontend but were
+> never run on prod. The Transfer Report page surfaced this as a runtime
+> `Could not find the table 'public.staff_transfers' in the schema cache` error. The
+> `supabase/PROMOTION.md` pending-check manifest was also stale (ended at `027`) so it falsely
+> reported prod as up to date. **Schema-touching code is not safe to merge to `main` without
+> running each new migration on prod via the dashboard SQL editor AND confirming the manifest is
+> current.**
 
 ```bash
 cp .env.example .env            # defaults to staging
@@ -160,19 +171,31 @@ book-spa/
 
 ### Routing Map
 
-All staff/customer routes are org-scoped: `/:orgSlug/login`, `/:orgSlug/staff-dashboard`, etc.
+All staff/customer routes are org-scoped: `/:orgSlug/login`, `/:orgSlug/dashboard`, etc. Source of truth is `src/Routes.jsx` — keep this table in sync.
 
 | Path | Component | Access |
 |------|-----------|--------|
 | `/` | ExternalRedirect → zunkireelabs.com | Public (redirects externally) |
 | `/login` | OrgFinder | Public (org slug entry page) |
 | `/:orgSlug/login` | StaffLoginAuthentication | Public |
-| `/:orgSlug/staff-dashboard` | BranchStaffDashboard | staff, manager, admin |
-| `/:orgSlug/manager-dashboard` | BranchManagerDashboard | manager, admin |
-| `/:orgSlug/booking-details/:bookingId` | BookingDetailsAssignmentModal | staff, manager, admin |
+| `/:orgSlug/dashboard` | UnifiedDashboard (role-dispatched view) | staff, manager, admin |
+| `/:orgSlug/attendance-calendar` | AttendanceCalendarPage | manager, admin |
+| `/:orgSlug/bookings/:bookingId` | BookingDetailsAssignmentModal | staff, manager, admin |
 | `/:orgSlug/book` | CustomerBookingFlow (via TenantProvider) | Public |
+| `/:orgSlug/manage` | BookingManagementPortal (via TenantProvider) | Public (customer self-service) |
+| `/:orgSlug` | CustomerBookingFlow (shortcut) | Public |
 
-Legacy paths (`/branch-staff-dashboard`, `/booking-details/:id`, etc.) auto-redirect to org-scoped URLs. Protected routes use `<ProtectedRoute allowedRoles={[...]}>`.
+**Important:** there is no separate `/staff-dashboard` / `/manager-dashboard` — both roles land on `/:orgSlug/dashboard` and `UnifiedDashboard` renders the right view.
+
+Legacy paths (`/branch-staff-dashboard`, `/branch-manager-dashboard`, `/booking-details/:bookingId`, `/customer-booking-flow`, `/booking-management-portal`) auto-redirect to their org-scoped equivalents. Protected routes use `<ProtectedRoute allowedRoles={[...]}>`.
+
+> [!WARNING]
+> **Legacy customer redirects are hardcoded to the `nuad-thai-spa` tenant** —
+> `/customer-booking-flow` → `/nuad-thai-spa/book` and `/booking-management-portal` →
+> `/nuad-thai-spa/manage` (see `src/Routes.jsx`). This is fine while Nuad Thai Spa is the only
+> production tenant, but **when a second org goes live, these two redirects must be replaced**
+> (probably with a per-org landing page or a "pick your org" prompt) — otherwise their customers
+> will be silently sent to the wrong tenant.
 
 ### Data Flow
 
@@ -189,6 +212,12 @@ UI Component ← transformBooking() ← raw DB response ←┘
 ---
 
 ## Service Layer Patterns
+
+**All Supabase mutations and queries live in a single `src/services/api.js` (~6k lines).**
+`bookingTransformers.js` (snake/camel case + status normalization) and `serviceEnrichment.js`
+(static service display metadata) are the only sibling modules. Don't split `api.js` into per-domain
+files without an explicit refactor request — the monolith is intentional for now, and the existing
+state-machine + discount validation helpers depend on shared module-scope constants.
 
 ### State Machine (`services/api.js`)
 
