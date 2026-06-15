@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { capture } from '../lib/analytics';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -388,6 +389,11 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (updateError) throw updateError;
     }
 
+    capture('staff_payment_recorded', {
+      tender_modes: tenderList.map(t => t.paymentMode),
+      total_amount: tenderTotal,
+      fully_paid: leftover === 0,
+    });
     return {
       data: {
         success: true,
@@ -666,6 +672,7 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
 
     if (updateError) throw updateError;
 
+    capture('staff_booking_status_changed', { from_status: booking.status, to_status: newStatus });
     return { data: { success: true, bookingId, status: updated.status }, error: null };
   } catch (error) {
     console.error('[API] updateBookingStatus error:', error.message);
@@ -1047,6 +1054,11 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
 
     if (updateError) throw updateError;
 
+    capture(updated.discount_status === 'pending' ? 'staff_discount_requested' : 'staff_discount_applied', {
+      discount_type: discountType,
+      discount_value: discountValue,
+      discount_amount_npr: Number(updated.discount_amount),
+    });
     return {
       data: {
         success: true,
@@ -1272,6 +1284,7 @@ export async function approveDiscount(bookingId) {
 
     await notifyDiscountDecision(booking, 'approved');
 
+    capture('staff_discount_approved', { booking_id: bookingId });
     return { data: { success: true, bookingId, discountStatus: 'approved' }, error: null };
   } catch (error) {
     console.error('[API] approveDiscount error:', error.message);
@@ -1340,6 +1353,7 @@ export async function rejectDiscount(bookingId) {
 
     await notifyDiscountDecision(booking, 'declined');
 
+    capture('staff_discount_rejected', { booking_id: bookingId });
     return { data: { success: true, bookingId, discountStatus: 'none' }, error: null };
   } catch (error) {
     console.error('[API] rejectDiscount error:', error.message);
@@ -2872,6 +2886,11 @@ export async function createBooking({
       if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
     }
 
+    capture('staff_booking_created', {
+      service_id: serviceId,
+      branch_id: booking.branch_id,
+      final_amount: Number(booking.final_amount),
+    });
     return { data: booking, error: null };
   } catch (error) {
     console.error('[API] createBooking error:', error.message);
@@ -3412,6 +3431,7 @@ export async function transferTherapist({ therapistId, toBranchId, note = null, 
     });
 
     if (error) throw error;
+    capture('staff_transfer_scheduled', { therapist_id: therapistId, to_branch_id: toBranchId, effective_date: effectiveDate });
     return { data: { transferId: data }, error: null };
   } catch (error) {
     console.error('[API] transferTherapist error:', error.message);

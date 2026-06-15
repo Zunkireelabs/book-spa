@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { identify, reset, setGroup } from '../lib/analytics';
 
 const AuthContext = createContext(null);
 
@@ -111,6 +112,21 @@ export const AuthProvider = ({ children }) => {
       setProfile(userProfile);
       setLoading(false);
 
+      if (userProfile) {
+        identify(userProfile.id, {
+          email: userProfile.email,
+          role: userProfile.role,
+          branch_id: userProfile.branch_id,
+          org_slug: userProfile.organizations?.slug,
+        });
+        if (userProfile.org_id) {
+          setGroup('organization', userProfile.org_id, {
+            name: userProfile.organizations?.name,
+            slug: userProfile.organizations?.slug,
+          });
+        }
+      }
+
       return { user: data.user, profile: userProfile };
     } finally {
       signInActiveRef.current = false;
@@ -118,6 +134,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
+    reset();
     setProfile(null);
     setUser(null);
     const { error } = await supabase.auth.signOut();

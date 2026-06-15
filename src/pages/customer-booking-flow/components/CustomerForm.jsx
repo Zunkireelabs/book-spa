@@ -234,6 +234,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
             <Input
               type="email"
               name="email"
+              data-ph-mask
               value={customerInfo.email || ''}
               onChange={handleInputChange}
               onBlur={handleBlur}
@@ -260,6 +261,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               <Input
                 type="tel"
                 name="phone"
+                data-ph-mask
                 value={customerInfo.phone || ''}
                 onChange={handleInputChange}
                 onBlur={handleBlur}
@@ -323,6 +325,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
             </label>
             <textarea
               name="specialRequests"
+              data-ph-mask
               value={customerInfo.specialRequests || ''}
               onChange={handleInputChange}
               placeholder="Any special requirements or health conditions we should know about..."
