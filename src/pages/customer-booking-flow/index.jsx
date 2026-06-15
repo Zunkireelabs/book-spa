@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { capture } from '../../lib/analytics';
 import CustomerHeader from '../../components/ui/CustomerHeader';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
@@ -36,6 +37,20 @@ const CustomerBookingFlow = () => {
   const [bookingData, setBookingData] = useState(null);
 
   const totalSteps = 6;
+  const stepNames = ['branch_selection', 'service_selection', 'datetime_selection', 'customer_details', 'booking_confirmation', 'booking_success'];
+  const stepEnteredAt = useRef(Date.now());
+
+  // Track step views and time-on-step
+  useEffect(() => {
+    if (currentStep >= 6) return;
+    stepEnteredAt.current = Date.now();
+    capture('customer_booking_step_viewed', {
+      step_index: currentStep,
+      step_name: stepNames[currentStep - 1],
+      org_slug: orgSlug,
+      branch_id: selectedBranch?.id,
+    });
+  }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-save to localStorage
   useEffect(() => {
@@ -80,11 +95,19 @@ const CustomerBookingFlow = () => {
 
   const handleNext = async () => {
     if (!canProceed()) return;
-    
+
     setIsLoading(true);
-    
+
     try {
       if (currentStep < totalSteps) {
+        capture('customer_booking_step_completed', {
+          step_index: currentStep,
+          step_name: stepNames[currentStep - 1],
+          org_slug: orgSlug,
+          branch_id: selectedBranch?.id,
+          service_id: selectedService?.id,
+          time_on_step_ms: Date.now() - stepEnteredAt.current,
+        });
         setCurrentStep(currentStep + 1);
       }
     } catch (error) {
@@ -173,6 +196,16 @@ const CustomerBookingFlow = () => {
     setBookingData(finalBookingData);
     setCurrentStep(6);
     localStorage.removeItem('bookingFlow');
+
+    capture('customer_booking_submitted', {
+      org_slug: orgSlug,
+      branch_id: selectedBranch?.id,
+      branch_name: selectedBranch?.name,
+      service_id: selectedService?.id,
+      service_name: selectedService?.name,
+      service_price_npr: selectedService?.price_npr,
+      customer_gender: customerInfo.gender || null,
+    });
   };
 
   const handleEditBooking = (step) => {

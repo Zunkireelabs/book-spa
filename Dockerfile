@@ -3,6 +3,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_POSTHOG_KEY
+ARG VITE_POSTHOG_HOST
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
