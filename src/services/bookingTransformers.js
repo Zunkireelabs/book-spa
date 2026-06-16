@@ -101,3 +101,56 @@ export function transformBooking(dbBooking) {
 export function transformBookings(dbBookings) {
   return dbBookings.map(transformBooking);
 }
+
+// Membership status is COMPUTED from balance/total_deposited/activation_date/expiry_date
+// instead of stored. See migration-045-memberships.sql §"Status (pending/active/lapsed/depleted)
+// is computed, not stored".
+function computeMembershipStatus(m) {
+  const advance = Number(m.tier?.advance_amount ?? 0);
+  const total = Number(m.total_deposited ?? 0);
+  const balance = Number(m.balance ?? 0);
+  if (!m.activation_date) {
+    if (balance <= 0 && total > 0) return 'depleted';
+    return total >= advance ? 'active' : 'pending';
+  }
+  if (balance <= 0) return 'depleted';
+  const today = new Date();
+  const today00 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const expiry = m.expiry_date ? new Date(m.expiry_date + 'T00:00:00') : null;
+  if (expiry && expiry < today00) return 'lapsed';
+  return 'active';
+}
+
+export function transformMembership(dbMembership) {
+  if (!dbMembership) return null;
+  const tier = dbMembership.tier || dbMembership.membership_tiers || null;
+  const customer = dbMembership.customer || dbMembership.customers || null;
+  const status = computeMembershipStatus({ ...dbMembership, tier });
+  return {
+    id: dbMembership.id,
+    orgId: dbMembership.org_id,
+    customerId: dbMembership.customer_id,
+    customerName: customer?.full_name || null,
+    customerPhone: customer?.phone || null,
+    membershipNumber: dbMembership.membership_number || null,
+    tierId: dbMembership.tier_id,
+    tierName: tier?.name || null,
+    tierCodePrefix: tier?.code_prefix || null,
+    tierAdvanceAmount: tier ? Number(tier.advance_amount) : null,
+    tierDiscountRules: tier?.discount_rules || {},
+    tierValidityDays: tier?.validity_days || null,
+    totalDeposited: Number(dbMembership.total_deposited || 0),
+    balance: Number(dbMembership.balance || 0),
+    activationDate: dbMembership.activation_date || null,
+    expiryDate: dbMembership.expiry_date || null,
+    birthdayPerkUsedAt: dbMembership.birthday_perk_used_at || null,
+    notes: dbMembership.notes || null,
+    createdBy: dbMembership.created_by || null,
+    createdAt: dbMembership.created_at || null,
+    status,
+  };
+}
+
+export function transformMemberships(dbRows) {
+  return (dbRows || []).map(transformMembership);
+}

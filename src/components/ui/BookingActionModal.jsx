@@ -393,15 +393,16 @@ const BookingActionModal = ({
     }
 
     // Over-limit discounts are routed to a chosen approver instead of blocked.
-    const maxPercent = userRole === 'admin' ? 50 : userRole === 'manager' ? 50 : 15;
+    const maxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
     const baseAmount = booking.baseAmount || 0;
     const effectivePercent = discountType === 'percentage'
       ? Number(discountValue)
       : baseAmount > 0 ? (Number(discountValue) / baseAmount) * 100 : 0;
 
-    // Hard ceiling: nobody can exceed 50% (staff requests included).
-    if (effectivePercent > 50) {
-      setDiscountError('Discount cannot exceed 50%.');
+    // Hard ceiling: staff requests capped at 50%, manager/admin can apply up to 100%.
+    const hardCeiling = userRole === 'staff' ? 50 : 100;
+    if (effectivePercent > hardCeiling) {
+      setDiscountError(`Discount cannot exceed ${hardCeiling}%.`);
       return;
     }
 
@@ -475,12 +476,13 @@ const BookingActionModal = ({
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
   const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
-  const discountLimitLabel = userRole === 'admin' ? '50%' : userRole === 'manager' ? '50%' : '15%';
+  const discountLimitLabel = userRole === 'admin' ? '100%' : userRole === 'manager' ? '100%' : '15%';
 
   // Request-mode derivations: a discount over the user's role limit must be
   // routed to a chosen approver instead of being applied directly.
-  const DISCOUNT_HARD_CAP = 50; // absolute ceiling for any role / request
-  const discountMaxPercent = userRole === 'admin' ? 50 : userRole === 'manager' ? 50 : 15;
+  // Staff request ceiling stays at 50%; manager/admin direct-apply ceiling is 100%.
+  const DISCOUNT_HARD_CAP = userRole === 'staff' ? 50 : 100;
+  const discountMaxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
   const discountEffPercent = discountType === 'percentage'
     ? Number(discountValue || 0)
     : (booking.baseAmount > 0 ? (Number(discountValue || 0) / booking.baseAmount) * 100 : 0);
@@ -1281,10 +1283,10 @@ const BookingActionModal = ({
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
-                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 0.50 : userRole === 'manager' ? 0.50 : 0.15))}`}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.15))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
                           discountValue && (() => {
-                            const maxP = userRole === 'admin' ? 50 : userRole === 'manager' ? 50 : 15;
+                            const maxP = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
                             const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
                             return eff > maxP;
                           })() ? 'border-error' : 'border-border'
