@@ -46,13 +46,14 @@ const VALID_TRANSITIONS = {
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 const DISCOUNT_LIMITS = {
-  staff:   0.15, // 15% — staff auto-approve; 15–50% must be requested to an approver
-  manager: 0.50, // 50%
-  admin:   0.50, // 50%
+  staff:   0.15, // 15% direct-apply; 15–50% must be requested to a manager/admin
+  manager: 1.00, // 100%
+  admin:   1.00, // 100%
 };
 
-// Absolute ceiling — no role (and no staff request) may exceed this.
-const MAX_DISCOUNT_PERCENT = 0.50;
+// Staff can request a discount up to this band (above their direct-apply limit).
+// Manager/admin direct-apply is bounded by DISCOUNT_LIMITS above.
+const STAFF_REQUEST_CEILING = 0.50;
 
 /**
  * Fetch authenticated user + profile in one call.
@@ -1014,12 +1015,13 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       return { data: null, error: { code: 'INVALID_DISCOUNT_VALUE', message: 'Discount cannot be negative or exceed base amount.' } };
     }
 
-    // Hard ceiling: no role may apply, and no staff request may exceed, 50%.
-    if (effectivePercent > MAX_DISCOUNT_PERCENT + 1e-9) {
-      return { data: null, error: { code: 'DISCOUNT_LIMIT_EXCEEDED', message: 'Discount cannot exceed 50%.' } };
+    // Hard ceiling: staff request can't exceed 50%; manager/admin can go to 100%.
+    const hardCeiling = profile.role === 'staff' ? STAFF_REQUEST_CEILING : DISCOUNT_LIMITS[profile.role];
+    if (effectivePercent > hardCeiling + 1e-9) {
+      return { data: null, error: { code: 'DISCOUNT_LIMIT_EXCEEDED', message: `Discount cannot exceed ${Math.round(hardCeiling * 100)}%.` } };
     }
 
-    // 6. Role-based limit check (exceeding sends to pending approval)
+    // 6. Role-based limit check (exceeding direct-apply sends to pending approval)
     const maxPercent = DISCOUNT_LIMITS[profile.role];
 
     // 7. Discount reason required
