@@ -208,11 +208,12 @@ Cancelled  Cancelled / No Show (terminal)
 | Role | Max Discount |
 |------|-------------|
 | staff | 15% (can request up to 50% from a manager/admin) |
-| manager | 50% |
-| admin | 50% |
+| manager | 100% |
+| admin | 100% |
 
-Hard ceiling: no role may apply, and no staff request may exceed, **50%** (enforced in
-`api.js` `MAX_DISCOUNT_PERCENT` and `BookingActionModal.jsx`).
+Hard ceiling: staff requests capped at **50%**; manager/admin direct-apply capped at
+**100%** (enforced in `api.js` `DISCOUNT_LIMITS` + `STAFF_REQUEST_CEILING` and
+`BookingActionModal.jsx`).
 
 ### PIN Login Flow
 
