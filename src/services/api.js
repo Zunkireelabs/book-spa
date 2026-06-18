@@ -3618,8 +3618,8 @@ export async function fetchServicesForManagement() {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage services.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage services.' } };
     }
 
     // Filter by user's organization for tenant isolation
@@ -3697,8 +3697,8 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can create services.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create services.' } };
     }
 
     if (!name || !name.trim()) {
@@ -3745,8 +3745,8 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can update service pricing.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update service pricing.' } };
     }
 
     // Tenant isolation: ensure service belongs to user's org
@@ -3791,8 +3791,8 @@ export async function toggleServiceActive({ serviceId, isActive }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage service status.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage service status.' } };
     }
 
     // Tenant isolation: ensure user has org
@@ -3857,9 +3857,10 @@ export async function deleteService({ serviceId }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    // Only admin can delete services (services are global, not branch-scoped)
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can delete services.' } };
+    // Manager + admin can delete services. Services are org-global, not branch-scoped,
+    // so any manager's delete affects every branch in the org. Bookings check below still applies.
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete services.' } };
     }
 
     // Tenant isolation: ensure user has org
@@ -5299,19 +5300,19 @@ export async function fetchServicesByOrgId(orgId, branchId) {
 }
 
 // ============================================================
-// Service Categories Management (Admin only)
+// Service Categories Management (Manager + Admin)
 // ============================================================
 
 /**
- * Fetch all categories for management (admin view)
+ * Fetch all categories for management (manager/admin view)
  */
 export async function fetchCategoriesForManagement() {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can manage categories.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage categories.' } };
     }
 
     // Filter by user's organization for tenant isolation
@@ -5388,8 +5389,8 @@ export async function createCategory({ name, description }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can create categories.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create categories.' } };
     }
 
     if (!name || !name.trim()) {
@@ -5439,8 +5440,8 @@ export async function updateCategory({ categoryId, name, description }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can update categories.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update categories.' } };
     }
 
     // Tenant isolation: ensure user has org
@@ -5505,8 +5506,8 @@ export async function toggleCategoryActive({ categoryId, isActive }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can toggle categories.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can toggle categories.' } };
     }
 
     // Tenant isolation: ensure user has org
@@ -5543,8 +5544,8 @@ export async function deleteCategory({ categoryId }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (profile.role !== 'admin') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can delete categories.' } };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete categories.' } };
     }
 
     // Tenant isolation: ensure user has org
