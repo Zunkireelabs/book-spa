@@ -215,14 +215,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           id: 'services',
           label: 'Services',
           path: `${basePath}?view=services`,
-          roles: ['admin'],
+          roles: ['manager', 'admin'],
           overallHidden: true
         },
         {
           id: 'categories',
           label: 'Categories',
           path: `${basePath}?view=categories`,
-          roles: ['admin'],
+          roles: ['manager', 'admin'],
           overallHidden: true
         },
         {
