@@ -1922,8 +1922,10 @@ const OperationalCalendar = ({ branchId }) => {
     return { error: null };
   };
 
-  // ── Therapist column reorder ─────────────────────────────────
-  const canReorderTherapists = ['manager', 'admin'].includes(profile?.role);
+  // ── Therapist/room column reorder ────────────────────────────
+  // Gates both onTherapistReorder and onRoomReorder below. Branch-scoped:
+  // staff can rearrange columns for their own branch only.
+  const canReorderTherapists = ['staff', 'manager', 'admin'].includes(profile?.role);
 
   const handleTherapistReorder = useCallback(async (orderedIds) => {
     if (!branchId) return;
