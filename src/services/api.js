@@ -3548,11 +3548,12 @@ export async function updateTherapistOrder({ branchId, orderedIds }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (!['manager', 'admin'].includes(profile.role)) {
+    if (!['staff', 'manager', 'admin'].includes(profile.role)) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
     }
 
-    const effectiveBranchId = profile.role === 'manager' ? profile.branch_id : branchId;
+    // Staff + manager are pinned to their own branch; only admin can reorder any branch.
+    const effectiveBranchId = profile.role === 'admin' ? branchId : profile.branch_id;
     if (!effectiveBranchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
@@ -3581,11 +3582,12 @@ export async function updateRoomOrder({ branchId, orderedIds }) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (!['manager', 'admin'].includes(profile.role)) {
+    if (!['staff', 'manager', 'admin'].includes(profile.role)) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
     }
 
-    const effectiveBranchId = profile.role === 'manager' ? profile.branch_id : branchId;
+    // Staff + manager are pinned to their own branch; only admin can reorder any branch.
+    const effectiveBranchId = profile.role === 'admin' ? branchId : profile.branch_id;
     if (!effectiveBranchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
