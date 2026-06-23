@@ -1594,11 +1594,28 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       throw updateError;
     }
 
-    // 9. Sync booking_therapists times to match the rescheduled booking
-    await supabase
-      .from('booking_therapists')
-      .update({ start_time: updated.start_time, end_time: updated.end_time })
-      .eq('booking_id', bookingId);
+    // 9. Sync booking_therapists junction. If therapist changed, replace the
+    //    junction row(s) so display reads the new therapist. Calendar reads the
+    //    therapist name from this junction when it has any rows, so leaving the
+    //    old therapist_id here causes the card to render the previous name even
+    //    though bookings.therapist_id was updated. Shared-booking reassignment
+    //    goes through assignTherapist and never reaches this path.
+    if (newTherapistId !== undefined) {
+      await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
+      if (newTherapistId !== 'unassigned' && newTherapistId !== null) {
+        await supabase.from('booking_therapists').insert({
+          booking_id: bookingId,
+          therapist_id: newTherapistId,
+          start_time: updated.start_time,
+          end_time: updated.end_time,
+        });
+      }
+    } else {
+      await supabase
+        .from('booking_therapists')
+        .update({ start_time: updated.start_time, end_time: updated.end_time })
+        .eq('booking_id', bookingId);
+    }
 
     return {
       data: {
