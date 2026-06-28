@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, pointerWithin } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import BookingActionModal from '../../../../components/ui/BookingActionModal';
@@ -55,6 +56,9 @@ function formatDateTitle(dateStr, viewMode) {
     const endStr = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     return `${startStr} – ${endStr}`;
   }
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  if (dateStr === todayStr) return 'Today';
   return d.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
@@ -148,7 +152,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
     setBookingDate(slotInfo?.day || '');
-    const slotTime = slotInfo ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}` : '';
+    const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
+      ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
+      : '';
     setBookingTime(slotTime);
     setTimeText(slotTime ? format12h(slotTime) : '');
     setBookingMode('individual');
@@ -406,6 +412,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const isOpen = !!slotInfo;
 
+  // While the quick-booking panel is open on mobile, hide the floating pill nav
+  // and FAB so they don't cover the Cancel / Create Booking buttons. The CSS rule
+  // lives in src/styles/tailwind.css (`.mobile-panel-open .js-mobile-floating-ui`).
+  useEffect(() => {
+    if (!isOpen) return;
+    document.body.classList.add('mobile-panel-open');
+    return () => document.body.classList.remove('mobile-panel-open');
+  }, [isOpen]);
+
   return (
     <>
       {/* Backdrop */}
@@ -415,7 +430,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       />
       {/* Panel */}
       <div
-        className={`fixed top-0 right-0 h-full w-[400px] z-modal bg-surface border-l border-border shadow-2xl flex flex-col transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed top-0 right-0 h-full w-full sm:w-[400px] max-w-full z-modal bg-surface border-l border-border shadow-2xl flex flex-col transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-background/50">
@@ -1065,6 +1080,8 @@ const OperationalCalendar = ({ branchId }) => {
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
   const [positionDropdownOpen, setPositionDropdownOpen] = useState(false);
   const positionDropdownRef = useRef(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Calendar data state
   const [calendarData, setCalendarData] = useState(null);
@@ -1698,6 +1715,23 @@ const OperationalCalendar = ({ branchId }) => {
     setQuickCreateSlot(null);
   }, []);
 
+  // Auto-open the Quick Booking panel when the mobile FAB navigates here with
+  // ?newBooking=1. Defaults to today + unassigned, no time. Param is stripped
+  // afterwards so refresh/back-nav doesn't re-trigger the panel.
+  useEffect(() => {
+    if (!branchId) return;
+    if (searchParams.get('newBooking') !== '1') return;
+    handleEmptySlotClick({
+      day: currentDate,
+      colType: null,
+      colId: null,
+      colName: 'Unassigned',
+    });
+    const next = new URLSearchParams(searchParams);
+    next.delete('newBooking');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, branchId, currentDate, handleEmptySlotClick, setSearchParams]);
+
   const handleQuickCreateSubmit = useCallback(async (formData) => {
     if (!branchId) return 'Missing branch info.';
     const date = formData.bookingDate;
@@ -2031,10 +2065,11 @@ const OperationalCalendar = ({ branchId }) => {
         onDragCancel={handleDragCancel}
       >
         <div className="bg-surface overflow-hidden flex flex-col h-full pb-2">
-          {/* Top toolbar */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
-            {/* Left: Navigation */}
-            <div className="flex items-center space-x-2">
+          {/* Top toolbar — stacks into 3 rows on mobile (left controls / centered date / Day+Filter),
+              single row on sm+ */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 px-3 sm:px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
+            {/* Left: Navigation (desktop only — panel button is folded into the center row on mobile) */}
+            <div className="hidden sm:flex items-center space-x-2">
               <div className="flex items-center border border-border rounded-spa overflow-hidden">
                 <button
                   onClick={goPrev}
@@ -2053,35 +2088,53 @@ const OperationalCalendar = ({ branchId }) => {
               </div>
               <button
                 onClick={goToday}
-                className="px-3 py-1.5 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
+                className="hidden sm:inline-flex px-3 py-1.5 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
               >
                 Today
               </button>
             </div>
 
-            {/* Center: Date title with navigation */}
-            <div className="flex items-center space-x-3">
+            {/* Center: Date title with navigation.
+                Mobile: 3-col grid — panel-toggle on the left, centered date group, balancing spacer on the right.
+                Desktop: plain flex row in the normal toolbar position. */}
+            <div className="grid grid-cols-[auto_1fr_auto] sm:flex items-center sm:space-x-3 w-full sm:w-auto">
+              {/* Panel toggle (mobile only) */}
               <button
-                onClick={goPrev}
-                className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
-                aria-label="Previous"
+                onClick={() => setMobileSidebarOpen(true)}
+                className="sm:hidden p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast justify-self-start"
+                aria-label="Show calendar tools"
               >
-                <Icon name="ChevronLeft" size={18} className="text-text-secondary" />
+                <Icon name="PanelLeftOpen" size={18} className="text-text-secondary" />
               </button>
-              <h2 className="font-heading font-heading-semibold text-base text-text-primary min-w-[140px] text-center">
-                {formatDateTitle(currentDate, viewMode)}
-              </h2>
-              <button
-                onClick={goNext}
-                className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
-                aria-label="Next"
-              >
-                <Icon name="ChevronRight" size={18} className="text-text-secondary" />
-              </button>
+
+              {/* Date + chevrons (centered in the middle grid column) */}
+              <div className="flex items-center justify-center space-x-3">
+                <button
+                  onClick={goPrev}
+                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  aria-label="Previous"
+                >
+                  <Icon name="ChevronLeft" size={18} className="text-text-secondary" />
+                </button>
+                <h2 className="font-heading font-heading-semibold text-sm sm:text-base text-text-primary min-w-[110px] sm:min-w-[140px] text-center">
+                  {formatDateTitle(currentDate, viewMode)}
+                </h2>
+                <button
+                  onClick={goNext}
+                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  aria-label="Next"
+                >
+                  <Icon name="ChevronRight" size={18} className="text-text-secondary" />
+                </button>
+              </div>
+
+              {/* Right-side spacer balancing the panel button so the date stays screen-centered (mobile only) */}
+              <div className="sm:hidden w-9" aria-hidden="true" />
             </div>
 
-            {/* Right: Position filter + View toggle */}
-            <div className="flex items-center space-x-3">
+            {/* Right: Position filter + View toggle
+                On mobile: own row spreading full width — Day/4-Day on the left, Position filter on the right */}
+            <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end flex-row-reverse sm:flex-row">
               {columnMode === 'therapist' && calendarPositionOptions.length > 0 && (
                 <div className="relative" ref={positionDropdownRef}>
                   <button
@@ -2150,8 +2203,20 @@ const OperationalCalendar = ({ branchId }) => {
 
           {/* Main content area: Sidebar + Grid */}
           <div className="flex flex-1 min-h-0">
-            {/* Left sidebar: Mini calendar + Legend */}
-            <div className="w-52 flex-shrink-0 border-r border-border bg-surface p-3 flex flex-col overflow-y-auto sidebar-scroll">
+            {/* Left sidebar: Mini calendar + Legend
+                - desktop (md+): always visible inline
+                - mobile: rendered inline when toggled — pushes the grid right, which scrolls horizontally */}
+            <div className={`${mobileSidebarOpen ? 'flex' : 'hidden'} md:flex w-64 md:w-52 flex-shrink-0 border-r border-border bg-surface p-3 flex-col overflow-y-auto sidebar-scroll`}>
+              {/* Mobile close button */}
+              <div className="md:hidden flex justify-end mb-2">
+                <button
+                  onClick={() => setMobileSidebarOpen(false)}
+                  className="p-1.5 rounded-spa hover:bg-background spa-transition-fast"
+                  aria-label="Hide calendar tools"
+                >
+                  <Icon name="X" size={18} className="text-text-secondary" />
+                </button>
+              </div>
               <MiniMonthCalendar
                 selectedDate={currentDate}
                 onDateSelect={setCurrentDate}
@@ -2270,7 +2335,7 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
 
             {/* Calendar grid */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-x-auto md:overflow-hidden">
               {calendarData ? (
                 <CalendarGrid
                   therapists={filteredTherapists}

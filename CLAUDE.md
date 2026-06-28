@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Project**: Zenly — Multi-tenant Booking Web App
 **Type**: React 18 + Vite SPA with Supabase backend
-**Tech Stack**: React 18, Vite 5, Tailwind CSS 3, Supabase (Postgres, Auth, RLS, Realtime), Framer Motion, Lucide Icons
-**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), FullCalendar (calendar views, resource-timeline)
+**Tech Stack**: React 18, Vite 5 (`vite.config.mjs`), Tailwind CSS 3, Supabase (Postgres, Auth, RLS, Realtime), Lucide Icons
+**Key Libraries**: date-fns (date handling), Recharts (charts), @dnd-kit (drag-and-drop), FullCalendar (calendar views, resource-timeline), posthog-js (analytics — prod only)
 
 ---
 
@@ -141,13 +141,18 @@ book-spa/
 │   │   └── ui/             # Reusable UI: Button, Input, Select, CustomSelect, FilterBar,
 │   │                       #   Modal components, StaffSidebar, CustomerHeader, StatusLegend
 │   ├── contexts/           # AuthContext → OrgContext → BranchContext → AIAssistantContext
-│   ├── lib/                # supabase.js — Supabase client singleton
+│   ├── hooks/              # useIndustry, usePersistentNotifications (Realtime feed)
+│   ├── lib/                # supabase.js (client singleton), analytics.js (PostHog wrapper)
 │   ├── pages/              # Route pages (see Routing Map below)
 │   ├── services/           # API service layer (see Service Layer below)
-│   └── styles/             # Tailwind CSS entry
+│   ├── styles/             # Tailwind CSS entry
+│   └── utils/              # periodPresets.js (date-range presets for reports)
 ├── supabase/               # Migrations and seed data
+├── scripts/                # onboard-tenant.sql — multi-industry tenant bootstrap (spa/cleaning/salon)
 ├── .claude/skills/         # Claude Code skills
 ├── Dockerfile              # Multi-stage Docker build (node → nginx)
+├── docker-compose.yml      # Production compose (Vite build args baked in)
+├── docker-compose.dev.yml  # Local container compose (uses dev-nuad.nginx.conf)
 ├── jsconfig.json           # Absolute imports: baseUrl "./src"
 └── CLAUDE.md
 ```
@@ -269,6 +274,15 @@ Frontend → POST /functions/v1/pin-login (email, pin, org_slug)
 - `formatNPR(amount)` — formats as `NPR 1,234` (Indian/Nepali locale)
 
 **Critical**: Always use `booking.bookingId` (UUID) for API calls, never `booking.id` (display number).
+
+### Analytics (`lib/analytics.js`)
+
+Thin PostHog wrapper — every export (`init / identify / reset / capture / setGroup / isFeatureEnabled`) no-ops if `VITE_POSTHOG_KEY` is unset. **Staging is intentionally silent**; production bakes the key at build time via `docker-compose.yml` build args (not GitHub Actions secrets — CI's `npm run build` is verification only; the real prod bundle is built on the prod server by `docker compose up -d --build`).
+
+- `autocapture: false`, `capture_pageview: false` — explicit captures only
+- `session_recording.maskAllInputs: true` + `[data-ph-mask]` selector for PII (email, phone, special-requests inputs in the customer flow)
+- `respect_dnt: true`
+- `phc_` project keys are publishable (same posture as Supabase `anon` keys) and safe to commit to `docker-compose.yml`
 
 ---
 

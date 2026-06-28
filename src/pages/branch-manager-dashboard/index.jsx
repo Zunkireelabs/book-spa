@@ -415,7 +415,7 @@ const BranchManagerDashboard = () => {
           onCollapseChange={setSidebarCollapsed}
         />
 
-        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : ''}`}>
+        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : 'pb-20 lg:pb-0'}`}>
           {/* Header */}
           <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
             <div className="px-4 sm:px-6 lg:px-8 py-3">
@@ -437,7 +437,7 @@ const BranchManagerDashboard = () => {
                 </div>
 
                 {/* Right: Real-time status + Role badge + New Booking + Profile */}
-                <div className="flex items-center space-x-3 flex-shrink-0">
+                <div className="flex items-center space-x-3 flex-shrink-0 ml-3">
                   {/* Real-time Status Indicator */}
                   <div
                     className="hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full bg-background border border-border"
