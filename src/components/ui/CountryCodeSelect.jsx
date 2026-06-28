@@ -142,7 +142,7 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
 
       {isOpen && (
         <div
-          className={`absolute left-0 w-[260px] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown flex flex-col max-h-[280px] ${
+          className={`absolute left-0 w-[260px] max-w-[calc(100vw-24px)] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown flex flex-col max-h-[280px] ${
             openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
         >

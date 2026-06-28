@@ -216,7 +216,8 @@ const TherapistPerformancePanel = ({ branchId }) => {
             <p className="font-body text-xs text-text-tertiary">No active therapists or bookings found for this period.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full min-w-[800px]">
               <thead>
                 <tr className="bg-background/50 border-b border-border">
@@ -315,6 +316,67 @@ const TherapistPerformancePanel = ({ branchId }) => {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile card stack */}
+          <div className="md:hidden divide-y divide-border">
+            {therapists.map((t, idx) => {
+              const rank = idx + 1;
+              return (
+                <div key={t.therapistId} className="p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full font-data font-data-medium text-xs flex-shrink-0 ${
+                        rank <= 3 ? 'bg-accent/10 text-accent' : 'bg-background text-text-tertiary'
+                      }`}>
+                        {rank}
+                      </span>
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Icon name="User" size={14} className="text-primary" />
+                      </div>
+                      <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
+                    </div>
+                    <ScoreBadge score={t.performanceScore} />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Revenue</span>
+                      <span className="font-data font-data-normal text-text-primary">NPR {t.paidRevenue.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Completed</span>
+                      <span className="font-data font-data-normal text-text-primary">
+                        {t.completedBookings}<span className="text-text-tertiary text-xs">/{t.totalAssigned}</span>
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Completion</span>
+                      <span className={`font-data font-data-normal ${
+                        t.completionRate >= 80 ? 'text-success' : t.completionRate >= 60 ? 'text-warning' : 'text-error'
+                      }`}>{t.completionRate}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Attendance</span>
+                      <span className={`font-data font-data-normal ${
+                        t.attendanceRate >= 80 ? 'text-success' : t.attendanceRate >= 60 ? 'text-warning' : 'text-error'
+                      }`}>{t.attendanceRate}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Utilization</span>
+                      <span className={`font-data font-data-normal ${
+                        t.utilizationRate >= 70 ? 'text-success' : t.utilizationRate >= 40 ? 'text-warning' : 'text-error'
+                      }`}>{t.utilizationRate}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Avg/Booking</span>
+                      <span className="font-data font-data-normal text-text-primary">NPR {t.avgRevenuePerBooking.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
       </div>
     </div>

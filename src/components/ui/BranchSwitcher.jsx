@@ -27,10 +27,10 @@ const BranchSwitcher = () => {
   if (isAdmin && branches.length > 0) {
     return (
       <div className="flex items-center gap-2">
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-pink-100 text-pink-700 whitespace-nowrap">
+        <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-pink-100 text-pink-700 whitespace-nowrap">
           Platform Admin
         </span>
-        <Icon name="Building2" size={16} className="text-text-secondary" />
+        <Icon name="Building2" size={16} className="hidden sm:inline text-text-secondary" />
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
