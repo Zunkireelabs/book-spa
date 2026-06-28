@@ -140,25 +140,25 @@ const DailyOperationalReportPanel = ({ branchId }) => {
     : null;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 min-w-0">
       {/* Header with Date Selector + Actions */}
-      <div className="bg-surface rounded-spa p-6 border border-border">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary/10 rounded-spa flex items-center justify-center">
+      <div className="bg-surface rounded-spa p-4 sm:p-6 border border-border">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 bg-primary/10 rounded-spa flex items-center justify-center flex-shrink-0">
               <Icon name="FileText" size={20} className="text-primary" />
             </div>
-            <div>
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
+            <div className="min-w-0">
+              <h2 className="font-heading font-heading-semibold text-base sm:text-lg text-text-primary truncate">
                 Daily Operational Report
               </h2>
-              <p className="text-sm text-text-secondary">
+              <p className="text-xs sm:text-sm text-text-secondary truncate">
                 {formatDate(selectedDate)}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <input
               type="date"
               value={selectedDate}
