@@ -622,10 +622,10 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         </div>
       </aside>
 
-      {/* Mobile Floating Pill Navigation — icon + label inside the pill, shrinks (and drops labels) while scrolling */}
+      {/* Mobile Floating Pill Navigation — icon + label inside the pill; subtle shrink while scrolling */}
       <nav
         className={`js-mobile-floating-ui lg:hidden fixed left-1/2 -translate-x-1/2 z-staff-sidebar bg-surface-sidebar rounded-full shadow-spa-elevated border border-border transition-all duration-200 ease-out ${
-          isScrolling ? 'bottom-3 px-1 py-1 scale-90' : 'bottom-4 px-2 py-1.5'
+          isScrolling ? 'bottom-3 px-1.5 py-1' : 'bottom-4 px-2 py-1.5'
         }`}
       >
         <div className="flex items-center gap-0.5">
@@ -637,17 +637,15 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 to={item.path}
                 aria-label={item.label}
                 className={`relative flex flex-col items-center justify-center rounded-full transition-all duration-200 ${
-                  isScrolling ? 'p-1.5 gap-0' : 'px-2.5 py-1.5 gap-0.5'
+                  isScrolling ? 'px-2 py-1 gap-0.5' : 'px-2.5 py-1.5 gap-0.5'
                 } ${
                   isActive(item.path)
                     ? 'bg-primary/10 text-primary'
                     : 'text-gray-500 hover:text-gray-900 hover:bg-background'
                 }`}
               >
-                <Icon name={item.icon} size={isScrolling ? 18 : 20} />
-                {!isScrolling && (
-                  <span className="text-[10px] leading-none font-medium">{item.label}</span>
-                )}
+                <Icon name={item.icon} size={isScrolling ? 19 : 20} />
+                <span className="text-[10px] leading-none font-medium">{item.label}</span>
                 {showBadge && (
                   <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 text-[10px] font-semibold text-white bg-error rounded-full">
                     {pendingApprovals > 9 ? '9+' : pendingApprovals}
@@ -661,15 +659,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
               aria-label="More"
               className={`flex flex-col items-center justify-center rounded-full transition-all duration-200 ${
-                isScrolling ? 'p-1.5 gap-0' : 'px-2.5 py-1.5 gap-0.5'
+                isScrolling ? 'px-2 py-1 gap-0.5' : 'px-2.5 py-1.5 gap-0.5'
               } ${
                 mobileMoreOpen ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-gray-900 hover:bg-background'
               }`}
             >
-              <Icon name="MoreHorizontal" size={isScrolling ? 18 : 20} />
-              {!isScrolling && (
-                <span className="text-[10px] leading-none font-medium">More</span>
-              )}
+              <Icon name="MoreHorizontal" size={isScrolling ? 19 : 20} />
+              <span className="text-[10px] leading-none font-medium">More</span>
             </button>
           )}
         </div>
@@ -751,10 +747,10 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           to={`${basePath}?view=calendar&newBooking=1`}
           aria-label="New Booking"
           className={`js-mobile-floating-ui lg:hidden fixed right-4 z-staff-sidebar inline-flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all duration-200 ease-out ${
-            isScrolling ? 'bottom-16 w-11 h-11' : 'bottom-20 w-14 h-14'
+            isScrolling ? 'bottom-[72px] w-[52px] h-[52px]' : 'bottom-20 w-14 h-14'
           }`}
         >
-          <Icon name="CalendarPlus" size={isScrolling ? 18 : 24} />
+          <Icon name="CalendarPlus" size={isScrolling ? 22 : 24} />
         </Link>
       )}
     </>
