@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
@@ -277,7 +278,7 @@ export async function fetchBookingCreator(bookingId) {
 // Booking Mutations (Phase 4 + Phase 6 hardened)
 // ============================================================
 
-export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti'];
+export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti', 'Membership'];
 
 // Record one or more payment tenders against a booking. Supports split payments
 // (e.g. part cash + part card) and leaving a remaining balance as a due, which is
@@ -364,21 +365,44 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       return { data: null, error: { code: 'DUE_HOLDER_REQUIRED', message: 'Enter who the remaining due is under before leaving a balance unpaid.' } };
     }
 
-    // 9. Insert tenders (notes attached to the first row)
-    const insertRows = tenderList.map((t, i) => ({
-      booking_id: bookingId,
-      amount: t.amount,
-      payment_mode: t.paymentMode,
-      recorded_by: user.id,
-      notes: i === 0 ? (notes || null) : null,
-    }));
+    // 9. Insert tenders (notes attached to the first row). Membership tenders are
+    // routed through the SECURITY DEFINER record_membership_payment RPC so the
+    // payments INSERT and the wallet deduction happen in the same transaction.
+    // Multiple Membership tenders in one submission are batched into a single
+    // wallet deduction (one ledger row) to keep the audit log tidy.
+    const membershipTenders = tenderList.filter((t) => t.paymentMode === 'Membership');
+    const otherTenders = tenderList.filter((t) => t.paymentMode !== 'Membership');
+    const insertedIds = [];
 
-    const { data: inserted, error: insertError } = await supabase
-      .from('payments')
-      .insert(insertRows)
-      .select('id');
+    if (otherTenders.length > 0) {
+      const insertRows = otherTenders.map((t, i) => ({
+        booking_id: bookingId,
+        amount: t.amount,
+        payment_mode: t.paymentMode,
+        recorded_by: user.id,
+        notes: i === 0 ? (notes || null) : null,
+      }));
+      const { data: inserted, error: insertError } = await supabase
+        .from('payments')
+        .insert(insertRows)
+        .select('id');
+      if (insertError) throw insertError;
+      insertedIds.push(...(inserted || []).map((r) => r.id));
+    }
 
-    if (insertError) throw insertError;
+    if (membershipTenders.length > 0) {
+      const membershipTotal = Math.round(
+        membershipTenders.reduce((s, t) => s + t.amount, 0) * 100
+      ) / 100;
+      const noteText = otherTenders.length === 0 ? (notes || null) : null;
+      const { data: paymentId, error: rpcError } = await supabase.rpc('record_membership_payment', {
+        p_booking_id: bookingId,
+        p_amount: membershipTotal,
+        p_notes: noteText,
+      });
+      if (rpcError) throw rpcError;
+      if (paymentId) insertedIds.push(paymentId);
+    }
 
     // 10. Maintain due_holder_name: set when a due remains, clear when fully settled
     const newDueHolder = leftover > 0 ? resolvedDueHolder : null;
@@ -398,7 +422,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     return {
       data: {
         success: true,
-        paymentIds: (inserted || []).map(r => r.id),
+        paymentIds: insertedIds,
         bookingId,
         amountPaid: tenderTotal,
         amountDue: leftover,
@@ -4127,14 +4151,38 @@ export async function fetchCustomersLightweight(branchId) {
 
     const { data, error } = await supabase
       .from('customers')
-      .select('id, full_name, phone')
+      .select(`
+        id, full_name, phone,
+        memberships (
+          id, membership_number,
+          total_deposited, balance,
+          activation_date, expiry_date,
+          tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days )
+        )
+      `)
       .eq('org_id', branch.org_id)
       .eq('is_active', true)
       .order('full_name');
 
     if (error) throw error;
 
-    return { data: data || [], error: null };
+    // Attach a `primaryMembership` to each customer (the most-recent non-depleted
+    // membership, transformed to include the computed status). Drives the
+    // membership badge in the booking-creation customer autocomplete.
+    const enriched = (data || []).map((c) => {
+      const memberships = (c.memberships || [])
+        .map((row) => transformMembership({ ...row, customer_id: c.id, org_id: branch.org_id }))
+        .filter((m) => m && m.status !== 'depleted')
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      return {
+        id: c.id,
+        full_name: c.full_name,
+        phone: c.phone,
+        primaryMembership: memberships[0] || null,
+      };
+    });
+
+    return { data: enriched, error: null };
   } catch (error) {
     console.error('[API] fetchCustomersLightweight error:', error.message);
     return { data: null, error };
@@ -5958,6 +6006,440 @@ export async function finalizePayroll({ runId }) {
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] finalizePayroll error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// MEMBERSHIPS (Phase 1+2 — migration-045-memberships.sql)
+// ============================================================
+// Two SECURITY DEFINER fns gate every write:
+//   enroll_member(p_customer_id, p_tier_id, p_initial_deposit, p_payment_mode, p_notes)
+//   record_membership_transaction(p_membership_id, p_kind, p_amount, p_payment_mode,
+//                                 p_booking_id, p_payment_id, p_notes)
+// Reads use direct selects; RLS scopes rows to caller's org. Public marketing page
+// reads membership_tiers anonymously.
+
+// Deposit/top-up payment modes (exclude 'Membership' — you can't pay a deposit with
+// your own balance). Mirrors PAYMENT_MODES above, minus 'Membership'.
+export const MEMBERSHIP_DEPOSIT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti'];
+
+// Org-wide lookup-or-create for a customer. Mirrors the identity logic embedded in
+// createBooking() (look up by org+phone first, then org+email; fall back to INSERT;
+// re-fetch on the customers_org_nphone_uniq race per migration-036). Used by walk-in
+// flows such as direct membership enrollment where there is no booking yet.
+export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email }) {
+  try {
+    if (!orgId || !branchId || !fullName) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
+    }
+    const normalizedPhone = phone ? String(phone).replace(/\D/g, '') : null;
+    const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+
+    // 1. Look up an existing customer in the org by phone.
+    let existing = null;
+    if (normalizedPhone) {
+      const { data } = await supabase
+        .from('customers')
+        .select('id, full_name, phone, email')
+        .eq('org_id', orgId)
+        .eq('phone', normalizedPhone)
+        .limit(1)
+        .maybeSingle();
+      existing = data;
+    }
+    if (!existing && normalizedEmail) {
+      const { data } = await supabase
+        .from('customers')
+        .select('id, full_name, phone, email')
+        .eq('org_id', orgId)
+        .eq('email', normalizedEmail)
+        .limit(1)
+        .maybeSingle();
+      existing = data;
+    }
+
+    if (existing) {
+      // Refresh stale fields if the staff member retyped them.
+      await supabase
+        .from('customers')
+        .update({
+          full_name: fullName,
+          phone: normalizedPhone || existing.phone,
+          email: normalizedEmail || existing.email,
+        })
+        .eq('id', existing.id);
+      return { data: { customerId: existing.id, isNew: false }, error: null };
+    }
+
+    // 2. Create a fresh customer.
+    const { data: created, error: insertErr } = await supabase
+      .from('customers')
+      .insert({
+        org_id: orgId,
+        branch_id: branchId,
+        full_name: fullName,
+        phone: normalizedPhone,
+        email: normalizedEmail,
+      })
+      .select('id')
+      .single();
+    if (created) {
+      return { data: { customerId: created.id, isNew: true }, error: null };
+    }
+
+    // 3. Race against customers_org_nphone_uniq (migration-036): re-fetch the winner.
+    if (insertErr?.code === '23505' && normalizedPhone) {
+      const { data } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('phone', normalizedPhone)
+        .limit(1)
+        .maybeSingle();
+      if (data) return { data: { customerId: data.id, isNew: false }, error: null };
+    }
+
+    throw insertErr || new Error('Customer create failed without an error code');
+  } catch (error) {
+    console.error('[API] findOrCreateCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Create a new tier in the caller's org. Admin-only via RLS on membership_tiers.
+// Caller passes a uniform shape; orgId is resolved from the authenticated profile.
+export async function createMembershipTier({
+  orgId,
+  name,
+  codePrefix,
+  advanceAmount,
+  validityDays = 365,
+  displayOrder = 0,
+  discountRules = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!orgId)       return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
+    if (!name?.trim())       return { data: null, error: { code: 'INVALID_INPUT', message: 'Tier name is required.' } };
+    if (!codePrefix?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Code prefix is required.' } };
+    const amt = Number(advanceAmount);
+    if (!(amt > 0)) return { data: null, error: { code: 'INVALID_INPUT', message: 'Advance amount must be greater than zero.' } };
+    const days = Number(validityDays);
+    if (!(days > 0)) return { data: null, error: { code: 'INVALID_INPUT', message: 'Validity days must be greater than zero.' } };
+
+    const { data, error } = await supabase
+      .from('membership_tiers')
+      .insert({
+        org_id: orgId,
+        name: name.trim(),
+        code_prefix: codePrefix.trim().toUpperCase(),
+        advance_amount: amt,
+        validity_days: days,
+        discount_rules: discountRules || {},
+        display_order: Number(displayOrder) || 0,
+        is_active: true,
+      })
+      .select('id, org_id, name, code_prefix, advance_amount, validity_days, discount_rules, display_order, is_active')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createMembershipTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateMembershipTier({ id, name, advanceAmount, validityDays, displayOrder, isActive, discountRules }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!id) return { data: null, error: { code: 'INVALID_INPUT', message: 'Tier id is required.' } };
+
+    const patch = {};
+    if (name !== undefined)          patch.name = name.trim();
+    if (advanceAmount !== undefined) patch.advance_amount = Number(advanceAmount);
+    if (validityDays !== undefined)  patch.validity_days = Number(validityDays);
+    if (displayOrder !== undefined)  patch.display_order = Number(displayOrder) || 0;
+    if (isActive !== undefined)      patch.is_active = !!isActive;
+    if (discountRules !== undefined) patch.discount_rules = discountRules || {};
+
+    const { data, error } = await supabase
+      .from('membership_tiers')
+      .update(patch)
+      .eq('id', id)
+      .select('id, org_id, name, code_prefix, advance_amount, validity_days, discount_rules, display_order, is_active')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateMembershipTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchMembershipTiers(orgId, { includeInactive = false } = {}) {
+  try {
+    let q = supabase
+      .from('membership_tiers')
+      .select('id, org_id, name, code_prefix, advance_amount, validity_days, discount_rules, display_order, is_active')
+      .order('display_order', { ascending: true });
+    if (!includeInactive) q = q.eq('is_active', true);
+    if (orgId) q = q.eq('org_id', orgId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchMembershipTiers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Returns memberships scoped to the caller's org (RLS) joined with tier + customer
+// for list rendering. Optional client-side filters: search (name/phone), statusFilter.
+export async function fetchMemberships({ search, statusFilter } = {}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('memberships')
+      .select(`
+        id, org_id, customer_id, tier_id, membership_number,
+        total_deposited, balance,
+        activation_date, expiry_date, birthday_perk_used_at,
+        notes, created_by, created_at,
+        customer:customers ( id, full_name, phone ),
+        tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
+      `)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const rows = transformMemberships(data || []);
+    const filtered = rows.filter((m) => {
+      if (statusFilter && statusFilter !== 'all' && m.status !== statusFilter) return false;
+      if (search && search.trim().length > 0) {
+        const q = search.trim().toLowerCase();
+        const name = (m.customerName || '').toLowerCase();
+        const phone = m.customerPhone || '';
+        const number = (m.membershipNumber || '').toLowerCase();
+        if (!name.includes(q) && !phone.includes(q) && !number.includes(q)) return false;
+      }
+      return true;
+    });
+    return { data: filtered, error: null };
+  } catch (error) {
+    console.error('[API] fetchMemberships error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchMembership(membershipId) {
+  try {
+    const { data, error } = await supabase
+      .from('memberships')
+      .select(`
+        id, org_id, customer_id, tier_id, membership_number,
+        total_deposited, balance,
+        activation_date, expiry_date, birthday_perk_used_at,
+        notes, created_by, created_at,
+        customer:customers ( id, full_name, phone ),
+        tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
+      `)
+      .eq('id', membershipId)
+      .single();
+    if (error) throw error;
+    return { data: transformMembership(data), error: null };
+  } catch (error) {
+    console.error('[API] fetchMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchMembershipTransactions(membershipId) {
+  try {
+    const { data, error } = await supabase
+      .from('membership_transactions')
+      .select(`
+        id, kind, amount, payment_mode, booking_id, payment_id,
+        performed_by, notes, created_at,
+        performer:users!performed_by ( id, full_name )
+      `)
+      .eq('membership_id', membershipId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchMembershipTransactions error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Fetch the most-recent membership for the customer attached to a booking.
+// Returns null in `data` if the booking has no customer (walk-in) or no
+// membership exists. Used by PaymentModal to surface the wallet option and
+// balance banner at checkout.
+export async function fetchMembershipForBooking(bookingId) {
+  try {
+    if (!bookingId) return { data: null, error: null };
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (bErr) throw bErr;
+    if (!booking?.customer_id) return { data: null, error: null };
+    return fetchMembershipForCustomer(booking.customer_id);
+  } catch (error) {
+    console.error('[API] fetchMembershipForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Fetch the active (or pending) membership for a given customer. Returns null
+// in `data` if none exists. Used by Phase 3 at the booking checkout.
+export async function fetchMembershipForCustomer(customerId) {
+  try {
+    if (!customerId) return { data: null, error: null };
+    const { data, error } = await supabase
+      .from('memberships')
+      .select(`
+        id, org_id, customer_id, tier_id, membership_number,
+        total_deposited, balance,
+        activation_date, expiry_date, birthday_perk_used_at,
+        notes, created_by, created_at,
+        customer:customers ( id, full_name, phone ),
+        tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
+      `)
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return { data: data ? transformMembership(data) : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchMembershipForCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function enrollMember({ customerId, tierId, initialDeposit, paymentMode, notes = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('enroll_member', {
+      p_customer_id: customerId,
+      p_tier_id: tierId,
+      p_initial_deposit: initialDeposit,
+      p_payment_mode: paymentMode,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_enrolled', { tier_id: tierId, initial_deposit: initialDeposit, payment_mode: paymentMode });
+    return { data: { membershipId: data }, error: null };
+  } catch (error) {
+    console.error('[API] enrollMember error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function topUpMembership({ membershipId, amount, paymentMode, notes = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('record_membership_transaction', {
+      p_membership_id: membershipId,
+      p_kind: 'deposit',
+      p_amount: amount,
+      p_payment_mode: paymentMode,
+      p_booking_id: null,
+      p_payment_id: null,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_topup', { membership_id: membershipId, amount, payment_mode: paymentMode });
+    return { data: { transactionId: data }, error: null };
+  } catch (error) {
+    console.error('[API] topUpMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Used by Phase 3 (booking checkout). `amount` is the (positive) charge; the RPC
+// stores it as a negative ledger row.
+export async function deductMembership({ membershipId, amount, bookingId = null, paymentId = null, notes = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const negativeAmount = -Math.abs(Number(amount));
+    const { data, error } = await supabase.rpc('record_membership_transaction', {
+      p_membership_id: membershipId,
+      p_kind: 'deduction',
+      p_amount: negativeAmount,
+      p_payment_mode: null,
+      p_booking_id: bookingId,
+      p_payment_id: paymentId,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_deducted', { membership_id: membershipId, amount: Math.abs(Number(amount)) });
+    return { data: { transactionId: data }, error: null };
+  } catch (error) {
+    console.error('[API] deductMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function giftBirthdayPerk({ membershipId, notes = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('record_membership_transaction', {
+      p_membership_id: membershipId,
+      p_kind: 'birthday_perk',
+      p_amount: 0,
+      p_payment_mode: null,
+      p_booking_id: null,
+      p_payment_id: null,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_birthday_perk', { membership_id: membershipId });
+    return { data: { transactionId: data }, error: null };
+  } catch (error) {
+    console.error('[API] giftBirthdayPerk error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only correction (positive OR negative amount). The DB CHECK enforces a non-zero
+// value, and the SECURITY DEFINER fn enforces the role + required note.
+export async function adjustMembership({ membershipId, amount, notes }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('record_membership_transaction', {
+      p_membership_id: membershipId,
+      p_kind: 'adjustment',
+      p_amount: amount,
+      p_payment_mode: null,
+      p_booking_id: null,
+      p_payment_id: null,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_adjusted', { membership_id: membershipId, amount });
+    return { data: { transactionId: data }, error: null };
+  } catch (error) {
+    console.error('[API] adjustMembership error:', error.message);
     return { data: null, error };
   }
 }

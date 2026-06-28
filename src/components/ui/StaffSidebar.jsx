@@ -222,6 +222,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       roles: ['admin'],
     },
     {
+      id: 'memberships',
+      label: 'Memberships',
+      icon: 'CreditCard',
+      path: `${basePath}?view=memberships`,
+      roles: ['manager', 'admin'],
+    },
+    {
       id: 'infrastructure',
       label: 'Setup',
       icon: 'Settings',
