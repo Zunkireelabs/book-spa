@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Icon from '../AppIcon';
 import CustomSelect from './CustomSelect';
 
@@ -37,6 +37,18 @@ const FilterBar = ({
   const hasTopRow = count != null || !!search;
   const hasFilterRow = presets.length > 0 || !!dateRange || filters.length > 0;
   const showMeta = !!resultCount || (hasActiveFilters && !!onClear);
+
+  // Mobile "Custom" mode — toggled when the user picks Custom from the preset
+  // dropdown. Date inputs only render on mobile while this is true (or while
+  // the parent already reports applyActive — i.e. a custom range is in effect).
+  const [mobileCustomOpen, setMobileCustomOpen] = useState(false);
+  const isMobileCustomMode = mobileCustomOpen || !!dateRange?.applyActive;
+  // Synthetic "Custom" option appended to the mobile preset dropdown when a
+  // date range picker is available. Selected when no preset is active and we're
+  // in custom mode.
+  const presetMobileValue =
+    (presets.find((p) => p.active) || {}).label
+    || (isMobileCustomMode && dateRange ? 'Custom' : '');
 
   const meta = showMeta && (
     <div className="flex items-center gap-2 ml-auto">
@@ -117,25 +129,39 @@ const FilterBar = ({
           )}
 
           {/* Preset dropdown — mobile only (collapses the pill row into one CustomSelect).
-              Compact so it sits inline with the date-range inputs + Apply on a single mobile row. */}
+              When a dateRange picker is wired, append a synthetic "Custom" option that
+              reveals the date inputs only when chosen. */}
           {presets.length > 0 && (
             <div className="sm:hidden w-[110px] flex-shrink-0">
               <CustomSelect
                 size="sm"
-                value={(presets.find((p) => p.active) || {}).label || ''}
+                value={presetMobileValue}
                 onChange={(label) => {
+                  if (label === 'Custom') {
+                    setMobileCustomOpen(true);
+                    return;
+                  }
                   const match = presets.find((p) => p.label === label);
-                  if (match) match.onClick();
+                  if (match) {
+                    setMobileCustomOpen(false);
+                    match.onClick();
+                  }
                 }}
-                options={presets.map((p) => ({ value: p.label, label: p.label }))}
+                options={[
+                  ...presets.map((p) => ({ value: p.label, label: p.label })),
+                  ...(dateRange ? [{ value: 'Custom', label: 'Custom' }] : []),
+                ]}
                 placeholder="Period"
               />
             </div>
           )}
 
-          {/* Date range inputs */}
+          {/* Date range inputs.
+              Desktop (sm+): always shown next to the preset pills.
+              Mobile (<sm): only shown when the user picked "Custom" in the dropdown
+                            or a custom range is already applied. */}
           {dateRange && (
-            <div className="flex items-center flex-wrap gap-1 sm:gap-2 flex-1 min-w-0">
+            <div className={`${isMobileCustomMode ? 'flex' : 'hidden'} sm:flex items-center flex-wrap gap-1 sm:gap-2 flex-1 min-w-0`}>
               <input
                 type="date"
                 value={dateRange.from}
