@@ -58,10 +58,10 @@ const FilterBar = ({
   );
 
   return (
-    <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-      {/* Row 1 — count chip + search */}
+    <div className={`flex flex-col bg-white rounded-lg border border-gray-200 ${className}`}>
+      {/* Row 1 — count chip + search. On mobile, swap with Row 2 so filters appear on top of the search. */}
       {hasTopRow && (
-        <div className={`flex flex-wrap items-center gap-3 p-3 ${hasFilterRow ? 'border-b border-gray-100' : ''}`}>
+        <div className={`order-2 sm:order-1 flex flex-wrap items-center gap-3 p-3 ${hasFilterRow ? 'border-t sm:border-t-0 sm:border-b border-gray-100' : ''}`}>
           {count != null && (
             <span className="hidden sm:inline-flex items-center h-9 px-3 rounded-md bg-gray-50 border border-gray-200 text-sm font-medium text-gray-600 whitespace-nowrap">
               {count.value}{count.label ? ` ${count.label}` : ''}
@@ -95,7 +95,7 @@ const FilterBar = ({
 
       {/* Row 2 — preset pills, date range, filter dropdowns */}
       {hasFilterRow && (
-        <div className="flex flex-wrap items-center gap-2 p-3">
+        <div className="order-1 sm:order-2 flex flex-wrap items-center gap-2 p-3">
           {/* Preset pill buttons — desktop only */}
           {presets.length > 0 && (
             <div className="hidden sm:flex flex-wrap items-center gap-2">
@@ -117,9 +117,9 @@ const FilterBar = ({
           )}
 
           {/* Preset dropdown — mobile only (collapses the pill row into one CustomSelect).
-              Not full-width so it sits inline with the date-range inputs. */}
+              Compact so it sits inline with the date-range inputs + Apply on a single mobile row. */}
           {presets.length > 0 && (
-            <div className="sm:hidden flex-1 min-w-[120px] max-w-[160px]">
+            <div className="sm:hidden w-[110px] flex-shrink-0">
               <CustomSelect
                 size="sm"
                 value={(presets.find((p) => p.active) || {}).label || ''}
@@ -135,28 +135,29 @@ const FilterBar = ({
 
           {/* Date range inputs */}
           {dateRange && (
-            <div className="flex items-center flex-wrap gap-2">
+            <div className="flex items-center flex-wrap gap-1 sm:gap-2 flex-1 min-w-0">
               <input
                 type="date"
                 value={dateRange.from}
                 max={dateRange.max}
                 onChange={(e) => dateRange.onFromChange(e.target.value)}
-                className="h-9 px-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="h-9 px-1.5 sm:px-2 text-xs sm:text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary min-w-0 flex-shrink"
               />
-              <span className="text-xs text-gray-400">to</span>
+              <span className="hidden sm:inline text-xs text-gray-400">to</span>
+              <span className="sm:hidden text-xs text-gray-400">–</span>
               <input
                 type="date"
                 value={dateRange.to}
                 max={dateRange.max}
                 onChange={(e) => dateRange.onToChange(e.target.value)}
-                className="h-9 px-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="h-9 px-1.5 sm:px-2 text-xs sm:text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary min-w-0 flex-shrink"
               />
               {dateRange.onApply && (
                 <button
                   type="button"
                   onClick={dateRange.onApply}
                   disabled={dateRange.applyDisabled}
-                  className={`px-3 h-9 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`px-2 sm:px-3 h-9 rounded-md text-xs sm:text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     dateRange.applyActive
                       ? 'bg-primary text-white'
                       : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
