@@ -120,7 +120,7 @@ const FilterBar = ({
                 placeholder={search.placeholder || 'Search...'}
                 value={search.value}
                 onChange={(e) => search.onChange(e.target.value)}
-                className="w-full h-9 pl-9 pr-9 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className={`w-full h-9 pl-9 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary ${search.value ? 'pr-9' : 'pr-3'}`}
                 aria-label={search.placeholder || 'Search'}
               />
               {search.value && (
