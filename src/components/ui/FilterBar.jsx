@@ -69,18 +69,51 @@ const FilterBar = ({
     </div>
   );
 
+  // On mobile, the second row only carries the date inputs + Apply (since
+  // preset pills move into the search row as a dropdown). Hide it entirely
+  // when not in custom mode and there are no `filters[]` to render.
+  const showFilterRowMobile = isMobileCustomMode || filters.length > 0;
+
+  // Mobile preset dropdown — declared once so it can render either in the
+  // search row (when a top row exists) or in the filter row (when it doesn't).
+  const mobilePresetDropdown = presets.length > 0 && (
+    <div className="sm:hidden w-[110px] flex-shrink-0">
+      <CustomSelect
+        size="sm"
+        value={presetMobileValue}
+        onChange={(label) => {
+          if (label === 'Custom') {
+            setMobileCustomOpen(true);
+            return;
+          }
+          const match = presets.find((p) => p.label === label);
+          if (match) {
+            setMobileCustomOpen(false);
+            match.onClick();
+          }
+        }}
+        options={[
+          ...presets.map((p) => ({ value: p.label, label: p.label })),
+          ...(dateRange ? [{ value: 'Custom', label: 'Custom' }] : []),
+        ]}
+        placeholder="Period"
+      />
+    </div>
+  );
+
   return (
     <div className={`flex flex-col bg-white rounded-lg border border-gray-200 ${className}`}>
-      {/* Row 1 — count chip + search. On mobile, swap with Row 2 so filters appear on top of the search. */}
+      {/* Row 1 — count chip + search + (mobile) preset dropdown.
+          Mobile layout puts the preset dropdown on the right of the search box. */}
       {hasTopRow && (
-        <div className={`order-2 sm:order-1 flex flex-wrap items-center gap-3 p-3 ${hasFilterRow ? 'border-t sm:border-t-0 sm:border-b border-gray-100' : ''}`}>
+        <div className={`flex flex-wrap items-center gap-2 sm:gap-3 p-3 ${hasFilterRow ? 'border-b border-gray-100' : ''}`}>
           {count != null && (
             <span className="hidden sm:inline-flex items-center h-9 px-3 rounded-md bg-gray-50 border border-gray-200 text-sm font-medium text-gray-600 whitespace-nowrap">
               {count.value}{count.label ? ` ${count.label}` : ''}
             </span>
           )}
           {search && (
-            <div className="relative flex-1 min-w-[200px]">
+            <div className="relative flex-1 min-w-0 sm:min-w-[200px]">
               <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
@@ -101,13 +134,16 @@ const FilterBar = ({
               )}
             </div>
           )}
+          {/* Mobile-only preset dropdown — sits to the right of the search box */}
+          {mobilePresetDropdown}
           {!hasFilterRow && meta}
         </div>
       )}
 
-      {/* Row 2 — preset pills, date range, filter dropdowns */}
+      {/* Row 2 — preset pills (desktop), date range + Apply, filter dropdowns.
+          On mobile, only renders when in Custom mode or filters[] is non-empty. */}
       {hasFilterRow && (
-        <div className="order-1 sm:order-2 flex flex-wrap items-center gap-2 p-3">
+        <div className={`${showFilterRowMobile ? 'flex' : 'hidden sm:flex'} flex-wrap items-center gap-2 p-3`}>
           {/* Preset pill buttons — desktop only */}
           {presets.length > 0 && (
             <div className="hidden sm:flex flex-wrap items-center gap-2">
@@ -128,33 +164,9 @@ const FilterBar = ({
             </div>
           )}
 
-          {/* Preset dropdown — mobile only (collapses the pill row into one CustomSelect).
-              When a dateRange picker is wired, append a synthetic "Custom" option that
-              reveals the date inputs only when chosen. */}
-          {presets.length > 0 && (
-            <div className="sm:hidden w-[110px] flex-shrink-0">
-              <CustomSelect
-                size="sm"
-                value={presetMobileValue}
-                onChange={(label) => {
-                  if (label === 'Custom') {
-                    setMobileCustomOpen(true);
-                    return;
-                  }
-                  const match = presets.find((p) => p.label === label);
-                  if (match) {
-                    setMobileCustomOpen(false);
-                    match.onClick();
-                  }
-                }}
-                options={[
-                  ...presets.map((p) => ({ value: p.label, label: p.label })),
-                  ...(dateRange ? [{ value: 'Custom', label: 'Custom' }] : []),
-                ]}
-                placeholder="Period"
-              />
-            </div>
-          )}
+          {/* Mobile preset dropdown rendered in the filter row only when there's
+              no top row to host it (rare). Normally it lives in the search row above. */}
+          {!hasTopRow && mobilePresetDropdown}
 
           {/* Date range inputs.
               Desktop (sm+): always shown next to the preset pills.
