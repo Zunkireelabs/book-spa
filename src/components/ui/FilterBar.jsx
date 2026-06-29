@@ -96,21 +96,41 @@ const FilterBar = ({
       {/* Row 2 — preset pills, date range, filter dropdowns */}
       {hasFilterRow && (
         <div className="flex flex-wrap items-center gap-2 p-3">
-          {/* Preset pill buttons */}
-          {presets.map((p) => (
-            <button
-              key={p.label}
-              type="button"
-              onClick={p.onClick}
-              className={`px-3 h-9 rounded-md text-sm font-medium transition-colors ${
-                p.active
-                  ? 'bg-primary text-white'
-                  : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+          {/* Preset pill buttons — desktop only */}
+          {presets.length > 0 && (
+            <div className="hidden sm:flex flex-wrap items-center gap-2">
+              {presets.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={p.onClick}
+                  className={`px-3 h-9 rounded-md text-sm font-medium transition-colors ${
+                    p.active
+                      ? 'bg-primary text-white'
+                      : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Preset dropdown — mobile only (collapses the pill row into one CustomSelect) */}
+          {presets.length > 0 && (
+            <div className="sm:hidden w-full min-w-[140px]">
+              <CustomSelect
+                size="sm"
+                value={(presets.find((p) => p.active) || {}).label || ''}
+                onChange={(label) => {
+                  const match = presets.find((p) => p.label === label);
+                  if (match) match.onClick();
+                }}
+                options={presets.map((p) => ({ value: p.label, label: p.label }))}
+                placeholder="Period"
+              />
+            </div>
+          )}
 
           {/* Date range inputs */}
           {dateRange && (
