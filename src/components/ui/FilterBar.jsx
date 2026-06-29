@@ -63,7 +63,7 @@ const FilterBar = ({
       {hasTopRow && (
         <div className={`flex flex-wrap items-center gap-3 p-3 ${hasFilterRow ? 'border-b border-gray-100' : ''}`}>
           {count != null && (
-            <span className="inline-flex items-center h-9 px-3 rounded-md bg-gray-50 border border-gray-200 text-sm font-medium text-gray-600 whitespace-nowrap">
+            <span className="hidden sm:inline-flex items-center h-9 px-3 rounded-md bg-gray-50 border border-gray-200 text-sm font-medium text-gray-600 whitespace-nowrap">
               {count.value}{count.label ? ` ${count.label}` : ''}
             </span>
           )}
@@ -116,9 +116,10 @@ const FilterBar = ({
             </div>
           )}
 
-          {/* Preset dropdown — mobile only (collapses the pill row into one CustomSelect) */}
+          {/* Preset dropdown — mobile only (collapses the pill row into one CustomSelect).
+              Not full-width so it sits inline with the date-range inputs. */}
           {presets.length > 0 && (
-            <div className="sm:hidden w-full min-w-[140px]">
+            <div className="sm:hidden flex-1 min-w-[120px] max-w-[160px]">
               <CustomSelect
                 size="sm"
                 value={(presets.find((p) => p.active) || {}).label || ''}
