@@ -3,15 +3,8 @@ import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import { fetchMembershipForBooking } from '../../services/api';
-
-const BASE_PAYMENT_MODES = [
-  { value: 'Cash', label: 'Cash' },
-  { value: 'Card', label: 'Card' },
-  { value: 'MobileBanking', label: 'Mobile Banking' },
-  { value: 'Cheque', label: 'Cheque' },
-  { value: 'Esewa', label: 'Esewa' },
-  { value: 'Khalti', label: 'Khalti' },
-];
+import { humanizePaymentMethod } from '../../services/paymentMethods';
+import { useOrg } from '../../contexts/OrgContext';
 
 const MEMBERSHIP_STATUS_STYLES = {
   active:   { container: 'bg-primary/5 border-primary/20',    pill: 'bg-success/10 text-success',  label: 'Active' },
@@ -34,6 +27,12 @@ const PaymentModal = ({
   isSubmitting,
   dueHolderSuggestions = [],
 }) => {
+  const { paymentMethods } = useOrg();
+  const BASE_PAYMENT_MODES = useMemo(
+    () => paymentMethods.map((m) => ({ value: m, label: humanizePaymentMethod(m) })),
+    [paymentMethods]
+  );
+
   const isBatch = additionalBookings.length > 0;
 
   const allBookings = [booking, ...additionalBookings];
@@ -54,7 +53,7 @@ const PaymentModal = ({
   const [batchMode, setBatchMode] = useState('');
 
   // --- split state ---
-  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: 'Cash' }]);
+  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: paymentMethods[0] }]);
   const [dueHolderName, setDueHolderName] = useState(booking.dueHolderName || booking.due_holder_name || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -105,7 +104,7 @@ const PaymentModal = ({
   const updateTender = (i, patch) => {
     setTenders(prev => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   };
-  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: 'Cash' }]);
+  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: paymentMethods[0] }]);
   const removeTender = (i) => setTenders(prev => prev.filter((_, idx) => idx !== i));
 
   const handleBatchSubmit = async () => {

@@ -260,6 +260,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           overallHidden: true
         },
         {
+          id: 'payment-methods',
+          label: 'Payment Methods',
+          icon: 'CreditCard',
+          path: `${basePath}?view=payment-methods`,
+          roles: ['admin'],
+          overallHidden: true
+        },
+        {
           id: 'audit',
           label: 'Audit Log',
           icon: 'History',

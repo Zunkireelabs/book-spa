@@ -4,6 +4,7 @@ import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder } from '../../../../services/api';
+import SettledDueHistoryPanel from './SettledDueHistoryPanel';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -20,6 +21,7 @@ function formatDateOnly(d) {
 const UNASSIGNED_LABEL = 'Unassigned';
 
 const OutstandingReportPanel = ({ branchId }) => {
+  const [view, setView] = useState('outstanding'); // 'outstanding' | 'settled'
   const today = getTodayISO();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +125,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     if (q) {
       list = list.filter((r) =>
         (r.customerName || '').toLowerCase().includes(q) ||
+        (r.customerPhone || '').toLowerCase().includes(q) ||
         (r.bookingNumber || '').toLowerCase().includes(q) ||
         (r.serviceName || '').toLowerCase().includes(q) ||
         r.responsible.toLowerCase().includes(q)
@@ -183,11 +186,12 @@ const OutstandingReportPanel = ({ branchId }) => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Customer', 'Responsible Person', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
+    const header = ['Customer', 'Phone', 'Responsible Person', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
     let csv = header.join(',') + '\n';
     filtered.forEach((r) => {
       csv += [
         esc(r.customerName),
+        esc(r.customerPhone),
         esc(r.responsible),
         esc(r.bookingNumber),
         esc(formatDateOnly(r.date)),
@@ -218,6 +222,32 @@ const OutstandingReportPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4">
+      {/* Tabs */}
+      <div className="border-b border-border">
+        <nav className="flex gap-6">
+          {[
+            { id: 'outstanding', label: 'Outstanding' },
+            { id: 'settled', label: 'Settled' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setView(tab.id)}
+              className={`py-2.5 px-1 border-b-2 spa-transition-fast font-body font-body-medium text-sm ${
+                view === tab.id
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {view === 'settled' ? (
+        <SettledDueHistoryPanel branchId={branchId} />
+      ) : (
+      <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -329,6 +359,7 @@ const OutstandingReportPanel = ({ branchId }) => {
                   <tr key={r.bookingId} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
                     <td className="px-4 py-3">
                       <div className="font-body font-body-medium text-sm text-text-primary">{r.customerName}</div>
+                      <div className="font-caption text-xs text-text-tertiary">{r.customerPhone || '—'}</div>
                       <div className="font-body text-xs text-text-secondary">
                         #{r.bookingNumber} · {r.serviceName} · {formatDateOnly(r.date)}
                       </div>
@@ -416,6 +447,8 @@ const OutstandingReportPanel = ({ branchId }) => {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 };

@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { getOrgPaymentMethods } from '../services/paymentMethods';
 
 const OrgContext = createContext(null);
 
@@ -12,38 +13,37 @@ export const OrgProvider = ({ children }) => {
   const [error, setError] = useState(null);
 
   // Fetch organization data
+  const loadOrg = useCallback(async () => {
+    if (!profile?.org_id) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('organizations')
+        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type')
+        .eq('id', profile.org_id)
+        .single();
+
+      if (fetchError) {
+        console.error('[OrgContext] Error fetching organization:', fetchError.message);
+        setError(fetchError.message);
+      } else {
+        setOrg(data);
+      }
+    } catch (err) {
+      console.error('[OrgContext] Unexpected error:', err.message);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [profile?.org_id]);
+
   useEffect(() => {
-    const fetchOrg = async () => {
-      if (authLoading) return;
-
-      if (!profile?.org_id) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const { data, error: fetchError } = await supabase
-          .from('organizations')
-          .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type')
-          .eq('id', profile.org_id)
-          .single();
-
-        if (fetchError) {
-          console.error('[OrgContext] Error fetching organization:', fetchError.message);
-          setError(fetchError.message);
-        } else {
-          setOrg(data);
-        }
-      } catch (err) {
-        console.error('[OrgContext] Unexpected error:', err.message);
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOrg();
-  }, [profile?.org_id, authLoading]);
+    if (authLoading) return;
+    loadOrg();
+  }, [authLoading, loadOrg]);
 
   // Fetch industry data when org loads
   useEffect(() => {
@@ -83,6 +83,8 @@ export const OrgProvider = ({ children }) => {
     orgTimezone: org?.timezone || 'Asia/Kathmandu',
     orgCurrency: org?.currency || 'NPR',
     orgSettings: org?.settings || {},
+    paymentMethods: getOrgPaymentMethods(org?.settings),
+    refreshOrg: loadOrg,
     loading: authLoading || loading,
     error,
 

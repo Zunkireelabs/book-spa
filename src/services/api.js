@@ -280,6 +280,32 @@ export async function fetchBookingCreator(bookingId) {
 
 export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti', 'Membership'];
 
+// Persists the org's admin-configured payment method list (organizations.settings
+// .paymentMethods) via a SECURITY DEFINER RPC scoped to just that key — see
+// migration-052-custom-payment-methods.sql.
+export async function updateOrgPaymentMethods(methods) {
+  const seen = new Set();
+  const cleaned = (methods || [])
+    .map((m) => (m || '').trim())
+    .filter((m) => {
+      if (!m || m.length > 40) return false;
+      const key = m.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  if (cleaned.length === 0) {
+    return { data: null, error: { code: 'EMPTY_LIST', message: 'At least one payment method is required.' } };
+  }
+
+  const { data, error } = await supabase.rpc('update_org_payment_methods', { p_methods: cleaned });
+  if (error) {
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update payment methods.' } };
+  }
+  return { data, error: null };
+}
+
 // Record one or more payment tenders against a booking. Supports split payments
 // (e.g. part cash + part card) and leaving a remaining balance as a due, which is
 // attributed to a free-typed responsible person (dueHolderName).
@@ -347,7 +373,8 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       return { data: null, error: { code: 'NO_TENDER', message: 'Enter at least one payment amount.' } };
     }
     for (const t of tenderList) {
-      if (!PAYMENT_MODES.includes(t.paymentMode)) {
+      const mode = (t.paymentMode || '').trim();
+      if (!mode || mode.length > 40) {
         return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: `Invalid payment method: ${t.paymentMode}.` } };
       }
     }
@@ -404,8 +431,10 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (paymentId) insertedIds.push(paymentId);
     }
 
-    // 10. Maintain due_holder_name: set when a due remains, clear when fully settled
-    const newDueHolder = leftover > 0 ? resolvedDueHolder : null;
+    // 10. Maintain due_holder_name: keep whoever was last responsible even once fully
+    // settled (never erase it), so it stands as a permanent "who paid this off"
+    // record for the Settled history view.
+    const newDueHolder = resolvedDueHolder || null;
     if (newDueHolder !== (booking.due_holder_name || null)) {
       const { error: updateError } = await supabase
         .from('bookings')
@@ -490,7 +519,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   try {
     let query = supabase
       .from('bookings')
-      .select('id, booking_number, customer_name, date, final_amount, payment_status, due_holder_name, service_name_snapshot')
+      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot')
       .in('payment_status', ['unpaid', 'partial'])
       .not('status', 'in', '("Cancelled","No Show")');
     if (from) query = query.gte('date', from);
@@ -529,6 +558,7 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
         bookingId: b.id,
         bookingNumber: b.booking_number,
         customerName: b.customer_name,
+        customerPhone: b.customer_phone,
         date: b.date,
         serviceName: b.service_name_snapshot || '—',
         finalAmount: Number(b.final_amount),
@@ -542,6 +572,65 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     return { data: result, error: null };
   } catch (error) {
     console.error('[API] getOutstandingByStaff error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// History of bookings that used to carry an outstanding due and have since been
+// fully paid off — who owed it, when it was settled, and which payment method(s)
+// cleared it. from/to filter by settlement date (the latest payment's created_at).
+export async function getSettledDueHistory({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, customer_phone, date, final_amount, due_holder_name, service_name_snapshot')
+      .eq('payment_status', 'paid')
+      .not('due_holder_name', 'is', null);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const all = bookings || [];
+    if (all.length === 0) return { data: [], error: null };
+
+    const bookingIds = all.map((b) => b.id);
+    const { data: payments, error: payError } = await supabase
+      .from('payments')
+      .select('booking_id, amount, payment_mode, created_at')
+      .in('booking_id', bookingIds)
+      .order('created_at', { ascending: true });
+    if (payError) throw payError;
+
+    const paymentsByBooking = {};
+    for (const p of (payments || [])) {
+      (paymentsByBooking[p.booking_id] ||= []).push(p);
+    }
+
+    let rows = all.map((b) => {
+      const tenders = paymentsByBooking[b.id] || [];
+      const settledAt = tenders.length > 0 ? tenders[tenders.length - 1].created_at : null;
+      const paymentModes = [...new Set(tenders.map((t) => t.payment_mode))];
+      return {
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        customerPhone: b.customer_phone,
+        date: b.date,
+        serviceName: b.service_name_snapshot || '—',
+        finalAmount: Number(b.final_amount),
+        dueHolderName: b.due_holder_name,
+        settledAt,
+        paymentModes,
+      };
+    }).filter((r) => r.settledAt);
+
+    if (from) rows = rows.filter((r) => r.settledAt.slice(0, 10) >= from);
+    if (to) rows = rows.filter((r) => r.settledAt.slice(0, 10) <= to);
+
+    rows.sort((a, b) => new Date(b.settledAt) - new Date(a.settledAt));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] getSettledDueHistory error:', error.message);
     return { data: null, error };
   }
 }
