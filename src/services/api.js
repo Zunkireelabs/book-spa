@@ -282,18 +282,35 @@ export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa'
 
 // Persists the org's admin-configured payment method list (organizations.settings
 // .paymentMethods) via a SECURITY DEFINER RPC scoped to just that key — see
-// migration-052-custom-payment-methods.sql.
+// migration-052-custom-payment-methods.sql. Each entry is either a plain string
+// (leaf method) or { name, subMethods: string[] } (a group, e.g. Card -> Mastercard).
+// Every name at any level is independently usable as a payment_mode value, so
+// uniqueness is enforced across the whole flattened value space.
 export async function updateOrgPaymentMethods(methods) {
   const seen = new Set();
+  const cleanName = (raw) => {
+    const name = (raw || '').trim();
+    if (!name || name.length > 40) return null;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return name;
+  };
+
   const cleaned = (methods || [])
-    .map((m) => (m || '').trim())
-    .filter((m) => {
-      if (!m || m.length > 40) return false;
-      const key = m.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    .map((m) => {
+      if (typeof m === 'string') return cleanName(m);
+      if (m && typeof m === 'object') {
+        const name = cleanName(m.name);
+        if (!name) return null;
+        const subMethods = (Array.isArray(m.subMethods) ? m.subMethods : [])
+          .map((s) => cleanName(s))
+          .filter(Boolean);
+        return subMethods.length > 0 ? { name, subMethods } : name;
+      }
+      return null;
+    })
+    .filter(Boolean);
 
   if (cleaned.length === 0) {
     return { data: null, error: { code: 'EMPTY_LIST', message: 'At least one payment method is required.' } };

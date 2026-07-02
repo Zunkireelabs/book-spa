@@ -3,7 +3,7 @@ import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import { fetchMembershipForBooking } from '../../services/api';
-import { humanizePaymentMethod } from '../../services/paymentMethods';
+import { flattenPaymentMethodOptions } from '../../services/paymentMethods';
 import { useOrg } from '../../contexts/OrgContext';
 
 const MEMBERSHIP_STATUS_STYLES = {
@@ -29,7 +29,7 @@ const PaymentModal = ({
 }) => {
   const { paymentMethods } = useOrg();
   const BASE_PAYMENT_MODES = useMemo(
-    () => paymentMethods.map((m) => ({ value: m, label: humanizePaymentMethod(m) })),
+    () => flattenPaymentMethodOptions(paymentMethods),
     [paymentMethods]
   );
 
@@ -53,7 +53,7 @@ const PaymentModal = ({
   const [batchMode, setBatchMode] = useState('');
 
   // --- split state ---
-  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: paymentMethods[0] }]);
+  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: BASE_PAYMENT_MODES[0]?.value }]);
   const [dueHolderName, setDueHolderName] = useState(booking.dueHolderName || booking.due_holder_name || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -104,7 +104,7 @@ const PaymentModal = ({
   const updateTender = (i, patch) => {
     setTenders(prev => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   };
-  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: paymentMethods[0] }]);
+  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: BASE_PAYMENT_MODES[0]?.value }]);
   const removeTender = (i) => setTenders(prev => prev.filter((_, idx) => idx !== i));
 
   const handleBatchSubmit = async () => {
