@@ -22,8 +22,10 @@ function to12h(timeStr) {
   return `${h12}:${String(m).padStart(2, '0')}${period}`;
 }
 
-// Statuses that cannot be dragged (terminal states)
-const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
+// Statuses that cannot be dragged (terminal states, plus Confirmed/In-Progress —
+// once staff confirms a booking the schedule is committed, so it locks immediately
+// rather than only once it's paid or completed).
+const NON_DRAGGABLE_STATUSES = ['Confirmed', 'In-Progress', 'Completed', 'Cancelled', 'No Show'];
 
 function formatDateLabel(dateStr) {
   if (!dateStr) return '';
@@ -50,9 +52,15 @@ function canDragBooking(booking) {
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect }) => {
   const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
-  const isLocked = booking.isLocked;
   const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);
+  // Show the padlock for every status past Pending (Confirmed, In-Progress,
+  // Completed) — matching the same statuses that are already non-draggable —
+  // plus whenever it's paid or the day's closed, regardless of status.
+  const isLocked = booking.isLocked
+    || booking.status === 'Confirmed'
+    || booking.status === 'In-Progress'
+    || booking.status === 'Completed';
 
   const cardRef = useRef(null);
   const [showPopover, setShowPopover] = useState(false);

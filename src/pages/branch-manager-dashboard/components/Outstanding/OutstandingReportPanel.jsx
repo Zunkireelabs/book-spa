@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import PaymentModal from '../../../../components/ui/PaymentModal';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
-import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder } from '../../../../services/api';
+import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, getCustomerOutstandingBalance } from '../../../../services/api';
 import SettledDueHistoryPanel from './SettledDueHistoryPanel';
 
 function formatNPR(amount) {
@@ -46,6 +47,11 @@ const OutstandingReportPanel = ({ branchId }) => {
   const [assignName, setAssignName] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
   const [showAssignSuggestions, setShowAssignSuggestions] = useState(false);
+  // row currently being paid (full row object, or null when closed)
+  const [payingRow, setPayingRow] = useState(null);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  // this customer's other outstanding bookings, auto-bundled into the same payment
+  const [otherDueBookings, setOtherDueBookings] = useState([]);
 
   const filteredAssignSuggestions = useMemo(() => {
     const q = assignName.trim().toLowerCase();
@@ -181,6 +187,42 @@ const OutstandingReportPanel = ({ branchId }) => {
     fetchDueHolderNames(branchId).then(({ data }) => {
       if (Array.isArray(data)) setSuggestions(data);
     });
+  };
+
+  const openPay = async (row) => {
+    setPayingRow(row);
+    setOtherDueBookings([]);
+    if (!row.customerPhone) return;
+    const { data } = await getCustomerOutstandingBalance({
+      customerPhone: row.customerPhone,
+      branchId,
+      excludeBookingId: row.bookingId,
+    });
+    setOtherDueBookings(data?.bookings || []);
+  };
+
+  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes }) => {
+    if (!payingRow) return { error: { message: 'No booking selected.' } };
+    setPaymentSubmitting(true);
+    // Pay the clicked row with its allocated tenders, then pay each bundled
+    // other-outstanding booking with its own allocated tenders — PaymentModal
+    // splits the entered amount across bookings and payment methods.
+    const result = await recordPayment({ bookingId: payingRow.bookingId, tenders, dueHolderName, notes });
+    if (result.error) {
+      setPaymentSubmitting(false);
+      return { error: result.error };
+    }
+    for (const alloc of (additionalAllocations || [])) {
+      await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
+    }
+    setPaymentSubmitting(false);
+    setPayingRow(null);
+    setOtherDueBookings([]);
+    await load();
+    fetchDueHolderNames(branchId).then(({ data }) => {
+      if (Array.isArray(data)) setSuggestions(data);
+    });
+    return { error: null };
   };
 
   const handleExportCSV = () => {
@@ -352,6 +394,9 @@ const OutstandingReportPanel = ({ branchId }) => {
                       Outstanding <Icon name={sortIcon('due')} size={14} />
                     </button>
                   </th>
+                  <th className="text-right px-4 py-3">
+                    <span className="font-body font-body-medium text-sm text-text-secondary">Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -431,6 +476,15 @@ const OutstandingReportPanel = ({ branchId }) => {
                     <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-warning font-semibold whitespace-nowrap">
                       {formatNPR(r.amountDue)}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => openPay(r)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-spa bg-success text-white text-xs font-body-medium hover:bg-success/90 spa-transition-fast"
+                      >
+                        <Icon name="CreditCard" size={13} />
+                        Pay
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -441,6 +495,7 @@ const OutstandingReportPanel = ({ branchId }) => {
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning whitespace-nowrap">
                     {formatNPR(totalOutstanding)}
                   </td>
+                  <td className="px-4 py-3" />
                 </tr>
               </tfoot>
             </table>
@@ -448,6 +503,24 @@ const OutstandingReportPanel = ({ branchId }) => {
         )}
       </div>
       </>
+      )}
+
+      {payingRow && (
+        <PaymentModal
+          booking={{
+            bookingId: payingRow.bookingId,
+            booking_number: payingRow.bookingNumber,
+            finalAmount: payingRow.finalAmount,
+            amountPaid: payingRow.amountPaid,
+            service: payingRow.serviceName,
+            dueHolderName: payingRow.isUnassigned ? '' : payingRow.responsible,
+          }}
+          additionalBookings={otherDueBookings}
+          dueHolderSuggestions={suggestions}
+          onConfirm={handleRecordPayment}
+          onClose={() => { setPayingRow(null); setOtherDueBookings([]); }}
+          isSubmitting={paymentSubmitting}
+        />
       )}
     </div>
   );

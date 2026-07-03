@@ -33,6 +33,12 @@ const PaymentMethodsPanel = () => {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(new Set());
+  const [editingSub, setEditingSub] = useState(null); // { parentIndex, subIndex }
+  const [subEditName, setSubEditName] = useState('');
+  const [subEditError, setSubEditError] = useState(null);
+  const [subSaving, setSubSaving] = useState(false);
+  const [confirmDeleteSub, setConfirmDeleteSub] = useState(null); // { parentIndex, subIndex }
+  const [deletingSub, setDeletingSub] = useState(false);
 
   const toggleExpanded = (index) => {
     setExpanded((prev) => {
@@ -136,6 +142,72 @@ const PaymentMethodsPanel = () => {
     setDeleting(false);
   };
 
+  const handleOpenEditSub = (parentIndex, subIndex) => {
+    const subs = entrySubMethods(paymentMethods[parentIndex]);
+    setEditingSub({ parentIndex, subIndex });
+    setSubEditName(subs[subIndex]);
+    setSubEditError(null);
+  };
+
+  const handleSaveSub = async () => {
+    if (!editingSub) return;
+    const { parentIndex, subIndex } = editingSub;
+    const trimmed = subEditName.trim();
+    if (!trimmed) {
+      setSubEditError('Sub-option name is required.');
+      return;
+    }
+    if (trimmed.length > 40) {
+      setSubEditError('Sub-option name must be 40 characters or fewer.');
+      return;
+    }
+    const subs = entrySubMethods(paymentMethods[parentIndex]);
+    const duplicate = subs.some((s, i) => i !== subIndex && s.toLowerCase() === trimmed.toLowerCase());
+    if (duplicate) {
+      setSubEditError('That sub-option already exists.');
+      return;
+    }
+
+    const nextSubs = [...subs];
+    nextSubs[subIndex] = trimmed;
+    const nextMethods = [...paymentMethods];
+    nextMethods[parentIndex] = { name: entryName(paymentMethods[parentIndex]), subMethods: nextSubs };
+
+    setSubSaving(true);
+    setSubEditError(null);
+    const result = await updateOrgPaymentMethods(nextMethods);
+    if (result.error) {
+      setSubEditError(result.error.message || 'Save failed.');
+    } else {
+      setEditingSub(null);
+      await refreshOrg();
+    }
+    setSubSaving(false);
+  };
+
+  const handleDeleteSub = async () => {
+    if (!confirmDeleteSub) return;
+    const { parentIndex, subIndex } = confirmDeleteSub;
+    setDeletingSub(true);
+    setError(null);
+
+    const subs = entrySubMethods(paymentMethods[parentIndex]);
+    const nextSubs = subs.filter((_, i) => i !== subIndex);
+    const parentName = entryName(paymentMethods[parentIndex]);
+    const nextMethods = [...paymentMethods];
+    nextMethods[parentIndex] = nextSubs.length > 0 ? { name: parentName, subMethods: nextSubs } : parentName;
+
+    const result = await updateOrgPaymentMethods(nextMethods);
+    if (result.error) {
+      setError(result.error.message || 'Delete failed.');
+    } else {
+      await refreshOrg();
+    }
+
+    setConfirmDeleteSub(null);
+    setDeletingSub(false);
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -161,7 +233,7 @@ const PaymentMethodsPanel = () => {
       )}
 
       {/* List */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
         {paymentMethods.map((method, index) => {
           const label = entryName(method);
           const subs = entrySubMethods(method);
@@ -208,14 +280,30 @@ const PaymentMethodsPanel = () => {
                 </div>
               </div>
               {subs.length > 0 && isExpanded && (
-                <div className="px-4 pb-4 border-t border-border pt-3 flex flex-wrap gap-1.5">
-                  {subs.map((sub) => (
-                    <span
+                <div className="px-4 pb-4 border-t border-border pt-3 space-y-2">
+                  {subs.map((sub, subIndex) => (
+                    <div
                       key={sub}
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption bg-primary/5 text-text-secondary border border-border"
+                      className="flex items-center justify-between gap-2 pl-3 pr-1.5 py-2 rounded-spa border border-border bg-background"
                     >
-                      {sub}
-                    </span>
+                      <span className="font-body text-sm text-text-primary truncate">{sub}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleOpenEditSub(index, subIndex)}
+                          className="p-1.5 rounded hover:bg-surface spa-transition-fast text-text-secondary hover:text-text-primary"
+                          title="Edit"
+                        >
+                          <Icon name="Pencil" size={14} />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteSub({ parentIndex: index, subIndex })}
+                          className="p-1.5 rounded hover:bg-error/10 spa-transition-fast text-text-secondary hover:text-error"
+                          title="Delete"
+                        >
+                          <Icon name="Trash2" size={14} />
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -331,6 +419,70 @@ const PaymentMethodsPanel = () => {
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
               <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Sub-option Modal */}
+      {editingSub && (
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !subSaving && setEditingSub(null)}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Edit Sub-option</h3>
+              <button onClick={() => setEditingSub(null)} className="p-1 rounded hover:bg-background">
+                <Icon name="X" size={20} className="text-text-secondary" />
+              </button>
+            </div>
+
+            {subEditError && (
+              <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                <Icon name="AlertCircle" size={16} />
+                <span>{subEditError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="block font-body font-body-medium text-sm text-text-primary">Sub-option Name</label>
+              <Input
+                value={subEditName}
+                onChange={(e) => setSubEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleSaveSub(); }
+                }}
+                placeholder="e.g. Mastercard"
+                maxLength={40}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditingSub(null)} disabled={subSaving}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={handleSaveSub} loading={subSaving}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Sub-option Confirmation Dialog */}
+      {confirmDeleteSub && (
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !deletingSub && setConfirmDeleteSub(null)}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
+                <Icon name="Trash2" size={20} className="text-error" />
+              </div>
+              <div>
+                <h3 className="font-heading font-heading-semibold text-text-primary">Delete Sub-option?</h3>
+                <p className="font-body text-sm text-text-secondary">
+                  "{entrySubMethods(paymentMethods[confirmDeleteSub.parentIndex])[confirmDeleteSub.subIndex]}" will
+                  no longer be offered when recording payments. Past payments already recorded with it are unaffected.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteSub(null)} disabled={deletingSub}>Cancel</Button>
+              <Button variant="danger" size="sm" onClick={handleDeleteSub} loading={deletingSub}>Delete</Button>
             </div>
           </div>
         </div>

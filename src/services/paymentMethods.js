@@ -37,21 +37,13 @@ export function humanizePaymentMethod(value) {
   return KNOWN_LABELS[value] || value;
 }
 
-export function flattenPaymentMethodOptions(paymentMethods) {
-  const options = [];
-  (paymentMethods || []).forEach((m) => {
-    if (typeof m === 'string') {
-      options.push({ value: m, label: humanizePaymentMethod(m) });
-      return;
-    }
-    if (m && typeof m === 'object' && m.name) {
-      const subMethods = m.subMethods || [];
-      if (subMethods.length > 0) {
-        subMethods.forEach((sub) => options.push({ value: sub, label: sub }));
-      } else {
-        options.push({ value: m.name, label: humanizePaymentMethod(m.name) });
-      }
-    }
+// Two-level tree for the hierarchical payment-method selector: top-level entries,
+// each optionally carrying its own drill-down subMethods list. A group with no
+// subMethods is a selectable leaf (nothing more specific to pick).
+export function buildPaymentMethodTree(paymentMethods) {
+  return (paymentMethods || []).map((m) => {
+    if (typeof m === 'string') return { value: m, label: humanizePaymentMethod(m) };
+    const subMethods = (m.subMethods || []).map((s) => ({ value: s, label: s }));
+    return { value: m.name, label: humanizePaymentMethod(m.name), subMethods };
   });
-  return options;
 }

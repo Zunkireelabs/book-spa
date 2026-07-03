@@ -593,6 +593,77 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   }
 }
 
+// One customer's total outstanding balance (unpaid + partial), across all dates —
+// used to warn staff of a returning customer's previous due at booking time, and
+// to bundle a customer's other outstanding bookings into a single payment.
+// Matches on phone alone — phone numbers are unique per customer, while names
+// aren't (two different customers can share a name), so phone is the reliable
+// identifier here. Compared normalized (reduced to its last 10 digits) rather
+// than as an exact string, since the same real customer is often recorded with
+// slightly different phone formatting (with/without country code) across visits.
+// customerName is accepted but purely cosmetic — it is never used to filter.
+export async function getCustomerOutstandingBalance({ customerPhone, branchId, excludeBookingId } = {}) {
+  try {
+    const phone = (customerPhone || '').trim();
+    if (!phone) return { data: { totalDue: 0, bookingCount: 0, bookings: [] }, error: null };
+
+    const normalizedPhone = phone.replace(/\D/g, '').slice(-10);
+    if (normalizedPhone.length < 10) return { data: { totalDue: 0, bookingCount: 0, bookings: [] }, error: null };
+
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, service_name_snapshot')
+      .in('payment_status', ['unpaid', 'partial'])
+      .not('status', 'in', '("Cancelled","No Show")');
+    if (excludeBookingId) query = query.neq('id', excludeBookingId);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const all = (bookings || []).filter((b) => {
+      const bPhone = (b.customer_phone || '').replace(/\D/g, '').slice(-10);
+      return bPhone.length === 10 && bPhone === normalizedPhone;
+    });
+    const bookingIds = all.map(b => b.id);
+    const paidMap = {};
+    if (bookingIds.length > 0) {
+      const { data: payments, error: payError } = await supabase
+        .from('payments')
+        .select('booking_id, amount')
+        .in('booking_id', bookingIds);
+      if (payError) throw payError;
+      for (const p of (payments || [])) {
+        paidMap[p.booking_id] = (paidMap[p.booking_id] || 0) + Number(p.amount);
+      }
+    }
+
+    let totalDue = 0;
+    const dueBookings = [];
+    for (const b of all) {
+      const collected = paidMap[b.id] || 0;
+      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
+      if (due <= 0) continue;
+      totalDue = Math.round((totalDue + due) * 100) / 100;
+      dueBookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        customerName: b.customer_name,
+        date: b.date,
+        serviceName: b.service_name_snapshot || '—',
+        finalAmount: Number(b.final_amount),
+        amountPaid: collected,
+        amountDue: due,
+        paymentStatus: b.payment_status,
+      });
+    }
+
+    return { data: { totalDue, bookingCount: dueBookings.length, bookings: dueBookings }, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerOutstandingBalance error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // History of bookings that used to carry an outstanding due and have since been
 // fully paid off — who owed it, when it was settled, and which payment method(s)
 // cleared it. from/to filter by settlement date (the latest payment's created_at).

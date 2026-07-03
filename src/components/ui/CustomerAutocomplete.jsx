@@ -18,6 +18,7 @@ const CustomerAutocomplete = ({
   placeholder = searchBy === 'phone' ? '98XXXXXXXX' : 'Enter customer name',
   inputClassName,
   inputRef: externalRef,
+  onBlur,
 }) => {
   const [customers, setCustomers] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -121,6 +122,7 @@ const CustomerAutocomplete = ({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+        onBlur={onBlur}
         required
         placeholder={placeholder}
         className={inputClassName || "w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"}

@@ -4,7 +4,7 @@ import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
@@ -91,11 +91,16 @@ const BookingActionModal = ({
   // Who created this booking (lazy-loaded on open)
   const [creator, setCreator] = useState(null);
 
-  // Multi-payment/discount: related unpaid bookings for same customer
+  // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
-  const [selectedPaymentIds, setSelectedPaymentIds] = useState(new Set());
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
+
+  // Previous due: this customer's outstanding balance from earlier visits (any date),
+  // separate from `relatedBookings` (same-day services, used by the Discount tab).
+  // Pre-selected by default so it's bundled into payment automatically.
+  const [previousDueBookings, setPreviousDueBookings] = useState([]);
+  const [selectedPreviousDueIds, setSelectedPreviousDueIds] = useState(new Set());
 
   // Load due-holder name suggestions for the split-payment typeahead.
   useEffect(() => {
@@ -139,13 +144,27 @@ const BookingActionModal = ({
         excludeBookingId: booking.bookingId,
       }).then(result => {
         setRelatedBookings(result.data || []);
-        setSelectedPaymentIds(new Set());
         setSelectedDiscountIds(new Set([booking.bookingId]));
         setSelectedApprover('');
         setDiscountSuccess(false);
       });
     }
-  }, [activeTab, booking?.bookingId, booking?.paymentStatus]);
+    if (activeTab === 'payment' && booking?.customerPhone) {
+      getCustomerOutstandingBalance({
+        customerPhone: booking.customerPhone,
+        branchId,
+        excludeBookingId: booking.bookingId,
+      }).then(result => {
+        const bookings = result.data?.bookings || [];
+        setPreviousDueBookings(bookings);
+        // Auto-bundled by default — staff can uncheck individual items.
+        setSelectedPreviousDueIds(new Set(bookings.map(b => b.bookingId)));
+      });
+    } else if (activeTab === 'payment') {
+      setPreviousDueBookings([]);
+      setSelectedPreviousDueIds(new Set());
+    }
+  }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId]);
 
   // Load who created this booking when the modal opens
   useEffect(() => {
@@ -354,23 +373,21 @@ const BookingActionModal = ({
     }
   };
 
-  const handlePaymentConfirm = async ({ tenders, paymentMode, dueHolderName, notes: paymentNotes }) => {
+  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     try {
-      // Pay the current booking. Split mode forwards tenders + dueHolderName;
-      // batch mode forwards a single paymentMode (full amount per booking).
-      const result = await onRecordPayment(booking.bookingId, { tenders, paymentMode, dueHolderName, notes: paymentNotes });
+      const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes });
       if (result?.error) return result;
 
-      // Batch: pay any selected additional bookings in full with the same mode.
-      const additionalIds = [...selectedPaymentIds];
-      for (const rbId of additionalIds) {
-        await onRecordPayment(rbId, { paymentMode, notes: paymentNotes });
+      // Pay each bundled previous-due booking with its own allocated tenders
+      // (PaymentModal splits the entered amount across bookings and methods).
+      for (const alloc of (additionalAllocations || [])) {
+        await onRecordPayment(alloc.bookingId, { tenders: alloc.tenders, notes: paymentNotes });
       }
 
       setShowPaymentModal(false);
-      setSelectedPaymentIds(new Set());
+      setSelectedPreviousDueIds(new Set());
       onClose();
       return result;
     } finally {
@@ -1417,10 +1434,10 @@ const BookingActionModal = ({
 
             {/* Payment Tab */}
             {activeTab === 'payment' && (() => {
-              const combinedTotal = (booking.finalAmount || 0) +
-                relatedBookings
-                  .filter(rb => selectedPaymentIds.has(rb.id))
-                  .reduce((sum, rb) => sum + Number(rb.final_amount || rb.base_amount || 0), 0);
+              const selectedPreviousDue = previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId));
+              const previousDueTotal = selectedPreviousDue.reduce((sum, pb) => sum + Number(pb.amountDue || 0), 0);
+              const combinedTotal = (booking.finalAmount || 0) + previousDueTotal;
+              const selectedCount = selectedPreviousDueIds.size;
 
               return (
               <div className="space-y-4 sm:space-y-6">
@@ -1430,7 +1447,7 @@ const BookingActionModal = ({
 
                 {/* Current booking */}
                 <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
-                  {relatedBookings.length > 0 && (
+                  {previousDueBookings.length > 0 && (
                     <div className="flex items-center gap-2 mb-1">
                       <Icon name="CheckSquare" size={14} className="text-primary" />
                       <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
@@ -1447,7 +1464,7 @@ const BookingActionModal = ({
                     </div>
                   )}
                   <div className="flex items-center justify-between border-t border-border pt-2">
-                    <span className="font-body font-body-medium text-xs text-text-primary">{relatedBookings.length > 0 ? 'Subtotal' : 'Final Amount'}</span>
+                    <span className="font-body font-body-medium text-xs text-text-primary">{previousDueBookings.length > 0 ? 'Subtotal' : 'Final Amount'}</span>
                     <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
                 </div>
@@ -1457,50 +1474,44 @@ const BookingActionModal = ({
                   <div className="flex items-start space-x-2 px-3 py-2.5 rounded-spa bg-warning/5 border border-warning/20">
                     <Icon name="Info" size={14} className="text-warning flex-shrink-0 mt-0.5" />
                     <span className="font-body font-body-normal text-xs sm:text-sm text-warning">
-                      {relatedBookings.length > 0
-                        ? `Confirm or complete the bookings before recording payment. Once they're confirmed, this and ${relatedBookings.length} related service${relatedBookings.length > 1 ? 's' : ''} for ${booking.customerName} can be selected and paid together here.`
-                        : 'Confirm or complete this booking before recording payment.'}
+                      Confirm or complete this booking before recording payment.
                     </span>
                   </div>
                 )}
 
-                {/* Related unpaid bookings */}
-                {relatedBookings.length > 0 && canPay && (
+                {/* Previous due — this customer's outstanding balance from earlier visits,
+                    bundled in by default so it's collected together with this booking */}
+                {previousDueBookings.length > 0 && canPay && (
                   <div className="space-y-2">
-                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase">
-                      Other unpaid services for {booking.customerName}
+                    <label className="font-body font-body-medium text-xs text-warning uppercase flex items-center gap-1.5">
+                      <Icon name="AlertCircle" size={13} />
+                      Previous due for {booking.customerName}
                     </label>
-                    <div className="border border-border rounded-spa divide-y divide-border overflow-hidden">
-                      {relatedBookings.map(rb => {
-                        const isChecked = selectedPaymentIds.has(rb.id);
-                        const rbFinal = Number(rb.final_amount || rb.base_amount || 0);
-                        const rbDiscount = Number(rb.discount_amount || 0);
+                    <div className="border border-warning/20 rounded-spa divide-y divide-border overflow-hidden">
+                      {previousDueBookings.map(pb => {
+                        const isChecked = selectedPreviousDueIds.has(pb.bookingId);
                         return (
-                          <label key={rb.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-background/50 ${isChecked ? 'bg-primary/5' : ''}`}>
+                          <label key={pb.bookingId} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-background/50 ${isChecked ? 'bg-warning/5' : ''}`}>
                             <input
                               type="checkbox"
                               checked={isChecked}
                               onChange={(e) => {
-                                setSelectedPaymentIds(prev => {
+                                setSelectedPreviousDueIds(prev => {
                                   const next = new Set(prev);
-                                  if (e.target.checked) next.add(rb.id);
-                                  else next.delete(rb.id);
+                                  if (e.target.checked) next.add(pb.bookingId);
+                                  else next.delete(pb.bookingId);
                                   return next;
                                 });
                               }}
                               className="text-primary focus:ring-primary w-4 h-4 rounded"
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
-                              <div className="font-caption text-xs text-text-secondary flex flex-wrap gap-x-1">
-                                <span>{to12h(rb.start_time)}{rb.end_time ? ` – ${to12h(rb.end_time)}` : ''}</span>
-                                {rb.therapist?.name && <span>· {rb.therapist.name}</span>}
-                                {rb.room?.name && <span>· {rb.room.name}</span>}
-                                <span>· {rb.booking_number}</span>
-                                {rbDiscount > 0 && <span className="text-error">(-NPR {rbDiscount.toLocaleString('en-IN')})</span>}
+                              <div className="font-body text-sm text-text-primary">{pb.serviceName}</div>
+                              <div className="font-caption text-xs text-text-secondary">
+                                #{pb.bookingNumber} · {pb.date}
                               </div>
                             </div>
-                            <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {rbFinal.toLocaleString('en-IN')}</span>
+                            <span className="font-data text-sm text-warning flex-shrink-0">NPR {Number(pb.amountDue).toLocaleString('en-IN')}</span>
                           </label>
                         );
                       })}
@@ -1508,12 +1519,12 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Combined total */}
-                {selectedPaymentIds.size > 0 && (
+                {/* Grand total */}
+                {selectedCount > 0 && (
                   <div className="bg-primary/5 border border-primary/20 rounded-spa p-3">
                     <div className="flex items-center justify-between">
                       <span className="font-body font-body-medium text-sm text-text-primary">
-                        Combined Total ({1 + selectedPaymentIds.size} services)
+                        Grand Total ({1 + selectedCount} services)
                       </span>
                       <span className="font-data font-data-medium text-base text-primary">
                         NPR {combinedTotal.toLocaleString('en-IN')}
@@ -1538,7 +1549,7 @@ const BookingActionModal = ({
                     iconPosition="left"
                     className="w-full sm:w-auto min-h-[44px]"
                   >
-                    {selectedPaymentIds.size > 0 ? `Pay ${1 + selectedPaymentIds.size} Services` : 'Record Payment'}
+                    {selectedCount > 0 ? `Pay ${1 + selectedCount} Services` : 'Record Payment'}
                   </Button>
                 )}
                 {booking.paymentStatus === 'paid' && (
@@ -1746,7 +1757,7 @@ const BookingActionModal = ({
             amountPaid: booking.amountPaid,
             dueHolderName: booking.dueHolderName,
           }}
-          additionalBookings={relatedBookings.filter(rb => selectedPaymentIds.has(rb.id))}
+          additionalBookings={previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId))}
           dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handlePaymentConfirm}
           onClose={() => setShowPaymentModal(false)}

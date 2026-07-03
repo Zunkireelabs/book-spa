@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
-import { fetchServices, createBooking } from '../../../services/api';
+import { fetchServices, createBooking, getCustomerOutstandingBalance } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 
 const StaffBookingForm = ({ onBookingCreated }) => {
@@ -23,6 +23,11 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerGender, setCustomerGender] = useState('');
   const [specialRequests, setSpecialRequests] = useState('');
+
+  // Previous-due reminder — set when this customer's phone matches an existing
+  // outstanding balance from an earlier visit. Non-blocking: staff can still
+  // proceed with the booking; the due gets bundled into payment collection later.
+  const [previousDue, setPreviousDue] = useState(null);
 
   // Submit state
   const [submitting, setSubmitting] = useState(false);
@@ -100,6 +105,19 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     onBookingCreated?.();
   };
 
+  const checkPreviousDue = async () => {
+    const digits = customerPhone.replace(/\D/g, '');
+    if (digits.length < 7) {
+      setPreviousDue(null);
+      return;
+    }
+    const { data } = await getCustomerOutstandingBalance({
+      customerPhone: `${customerCountryCode}${digits}`,
+      branchId,
+    });
+    setPreviousDue(data && data.totalDue > 0 ? data : null);
+  };
+
   const resetForm = () => {
     setStep(1);
     setSelectedService(null);
@@ -113,6 +131,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setSpecialRequests('');
     setError(null);
     setCreatedBooking(null);
+    setPreviousDue(null);
   };
 
   const canProceed = () => {
@@ -320,6 +339,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                     type="tel"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                    onBlur={checkPreviousDue}
                     placeholder="9800000000"
                     className="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
@@ -339,6 +359,18 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                 />
               </div>
             </div>
+
+            {previousDue && (
+              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <Icon name="AlertTriangle" size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-800">
+                  <span className="font-medium">{customerName.trim() || 'This customer'}</span> has an outstanding
+                  balance — NPR {previousDue.totalDue.toLocaleString('en-IN')} across {previousDue.bookingCount} earlier
+                  booking{previousDue.bookingCount > 1 ? 's' : ''}. You'll be able to collect it together with this
+                  booking's payment.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
