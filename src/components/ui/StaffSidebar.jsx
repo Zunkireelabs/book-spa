@@ -111,6 +111,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['staff', 'manager', 'admin']
         },
         {
+          id: 'collect-payment',
+          label: 'Collect Payment',
+          icon: 'CreditCard',
+          path: `${basePath}?view=collect-payment`,
+          roles: ['staff']
+        },
+        {
           id: 'new-booking',
           label: 'New Booking',
           icon: 'CalendarPlus',
