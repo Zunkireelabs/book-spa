@@ -27,6 +27,9 @@ function formatCreatedAt(iso) {
   });
 }
 
+// Rooms that are self-service experiences — no therapist needed (Thamel branch hotfix)
+const THERAPIST_OPTIONAL_ROOM_NAMES = ['JACUZZI', 'SAUNA', 'STEAM'];
+
 // Status badge styles
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -55,7 +58,7 @@ const BookingActionModal = ({
   defaultNewBookingMode,
   userRole = 'staff'
 }) => {
-  const { branchId } = useBranch();
+  const { branchId, branchName } = useBranch();
   const [activeTab, setActiveTab] = useState('details');
   const [selectedTherapists, setSelectedTherapists] = useState([]);
   const [therapistSearch, setTherapistSearch] = useState('');
@@ -469,6 +472,11 @@ const BookingActionModal = ({
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
+  // Thamel hotfix: Jacuzzi/Sauna/Steam are self-service rooms — no therapist needed
+  const selectedRoomObj = rooms.find(r => r.id === selectedRoom);
+  const isTherapistOptional = branchName?.trim().toLowerCase() === 'thamel'
+    && THERAPIST_OPTIONAL_ROOM_NAMES.includes(selectedRoomObj?.name?.trim().toUpperCase());
+
   const nextStatuses = getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
@@ -864,6 +872,11 @@ const BookingActionModal = ({
                   <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                     Therapist
                   </h3>
+                  {isTherapistOptional && (
+                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                      Optional for {selectedRoomObj?.name} — self-service room, no therapist required.
+                    </p>
+                  )}
                   {therapists.length === 0 ? (
                     <p className="font-body font-body-normal text-sm text-text-secondary">No therapists available.</p>
                   ) : (
@@ -1719,7 +1732,7 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleAssignTherapist}
                       loading={isLoading}
-                      disabled={selectedTherapists.length === 0}
+                      disabled={selectedTherapists.length === 0 && !isTherapistOptional}
                       className="min-h-[44px] sm:min-h-0"
                     >
                       Save Assignment
