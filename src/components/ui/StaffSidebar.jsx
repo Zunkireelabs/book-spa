@@ -5,6 +5,7 @@ import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { fetchPendingApprovalCount } from 'services/api';
+import { MEMBERSHIP_ENABLED } from 'lib/featureFlags';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
@@ -228,13 +229,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       path: `${basePath}?view=payroll`,
       roles: ['admin', 'admin_viewer'],
     },
-    {
+    ...(MEMBERSHIP_ENABLED ? [{
       id: 'memberships',
       label: 'Memberships',
       icon: 'CreditCard',
       path: `${basePath}?view=memberships`,
       roles: ['manager', 'admin'],
-    },
+    }] : []),
     {
       id: 'infrastructure',
       label: 'Setup',

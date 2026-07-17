@@ -8,6 +8,7 @@ services:
         VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuemNja3pmbXBib2Vxa2t0bXd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjMzNjcsImV4cCI6MjA5Mjk5OTM2N30.AUyPbLIajgf6iYLPdaiLsrFTY0-Xp5EqudlXB3ZuuTQ
         VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY:-}
         VITE_POSTHOG_HOST: ${VITE_POSTHOG_HOST:-https://us.i.posthog.com}
+        VITE_ENABLE_MEMBERSHIP: "true"
     container_name: nuad-thai-dev
     restart: unless-stopped
     healthcheck:
