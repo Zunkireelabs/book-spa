@@ -47,9 +47,10 @@ const VALID_TRANSITIONS = {
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 const DISCOUNT_LIMITS = {
-  staff:   0.15, // 15% direct-apply; 15–50% must be requested to a manager/admin
-  manager: 1.00, // 100%
-  admin:   1.00, // 100%
+  staff:        0.15, // 15% direct-apply; 15–50% must be requested to a manager/admin
+  manager:      1.00, // 100%
+  admin:        1.00, // 100%
+  admin_viewer: 0,    // view-only role — RLS blocks writes regardless, this is just a safe default
 };
 
 // Staff can request a discount up to this band (above their direct-apply limit).

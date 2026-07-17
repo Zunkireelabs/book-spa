@@ -40,7 +40,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const userRole = profile?.role || propRole || 'staff';
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
-  const isManagerOrAdmin = ['manager', 'admin'].includes(userRole);
+  const isManagerOrAdmin = ['manager', 'admin', 'admin_viewer'].includes(userRole);
 
   // Pending discount-approval count for the badge on "Dashboard".
   // Only approvers (manager/admin) can receive requests; re-check on branch
@@ -88,27 +88,27 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Dashboard',
       icon: 'LayoutDashboard',
       path: basePath,
-      roles: ['staff', 'manager', 'admin']
+      roles: ['staff', 'manager', 'admin', 'admin_viewer']
     },
     {
       id: 'operations',
       label: 'Operations',
       icon: 'ClipboardList',
-      roles: ['staff', 'manager', 'admin'],
+      roles: ['staff', 'manager', 'admin', 'admin_viewer'],
       children: [
         {
           id: 'bookings',
           label: 'Bookings',
           icon: 'BookOpen',
           path: `${basePath}?view=bookings`,
-          roles: ['staff', 'manager', 'admin']
+          roles: ['staff', 'manager', 'admin', 'admin_viewer']
         },
         {
           id: 'calendar',
           label: 'Calendar',
           icon: 'Calendar',
           path: `${basePath}?view=calendar`,
-          roles: ['staff', 'manager', 'admin']
+          roles: ['staff', 'manager', 'admin', 'admin_viewer']
         },
         {
           id: 'collect-payment',
@@ -122,7 +122,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: 'New Booking',
           icon: 'CalendarPlus',
           path: `${basePath}?view=new-booking`,
-          roles: ['staff', 'manager', 'admin'],
+          roles: ['staff', 'manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
       ]
@@ -132,69 +132,69 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Customers',
       icon: 'Users',
       path: `${basePath}?view=customers`,
-      roles: ['manager', 'admin']
+      roles: ['manager', 'admin', 'admin_viewer']
     },
     {
       id: 'insights',
       label: 'Reports',
       icon: 'BarChart3',
-      roles: ['manager', 'admin'],
+      roles: ['manager', 'admin', 'admin_viewer'],
       children: [
         {
           id: 'reports',
           label: 'Daily Report',
           icon: 'FileText',
           path: `${basePath}?view=reports`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'performance',
           label: 'Performance',
           icon: 'TrendingUp',
           path: `${basePath}?view=performance`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'discounts',
           label: 'Discounts Report',
           icon: 'Percent',
           path: `${basePath}?view=discounts`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'attendance-report',
           label: 'Attendance Report',
           icon: 'CalendarCheck',
           path: `${basePath}?view=attendance-report`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'attendance-calendar',
           label: 'Attendance Calendar',
           icon: 'CalendarDays',
           path: orgSlug ? `/${orgSlug}/attendance-calendar` : '/attendance-calendar',
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'transfer-report',
           label: 'Transfer Report',
           icon: 'ArrowRightLeft',
           path: `${basePath}?view=transfer-report`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'outstanding',
           label: 'Outstanding Report',
           icon: 'AlertCircle',
           path: `${basePath}?view=outstanding`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'referrals',
           label: 'Referrals Report',
           icon: 'UserPlus',
           path: `${basePath}?view=referrals`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
       ]
     },
@@ -202,21 +202,21 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'staff-mgmt',
       label: 'Staff',
       icon: 'UserCog',
-      roles: ['manager', 'admin'],
+      roles: ['manager', 'admin', 'admin_viewer'],
       children: [
         {
           id: 'therapists',
           label: staffLabelPlural,
           icon: 'Users',
           path: `${basePath}?view=therapists`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'attendance',
           label: 'Attendance',
           icon: 'Clock',
           path: `${basePath}?view=attendance`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
       ]
@@ -226,7 +226,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Payroll',
       icon: 'Wallet',
       path: `${basePath}?view=payroll`,
-      roles: ['admin'],
+      roles: ['admin', 'admin_viewer'],
     },
     {
       id: 'memberships',
@@ -239,7 +239,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'infrastructure',
       label: 'Setup',
       icon: 'Settings',
-      roles: ['manager', 'admin'],
+      roles: ['manager', 'admin', 'admin_viewer'],
       children: [
         // Only show rooms/locations for industries that use them
         ...(enableRooms ? [{
@@ -247,7 +247,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: locationLabelPlural,
           icon: 'DoorOpen',
           path: `${basePath}?view=rooms`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         }] : []),
         {
@@ -255,7 +255,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: 'Services',
           icon: 'Sparkles',
           path: `${basePath}?view=services`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
         {
@@ -263,7 +263,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: 'Categories',
           icon: 'Tags',
           path: `${basePath}?view=categories`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
         {
@@ -279,7 +279,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: 'Audit Log',
           icon: 'History',
           path: `${basePath}?view=audit`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
       ]
     },
