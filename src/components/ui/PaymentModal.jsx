@@ -1,17 +1,21 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
-import CustomSelect from './CustomSelect';
+import PaymentMethodSelector from './PaymentMethodSelector';
 import { fetchMembershipForBooking } from '../../services/api';
+import { buildPaymentMethodTree } from '../../services/paymentMethods';
+import { useOrg } from '../../contexts/OrgContext';
 
-const BASE_PAYMENT_MODES = [
-  { value: 'Cash', label: 'Cash' },
-  { value: 'Card', label: 'Card' },
-  { value: 'MobileBanking', label: 'Mobile Banking' },
-  { value: 'Cheque', label: 'Cheque' },
-  { value: 'Esewa', label: 'Esewa' },
-  { value: 'Khalti', label: 'Khalti' },
-];
+// First immediately-selectable leaf value in the tree — a plain method, or a
+// group's first sub-method (the group name itself isn't selectable once it has
+// sub-methods). Used to seed the default tender payment mode.
+function firstLeafValue(tree) {
+  for (const item of tree) {
+    if (!item.subMethods || item.subMethods.length === 0) return item.value;
+    if (item.subMethods.length > 0) return item.subMethods[0].value;
+  }
+  return undefined;
+}
 
 const MEMBERSHIP_STATUS_STYLES = {
   active:   { container: 'bg-primary/5 border-primary/20',    pill: 'bg-success/10 text-success',  label: 'Active' },
@@ -34,27 +38,39 @@ const PaymentModal = ({
   isSubmitting,
   dueHolderSuggestions = [],
 }) => {
-  const isBatch = additionalBookings.length > 0;
-
-  const allBookings = [booking, ...additionalBookings];
-  const totalFinal = allBookings.reduce(
-    (s, b) => s + Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0), 0
+  const { paymentMethods } = useOrg();
+  const PAYMENT_TREE = useMemo(
+    () => buildPaymentMethodTree(paymentMethods),
+    [paymentMethods]
   );
 
-  // Single-booking split context
+  const hasPreviousDue = additionalBookings.length > 0;
+
+  // Remaining balance for any booking-like object — prefers a precomputed amountDue
+  // (e.g. from getCustomerOutstandingBalance) and otherwise derives it from
+  // final_amount minus whatever's already been paid, so a partially-paid bundled
+  // booking is charged its true remainder, not its full original amount.
+  const bookingRemaining = (b) => {
+    if (b.amountDue !== undefined && b.amountDue !== null) return Number(b.amountDue);
+    const already = Number(b.amountPaid ?? b.amount_paid ?? 0);
+    const final = Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0);
+    return Math.max(round2(final - already), 0);
+  };
+
   const finalAmount = Number(booking.final_amount || booking.finalAmount || 0);
   const alreadyPaid = round2(booking.amountPaid || booking.amount_paid || 0);
   const remaining = round2(Math.max(finalAmount - alreadyPaid, 0));
 
-  // --- shared state ---
+  const additionalRemaining = round2(additionalBookings.reduce((s, b) => s + bookingRemaining(b), 0));
+  const grandTotal = round2(remaining + additionalRemaining);
+
   const [notes, setNotes] = useState('');
   const [error, setError] = useState(null);
 
-  // --- batch state ---
-  const [batchMode, setBatchMode] = useState('');
-
-  // --- split state ---
-  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: 'Cash' }]);
+  // Split payment — one or more tenders, always available (even when a previous
+  // due is bundled in) so staff can pay across multiple methods or leave part
+  // unpaid, rather than being forced into a single payment mode for everything.
+  const [tenders, setTenders] = useState([{ amount: String(grandTotal || ''), paymentMode: firstLeafValue(PAYMENT_TREE) }]);
   const [dueHolderName, setDueHolderName] = useState(booking.dueHolderName || booking.due_holder_name || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -62,22 +78,21 @@ const PaymentModal = ({
   const [membership, setMembership] = useState(null);
   const bookingId = booking.bookingId || booking.id;
   useEffect(() => {
-    if (!bookingId || isBatch) return;
+    if (!bookingId) return;
     let cancelled = false;
     (async () => {
       const { data } = await fetchMembershipForBooking(bookingId);
       if (!cancelled) setMembership(data || null);
     })();
     return () => { cancelled = true; };
-  }, [bookingId, isBatch]);
+  }, [bookingId]);
 
-  // The Membership option is added to the mode dropdown only when there's a
+  // The Membership option is added to the mode selector only when there's a
   // wallet attached to this booking's customer AND the wallet still has balance.
   const membershipUsable = membership && membership.balance > 0 && membership.status !== 'depleted';
-  const paymentModeOptions = useMemo(() => {
-    if (!membershipUsable) return BASE_PAYMENT_MODES;
-    return [...BASE_PAYMENT_MODES, { value: 'Membership', label: `Membership (${membership.tierName})` }];
-  }, [membershipUsable, membership]);
+  const membershipLeaf = membershipUsable
+    ? { value: 'Membership', label: `Membership (${membership.tierName})` }
+    : null;
 
   // How much of the Membership wallet is already committed by other tenders in
   // this submission. Used to cap each Membership tender input.
@@ -93,7 +108,7 @@ const PaymentModal = ({
     () => round2(tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0)),
     [tenders]
   );
-  const leftover = round2(Math.max(remaining - entered, 0));
+  const leftover = round2(Math.max(grandTotal - entered, 0));
 
   const filteredSuggestions = useMemo(() => {
     const q = dueHolderName.trim().toLowerCase();
@@ -105,26 +120,52 @@ const PaymentModal = ({
   const updateTender = (i, patch) => {
     setTenders(prev => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   };
-  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: 'Cash' }]);
+  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: firstLeafValue(PAYMENT_TREE) }]);
   const removeTender = (i) => setTenders(prev => prev.filter((_, idx) => idx !== i));
 
-  const handleBatchSubmit = async () => {
-    if (!batchMode) {
-      setError('Please select a payment mode.');
-      return;
+  // Waterfall-allocate the entered tenders: the primary booking first (up to its
+  // own remaining — this is the only place a partial "leave as due" applies), then
+  // each additional/previous-due booking in listed order, fully or not at all —
+  // an additional booking is never left partially paid, it's either fully covered
+  // by what's left in the pool or skipped (stays untouched, still fully due).
+  const allocateTenders = (cleanedTenders) => {
+    const pool = cleanedTenders.map(t => ({ ...t }));
+    let idx = 0;
+    const poolRemaining = () => round2(pool.slice(idx).reduce((s, t) => s + t.amount, 0));
+    const take = (target) => {
+      const consumed = [];
+      let needed = target;
+      while (needed > 0.001 && idx < pool.length) {
+        const t = pool[idx];
+        const amt = Math.min(t.amount, needed);
+        if (amt > 0) {
+          consumed.push({ amount: round2(amt), paymentMode: t.paymentMode });
+          t.amount = round2(t.amount - amt);
+          needed = round2(needed - amt);
+        }
+        if (t.amount <= 0.001) idx++;
+      }
+      return consumed;
+    };
+
+    const primaryTenders = take(remaining);
+    const additionalAllocations = [];
+    for (const pb of additionalBookings) {
+      const need = bookingRemaining(pb);
+      if (poolRemaining() + 0.001 >= need) {
+        additionalAllocations.push({ bookingId: pb.bookingId, tenders: take(need) });
+      }
     }
-    setError(null);
-    const result = await onConfirm({ paymentMode: batchMode, notes });
-    if (result?.error) setError(result.error.message || 'Failed to record payment.');
+    return { primaryTenders, additionalAllocations };
   };
 
-  const handleSplitSubmit = async () => {
+  const handleSubmit = async () => {
     if (entered <= 0) {
       setError('Enter a payment amount.');
       return;
     }
-    if (entered > remaining) {
-      setError(`Entered amount (${formatNPR(entered)}) exceeds the remaining balance (${formatNPR(remaining)}).`);
+    if (entered > grandTotal) {
+      setError(`Entered amount (${formatNPR(entered)}) exceeds the total due (${formatNPR(grandTotal)}).`);
       return;
     }
     if (leftover > 0 && !dueHolderName.trim()) {
@@ -139,8 +180,10 @@ const PaymentModal = ({
     const cleanedTenders = tenders
       .filter(t => Number(t.amount) > 0)
       .map(t => ({ amount: round2(t.amount), paymentMode: t.paymentMode }));
+    const { primaryTenders, additionalAllocations } = allocateTenders(cleanedTenders);
     const result = await onConfirm({
-      tenders: cleanedTenders,
+      tenders: primaryTenders,
+      additionalAllocations,
       dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
       notes,
     });
@@ -182,28 +225,36 @@ const PaymentModal = ({
               Payment Summary
             </h4>
             <div className="space-y-2">
-              {allBookings.map((b, i) => (
-                <div key={b.id || b.bookingId || i} className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary truncate pr-2">
-                    {b.service?.name || b.service || 'Service'}
-                  </span>
-                  <span className="font-body font-body-medium text-sm text-text-primary flex-shrink-0">
-                    {formatNPR(Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0))}
-                  </span>
-                </div>
-              ))}
-              {!isBatch && alreadyPaid > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="font-body font-body-normal text-sm text-text-secondary truncate pr-2">
+                  {booking.service?.name || booking.service || 'This booking'}
+                </span>
+                <span className="font-body font-body-medium text-sm text-text-primary flex-shrink-0">
+                  {formatNPR(remaining)}
+                </span>
+              </div>
+              {!hasPreviousDue && alreadyPaid > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="font-body font-body-normal text-sm text-text-secondary">Already paid</span>
                   <span className="font-body font-body-medium text-sm text-success">- {formatNPR(alreadyPaid)}</span>
                 </div>
               )}
+              {hasPreviousDue && (
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-normal text-sm text-warning">
+                    Previous due ({additionalBookings.length})
+                  </span>
+                  <span className="font-body font-body-medium text-sm text-warning flex-shrink-0">
+                    {formatNPR(additionalRemaining)}
+                  </span>
+                </div>
+              )}
               <div className="border-t border-border pt-2 flex items-center justify-between">
                 <span className="font-body font-body-semibold text-base text-text-primary">
-                  {isBatch ? 'Total Due' : 'Balance Due'}
+                  {hasPreviousDue ? 'Total Due' : 'Balance Due'}
                 </span>
                 <span className="font-heading font-heading-semibold text-lg text-success">
-                  {formatNPR(isBatch ? totalFinal : remaining)}
+                  {formatNPR(grandTotal)}
                 </span>
               </div>
             </div>
@@ -211,7 +262,7 @@ const PaymentModal = ({
 
           {/* Membership wallet banner (Phase 3) — surfaces when this booking's
               customer has a wallet. Active = primary color, lapsed = warning, depleted = gray. */}
-          {!isBatch && membership && (() => {
+          {membership && (() => {
             const styleKey = membership.status || 'pending';
             const styles = MEMBERSHIP_STATUS_STYLES[styleKey] || MEMBERSHIP_STATUS_STYLES.pending;
             return (
@@ -249,21 +300,8 @@ const PaymentModal = ({
             );
           })()}
 
-          {isBatch ? (
-            /* Batch pay — single method, full amount per booking */
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Payment Mode</label>
-              <CustomSelect
-                options={BASE_PAYMENT_MODES}
-                value={batchMode}
-                onChange={setBatchMode}
-                placeholder="Select payment mode..."
-                size="md"
-              />
-            </div>
-          ) : (
-            /* Split payment — one or more tenders */
-            <div className="space-y-3">
+          {/* Split payment — one or more tenders, even when a previous due is bundled in */}
+          <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="block font-body font-body-medium text-sm text-text-primary">
                   Payment Method{tenders.length > 1 ? 's' : ''}
@@ -283,9 +321,10 @@ const PaymentModal = ({
                 return (
                   <div key={i} className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <div className="w-32 flex-shrink-0">
-                        <CustomSelect
-                          options={paymentModeOptions}
+                      <div className="w-36 flex-shrink-0">
+                        <PaymentMethodSelector
+                          paymentMethods={paymentMethods}
+                          extraLeaf={membershipLeaf}
                           value={t.paymentMode}
                           onChange={(v) => updateTender(i, { paymentMode: v })}
                           size="md"
@@ -369,7 +408,6 @@ const PaymentModal = ({
                 </div>
               )}
             </div>
-          )}
 
           {/* Notes */}
           <div className="space-y-1">
@@ -401,13 +439,13 @@ const PaymentModal = ({
           </Button>
           <Button
             variant="success"
-            onClick={isBatch ? handleBatchSubmit : handleSplitSubmit}
+            onClick={handleSubmit}
             loading={isSubmitting}
-            disabled={isBatch ? !batchMode : entered <= 0}
+            disabled={entered <= 0}
             iconName="Check"
             iconPosition="left"
           >
-            {!isBatch && leftover > 0 ? 'Record & Leave Due' : 'Confirm Payment'}
+            {leftover > 0 ? 'Record & Leave Due' : 'Confirm Payment'}
           </Button>
         </div>
       </div>

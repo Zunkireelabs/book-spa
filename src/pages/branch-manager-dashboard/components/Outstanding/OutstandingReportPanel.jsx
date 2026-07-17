@@ -2,8 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import PaymentModal from '../../../../components/ui/PaymentModal';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
-import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder } from '../../../../services/api';
+import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, getCustomerOutstandingBalance } from '../../../../services/api';
+import SettledDueHistoryPanel from './SettledDueHistoryPanel';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -20,6 +22,7 @@ function formatDateOnly(d) {
 const UNASSIGNED_LABEL = 'Unassigned';
 
 const OutstandingReportPanel = ({ branchId }) => {
+  const [view, setView] = useState('outstanding'); // 'outstanding' | 'settled'
   const today = getTodayISO();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +47,11 @@ const OutstandingReportPanel = ({ branchId }) => {
   const [assignName, setAssignName] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
   const [showAssignSuggestions, setShowAssignSuggestions] = useState(false);
+  // row currently being paid (full row object, or null when closed)
+  const [payingRow, setPayingRow] = useState(null);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  // this customer's other outstanding bookings, auto-bundled into the same payment
+  const [otherDueBookings, setOtherDueBookings] = useState([]);
 
   const filteredAssignSuggestions = useMemo(() => {
     const q = assignName.trim().toLowerCase();
@@ -123,6 +131,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     if (q) {
       list = list.filter((r) =>
         (r.customerName || '').toLowerCase().includes(q) ||
+        (r.customerPhone || '').toLowerCase().includes(q) ||
         (r.bookingNumber || '').toLowerCase().includes(q) ||
         (r.serviceName || '').toLowerCase().includes(q) ||
         r.responsible.toLowerCase().includes(q)
@@ -180,14 +189,51 @@ const OutstandingReportPanel = ({ branchId }) => {
     });
   };
 
+  const openPay = async (row) => {
+    setPayingRow(row);
+    setOtherDueBookings([]);
+    if (!row.customerPhone) return;
+    const { data } = await getCustomerOutstandingBalance({
+      customerPhone: row.customerPhone,
+      branchId,
+      excludeBookingId: row.bookingId,
+    });
+    setOtherDueBookings(data?.bookings || []);
+  };
+
+  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes }) => {
+    if (!payingRow) return { error: { message: 'No booking selected.' } };
+    setPaymentSubmitting(true);
+    // Pay the clicked row with its allocated tenders, then pay each bundled
+    // other-outstanding booking with its own allocated tenders — PaymentModal
+    // splits the entered amount across bookings and payment methods.
+    const result = await recordPayment({ bookingId: payingRow.bookingId, tenders, dueHolderName, notes });
+    if (result.error) {
+      setPaymentSubmitting(false);
+      return { error: result.error };
+    }
+    for (const alloc of (additionalAllocations || [])) {
+      await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
+    }
+    setPaymentSubmitting(false);
+    setPayingRow(null);
+    setOtherDueBookings([]);
+    await load();
+    fetchDueHolderNames(branchId).then(({ data }) => {
+      if (Array.isArray(data)) setSuggestions(data);
+    });
+    return { error: null };
+  };
+
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Customer', 'Responsible Person', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
+    const header = ['Customer', 'Phone', 'Responsible Person', 'Booking #', 'Date', 'Service', 'Final', 'Paid', 'Outstanding', 'Status'];
     let csv = header.join(',') + '\n';
     filtered.forEach((r) => {
       csv += [
         esc(r.customerName),
+        esc(r.customerPhone),
         esc(r.responsible),
         esc(r.bookingNumber),
         esc(formatDateOnly(r.date)),
@@ -218,6 +264,32 @@ const OutstandingReportPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4">
+      {/* Tabs */}
+      <div className="border-b border-border">
+        <nav className="flex gap-6">
+          {[
+            { id: 'outstanding', label: 'Outstanding' },
+            { id: 'settled', label: 'Settled' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setView(tab.id)}
+              className={`py-2.5 px-1 border-b-2 spa-transition-fast font-body font-body-medium text-sm ${
+                view === tab.id
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {view === 'settled' ? (
+        <SettledDueHistoryPanel branchId={branchId} />
+      ) : (
+      <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -322,6 +394,9 @@ const OutstandingReportPanel = ({ branchId }) => {
                       Outstanding <Icon name={sortIcon('due')} size={14} />
                     </button>
                   </th>
+                  <th className="text-right px-4 py-3">
+                    <span className="font-body font-body-medium text-sm text-text-secondary">Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -329,6 +404,7 @@ const OutstandingReportPanel = ({ branchId }) => {
                   <tr key={r.bookingId} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
                     <td className="px-4 py-3">
                       <div className="font-body font-body-medium text-sm text-text-primary">{r.customerName}</div>
+                      <div className="font-caption text-xs text-text-tertiary">{r.customerPhone || '—'}</div>
                       <div className="font-body text-xs text-text-secondary">
                         #{r.bookingNumber} · {r.serviceName} · {formatDateOnly(r.date)}
                       </div>
@@ -400,6 +476,15 @@ const OutstandingReportPanel = ({ branchId }) => {
                     <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-warning font-semibold whitespace-nowrap">
                       {formatNPR(r.amountDue)}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => openPay(r)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-spa bg-success text-white text-xs font-body-medium hover:bg-success/90 spa-transition-fast"
+                      >
+                        <Icon name="CreditCard" size={13} />
+                        Pay
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -410,12 +495,33 @@ const OutstandingReportPanel = ({ branchId }) => {
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning whitespace-nowrap">
                     {formatNPR(totalOutstanding)}
                   </td>
+                  <td className="px-4 py-3" />
                 </tr>
               </tfoot>
             </table>
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {payingRow && (
+        <PaymentModal
+          booking={{
+            bookingId: payingRow.bookingId,
+            booking_number: payingRow.bookingNumber,
+            finalAmount: payingRow.finalAmount,
+            amountPaid: payingRow.amountPaid,
+            service: payingRow.serviceName,
+            dueHolderName: payingRow.isUnassigned ? '' : payingRow.responsible,
+          }}
+          additionalBookings={otherDueBookings}
+          dueHolderSuggestions={suggestions}
+          onConfirm={handleRecordPayment}
+          onClose={() => { setPayingRow(null); setOtherDueBookings([]); }}
+          isSubmitting={paymentSubmitting}
+        />
+      )}
     </div>
   );
 };

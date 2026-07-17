@@ -111,6 +111,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['staff', 'manager', 'admin', 'admin_viewer']
         },
         {
+          id: 'collect-payment',
+          label: 'Collect Payment',
+          icon: 'CreditCard',
+          path: `${basePath}?view=collect-payment`,
+          roles: ['staff']
+        },
+        {
           id: 'new-booking',
           label: 'New Booking',
           icon: 'CalendarPlus',
@@ -257,6 +264,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           icon: 'Tags',
           path: `${basePath}?view=categories`,
           roles: ['manager', 'admin', 'admin_viewer'],
+          overallHidden: true
+        },
+        {
+          id: 'payment-methods',
+          label: 'Payment Methods',
+          icon: 'CreditCard',
+          path: `${basePath}?view=payment-methods`,
+          roles: ['admin'],
           overallHidden: true
         },
         {
