@@ -164,8 +164,8 @@ const PaymentMethodSelector = ({
         createPortal(
           <div
             ref={flyoutRef}
-            className="fixed w-32 max-w-[60vw] bg-surface border border-border rounded-spa shadow-spa-elevated p-1 animate-fade-in"
-            style={{ top: submenuPos.top, left: submenuPos.left, zIndex: 1200 }}
+            className="fixed z-notification w-32 max-w-[60vw] bg-surface border border-border rounded-spa shadow-spa-elevated p-1 animate-fade-in"
+            style={{ top: submenuPos.top, left: submenuPos.left }}
           >
             {activeGroupItem.subMethods.map((sub) => {
               const isSubSelected = String(value) === String(sub.value);

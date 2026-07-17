@@ -159,6 +159,10 @@ const BookingActionModal = ({
         setPreviousDueBookings(bookings);
         // Auto-bundled by default — staff can uncheck individual items.
         setSelectedPreviousDueIds(new Set(bookings.map(b => b.bookingId)));
+      }).catch(err => {
+        console.error('[BookingActionModal] getCustomerOutstandingBalance failed:', err.message);
+        setPreviousDueBookings([]);
+        setSelectedPreviousDueIds(new Set());
       });
     } else if (activeTab === 'payment') {
       setPreviousDueBookings([]);
