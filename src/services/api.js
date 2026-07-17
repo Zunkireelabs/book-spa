@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
+import { MEMBERSHIP_ENABLED } from '../lib/featureFlags';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -4327,17 +4328,23 @@ export async function fetchCustomersLightweight(branchId) {
       .single();
     if (branchErr) throw branchErr;
 
-    const { data, error } = await supabase
-      .from('customers')
-      .select(`
-        id, full_name, phone,
+    // The embedded `memberships` relation must only be requested when the
+    // feature is enabled — on production the memberships/membership_tiers
+    // tables don't exist, and an embedded-relation select referencing an
+    // unresolvable FK hard-errors the whole query, not just this field.
+    const membershipSelect = MEMBERSHIP_ENABLED
+      ? `,
         memberships (
           id, membership_number,
           total_deposited, balance,
           activation_date, expiry_date,
           tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days )
-        )
-      `)
+        )`
+      : '';
+
+    const { data, error } = await supabase
+      .from('customers')
+      .select(`id, full_name, phone${membershipSelect}`)
       .eq('org_id', branch.org_id)
       .eq('is_active', true)
       .order('full_name');
@@ -4348,10 +4355,12 @@ export async function fetchCustomersLightweight(branchId) {
     // membership, transformed to include the computed status). Drives the
     // membership badge in the booking-creation customer autocomplete.
     const enriched = (data || []).map((c) => {
-      const memberships = (c.memberships || [])
-        .map((row) => transformMembership({ ...row, customer_id: c.id, org_id: branch.org_id }))
-        .filter((m) => m && m.status !== 'depleted')
-        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      const memberships = MEMBERSHIP_ENABLED
+        ? (c.memberships || [])
+            .map((row) => transformMembership({ ...row, customer_id: c.id, org_id: branch.org_id }))
+            .filter((m) => m && m.status !== 'depleted')
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+        : [];
       return {
         id: c.id,
         full_name: c.full_name,

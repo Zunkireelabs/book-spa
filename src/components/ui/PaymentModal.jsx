@@ -5,6 +5,7 @@ import PaymentMethodSelector from './PaymentMethodSelector';
 import { fetchMembershipForBooking } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { useOrg } from '../../contexts/OrgContext';
+import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
 
 // First immediately-selectable leaf value in the tree — a plain method, or a
 // group's first sub-method (the group name itself isn't selectable once it has
@@ -78,7 +79,7 @@ const PaymentModal = ({
   const [membership, setMembership] = useState(null);
   const bookingId = booking.bookingId || booking.id;
   useEffect(() => {
-    if (!bookingId) return;
+    if (!MEMBERSHIP_ENABLED || !bookingId) return;
     let cancelled = false;
     (async () => {
       const { data } = await fetchMembershipForBooking(bookingId);
