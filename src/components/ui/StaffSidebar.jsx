@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { fetchPendingApprovalCount } from 'services/api';
+import { MEMBERSHIP_ENABLED } from 'lib/featureFlags';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
@@ -15,6 +16,24 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const scrollTimeoutRef = useRef(null);
+
+  // Shrink the floating mobile nav + FAB while the user is actively scrolling
+  // any scrollable container on the page. `capture: true` catches scroll events
+  // from nested scrollers (e.g. the calendar grid) that don't bubble to window.
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolling(true);
+      clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = setTimeout(() => setIsScrolling(false), 300);
+    };
+    document.addEventListener('scroll', handleScroll, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener('scroll', handleScroll, { capture: true });
+      clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
   const [expandedItems, setExpandedItems] = useState(['operations']); // Default expanded
 
   // World Cup 2026 — show the logo-kicks-football animation through July 20, 2026 (Nepal time).
@@ -22,7 +41,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const userRole = profile?.role || propRole || 'staff';
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
-  const isManagerOrAdmin = ['manager', 'admin'].includes(userRole);
+  const isManagerOrAdmin = ['manager', 'admin', 'admin_viewer'].includes(userRole);
 
   // Pending discount-approval count for the badge on "Dashboard".
   // Only approvers (manager/admin) can receive requests; re-check on branch
@@ -70,31 +89,41 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Dashboard',
       icon: 'LayoutDashboard',
       path: basePath,
-      roles: ['staff', 'manager', 'admin']
+      roles: ['staff', 'manager', 'admin', 'admin_viewer']
     },
     {
       id: 'operations',
       label: 'Operations',
       icon: 'ClipboardList',
-      roles: ['staff', 'manager', 'admin'],
+      roles: ['staff', 'manager', 'admin', 'admin_viewer'],
       children: [
         {
           id: 'bookings',
           label: 'Bookings',
+          icon: 'BookOpen',
           path: `${basePath}?view=bookings`,
-          roles: ['staff', 'manager', 'admin']
+          roles: ['staff', 'manager', 'admin', 'admin_viewer']
         },
         {
           id: 'calendar',
           label: 'Calendar',
+          icon: 'Calendar',
           path: `${basePath}?view=calendar`,
-          roles: ['staff', 'manager', 'admin']
+          roles: ['staff', 'manager', 'admin', 'admin_viewer']
+        },
+        {
+          id: 'collect-payment',
+          label: 'Collect Payment',
+          icon: 'CreditCard',
+          path: `${basePath}?view=collect-payment`,
+          roles: ['staff']
         },
         {
           id: 'new-booking',
           label: 'New Booking',
+          icon: 'CalendarPlus',
           path: `${basePath}?view=new-booking`,
-          roles: ['staff', 'manager', 'admin'],
+          roles: ['staff', 'manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
       ]
@@ -104,61 +133,69 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Customers',
       icon: 'Users',
       path: `${basePath}?view=customers`,
-      roles: ['manager', 'admin']
+      roles: ['manager', 'admin', 'admin_viewer']
     },
     {
       id: 'insights',
       label: 'Reports',
       icon: 'BarChart3',
-      roles: ['manager', 'admin'],
+      roles: ['manager', 'admin', 'admin_viewer'],
       children: [
         {
           id: 'reports',
           label: 'Daily Report',
+          icon: 'FileText',
           path: `${basePath}?view=reports`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'performance',
           label: 'Performance',
+          icon: 'TrendingUp',
           path: `${basePath}?view=performance`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'discounts',
           label: 'Discounts Report',
+          icon: 'Percent',
           path: `${basePath}?view=discounts`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'attendance-report',
           label: 'Attendance Report',
+          icon: 'CalendarCheck',
           path: `${basePath}?view=attendance-report`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'attendance-calendar',
           label: 'Attendance Calendar',
+          icon: 'CalendarDays',
           path: orgSlug ? `/${orgSlug}/attendance-calendar` : '/attendance-calendar',
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'transfer-report',
           label: 'Transfer Report',
+          icon: 'ArrowRightLeft',
           path: `${basePath}?view=transfer-report`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'outstanding',
           label: 'Outstanding Report',
+          icon: 'AlertCircle',
           path: `${basePath}?view=outstanding`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'referrals',
           label: 'Referrals Report',
+          icon: 'UserPlus',
           path: `${basePath}?view=referrals`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
       ]
     },
@@ -166,19 +203,21 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'staff-mgmt',
       label: 'Staff',
       icon: 'UserCog',
-      roles: ['manager', 'admin'],
+      roles: ['manager', 'admin', 'admin_viewer'],
       children: [
         {
           id: 'therapists',
           label: staffLabelPlural,
+          icon: 'Users',
           path: `${basePath}?view=therapists`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
         {
           id: 'attendance',
           label: 'Attendance',
+          icon: 'Clock',
           path: `${basePath}?view=attendance`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
       ]
@@ -188,41 +227,60 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Payroll',
       icon: 'Wallet',
       path: `${basePath}?view=payroll`,
-      roles: ['admin'],
+      roles: ['admin', 'admin_viewer'],
     },
+    ...(MEMBERSHIP_ENABLED ? [{
+      id: 'memberships',
+      label: 'Memberships',
+      icon: 'CreditCard',
+      path: `${basePath}?view=memberships`,
+      roles: ['manager', 'admin'],
+    }] : []),
     {
       id: 'infrastructure',
       label: 'Setup',
       icon: 'Settings',
-      roles: ['manager', 'admin'],
+      roles: ['manager', 'admin', 'admin_viewer'],
       children: [
         // Only show rooms/locations for industries that use them
         ...(enableRooms ? [{
           id: 'rooms',
           label: locationLabelPlural,
+          icon: 'DoorOpen',
           path: `${basePath}?view=rooms`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         }] : []),
         {
           id: 'services',
           label: 'Services',
+          icon: 'Sparkles',
           path: `${basePath}?view=services`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
         {
           id: 'categories',
           label: 'Categories',
+          icon: 'Tags',
           path: `${basePath}?view=categories`,
-          roles: ['manager', 'admin'],
+          roles: ['manager', 'admin', 'admin_viewer'],
+          overallHidden: true
+        },
+        {
+          id: 'payment-methods',
+          label: 'Payment Methods',
+          icon: 'CreditCard',
+          path: `${basePath}?view=payment-methods`,
+          roles: ['admin'],
           overallHidden: true
         },
         {
           id: 'audit',
           label: 'Audit Log',
+          icon: 'History',
           path: `${basePath}?view=audit`,
-          roles: ['manager', 'admin']
+          roles: ['manager', 'admin', 'admin_viewer']
         },
       ]
     },
@@ -250,22 +308,26 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
 
   const filteredNavItems = filterByRole(navigationItems);
 
-  // Flatten for mobile nav
+  // Flatten for mobile nav. Tag each child with its parent group label so the
+  // "More" sheet can render section headers (e.g. Reports, Staff, Setup).
   const flattenNav = (items) => {
     const result = [];
     items.forEach(item => {
       if (item.children) {
-        item.children.forEach(child => result.push(child));
+        item.children.forEach(child => result.push({ ...child, groupLabel: item.label }));
       } else if (item.path) {
-        result.push(item);
+        result.push({ ...item, groupLabel: null });
       }
     });
     return result;
   };
 
   const flatNavItems = flattenNav(filteredNavItems);
-  const mobilePrimaryItems = flatNavItems.slice(0, 4);
-  const mobileOverflowItems = flatNavItems.slice(4);
+  // Pull New Booking out into its own floating FAB; everything else feeds the pill nav + "More" sheet.
+  const newBookingItem = flatNavItems.find(item => item.id === 'new-booking');
+  const mainNavItems = flatNavItems.filter(item => item.id !== 'new-booking');
+  const mobilePrimaryItems = mainNavItems.slice(0, 4);
+  const mobileOverflowItems = mainNavItems.slice(4);
 
   const isActive = (path) => {
     if (path.includes('?')) {
@@ -576,90 +638,137 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         </div>
       </aside>
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface-sidebar border-t border-gray-200 z-staff-sidebar">
-        <div className="flex items-center justify-around py-2">
+      {/* Mobile Floating Pill Navigation — icon + label inside the pill; subtle shrink while scrolling */}
+      <nav
+        className={`js-mobile-floating-ui lg:hidden fixed left-1/2 -translate-x-1/2 z-staff-sidebar bg-surface-sidebar rounded-full shadow-spa-elevated border border-border transition-all duration-200 ease-out ${
+          isScrolling ? 'bottom-3 px-1.5 py-1' : 'bottom-4 px-2 py-1.5'
+        }`}
+      >
+        <div className="flex items-center gap-0.5">
           {mobilePrimaryItems.map((item) => {
             const showBadge = item.id === 'dashboard' && pendingApprovals > 0;
             return (
               <Link
                 key={item.id}
                 to={item.path}
-                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
+                aria-label={item.label}
+                className={`relative flex flex-col items-center justify-center rounded-full transition-all duration-200 ${
+                  isScrolling ? 'px-2 py-1 gap-0.5' : 'px-2.5 py-1.5 gap-0.5'
+                } ${
                   isActive(item.path)
-                    ? 'text-gray-900 bg-background'
-                    : 'text-gray-500 hover:text-gray-900'
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-gray-500 hover:text-gray-900 hover:bg-background'
                 }`}
               >
-                <div className="relative">
-                  <Icon name={item.icon} size={18} />
-                  {showBadge && (
-                    <span className="absolute -top-1.5 -right-2 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 text-[10px] font-semibold text-white bg-error rounded-full">
-                      {pendingApprovals > 99 ? '99+' : pendingApprovals}
-                    </span>
-                  )}
-                </div>
-                <span className="text-xs font-medium">{item.label}</span>
+                <Icon name={item.icon} size={isScrolling ? 19 : 20} />
+                <span className="text-[10px] leading-none font-medium">{item.label}</span>
+                {showBadge && (
+                  <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 text-[10px] font-semibold text-white bg-error rounded-full">
+                    {pendingApprovals > 9 ? '9+' : pendingApprovals}
+                  </span>
+                )}
               </Link>
             );
           })}
           {mobileOverflowItems.length > 0 && (
             <button
               onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
-              className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
-                mobileMoreOpen ? 'text-gray-900 bg-background' : 'text-gray-500 hover:text-gray-900'
+              aria-label="More"
+              className={`flex flex-col items-center justify-center rounded-full transition-all duration-200 ${
+                isScrolling ? 'px-2 py-1 gap-0.5' : 'px-2.5 py-1.5 gap-0.5'
+              } ${
+                mobileMoreOpen ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-gray-900 hover:bg-background'
               }`}
             >
-              <Icon name="MoreHorizontal" size={18} />
-              <span className="text-xs font-medium">More</span>
+              <Icon name="MoreHorizontal" size={isScrolling ? 19 : 20} />
+              <span className="text-[10px] leading-none font-medium">More</span>
             </button>
           )}
         </div>
 
-        {/* Mobile overflow sheet */}
-        {mobileMoreOpen && (
-          <>
-            <div
-              className="fixed inset-0 bg-black/30 z-modal-overlay"
-              onClick={() => setMobileMoreOpen(false)}
-            />
-            <div className="absolute bottom-full left-0 right-0 bg-surface-sidebar border-t border-gray-200 rounded-t-xl shadow-lg z-modal animate-slide-in">
-              <div className="p-4 space-y-1">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-gray-900">More</span>
-                  <button onClick={() => setMobileMoreOpen(false)} className="p-1 rounded-md hover:bg-background">
-                    <Icon name="X" size={16} className="text-gray-500" />
-                  </button>
-                </div>
-                {mobileOverflowItems.map((item) => (
-                  <Link
-                    key={item.id}
-                    to={item.path}
-                    onClick={() => setMobileMoreOpen(false)}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                      isActive(item.path)
-                        ? 'bg-background text-gray-900'
-                        : 'text-gray-500 hover:bg-background hover:text-gray-900'
-                    }`}
-                  >
-                    <Icon name={item.icon} size={18} />
-                    <span>{item.label}</span>
-                  </Link>
-                ))}
-                <div className="border-t border-gray-200 mt-2 pt-2">
-                  <button
-                    onClick={() => { setMobileMoreOpen(false); handleLogout(); }}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 transition-colors w-full"
-                  >
-                    <Icon name="LogOut" size={18} />
-                    <span>Logout</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
       </nav>
+
+      {/* Mobile "More" full-screen panel — slides in from the right, grouped list style */}
+      {mobileMoreOpen && (
+        <div className="lg:hidden fixed inset-0 z-modal bg-surface flex flex-col animate-slide-in-right">
+          {/* Header */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface flex-shrink-0">
+            <button
+              onClick={() => setMobileMoreOpen(false)}
+              className="p-1 -ml-1 rounded-spa hover:bg-background"
+              aria-label="Back"
+            >
+              <Icon name="ArrowLeft" size={22} className="text-text-primary" />
+            </button>
+            <h2 className="font-heading font-heading-semibold text-lg text-text-primary">More</h2>
+          </div>
+
+          {/* Grouped list */}
+          <div className="flex-1 overflow-y-auto">
+            {(() => {
+              // Group overflow items by their original parent group label.
+              const groups = [];
+              const groupMap = new Map();
+              mobileOverflowItems.forEach(item => {
+                const key = item.groupLabel || 'Other';
+                if (!groupMap.has(key)) {
+                  const group = { label: key, items: [] };
+                  groupMap.set(key, group);
+                  groups.push(group);
+                }
+                groupMap.get(key).items.push(item);
+              });
+              return groups.map(group => (
+                <div key={group.label} className="border-b border-border last:border-b-0">
+                  {group.label !== 'Other' && (
+                    <div className="px-4 pt-4 pb-2 font-caption font-caption-medium text-[11px] uppercase tracking-wider text-text-tertiary">
+                      {group.label}
+                    </div>
+                  )}
+                  {group.items.map(item => (
+                    <Link
+                      key={item.id}
+                      to={item.path}
+                      onClick={() => setMobileMoreOpen(false)}
+                      className={`flex items-center gap-3 px-4 py-3 transition-colors ${
+                        isActive(item.path) ? 'bg-background' : 'hover:bg-background'
+                      }`}
+                    >
+                      <Icon name={item.icon} size={20} className="text-text-secondary flex-shrink-0" />
+                      <span className="flex-1 font-body font-body-medium text-sm text-text-primary">{item.label}</span>
+                      <Icon name="ChevronRight" size={16} className="text-text-tertiary flex-shrink-0" />
+                    </Link>
+                  ))}
+                </div>
+              ));
+            })()}
+
+            {/* Logout */}
+            <button
+              onClick={() => { setMobileMoreOpen(false); handleLogout(); }}
+              className="flex items-center gap-3 px-4 py-3 w-full text-error hover:bg-red-50 transition-colors border-t border-border"
+            >
+              <Icon name="LogOut" size={20} className="flex-shrink-0" />
+              <span className="flex-1 text-left font-body font-body-medium text-sm">Logout</span>
+              <Icon name="ChevronRight" size={16} className="flex-shrink-0" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile floating New Booking FAB — chatbot-style, shrinks while scrolling.
+          Routes to the calendar view with ?newBooking=1, which opens the Quick Booking panel. */}
+      {newBookingItem && (
+        <Link
+          to={`${basePath}?view=calendar&newBooking=1`}
+          aria-label="New Booking"
+          className={`js-mobile-floating-ui lg:hidden fixed right-4 z-staff-sidebar inline-flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all duration-200 ease-out ${
+            isScrolling ? 'bottom-[72px] w-[52px] h-[52px]' : 'bottom-20 w-14 h-14'
+          }`}
+        >
+          <Icon name="CalendarPlus" size={isScrolling ? 22 : 24} />
+        </Link>
+      )}
     </>
   );
 };

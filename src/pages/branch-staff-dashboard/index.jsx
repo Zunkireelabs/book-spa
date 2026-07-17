@@ -7,6 +7,7 @@ import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingLookupPanel from './components/BookingLookupPanel';
 import StaffBookingForm from './components/StaffBookingForm';
+import CollectPaymentPanel from './components/CollectPaymentPanel';
 import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
 import { useAuth } from '../../contexts/AuthContext';
@@ -643,6 +644,8 @@ const BranchStaffDashboard = () => {
             />
           ) : viewMode === 'calendar' ? (
             <OperationalCalendar branchId={branchId} />
+          ) : viewMode === 'collect-payment' ? (
+            <CollectPaymentPanel onSuccess={showSuccess} />
           ) : viewMode === 'new-booking' ? (
             <StaffBookingForm onBookingCreated={loadData} />
           ) : (

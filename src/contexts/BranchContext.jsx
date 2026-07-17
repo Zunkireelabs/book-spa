@@ -27,7 +27,7 @@ export const BranchProvider = ({ children }) => {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'admin_viewer';
 
   // Load branches for admin, resolve branchId for all roles
   useEffect(() => {

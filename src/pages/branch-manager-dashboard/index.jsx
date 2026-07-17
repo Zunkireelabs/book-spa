@@ -26,6 +26,7 @@ import RoomManagementPanel from './components/MasterData/RoomManagementPanel';
 import TherapistManagementPanel from './components/MasterData/TherapistManagementPanel';
 import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
+import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -43,6 +44,8 @@ import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
+import MembershipsPanel from './components/Memberships/MembershipsPanel';
+import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -414,7 +417,7 @@ const BranchManagerDashboard = () => {
           onCollapseChange={setSidebarCollapsed}
         />
 
-        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : ''}`}>
+        <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : 'pb-20 lg:pb-0'}`}>
           {/* Header */}
           <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
             <div className="px-4 sm:px-6 lg:px-8 py-3">
@@ -436,7 +439,7 @@ const BranchManagerDashboard = () => {
                 </div>
 
                 {/* Right: Real-time status + Role badge + New Booking + Profile */}
-                <div className="flex items-center space-x-3 flex-shrink-0">
+                <div className="flex items-center space-x-3 flex-shrink-0 ml-3">
                   {/* Real-time Status Indicator */}
                   <div
                     className="hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full bg-background border border-border"
@@ -629,10 +632,12 @@ const BranchManagerDashboard = () => {
               {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
               {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
+              {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
               {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
+              {viewMode === 'payment-methods' && profile?.role === 'admin' && <PaymentMethodsPanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}

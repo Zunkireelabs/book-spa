@@ -138,7 +138,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
   return (
     <div className="space-y-4">
       {/* Booking Summary */}
-      <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-6">
+      <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-4 sm:p-6">
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4 flex items-center">
           <Icon name="Calendar" size={20} className="mr-2" />
           Booking Summary
@@ -176,12 +176,12 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       </div>
 
       {/* Customer Form */}
-      <div className="bg-surface rounded-spa-lg border border-border p-6">
+      <div className="bg-surface rounded-spa-lg border border-border p-4 sm:p-6">
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-6">
           Personal Information
         </h3>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
           {/* First Name */}
           <div className="space-y-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
@@ -290,7 +290,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               ].map((option) => (
                 <label
                   key={option.value}
-                  className={`flex items-center space-x-3 p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
                     customerInfo.gender === option.value
                       ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
                   }`}

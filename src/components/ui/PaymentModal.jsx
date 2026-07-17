@@ -1,16 +1,29 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
-import CustomSelect from './CustomSelect';
+import PaymentMethodSelector from './PaymentMethodSelector';
+import { fetchMembershipForBooking } from '../../services/api';
+import { buildPaymentMethodTree } from '../../services/paymentMethods';
+import { useOrg } from '../../contexts/OrgContext';
+import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
 
-const PAYMENT_MODES = [
-  { value: 'Cash', label: 'Cash' },
-  { value: 'Card', label: 'Card' },
-  { value: 'MobileBanking', label: 'Mobile Banking' },
-  { value: 'Cheque', label: 'Cheque' },
-  { value: 'Esewa', label: 'Esewa' },
-  { value: 'Khalti', label: 'Khalti' },
-];
+// First immediately-selectable leaf value in the tree — a plain method, or a
+// group's first sub-method (the group name itself isn't selectable once it has
+// sub-methods). Used to seed the default tender payment mode.
+function firstLeafValue(tree) {
+  for (const item of tree) {
+    if (!item.subMethods || item.subMethods.length === 0) return item.value;
+    if (item.subMethods.length > 0) return item.subMethods[0].value;
+  }
+  return undefined;
+}
+
+const MEMBERSHIP_STATUS_STYLES = {
+  active:   { container: 'bg-primary/5 border-primary/20',    pill: 'bg-success/10 text-success',  label: 'Active' },
+  pending:  { container: 'bg-amber-50 border-amber-200',      pill: 'bg-amber-100 text-amber-800', label: 'Pending' },
+  lapsed:   { container: 'bg-warning/5 border-warning/20',    pill: 'bg-warning/10 text-warning',  label: 'Lapsed' },
+  depleted: { container: 'bg-gray-50 border-gray-200',        pill: 'bg-gray-100 text-gray-600',   label: 'Depleted' },
+};
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
@@ -26,35 +39,77 @@ const PaymentModal = ({
   isSubmitting,
   dueHolderSuggestions = [],
 }) => {
-  const isBatch = additionalBookings.length > 0;
-
-  const allBookings = [booking, ...additionalBookings];
-  const totalFinal = allBookings.reduce(
-    (s, b) => s + Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0), 0
+  const { paymentMethods } = useOrg();
+  const PAYMENT_TREE = useMemo(
+    () => buildPaymentMethodTree(paymentMethods),
+    [paymentMethods]
   );
 
-  // Single-booking split context
+  const hasPreviousDue = additionalBookings.length > 0;
+
+  // Remaining balance for any booking-like object — prefers a precomputed amountDue
+  // (e.g. from getCustomerOutstandingBalance) and otherwise derives it from
+  // final_amount minus whatever's already been paid, so a partially-paid bundled
+  // booking is charged its true remainder, not its full original amount.
+  const bookingRemaining = (b) => {
+    if (b.amountDue !== undefined && b.amountDue !== null) return Number(b.amountDue);
+    const already = Number(b.amountPaid ?? b.amount_paid ?? 0);
+    const final = Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0);
+    return Math.max(round2(final - already), 0);
+  };
+
   const finalAmount = Number(booking.final_amount || booking.finalAmount || 0);
   const alreadyPaid = round2(booking.amountPaid || booking.amount_paid || 0);
   const remaining = round2(Math.max(finalAmount - alreadyPaid, 0));
 
-  // --- shared state ---
+  const additionalRemaining = round2(additionalBookings.reduce((s, b) => s + bookingRemaining(b), 0));
+  const grandTotal = round2(remaining + additionalRemaining);
+
   const [notes, setNotes] = useState('');
   const [error, setError] = useState(null);
 
-  // --- batch state ---
-  const [batchMode, setBatchMode] = useState('');
-
-  // --- split state ---
-  const [tenders, setTenders] = useState([{ amount: String(remaining || ''), paymentMode: 'Cash' }]);
+  // Split payment — one or more tenders, always available (even when a previous
+  // due is bundled in) so staff can pay across multiple methods or leave part
+  // unpaid, rather than being forced into a single payment mode for everything.
+  const [tenders, setTenders] = useState([{ amount: String(grandTotal || ''), paymentMode: firstLeafValue(PAYMENT_TREE) }]);
   const [dueHolderName, setDueHolderName] = useState(booking.dueHolderName || booking.due_holder_name || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // --- membership wallet (Phase 3) ---
+  const [membership, setMembership] = useState(null);
+  const bookingId = booking.bookingId || booking.id;
+  useEffect(() => {
+    if (!MEMBERSHIP_ENABLED || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchMembershipForBooking(bookingId);
+      if (!cancelled) setMembership(data || null);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId]);
+
+  // The Membership option is added to the mode selector only when there's a
+  // wallet attached to this booking's customer AND the wallet still has balance.
+  const membershipUsable = membership && membership.balance > 0 && membership.status !== 'depleted';
+  const membershipLeaf = membershipUsable
+    ? { value: 'Membership', label: `Membership (${membership.tierName})` }
+    : null;
+
+  // How much of the Membership wallet is already committed by other tenders in
+  // this submission. Used to cap each Membership tender input.
+  const membershipCommitted = useMemo(() => {
+    if (!membershipUsable) return 0;
+    return round2(
+      tenders.reduce((s, t) => s + (t.paymentMode === 'Membership' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)
+    );
+  }, [tenders, membershipUsable]);
+  const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
 
   const entered = useMemo(
     () => round2(tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0)),
     [tenders]
   );
-  const leftover = round2(Math.max(remaining - entered, 0));
+  const leftover = round2(Math.max(grandTotal - entered, 0));
 
   const filteredSuggestions = useMemo(() => {
     const q = dueHolderName.trim().toLowerCase();
@@ -66,38 +121,70 @@ const PaymentModal = ({
   const updateTender = (i, patch) => {
     setTenders(prev => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   };
-  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: 'Cash' }]);
+  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: firstLeafValue(PAYMENT_TREE) }]);
   const removeTender = (i) => setTenders(prev => prev.filter((_, idx) => idx !== i));
 
-  const handleBatchSubmit = async () => {
-    if (!batchMode) {
-      setError('Please select a payment mode.');
-      return;
+  // Waterfall-allocate the entered tenders: the primary booking first (up to its
+  // own remaining — this is the only place a partial "leave as due" applies), then
+  // each additional/previous-due booking in listed order, fully or not at all —
+  // an additional booking is never left partially paid, it's either fully covered
+  // by what's left in the pool or skipped (stays untouched, still fully due).
+  const allocateTenders = (cleanedTenders) => {
+    const pool = cleanedTenders.map(t => ({ ...t }));
+    let idx = 0;
+    const poolRemaining = () => round2(pool.slice(idx).reduce((s, t) => s + t.amount, 0));
+    const take = (target) => {
+      const consumed = [];
+      let needed = target;
+      while (needed > 0.001 && idx < pool.length) {
+        const t = pool[idx];
+        const amt = Math.min(t.amount, needed);
+        if (amt > 0) {
+          consumed.push({ amount: round2(amt), paymentMode: t.paymentMode });
+          t.amount = round2(t.amount - amt);
+          needed = round2(needed - amt);
+        }
+        if (t.amount <= 0.001) idx++;
+      }
+      return consumed;
+    };
+
+    const primaryTenders = take(remaining);
+    const additionalAllocations = [];
+    for (const pb of additionalBookings) {
+      const need = bookingRemaining(pb);
+      if (poolRemaining() + 0.001 >= need) {
+        additionalAllocations.push({ bookingId: pb.bookingId, tenders: take(need) });
+      }
     }
-    setError(null);
-    const result = await onConfirm({ paymentMode: batchMode, notes });
-    if (result?.error) setError(result.error.message || 'Failed to record payment.');
+    return { primaryTenders, additionalAllocations };
   };
 
-  const handleSplitSubmit = async () => {
+  const handleSubmit = async () => {
     if (entered <= 0) {
       setError('Enter a payment amount.');
       return;
     }
-    if (entered > remaining) {
-      setError(`Entered amount (${formatNPR(entered)}) exceeds the remaining balance (${formatNPR(remaining)}).`);
+    if (entered > grandTotal) {
+      setError(`Entered amount (${formatNPR(entered)}) exceeds the total due (${formatNPR(grandTotal)}).`);
       return;
     }
     if (leftover > 0 && !dueHolderName.trim()) {
       setError('Enter who the remaining due is under before leaving a balance unpaid.');
       return;
     }
+    if (membershipUsable && membershipCommitted > membership.balance) {
+      setError(`Membership tenders total ${formatNPR(membershipCommitted)} but the wallet balance is only ${formatNPR(membership.balance)}.`);
+      return;
+    }
     setError(null);
     const cleanedTenders = tenders
       .filter(t => Number(t.amount) > 0)
       .map(t => ({ amount: round2(t.amount), paymentMode: t.paymentMode }));
+    const { primaryTenders, additionalAllocations } = allocateTenders(cleanedTenders);
     const result = await onConfirm({
-      tenders: cleanedTenders,
+      tenders: primaryTenders,
+      additionalAllocations,
       dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
       notes,
     });
@@ -139,48 +226,83 @@ const PaymentModal = ({
               Payment Summary
             </h4>
             <div className="space-y-2">
-              {allBookings.map((b, i) => (
-                <div key={b.id || b.bookingId || i} className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary truncate pr-2">
-                    {b.service?.name || b.service || 'Service'}
-                  </span>
-                  <span className="font-body font-body-medium text-sm text-text-primary flex-shrink-0">
-                    {formatNPR(Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0))}
-                  </span>
-                </div>
-              ))}
-              {!isBatch && alreadyPaid > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="font-body font-body-normal text-sm text-text-secondary truncate pr-2">
+                  {booking.service?.name || booking.service || 'This booking'}
+                </span>
+                <span className="font-body font-body-medium text-sm text-text-primary flex-shrink-0">
+                  {formatNPR(remaining)}
+                </span>
+              </div>
+              {!hasPreviousDue && alreadyPaid > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="font-body font-body-normal text-sm text-text-secondary">Already paid</span>
                   <span className="font-body font-body-medium text-sm text-success">- {formatNPR(alreadyPaid)}</span>
                 </div>
               )}
+              {hasPreviousDue && (
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-normal text-sm text-warning">
+                    Previous due ({additionalBookings.length})
+                  </span>
+                  <span className="font-body font-body-medium text-sm text-warning flex-shrink-0">
+                    {formatNPR(additionalRemaining)}
+                  </span>
+                </div>
+              )}
               <div className="border-t border-border pt-2 flex items-center justify-between">
                 <span className="font-body font-body-semibold text-base text-text-primary">
-                  {isBatch ? 'Total Due' : 'Balance Due'}
+                  {hasPreviousDue ? 'Total Due' : 'Balance Due'}
                 </span>
                 <span className="font-heading font-heading-semibold text-lg text-success">
-                  {formatNPR(isBatch ? totalFinal : remaining)}
+                  {formatNPR(grandTotal)}
                 </span>
               </div>
             </div>
           </div>
 
-          {isBatch ? (
-            /* Batch pay — single method, full amount per booking */
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Payment Mode</label>
-              <CustomSelect
-                options={PAYMENT_MODES}
-                value={batchMode}
-                onChange={setBatchMode}
-                placeholder="Select payment mode..."
-                size="md"
-              />
-            </div>
-          ) : (
-            /* Split payment — one or more tenders */
-            <div className="space-y-3">
+          {/* Membership wallet banner (Phase 3) — surfaces when this booking's
+              customer has a wallet. Active = primary color, lapsed = warning, depleted = gray. */}
+          {membership && (() => {
+            const styleKey = membership.status || 'pending';
+            const styles = MEMBERSHIP_STATUS_STYLES[styleKey] || MEMBERSHIP_STATUS_STYLES.pending;
+            return (
+              <div className={`rounded-spa border ${styles.container} px-3 py-2.5`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <Icon name="Wallet" size={14} className="text-primary flex-shrink-0" />
+                    <span className="font-body font-body-medium text-sm text-text-primary truncate">{membership.tierName}</span>
+                    {membership.membershipNumber && (
+                      <span className="font-data font-data-medium text-[11px] tracking-widest text-text-secondary">{membership.membershipNumber}</span>
+                    )}
+                    <span className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${styles.pill}`}>
+                      {styles.label}
+                    </span>
+                  </div>
+                  <span className="font-data font-data-medium text-sm text-primary flex-shrink-0">{formatNPR(membership.balance)}</span>
+                </div>
+                {membership.status === 'lapsed' && (
+                  <p className="mt-1.5 font-caption text-[11px] text-warning">
+                    Membership expired on {membership.expiryDate || '—'}. Wallet balance is still spendable but
+                    discount privileges no longer apply.
+                  </p>
+                )}
+                {membership.status === 'pending' && (
+                  <p className="mt-1.5 font-caption text-[11px] text-amber-700">
+                    Pending activation — wallet is not yet usable for booking payments. Top up to NPR {Number(membership.tierAdvanceAmount).toLocaleString('en-IN')} to activate.
+                  </p>
+                )}
+                {membership.status === 'depleted' && (
+                  <p className="mt-1.5 font-caption text-[11px] text-text-tertiary">
+                    Wallet is depleted.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Split payment — one or more tenders, even when a previous due is bundled in */}
+          <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="block font-body font-body-medium text-sm text-text-primary">
                   Payment Method{tenders.length > 1 ? 's' : ''}
@@ -194,40 +316,54 @@ const PaymentModal = ({
                 </button>
               </div>
 
-              {tenders.map((t, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className="w-32 flex-shrink-0">
-                    <CustomSelect
-                      options={PAYMENT_MODES}
-                      value={t.paymentMode}
-                      onChange={(v) => updateTender(i, { paymentMode: v })}
-                      size="md"
-                    />
+              {tenders.map((t, i) => {
+                const isMembership = t.paymentMode === 'Membership';
+                const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
+                return (
+                  <div key={i} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-36 flex-shrink-0">
+                        <PaymentMethodSelector
+                          paymentMethods={paymentMethods}
+                          extraLeaf={membershipLeaf}
+                          value={t.paymentMode}
+                          onChange={(v) => updateTender(i, { paymentMode: v })}
+                          size="md"
+                        />
+                      </div>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={t.amount}
+                          onChange={(e) => updateTender(i, { amount: e.target.value })}
+                          placeholder="0"
+                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
+                        />
+                      </div>
+                      {tenders.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTender(i)}
+                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                          aria-label="Remove method"
+                        >
+                          <Icon name="Trash2" size={16} />
+                        </button>
+                      )}
+                    </div>
+                    {isMembership && (
+                      <p className={`text-[11px] font-caption ml-[8.5rem] ${overWallet ? 'text-error' : 'text-text-tertiary'}`}>
+                        {overWallet
+                          ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
+                          : `Wallet available: ${formatNPR(walletRemaining)}`}
+                      </p>
+                    )}
                   </div>
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={t.amount}
-                      onChange={(e) => updateTender(i, { amount: e.target.value })}
-                      placeholder="0"
-                      className="w-full rounded-spa border border-border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
-                    />
-                  </div>
-                  {tenders.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeTender(i)}
-                      className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                      aria-label="Remove method"
-                    >
-                      <Icon name="Trash2" size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
 
               {/* Entered / leftover */}
               <div className="flex items-center justify-between text-sm pt-1">
@@ -273,7 +409,6 @@ const PaymentModal = ({
                 </div>
               )}
             </div>
-          )}
 
           {/* Notes */}
           <div className="space-y-1">
@@ -305,13 +440,13 @@ const PaymentModal = ({
           </Button>
           <Button
             variant="success"
-            onClick={isBatch ? handleBatchSubmit : handleSplitSubmit}
+            onClick={handleSubmit}
             loading={isSubmitting}
-            disabled={isBatch ? !batchMode : entered <= 0}
+            disabled={entered <= 0}
             iconName="Check"
             iconPosition="left"
           >
-            {!isBatch && leftover > 0 ? 'Record & Leave Due' : 'Confirm Payment'}
+            {leftover > 0 ? 'Record & Leave Due' : 'Confirm Payment'}
           </Button>
         </div>
       </div>

@@ -120,6 +120,12 @@
     @apply bg-background text-text-primary font-body;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+
+  /* Hide the floating mobile nav pill + FAB while an overlay panel is open
+     (e.g. Quick Booking side panel) so its action buttons aren't obscured. */
+  body.mobile-panel-open .js-mobile-floating-ui {
+    display: none !important;
+  }
   
   h1, h2, h3, h4, h5, h6 {
     @apply font-heading;

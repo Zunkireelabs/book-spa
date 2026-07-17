@@ -99,6 +99,7 @@ module.exports = {
           'pulse-gentle': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
           'fade-in': 'fadeIn 200ms cubic-bezier(0.4, 0, 0.2, 1)',
           'slide-in': 'slideIn 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+          'slide-in-right': 'slideInRight 250ms cubic-bezier(0.4, 0, 0.2, 1)',
         },
         keyframes: {
           fadeIn: {
@@ -108,6 +109,10 @@ module.exports = {
           slideIn: {
             '0%': { transform: 'translateY(-10px)', opacity: '0' },
             '100%': { transform: 'translateY(0)', opacity: '1' },
+          },
+          slideInRight: {
+            '0%': { transform: 'translateX(100%)' },
+            '100%': { transform: 'translateX(0)' },
           },
         },
       },

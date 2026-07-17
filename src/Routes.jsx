@@ -91,7 +91,7 @@ const LegacyDashboardRedirect = () => {
 // Unified Dashboard - renders appropriate dashboard based on role
 const UnifiedDashboard = () => {
   const { profile } = useAuth();
-  const isManagerOrAdmin = ['manager', 'admin'].includes(profile?.role);
+  const isManagerOrAdmin = ['manager', 'admin', 'admin_viewer'].includes(profile?.role);
 
   if (isManagerOrAdmin) {
     return <BranchManagerDashboard />;
@@ -121,7 +121,7 @@ const AppRoutes = () => {
         {/* Org-scoped unified dashboard (role determines view) */}
         <Route path="/:orgSlug/dashboard" element={
           <TenantWrapper>
-            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
               <UnifiedDashboard />
             </ProtectedRoute>
           </TenantWrapper>
@@ -130,7 +130,7 @@ const AppRoutes = () => {
         {/* Attendance calendar — dedicated full-page grid view */}
         <Route path="/:orgSlug/attendance-calendar" element={
           <TenantWrapper>
-            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+            <ProtectedRoute allowedRoles={['manager', 'admin', 'admin_viewer']}>
               <AttendanceCalendarPage />
             </ProtectedRoute>
           </TenantWrapper>
@@ -139,7 +139,7 @@ const AppRoutes = () => {
         {/* Org-scoped booking details */}
         <Route path="/:orgSlug/bookings/:bookingId" element={
           <TenantWrapper>
-            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin']}>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
               <BookingDetailsAssignmentModal />
             </ProtectedRoute>
           </TenantWrapper>
