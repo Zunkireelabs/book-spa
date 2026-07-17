@@ -21,6 +21,7 @@ import {
   updateRoomOrder,
   updateTherapistTime,
   applyDiscount,
+  getCustomerOutstandingBalance,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -130,6 +131,21 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const timeDropdownRef = useRef(null);
   const timeListRef = useRef(null);
 
+  // Previous-due reminder — set when the selected/typed phone matches an existing
+  // outstanding balance from an earlier visit. Non-blocking: booking creation isn't
+  // gated on this; the due gets bundled into payment collection later.
+  const [previousDue, setPreviousDue] = useState(null);
+
+  const checkPreviousDue = useCallback(async (phone) => {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (digits.length < 7) {
+      setPreviousDue(null);
+      return;
+    }
+    const { data } = await getCustomerOutstandingBalance({ customerPhone: phone, branchId });
+    setPreviousDue(data && data.totalDue > 0 ? data : null);
+  }, [branchId]);
+
   const handleCustomerSelect = useCallback((customer) => {
     setCustomerName(customer.full_name);
     const { dial, national } = parsePhone(customer.phone);
@@ -137,7 +153,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCustomerCountryCode(dial);
     setCustomerEmail(customer.email || '');
     setCustomerGender(customer.gender || '');
-  }, []);
+    checkPreviousDue(customer.phone);
+  }, [checkPreviousDue]);
 
   // Reset form when slot changes + pre-select therapist/room from column
   useEffect(() => {
@@ -168,6 +185,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setError(null);
     setSubmitting(false);
     submitInFlightRef.current = false;
+    setPreviousDue(null);
   }, [slotInfo]);
 
   // Compute which therapists & rooms are busy during the selected time slot
@@ -698,12 +716,25 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   value={customerPhone}
                   onChange={setCustomerPhone}
                   onSelect={handleCustomerSelect}
+                  onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
                   branchId={branchId}
                   searchBy="phone"
                   inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
               </div>
             </div>
+
+            {previousDue && (
+              <div className="flex items-start gap-2 p-3 bg-warning/5 border border-warning/20 rounded-spa">
+                <Icon name="AlertTriangle" size={14} className="text-warning flex-shrink-0 mt-0.5" />
+                <p className="font-body font-body-normal text-sm text-warning">
+                  <span className="font-body-medium">{customerName.trim() || 'This customer'}</span> has an outstanding
+                  balance — NPR {previousDue.totalDue.toLocaleString('en-IN')} across {previousDue.bookingCount} earlier
+                  booking{previousDue.bookingCount > 1 ? 's' : ''}. You'll be able to collect it together with this
+                  booking's payment.
+                </p>
+              </div>
+            )}
 
             {/* Email */}
             <div>
@@ -2273,7 +2304,8 @@ const OperationalCalendar = ({ branchId }) => {
                   Tip
                 </div>
                 <p className="text-xs text-text-secondary leading-relaxed">
-                  Drag unpaid bookings to reschedule. Paid and completed bookings are locked.
+                  Drag Pending bookings to reschedule. Confirmed, in-progress, paid, completed,
+                  cancelled, and day-closed bookings are locked.
                 </p>
               </div>
 
