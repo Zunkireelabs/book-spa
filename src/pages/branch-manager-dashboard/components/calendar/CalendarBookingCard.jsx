@@ -22,10 +22,8 @@ function to12h(timeStr) {
   return `${h12}:${String(m).padStart(2, '0')}${period}`;
 }
 
-// Statuses that cannot be dragged (terminal states, plus Confirmed/In-Progress —
-// once staff confirms a booking the schedule is committed, so it locks immediately
-// rather than only once it's paid or completed).
-const NON_DRAGGABLE_STATUSES = ['Confirmed', 'In-Progress', 'Completed', 'Cancelled', 'No Show'];
+// Statuses that cannot be dragged (terminal states)
+const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 function formatDateLabel(dateStr) {
   if (!dateStr) return '';
@@ -38,6 +36,19 @@ function formatAmount(amount) {
   return Number(amount).toLocaleString('en-IN');
 }
 
+function getNepalNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+}
+
+// Confirmed/In-Progress lock once their start time has passed; Pending stays
+// movable even if overdue, since staff still need to reschedule/assign it.
+function isTimeLocked(booking) {
+  if (booking.status === 'Pending') return false;
+  if (!booking.date || !booking.startTime) return false;
+  const start = new Date(`${booking.date}T${booking.startTime}`);
+  return getNepalNow() >= start;
+}
+
 // Check if booking can be dragged
 function canDragBooking(booking) {
   // Cannot drag terminal statuses
@@ -46,6 +57,8 @@ function canDragBooking(booking) {
   if (booking.paymentStatus === 'paid') return false;
   // Cannot drag locked bookings
   if (booking.isLocked) return false;
+  // Cannot drag once the booking has started
+  if (isTimeLocked(booking)) return false;
   return true;
 }
 
@@ -54,13 +67,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);
-  // Show the padlock for every status past Pending (Confirmed, In-Progress,
-  // Completed) — matching the same statuses that are already non-draggable —
-  // plus whenever it's paid or the day's closed, regardless of status.
-  const isLocked = booking.isLocked
-    || booking.status === 'Confirmed'
-    || booking.status === 'In-Progress'
-    || booking.status === 'Completed';
+  const isLocked = booking.isLocked || isTimeLocked(booking);
 
   const cardRef = useRef(null);
   const [showPopover, setShowPopover] = useState(false);
