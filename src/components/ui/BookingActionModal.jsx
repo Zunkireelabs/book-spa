@@ -84,6 +84,9 @@ const BookingActionModal = ({
   // Approver routing when a discount exceeds the user's limit
   const [approvers, setApprovers] = useState([]);
   const [selectedApprover, setSelectedApprover] = useState('');
+  // Per-row discount override: { [bookingId]: '10' } — lets each selected service get its
+  // own rate instead of the shared discountValue prorated/applied across the whole selection.
+  const [rowDiscountOverrides, setRowDiscountOverrides] = useState({});
 
   // Add another service / Rebook state
   const [newBookingMode, setNewBookingMode] = useState(null); // 'add-service' | 'rebook' | null
@@ -150,6 +153,7 @@ const BookingActionModal = ({
         setSelectedDiscountIds(new Set([booking.bookingId]));
         setSelectedApprover('');
         setDiscountSuccess(false);
+        setRowDiscountOverrides({});
       });
     }
     if (activeTab === 'payment' && booking?.customerPhone) {
@@ -402,94 +406,6 @@ const BookingActionModal = ({
     }
   };
 
-  const handleApplyDiscount = async () => {
-    if (!booking || !onApplyDiscount) return;
-    setDiscountError(null);
-    setDiscountSuccess(false);
-
-    if (!discountValue || Number(discountValue) <= 0) {
-      setDiscountError('Please enter a valid discount value.');
-      return;
-    }
-    if (!discountReason.trim()) {
-      setDiscountError('Reason is required.');
-      return;
-    }
-
-    // Over-limit discounts are routed to a chosen approver instead of blocked.
-    const maxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
-    const baseAmount = booking.baseAmount || 0;
-    // Combined base across every currently-checked booking — for a fixed-NPR discount this is
-    // the correct denominator (the entered amount is the total, not per-service).
-    const combinedBase = relatedBookings.reduce((s, rb) => s + (selectedDiscountIds.has(rb.id) ? Number(rb.base_amount || 0) : 0), 0)
-      + (selectedDiscountIds.has(booking.bookingId) ? baseAmount : 0);
-    const effectivePercent = discountType === 'percentage'
-      ? Number(discountValue)
-      : combinedBase > 0 ? (Number(discountValue) / combinedBase) * 100 : 0;
-
-    // Hard ceiling: staff requests capped at 50%, manager/admin can apply up to 100%.
-    const hardCeiling = userRole === 'staff' ? 50 : 100;
-    if (effectivePercent > hardCeiling) {
-      setDiscountError(`Discount cannot exceed ${hardCeiling}%.`);
-      return;
-    }
-
-    const exceedsLimit = effectivePercent > maxPercent;
-
-    if (exceedsLimit && !selectedApprover) {
-      setDiscountError('Select a manager or admin to send this discount request to.');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      // Apply to all selected bookings
-      const bookingIdsToDiscount = [...selectedDiscountIds];
-      let lastResult = null;
-      let failed = false;
-
-      for (const bid of bookingIdsToDiscount) {
-        // For fixed amounts, prorate the single entered NPR total across every checked
-        // booking's base amount so the sum of per-booking discounts equals discountValue —
-        // not discountValue applied again to each service.
-        let dValue = Number(discountValue);
-        if (discountType === 'fixed') {
-          const rbBase = bid === booking.bookingId
-            ? baseAmount
-            : Number(relatedBookings.find(r => r.id === bid)?.base_amount || 0);
-          const pct = combinedBase > 0 ? (dValue / combinedBase) : 0;
-          dValue = Math.round(rbBase * pct * 100) / 100;
-        }
-
-        const result = await onApplyDiscount(bid, {
-          discountType: discountType === 'percentage' ? 'percentage' : 'fixed',
-          discountValue: discountType === 'percentage' ? Number(discountValue) : dValue,
-          discountReason: discountReason.trim(),
-          requestedTo: exceedsLimit ? selectedApprover : undefined
-        });
-        lastResult = result;
-        if (result?.error) { failed = true; break; }
-      }
-
-      if (failed) {
-        setDiscountError(lastResult?.error?.message || 'Failed to apply discount.');
-      } else if (lastResult?.data?.isPending) {
-        setDiscountSuccess('pending');
-        setDiscountValue('');
-        setDiscountReason('');
-        setSelectedApprover('');
-      } else {
-        setDiscountSuccess('approved');
-        setDiscountValue('');
-        setDiscountReason('');
-      }
-    } catch (error) {
-      setDiscountError('An unexpected error occurred.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   if (!isOpen || !booking) return null;
 
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
@@ -517,15 +433,126 @@ const BookingActionModal = ({
   // Staff request ceiling stays at 50%; manager/admin direct-apply ceiling is 100%.
   const DISCOUNT_HARD_CAP = userRole === 'staff' ? 50 : 100;
   const discountMaxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
-  const discountEffPercent = discountType === 'percentage'
-    ? Number(discountValue || 0)
-    : (booking.baseAmount > 0 ? (Number(discountValue || 0) / booking.baseAmount) * 100 : 0);
-  const discountExceedsCap = Number(discountValue) > 0 && discountEffPercent > DISCOUNT_HARD_CAP;
+
+  // --- Discount tab: per-row resolution ---
+  // Every checked booking (current + related) resolves to a discount either from its own
+  // rowDiscountOverrides entry (e.g. Facial=10%, Massage=15%, Package=20%), or — when left
+  // blank — from the shared discountType/discountValue, prorated across the "pooled"
+  // (non-overridden) checked bookings for a fixed NPR amount so the pool's total discount
+  // equals discountValue exactly. Percentage needs no pooling: the same % applied to each
+  // booking's own base already sums to that % of the combined total.
+  const discountRowBase = (id) => id === booking.bookingId
+    ? (booking.baseAmount || 0)
+    : Number(relatedBookings.find(rb => rb.id === id)?.base_amount || 0);
+  const checkedRowIds = [booking.bookingId, ...relatedBookings.map(rb => rb.id)].filter(id => selectedDiscountIds.has(id));
+  const overriddenRowIds = checkedRowIds.filter(id => rowDiscountOverrides[id] !== undefined && rowDiscountOverrides[id] !== '');
+  const pooledBase = checkedRowIds
+    .filter(id => !overriddenRowIds.includes(id))
+    .reduce((s, id) => s + discountRowBase(id), 0);
+  const resolveRowDiscount = (id) => {
+    const rowBase = discountRowBase(id);
+    const hasOverride = overriddenRowIds.includes(id);
+    const value = Number(hasOverride ? rowDiscountOverrides[id] : discountValue) || 0;
+    let amount;
+    if (discountType === 'percentage') {
+      amount = Math.round(rowBase * value / 100 * 100) / 100;
+    } else if (hasOverride) {
+      amount = value;
+    } else {
+      const pct = pooledBase > 0 ? value / pooledBase : 0;
+      amount = Math.round(rowBase * pct * 100) / 100;
+    }
+    const effPercent = rowBase > 0 ? (amount / rowBase) * 100 : 0;
+    return { value, amount, base: rowBase, effPercent, hasOverride };
+  };
+  const setRowOverride = (id, val) => setRowDiscountOverrides(prev => ({ ...prev, [id]: val }));
+  const clearRowOverride = (id) => setRowDiscountOverrides(prev => {
+    const next = { ...prev };
+    delete next[id];
+    return next;
+  });
+
+  const handleApplyDiscount = async () => {
+    if (!booking || !onApplyDiscount) return;
+    setDiscountError(null);
+    setDiscountSuccess(false);
+
+    if (checkedRowIds.length === 0) {
+      setDiscountError('Select at least one service.');
+      return;
+    }
+    const rowPlans = checkedRowIds.map(id => ({ id, ...resolveRowDiscount(id) }));
+    if (rowPlans.some(r => !(r.value > 0))) {
+      setDiscountError('Enter a discount value for every selected service.');
+      return;
+    }
+    if (!discountReason.trim()) {
+      setDiscountError('Reason is required.');
+      return;
+    }
+
+    // Hard ceiling: staff requests capped at 50%, manager/admin can apply up to 100%.
+    const hardCeiling = userRole === 'staff' ? 50 : 100;
+    const maxRowEffPercent = Math.max(...rowPlans.map(r => r.effPercent));
+    if (maxRowEffPercent > hardCeiling) {
+      setDiscountError(`Discount cannot exceed ${hardCeiling}%.`);
+      return;
+    }
+
+    // If ANY row exceeds the role's direct-apply limit, the whole batch routes to one approver.
+    const maxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
+    const exceedsLimit = maxRowEffPercent > maxPercent;
+
+    if (exceedsLimit && !selectedApprover) {
+      setDiscountError('Select a manager or admin to send this discount request to.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      let lastResult = null;
+      let failed = false;
+
+      for (const row of rowPlans) {
+        const result = await onApplyDiscount(row.id, {
+          discountType: discountType === 'percentage' ? 'percentage' : 'fixed',
+          discountValue: discountType === 'percentage' ? row.value : row.amount,
+          discountReason: discountReason.trim(),
+          requestedTo: exceedsLimit ? selectedApprover : undefined
+        });
+        lastResult = result;
+        if (result?.error) { failed = true; break; }
+      }
+
+      if (failed) {
+        setDiscountError(lastResult?.error?.message || 'Failed to apply discount.');
+      } else if (lastResult?.data?.isPending) {
+        setDiscountSuccess('pending');
+        setDiscountValue('');
+        setDiscountReason('');
+        setSelectedApprover('');
+        setRowDiscountOverrides({});
+      } else {
+        setDiscountSuccess('approved');
+        setDiscountValue('');
+        setDiscountReason('');
+        setRowDiscountOverrides({});
+      }
+    } catch (error) {
+      setDiscountError('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const discountEffPercent = checkedRowIds.length > 0
+    ? Math.max(...checkedRowIds.map(id => resolveRowDiscount(id).effPercent))
+    : 0;
+  const discountHasInput = checkedRowIds.some(id => resolveRowDiscount(id).value > 0);
+  const discountExceedsCap = discountHasInput && discountEffPercent > DISCOUNT_HARD_CAP;
   // Routable request range only — above the hard cap it's blocked, not requestable.
-  const discountExceedsLimit = Number(discountValue) > 0 && discountEffPercent > discountMaxPercent && !discountExceedsCap;
-  const previewDiscountAmount = discountType === 'percentage'
-    ? Math.round((booking.baseAmount || 0) * Number(discountValue || 0) / 100)
-    : Number(discountValue || 0);
+  const discountExceedsLimit = discountHasInput && discountEffPercent > discountMaxPercent && !discountExceedsCap;
+  const previewDiscountAmount = checkedRowIds.reduce((s, id) => s + resolveRowDiscount(id).amount, 0);
   const selectedApproverName = approvers.find(a => a.id === selectedApprover)?.fullName || '';
 
   const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
@@ -1077,59 +1104,70 @@ const BookingActionModal = ({
                     <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
                       {(() => {
                         const base = booking.baseAmount || 0;
-                        // Combined base across every currently-checked booking — denominator for
-                        // prorating one fixed-NPR discount across multiple selected services so the
-                        // entered amount is the total discount, not the amount applied per service.
-                        const combinedBase = relatedBookings.reduce((s, rb) => s + (selectedDiscountIds.has(rb.id) ? Number(rb.base_amount || 0) : 0), 0)
-                          + (selectedDiscountIds.has(booking.bookingId) ? base : 0);
+                        const multiRow = relatedBookings.length > 0;
+                        const primaryChecked = selectedDiscountIds.has(booking.bookingId);
+                        const primaryPlan = resolveRowDiscount(booking.bookingId);
+                        const primaryLive = primaryChecked && primaryPlan.value > 0;
+
                         let previewDiscountAmt = booking.discountAmount || 0;
                         let previewDiscountPct = base > 0 ? Math.round((previewDiscountAmt / base) * 100) : 0;
-                        if (discountValue !== '' && discountValue !== null && discountValue !== undefined) {
-                          if (discountType === 'percentage') {
-                            previewDiscountPct = Number(discountValue) || 0;
-                            previewDiscountAmt = Math.round(base * previewDiscountPct / 100 * 100) / 100;
-                          } else {
-                            const fixedPct = combinedBase > 0 ? Number(discountValue) / combinedBase : 0;
-                            previewDiscountAmt = Math.round(base * fixedPct * 100) / 100;
-                            previewDiscountPct = base > 0 ? Math.round((previewDiscountAmt / base) * 100 * 10) / 10 : 0;
-                          }
+                        if (primaryLive) {
+                          previewDiscountAmt = primaryPlan.amount;
+                          previewDiscountPct = Math.round(primaryPlan.effPercent * 10) / 10;
                         }
                         const previewFinal = Math.max(base - previewDiscountAmt, 0);
-                        const hasLivePreview = discountValue !== '' && discountValue !== null && discountValue !== undefined;
                         const hasExistingDiscount = booking.discountAmount > 0;
-                        const showDiscount = hasLivePreview || hasExistingDiscount;
+                        const showDiscount = primaryLive || hasExistingDiscount;
 
-                        // Related bookings totals
-                        const relatedTotal = relatedBookings.reduce((s, rb) => s + Number(rb.final_amount || rb.base_amount || 0), 0);
-                        const overallTotal = previewFinal + relatedTotal;
+                        // Per-row override input, reused for the primary booking and every related row —
+                        // lets each checked service get its own rate instead of the shared value above.
+                        const renderOverrideInput = (id) => (
+                          <div className="pl-5 mt-1 flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              value={rowDiscountOverrides[id] ?? ''}
+                              onChange={(e) => setRowOverride(id, e.target.value)}
+                              placeholder={discountType === 'percentage' ? 'Same as shared %' : 'Same as shared NPR'}
+                              className="w-32 px-2 py-1 border border-border rounded-spa bg-surface text-text-primary text-xs focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                            />
+                            <span className="font-caption text-[10px] text-text-secondary">
+                              {discountType === 'percentage' ? '% for just this service' : 'NPR for just this service'}
+                            </span>
+                          </div>
+                        );
 
                         return (
                           <>
-                            {/* Current booking — checkbox only when multiple services */}
-                            {relatedBookings.length > 0 ? (
-                              <label className="flex items-start gap-2 mb-1 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedDiscountIds.has(booking.bookingId)}
-                                  onChange={(e) => {
-                                    setSelectedDiscountIds(prev => {
-                                      const next = new Set(prev);
-                                      if (e.target.checked) next.add(booking.bookingId);
-                                      else next.delete(booking.bookingId);
-                                      return next;
-                                    });
-                                  }}
-                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
-                                  <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
-                                    {booking.time && <span>{to12h(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
-                                    {booking.therapist?.name && <span>· {booking.therapist.name}</span>}
-                                    {booking.roomName && <span>· {booking.roomName}</span>}
+                            {/* Current booking — checkbox + override only when multiple services */}
+                            {multiRow ? (
+                              <div className="mb-1">
+                                <label className="flex items-start gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={primaryChecked}
+                                    onChange={(e) => {
+                                      setSelectedDiscountIds(prev => {
+                                        const next = new Set(prev);
+                                        if (e.target.checked) next.add(booking.bookingId);
+                                        else next.delete(booking.bookingId);
+                                        return next;
+                                      });
+                                      if (!e.target.checked) clearRowOverride(booking.bookingId);
+                                    }}
+                                    className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
+                                    <div className="font-caption text-[10px] text-text-secondary flex flex-wrap gap-x-2">
+                                      {booking.time && <span>{to12h(booking.startTime || booking.time)}{booking.startTime && booking.startTime !== booking.time ? '' : ''}</span>}
+                                      {booking.therapist?.name && <span>· {booking.therapist.name}</span>}
+                                      {booking.roomName && <span>· {booking.roomName}</span>}
+                                    </div>
                                   </div>
-                                </div>
-                              </label>
+                                </label>
+                                {primaryChecked && renderOverrideInput(booking.bookingId)}
+                              </div>
                             ) : null}
                             <div className="flex items-center justify-between">
                               <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
@@ -1138,41 +1176,32 @@ const BookingActionModal = ({
                             {showDiscount && (
                               <div className="flex items-center justify-between">
                                 <span className="font-body font-body-normal text-xs text-text-secondary">
-                                  {hasLivePreview ? 'Discount Preview' : 'Discount Applied'}
+                                  {primaryLive ? 'Discount Preview' : 'Discount Applied'}
                                 </span>
-                                <span className={`font-data text-sm ${hasLivePreview ? 'text-warning' : 'text-error'}`}>
+                                <span className={`font-data text-sm ${primaryLive ? 'text-warning' : 'text-error'}`}>
                                   - NPR {previewDiscountAmt.toLocaleString('en-IN')} ({previewDiscountPct}%)
                                 </span>
                               </div>
                             )}
                             <div className="flex items-center justify-between">
                               <span className="font-body font-body-normal text-xs text-text-secondary">Subtotal</span>
-                              <span className={`font-data text-sm ${hasLivePreview ? 'text-warning' : 'text-text-primary'}`}>
+                              <span className={`font-data text-sm ${primaryLive ? 'text-warning' : 'text-text-primary'}`}>
                                 NPR {previewFinal.toLocaleString('en-IN')}
                               </span>
                             </div>
 
                             {/* Related bookings */}
-                            {relatedBookings.length > 0 && (
+                            {multiRow && (
                               <>
                                 <div className="border-t border-border my-2" />
                                 {relatedBookings.map(rb => {
                                   const rbBase = Number(rb.base_amount || 0);
                                   const rbExistingDiscount = Number(rb.discount_amount || 0);
                                   const rbChecked = selectedDiscountIds.has(rb.id);
-                                  // Live preview for checked related bookings
-                                  let rbPreviewDiscount = rbExistingDiscount;
-                                  if (rbChecked && hasLivePreview) {
-                                    if (discountType === 'percentage') {
-                                      rbPreviewDiscount = Math.round(rbBase * Number(discountValue) / 100 * 100) / 100;
-                                    } else {
-                                      // Fixed: prorate the single entered NPR amount across the combined base of all checked services
-                                      const pct = combinedBase > 0 ? Number(discountValue) / combinedBase : 0;
-                                      rbPreviewDiscount = Math.round(rbBase * pct * 100) / 100;
-                                    }
-                                  }
+                                  const rbPlan = resolveRowDiscount(rb.id);
+                                  const rbHasPreview = rbChecked && rbPlan.value > 0;
+                                  const rbPreviewDiscount = rbHasPreview ? rbPlan.amount : rbExistingDiscount;
                                   const rbPreviewFinal = Math.max(rbBase - rbPreviewDiscount, 0);
-                                  const rbHasPreview = rbChecked && hasLivePreview;
                                   return (
                                     <div key={rb.id} className="space-y-1">
                                       <label className="flex items-start gap-2 cursor-pointer">
@@ -1186,6 +1215,7 @@ const BookingActionModal = ({
                                               else next.delete(rb.id);
                                               return next;
                                             });
+                                            if (!e.target.checked) clearRowOverride(rb.id);
                                           }}
                                           className="text-primary focus:ring-primary w-3.5 h-3.5 rounded mt-0.5"
                                         />
@@ -1201,6 +1231,7 @@ const BookingActionModal = ({
                                           </div>
                                         </div>
                                       </label>
+                                      {rbChecked && renderOverrideInput(rb.id)}
                                       <div className="flex items-center justify-between pl-5">
                                         <span className="font-body font-body-normal text-xs text-text-secondary">Base</span>
                                         <span className="font-data text-sm text-text-primary">NPR {rbBase.toLocaleString('en-IN')}</span>
@@ -1229,26 +1260,21 @@ const BookingActionModal = ({
 
                             {/* Overall total */}
                             {(() => {
-                              // Compute overall with live preview
-                              let total = selectedDiscountIds.has(booking.bookingId) ? previewFinal : (booking.finalAmount || base);
+                              let total = primaryLive ? previewFinal : (booking.finalAmount || base);
+                              let anyLive = primaryLive;
                               relatedBookings.forEach(rb => {
-                                const rbBase = Number(rb.base_amount || 0);
                                 const rbChecked = selectedDiscountIds.has(rb.id);
-                                if (rbChecked && hasLivePreview) {
-                                  let rbDis;
-                                  if (discountType === 'percentage') rbDis = Math.round(rbBase * Number(discountValue) / 100 * 100) / 100;
-                                  else { const pct = combinedBase > 0 ? Number(discountValue) / combinedBase : 0; rbDis = Math.round(rbBase * pct * 100) / 100; }
-                                  total += Math.max(rbBase - rbDis, 0);
-                                } else {
-                                  total += Number(rb.final_amount || rb.base_amount || 0);
-                                }
+                                const rbPlan = resolveRowDiscount(rb.id);
+                                const rbLive = rbChecked && rbPlan.value > 0;
+                                anyLive = anyLive || rbLive;
+                                total += rbLive ? Math.max(rbPlan.base - rbPlan.amount, 0) : Number(rb.final_amount || rb.base_amount || 0);
                               });
                               return (
                                 <div className="flex items-center justify-between border-t border-border pt-2 mt-1">
                                   <span className="font-body font-body-medium text-xs text-text-primary">
-                                    {relatedBookings.length > 0 ? 'Overall Total' : 'Final Amount'}
+                                    {multiRow ? 'Overall Total' : 'Final Amount'}
                                   </span>
-                                  <span className={`font-data font-data-medium text-sm ${hasLivePreview ? 'text-warning' : 'text-primary'}`}>
+                                  <span className={`font-data font-data-medium text-sm ${anyLive ? 'text-warning' : 'text-primary'}`}>
                                     NPR {total.toLocaleString('en-IN')}
                                   </span>
                                 </div>
@@ -1320,6 +1346,9 @@ const BookingActionModal = ({
                     <div className="space-y-1.5 sm:space-y-2">
                       <label className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
                         {discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount (NPR)'}
+                        {relatedBookings.length > 0 && (
+                          <span className="font-body font-body-normal text-text-secondary"> (shared default — override any service above for its own rate)</span>
+                        )}
                       </label>
                       <input
                         type="number"
@@ -1330,11 +1359,7 @@ const BookingActionModal = ({
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
                         placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.15))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
-                          discountValue && (() => {
-                            const maxP = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
-                            const eff = discountType === 'percentage' ? Number(discountValue) : (booking.baseAmount > 0 ? (Number(discountValue) / booking.baseAmount) * 100 : 0);
-                            return eff > maxP;
-                          })() ? 'border-error' : 'border-border'
+                          discountExceedsCap ? 'border-error' : 'border-border'
                         }`}
                       />
                       {discountExceedsCap && (
@@ -1446,14 +1471,20 @@ const BookingActionModal = ({
                       variant="primary"
                       onClick={handleApplyDiscount}
                       loading={isLoading}
-                      disabled={!discountValue || !discountReason.trim() || selectedDiscountIds.size === 0 || discountExceedsCap || (discountExceedsLimit && !selectedApprover)}
+                      disabled={
+                        checkedRowIds.length === 0 ||
+                        checkedRowIds.some(id => !(resolveRowDiscount(id).value > 0)) ||
+                        !discountReason.trim() ||
+                        discountExceedsCap ||
+                        (discountExceedsLimit && !selectedApprover)
+                      }
                       iconName={discountExceedsLimit ? 'Send' : 'Percent'}
                       iconPosition="left"
                       className="w-full sm:w-auto min-h-[44px]"
                     >
                       {discountExceedsLimit
                         ? 'Send Discount Request'
-                        : (selectedDiscountIds.size > 1 ? `Apply Discount to ${selectedDiscountIds.size} Services` : 'Apply Discount')}
+                        : (checkedRowIds.length > 1 ? `Apply Discount to ${checkedRowIds.length} Services` : 'Apply Discount')}
                     </Button>
                   </>
                 )}
