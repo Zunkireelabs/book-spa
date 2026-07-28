@@ -1,5 +1,5 @@
 -- One-time follow-up to supabase/fix-membership-import-round2.sql and
--- migration-056-renew-membership-forfeit-balance.sql.
+-- migration-061-renew-membership-forfeit-balance.sql.
 --
 -- Audit finding: round2.sql applied 22 historical renewals as a plain
 -- deposit on the already-imported base membership. For 12 of those rows the

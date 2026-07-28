@@ -123,5 +123,5 @@ REVOKE ALL ON FUNCTION public.renew_membership(uuid, numeric, text, uuid, text) 
 GRANT EXECUTE ON FUNCTION public.renew_membership(uuid, numeric, text, uuid, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('056', 'renew-membership-forfeit-balance')
+VALUES ('061', 'renew-membership-forfeit-balance')
 ON CONFLICT (version) DO NOTHING;
