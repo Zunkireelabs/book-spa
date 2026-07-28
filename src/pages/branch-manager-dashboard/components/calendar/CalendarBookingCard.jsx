@@ -53,11 +53,10 @@ function isTimeLocked(booking) {
 function canDragBooking(booking) {
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
-  // Cannot drag paid bookings
-  if (booking.paymentStatus === 'paid') return false;
-  // Cannot drag locked bookings
+  // Cannot drag locked bookings (day-closed)
   if (booking.isLocked) return false;
-  // Cannot drag once the booking has started
+  // Cannot drag once the booking has started — being paid ahead of time
+  // doesn't itself lock it, only the service actually starting does.
   if (isTimeLocked(booking)) return false;
   return true;
 }
@@ -258,7 +257,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
                 <span className="text-[9px] text-yellow-600 font-medium">Unpaid</span>
               </span>
             )}
-            {(isLocked || isPaid) && <span className="text-[9px]">🔒</span>}
+            {isLocked && <span className="text-[9px]">🔒</span>}
+            {!isLocked && isPaid && <span className="text-[9px]">✓</span>}
           </div>
         )}
       </div>

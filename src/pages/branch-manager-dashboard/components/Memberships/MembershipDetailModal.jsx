@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchMembership, fetchMembershipTransactions } from '../../../../services/api';
 import TopUpModal from './TopUpModal';
+import RenewModal from './RenewModal';
+import ExtendMembershipModal from './ExtendMembershipModal';
 import BirthdayPerkModal from './BirthdayPerkModal';
 import AdjustmentModal from './AdjustmentModal';
 
@@ -17,7 +19,12 @@ const KIND_CONFIG = {
   deduction:     { label: 'Deduction',    color: 'text-error',      sign: '' },
   birthday_perk: { label: 'Birthday Gift', color: 'text-accent',     sign: '' },
   adjustment:    { label: 'Adjustment',   color: 'text-text-secondary', sign: '' },
+  extension:     { label: 'Extended',     color: 'text-primary',    sign: '' },
 };
+
+// Kinds that are informational-only (amount is always 0) -- shown as an em
+// dash in the transaction table instead of "+0"/"0".
+const ZERO_AMOUNT_KINDS = new Set(['birthday_perk', 'extension']);
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -51,6 +58,8 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showTopUp, setShowTopUp] = useState(false);
+  const [showRenew, setShowRenew] = useState(false);
+  const [showExtend, setShowExtend] = useState(false);
   const [showBirthday, setShowBirthday] = useState(false);
   const [showAdjust, setShowAdjust] = useState(false);
 
@@ -80,6 +89,9 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
   const cfg = m ? STATUS_CONFIG[m.status] : STATUS_CONFIG.pending;
   const perkUsed = m ? perkUsedInCurrentCycle(m) : false;
   const canBirthday = m && m.status === 'active' && !perkUsed;
+  const isDepleted = m && m.status === 'depleted';
+  const isLapsed = m && m.status === 'lapsed';
+  const needsRenewal = isDepleted || isLapsed;
 
   const handleAnyChange = () => {
     reload();
@@ -140,7 +152,10 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
                   </div>
                 )}
                 <p className="font-heading font-heading-semibold text-base text-text-primary">{m.customerName}</p>
-                <p className="font-caption text-xs text-text-tertiary">{m.customerPhone || '—'}</p>
+                <p className="font-caption text-xs text-text-tertiary">
+                  {m.customerPhone || '—'}
+                  {m.customerGender && <span> · {m.customerGender}</span>}
+                </p>
                 <div className="flex items-center space-x-2 pt-1">
                   <span className="font-body font-body-medium text-sm text-text-primary">{m.tierName}</span>
                   <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${cfg.pill}`}>
@@ -178,16 +193,56 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
                 </div>
               </div>
 
+              {isDepleted && (
+                <div className="bg-amber-50 border border-amber-200 rounded-spa px-3 py-2 flex items-start space-x-2">
+                  <Icon name="RefreshCw" size={14} className="text-amber-700 flex-shrink-0 mt-0.5" />
+                  <p className="font-body text-xs text-amber-900">
+                    This wallet is empty. Renewing starts a fresh validity cycle from today (and can switch tier) on this
+                    same card.
+                  </p>
+                </div>
+              )}
+
+              {isLapsed && (
+                <div className="bg-amber-50 border border-amber-200 rounded-spa px-3 py-2 flex items-start space-x-2">
+                  <Icon name="AlertTriangle" size={14} className="text-amber-700 flex-shrink-0 mt-0.5" />
+                  <p className="font-body text-xs text-amber-900">
+                    This membership has lapsed, but the {formatNPR(m.balance)} balance is still available. Extend the
+                    validity to keep using it — no new payment needed.
+                  </p>
+                </div>
+              )}
+
               {/* Actions */}
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowTopUp(true)}
-                  className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
-                >
-                  <Icon name="Plus" size={14} />
-                  <span>Top up</span>
-                </button>
+                {isLapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowExtend(true)}
+                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                  >
+                    <Icon name="CalendarClock" size={14} />
+                    <span>Extend membership</span>
+                  </button>
+                ) : isDepleted ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowRenew(true)}
+                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                  >
+                    <Icon name="RefreshCw" size={14} />
+                    <span>Renew</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowTopUp(true)}
+                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                  >
+                    <Icon name="Plus" size={14} />
+                    <span>Top up</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowBirthday(true)}
@@ -246,7 +301,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
                                 {t.payment_mode ? <span className="text-text-tertiary"> · {t.payment_mode}</span> : null}
                               </td>
                               <td className={`px-3 py-2 text-right font-data font-data-medium text-xs ${kc.color}`}>
-                                {t.kind === 'birthday_perk' ? '—' : `${kc.sign}${formatNPR(Math.abs(amountValue))}`}
+                                {ZERO_AMOUNT_KINDS.has(t.kind) ? '—' : `${kc.sign}${formatNPR(Math.abs(amountValue))}`}
                               </td>
                               <td className="px-3 py-2 font-caption text-[11px] text-text-tertiary hidden sm:table-cell">{t.notes || '—'}</td>
                             </tr>
@@ -267,6 +322,22 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
           membership={m}
           onClose={() => setShowTopUp(false)}
           onSuccess={() => { setShowTopUp(false); handleAnyChange(); }}
+        />
+      )}
+
+      {showRenew && m && (
+        <RenewModal
+          membership={m}
+          onClose={() => setShowRenew(false)}
+          onSuccess={() => { setShowRenew(false); handleAnyChange(); }}
+        />
+      )}
+
+      {showExtend && m && (
+        <ExtendMembershipModal
+          membership={m}
+          onClose={() => setShowExtend(false)}
+          onSuccess={() => { setShowExtend(false); handleAnyChange(); }}
         />
       )}
 

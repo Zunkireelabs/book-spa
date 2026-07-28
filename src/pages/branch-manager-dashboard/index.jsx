@@ -46,6 +46,8 @@ import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPanel from './components/Memberships/MembershipsPanel';
 import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
+import MembershipCollectionPanel from './components/Memberships/MembershipCollectionPanel';
+import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -633,6 +635,8 @@ const BranchManagerDashboard = () => {
               {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
               {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel />}
+              {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
+              {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}

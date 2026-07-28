@@ -3,6 +3,8 @@ import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
 import StatusLegend from '../../../components/ui/StatusLegend';
+import { fetchBookingById } from '../../../services/api';
+import { transformBooking } from '../../../services/bookingTransformers';
 
 const DATE_RANGE_LABELS = {
   today: "Today's Appointments",
@@ -46,6 +48,18 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
   const handleBookingAction = (booking) => {
     setSelectedBooking(booking);
     setShowActionModal(true);
+  };
+
+  // Refetch and replace the open modal's booking when the payment just recorded
+  // was for it, so the wallet balance/status shown update immediately instead of
+  // requiring the modal to be closed and reopened.
+  const handleRecordPaymentWrapper = async (bookingId, opts) => {
+    const result = await onRecordPayment(bookingId, opts);
+    if (!result?.error && selectedBooking && bookingId === selectedBooking.bookingId) {
+      const refreshed = await fetchBookingById(bookingId);
+      if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    }
+    return result;
   };
 
   // Use booking.bookingId (real UUID) for all API calls
@@ -373,7 +387,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         therapists={therapists}
         onAssignTherapist={onAssignTherapist}
         onUpdateStatus={onStatusUpdate}
-        onRecordPayment={onRecordPayment}
+        onRecordPayment={handleRecordPaymentWrapper}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
       />
