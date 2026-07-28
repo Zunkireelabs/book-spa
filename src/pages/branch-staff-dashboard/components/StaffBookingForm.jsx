@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
-import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
+import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
+import CustomerAutocomplete from '../../../components/ui/CustomerAutocomplete';
 import { fetchServices, createBooking, getCustomerOutstandingBalance } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 
@@ -28,6 +29,15 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   // outstanding balance from an earlier visit. Non-blocking: staff can still
   // proceed with the booking; the due gets bundled into payment collection later.
   const [previousDue, setPreviousDue] = useState(null);
+  const nameInputRef = useRef(null);
+
+  // Restore the autofocus the plain name input used to get on step 3
+  useEffect(() => {
+    if (step === 3) {
+      const timer = setTimeout(() => nameInputRef.current?.focus(), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [step]);
 
   // Submit state
   const [submitting, setSubmitting] = useState(false);
@@ -104,6 +114,18 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setSubmitting(false);
     onBookingCreated?.();
   };
+
+  const handleCustomerSelect = useCallback((customer) => {
+    // Clicking a specific suggestion is a disambiguated choice — the row already
+    // showed this exact phone (and membership badge, when duplicate names exist)
+    // for staff to verify before clicking — so it's safe to fill from here.
+    setCustomerName(customer.full_name);
+    const { dial, national } = parsePhone(customer.phone);
+    setCustomerPhone(national);
+    setCustomerCountryCode(dial);
+    setCustomerEmail(customer.email || '');
+    setCustomerGender(customer.gender || '');
+  }, []);
 
   const checkPreviousDue = async () => {
     const digits = customerPhone.replace(/\D/g, '');
@@ -318,13 +340,13 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Customer Name <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
+              <CustomerAutocomplete
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Full name"
-                className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                autoFocus
+                onChange={setCustomerName}
+                onSelect={handleCustomerSelect}
+                branchId={branchId}
+                inputRef={nameInputRef}
+                inputClassName="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
               />
             </div>
 
@@ -335,13 +357,15 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                 </label>
                 <div className="flex">
                   <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
-                  <input
-                    type="tel"
+                  <CustomerAutocomplete
                     value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                    onChange={(v) => setCustomerPhone(v.replace(/\D/g, '').slice(0, 15))}
+                    onSelect={handleCustomerSelect}
                     onBlur={checkPreviousDue}
+                    branchId={branchId}
+                    searchBy="phone"
                     placeholder="9800000000"
-                    className="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                    inputClassName="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
                 </div>
               </div>

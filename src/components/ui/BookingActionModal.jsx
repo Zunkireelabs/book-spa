@@ -4,7 +4,8 @@ import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance } from '../../services/api';
+import MembershipWalletCard from './MembershipWalletCard';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
@@ -29,6 +30,19 @@ function formatCreatedAt(iso) {
 
 // Rooms that are self-service experiences — no therapist needed (Thamel branch hotfix)
 const THERAPIST_OPTIONAL_ROOM_NAMES = ['JACUZZI', 'SAUNA', 'STEAM'];
+
+function getNepalNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+}
+
+// Confirmed/In-Progress lock once their start time has passed; Pending stays
+// editable even if overdue, since staff still need to reschedule/assign it.
+function isTimeLocked(booking) {
+  if (booking.status === 'pending') return false;
+  if (!booking.date || !booking.startTime) return false;
+  const start = new Date(`${booking.date}T${booking.startTime}`);
+  return getNepalNow() >= start;
+}
 
 // Status badge styles
 const STATUS_STYLES = {
@@ -108,6 +122,11 @@ const BookingActionModal = ({
   const [previousDueBookings, setPreviousDueBookings] = useState([]);
   const [selectedPreviousDueIds, setSelectedPreviousDueIds] = useState(new Set());
 
+  // This customer's membership wallet, if any — re-fetched every time the
+  // Payment tab opens so the balance shown is always current, not cached
+  // from whenever this booking was first loaded.
+  const [membership, setMembership] = useState(null);
+
   // Load due-holder name suggestions for the split-payment typeahead.
   useEffect(() => {
     if (!showPaymentModal) return;
@@ -174,6 +193,13 @@ const BookingActionModal = ({
     } else if (activeTab === 'payment') {
       setPreviousDueBookings([]);
       setSelectedPreviousDueIds(new Set());
+    }
+    if (activeTab === 'payment' && booking?.bookingId) {
+      fetchMembershipForBooking(booking.bookingId).then(result => {
+        setMembership(result.data || null);
+      });
+    } else if (activeTab === 'payment') {
+      setMembership(null);
     }
   }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId]);
 
@@ -397,9 +423,11 @@ const BookingActionModal = ({
         await onRecordPayment(alloc.bookingId, { tenders: alloc.tenders, notes: paymentNotes });
       }
 
+      // Stay open on the Payment tab (rather than closing the whole modal) so
+      // staff immediately see the refreshed status, balance, and — for members —
+      // the updated wallet amount, instead of having to reopen the booking.
       setShowPaymentModal(false);
       setSelectedPreviousDueIds(new Set());
-      onClose();
       return result;
     } finally {
       setPaymentSubmitting(false);
@@ -410,7 +438,11 @@ const BookingActionModal = ({
 
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
   const isLocked = booking.isLocked || false;
-  const isMutationBlocked = isTerminal || isLocked;
+  const isStarted = isTimeLocked(booking);
+  const isSettled = booking.paymentStatus === 'paid';
+  // Being paid does not itself lock a booking — only day-close, a terminal status,
+  // or the service actually starting (isStarted) should block further mutation.
+  const isMutationBlocked = isTerminal || isLocked || isStarted;
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
@@ -423,8 +455,10 @@ const BookingActionModal = ({
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
   const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
-  // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay)
-  const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
+  // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay).
+  // Once ANY payment has been recorded (partial or full), the price is locked — the discount can no longer
+  // move retroactively against money already collected.
+  const canDiscount = booking.paymentStatus === 'unpaid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
   const discountLimitLabel = userRole === 'admin' ? '100%' : userRole === 'manager' ? '100%' : '15%';
 
@@ -633,7 +667,11 @@ const BookingActionModal = ({
                       ? booking.paymentStatus === 'paid'
                         ? { bg: 'bg-success/5', border: 'border-success/20', iconColor: 'text-success', textColor: 'text-success', icon: 'ShieldCheck', label: 'Completed — Settled' }
                         : { bg: 'bg-warning/5', border: 'border-warning/20', iconColor: 'text-warning', textColor: 'text-warning', icon: 'Clock', label: 'Service Completed — Payment Pending' }
-                      : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' };
+                      : isTerminal
+                        ? { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' }
+                        : isSettled
+                          ? { bg: 'bg-success/5', border: 'border-success/20', iconColor: 'text-success', textColor: 'text-success', icon: 'CheckCircle', label: 'Paid — Settled' }
+                          : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Booking Started — Locked' };
                   return (
                     <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
                       <Icon name={banner.icon} size={16} className={banner.iconColor} />
@@ -915,7 +953,7 @@ const BookingActionModal = ({
                   <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
                     <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
                     <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
-                      Assignment is disabled — {isLocked ? 'day is closed' : 'booking is immutable'}
+                      Assignment is disabled — {isLocked ? 'day is closed' : isTerminal ? 'booking is immutable' : 'booking has started'}
                     </span>
                   </div>
                 )}
@@ -954,7 +992,9 @@ const BookingActionModal = ({
                         return (
                           <label
                             key={therapist.id}
-                            className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[52px] ${
+                            className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[52px] ${
+                              isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                            } ${
                               isSelected
                                 ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                             }`}
@@ -963,6 +1003,7 @@ const BookingActionModal = ({
                               type="checkbox"
                               value={therapist.id}
                               checked={isSelected}
+                              disabled={isMutationBlocked}
                               onChange={(e) => {
                                 if (e.target.checked) {
                                   setSelectedTherapists(prev => [...prev, therapist.id]);
@@ -970,7 +1011,7 @@ const BookingActionModal = ({
                                   setSelectedTherapists(prev => prev.filter(id => id !== therapist.id));
                                 }
                               }}
-                              className="text-primary focus:ring-primary w-4 h-4 rounded"
+                              className="text-primary focus:ring-primary w-4 h-4 rounded disabled:cursor-not-allowed"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
@@ -1014,7 +1055,9 @@ const BookingActionModal = ({
                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
                       {/* Unassign room option */}
                       <label
-                        className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[44px] ${
+                        className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
+                          isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                        } ${
                           selectedRoom === ''
                             ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                         }`}
@@ -1024,15 +1067,18 @@ const BookingActionModal = ({
                           name="room"
                           value=""
                           checked={selectedRoom === ''}
+                          disabled={isMutationBlocked}
                           onChange={() => setSelectedRoom('')}
-                          className="text-primary focus:ring-primary w-4 h-4"
+                          className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
                         />
                         <span className="font-body font-body-normal text-sm text-text-secondary italic">No room assigned</span>
                       </label>
                       {rooms.map((room) => (
                         <label
                           key={room.id}
-                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[44px] ${
+                          className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
+                            isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                          } ${
                             selectedRoom === room.id
                               ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
                           }`}
@@ -1042,8 +1088,9 @@ const BookingActionModal = ({
                             name="room"
                             value={room.id}
                             checked={selectedRoom === room.id}
+                            disabled={isMutationBlocked}
                             onChange={(e) => setSelectedRoom(e.target.value)}
-                            className="text-primary focus:ring-primary w-4 h-4"
+                            className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
                           />
                           <div className="flex items-center gap-2">
                             <Icon name="DoorOpen" size={14} className="text-text-secondary" />
@@ -1069,7 +1116,8 @@ const BookingActionModal = ({
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Add any special instructions for the therapist..."
                     rows={3}
-                    className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
+                    disabled={isMutationBlocked}
+                    className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -1095,7 +1143,9 @@ const BookingActionModal = ({
                     <span className="font-body font-body-medium text-xs text-gray-600">
                       {booking.paymentStatus === 'paid'
                         ? 'Cannot modify discount on a paid booking.'
-                        : 'Discount changes are not allowed for this booking state.'}
+                        : booking.paymentStatus === 'partial'
+                          ? 'Cannot modify discount — a payment has already been recorded.'
+                          : 'Discount changes are not allowed for this booking state.'}
                     </span>
                   </div>
                 ) : (
@@ -1258,7 +1308,8 @@ const BookingActionModal = ({
                               </>
                             )}
 
-                            {/* Overall total */}
+                            {/* Overall total — reuses resolveRowDiscount so this can never disagree
+                                with each related row's own displayed Subtotal above. */}
                             {(() => {
                               let total = primaryLive ? previewFinal : (booking.finalAmount || base);
                               let anyLive = primaryLive;
@@ -1495,8 +1546,16 @@ const BookingActionModal = ({
             {activeTab === 'payment' && (() => {
               const selectedPreviousDue = previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId));
               const previousDueTotal = selectedPreviousDue.reduce((sum, pb) => sum + Number(pb.amountDue || 0), 0);
-              const combinedTotal = (booking.finalAmount || 0) + previousDueTotal;
-              const selectedCount = selectedPreviousDueIds.size;
+              // Related same-session services (discounted together via the Discount tab)
+              // are bundled into payment automatically — no opt-in checkboxes, since they
+              // were already grouped as one action.
+              const relatedRemaining = (rb) => Math.max(Number(rb.base_amount || 0) - Number(rb.discount_amount || 0), 0);
+              const relatedBookingsTotal = relatedBookings.reduce((sum, rb) => sum + relatedRemaining(rb), 0);
+              const combinedTotal = (booking.finalAmount || 0) + relatedBookingsTotal + previousDueTotal;
+              const selectedCount = relatedBookings.length + selectedPreviousDueIds.size;
+              const paidThisVisit = (booking.payments || [])
+                .filter(p => p.paymentMode === 'Membership')
+                .reduce((s, p) => s + p.amount, 0);
 
               return (
               <div className="space-y-4 sm:space-y-6">
@@ -1504,9 +1563,11 @@ const BookingActionModal = ({
                   Payment Status
                 </h3>
 
+                <MembershipWalletCard membership={membership} paidThisVisit={paidThisVisit} />
+
                 {/* Current booking */}
                 <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
-                  {previousDueBookings.length > 0 && (
+                  {(previousDueBookings.length > 0 || relatedBookings.length > 0) && (
                     <div className="flex items-center gap-2 mb-1">
                       <Icon name="CheckSquare" size={14} className="text-primary" />
                       <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
@@ -1523,10 +1584,35 @@ const BookingActionModal = ({
                     </div>
                   )}
                   <div className="flex items-center justify-between border-t border-border pt-2">
-                    <span className="font-body font-body-medium text-xs text-text-primary">{previousDueBookings.length > 0 ? 'Subtotal' : 'Final Amount'}</span>
+                    <span className="font-body font-body-medium text-xs text-text-primary">{(previousDueBookings.length > 0 || relatedBookings.length > 0) ? 'Subtotal' : 'Final Amount'}</span>
                     <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
                 </div>
+
+                {/* Related services — same-session bookings discounted together on the
+                    Discount tab. Bundled into payment by default, no opt-in needed. */}
+                {relatedBookings.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
+                      <Icon name="Layers" size={13} />
+                      Related services ({relatedBookings.length})
+                    </label>
+                    <div className="border border-border rounded-spa divide-y divide-border overflow-hidden">
+                      {relatedBookings.map(rb => (
+                        <div key={rb.id} className="flex items-center gap-3 px-3 py-2.5">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
+                            <div className="font-caption text-xs text-text-secondary">
+                              #{rb.booking_number} · {to12h(rb.start_time)}
+                              {Number(rb.discount_amount) > 0 && ` · discount -NPR ${Number(rb.discount_amount).toLocaleString('en-IN')}`}
+                            </div>
+                          </div>
+                          <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {relatedRemaining(rb).toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Pending bookings aren't payable yet — guide staff to confirm/complete first */}
                 {!canPay && booking.status === 'pending' && booking.paymentStatus !== 'paid' && !isLocked && (
@@ -1816,7 +1902,16 @@ const BookingActionModal = ({
             amountPaid: booking.amountPaid,
             dueHolderName: booking.dueHolderName,
           }}
-          additionalBookings={previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId))}
+          additionalBookings={[
+            ...relatedBookings.map(rb => ({
+              bookingId: rb.id,
+              service: rb.service?.name,
+              base_amount: rb.base_amount,
+              discount_amount: rb.discount_amount,
+              final_amount: rb.final_amount,
+            })),
+            ...previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId)),
+          ]}
           dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handlePaymentConfirm}
           onClose={() => setShowPaymentModal(false)}

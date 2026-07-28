@@ -235,6 +235,22 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       icon: 'CreditCard',
       path: `${basePath}?view=memberships`,
       roles: ['manager', 'admin'],
+      children: [
+        {
+          id: 'membership-collection',
+          label: 'Collection',
+          icon: 'PiggyBank',
+          path: `${basePath}?view=membership-collection`,
+          roles: ['manager', 'admin'],
+        },
+        {
+          id: 'wallet-usage',
+          label: 'Wallet Usage',
+          icon: 'Wallet',
+          path: `${basePath}?view=wallet-usage`,
+          roles: ['manager', 'admin'],
+        },
+      ],
     }] : []),
     {
       id: 'infrastructure',
@@ -314,6 +330,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     const result = [];
     items.forEach(item => {
       if (item.children) {
+        // A group can also be a direct link itself (e.g. Memberships) — keep
+        // it reachable from mobile nav alongside its children.
+        if (item.path) {
+          result.push({ id: item.id, label: item.label, icon: item.icon, path: item.path, groupLabel: null });
+        }
         item.children.forEach(child => result.push({ ...child, groupLabel: item.label }));
       } else if (item.path) {
         result.push({ ...item, groupLabel: null });
@@ -337,10 +358,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   };
 
   const isParentActive = (item) => {
+    if (item.path && isActive(item.path)) return true;
     if (item.children) {
       return item.children.some(child => isActive(child.path));
     }
-    return item.path && isActive(item.path);
+    return false;
   };
 
   const getActiveChildIndex = (children) => {
@@ -494,27 +516,65 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
             if (hasChildren) {
               return (
                 <div key={item.id}>
-                  {/* Parent item (button) */}
-                  <button
-                    onClick={() => toggleExpand(item.id)}
-                    className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      parentActive
-                        ? 'bg-background text-gray-900'
-                        : 'text-gray-500 hover:bg-background hover:text-gray-900'
-                    } ${isCollapsed ? 'justify-center' : ''}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Icon name={item.icon} size={18} className="flex-shrink-0" />
-                      {!isCollapsed && <span>{item.label}</span>}
+                  {/* Parent item — a plain toggle button, unless it also has its own
+                      path (e.g. Memberships), in which case the label navigates and
+                      a separate chevron control expands/collapses the children. */}
+                  {item.path ? (
+                    <div
+                      className={`w-full flex items-center gap-1 rounded-md text-sm font-medium transition-colors ${
+                        parentActive
+                          ? 'bg-background text-gray-900'
+                          : 'text-gray-500 hover:bg-background hover:text-gray-900'
+                      } ${isCollapsed ? 'justify-center' : ''}`}
+                    >
+                      <Link
+                        to={item.path}
+                        onClick={() => {
+                          // Expand immediately (synchronous local state) instead of
+                          // waiting on the route change + page data fetch to settle.
+                          if (!isExpanded) toggleExpand(item.id);
+                        }}
+                        className={`flex-1 flex items-center gap-3 px-3 py-2 rounded-md ${isCollapsed ? 'justify-center' : ''}`}
+                      >
+                        <Icon name={item.icon} size={18} className="flex-shrink-0" />
+                        {!isCollapsed && <span>{item.label}</span>}
+                      </Link>
+                      {!isCollapsed && (
+                        <button
+                          onClick={() => toggleExpand(item.id)}
+                          aria-label={isExpanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
+                          className="px-2.5 py-2 rounded-md hover:bg-background/80 flex-shrink-0"
+                        >
+                          <Icon
+                            name="ChevronDown"
+                            size={16}
+                            className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+                      )}
                     </div>
-                    {!isCollapsed && (
-                      <Icon
-                        name="ChevronDown"
-                        size={16}
-                        className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                      />
-                    )}
-                  </button>
+                  ) : (
+                    <button
+                      onClick={() => toggleExpand(item.id)}
+                      className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        parentActive
+                          ? 'bg-background text-gray-900'
+                          : 'text-gray-500 hover:bg-background hover:text-gray-900'
+                      } ${isCollapsed ? 'justify-center' : ''}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Icon name={item.icon} size={18} className="flex-shrink-0" />
+                        {!isCollapsed && <span>{item.label}</span>}
+                      </div>
+                      {!isCollapsed && (
+                        <Icon
+                          name="ChevronDown"
+                          size={16}
+                          className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                        />
+                      )}
+                    </button>
+                  )}
 
                   {/* Children (expanded state) */}
                   {isExpanded && !isCollapsed && (() => {

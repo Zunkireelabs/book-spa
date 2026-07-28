@@ -4,9 +4,10 @@ import { fetchCustomersLightweight } from 'services/api';
 
 // Color tokens for the inline membership pill (mirrors MembershipsPanel).
 const MEMBERSHIP_PILL_STYLES = {
-  active:  'bg-success/10 text-success',
-  lapsed:  'bg-warning/10 text-warning',
-  pending: 'bg-amber-100 text-amber-800',
+  active:   'bg-success/10 text-success',
+  lapsed:   'bg-warning/10 text-warning',
+  pending:  'bg-amber-100 text-amber-800',
+  depleted: 'bg-gray-100 text-gray-600',
 };
 
 const CustomerAutocomplete = ({
@@ -153,8 +154,12 @@ const CustomerAutocomplete = ({
                   )}
                 </span>
                 {m && (
-                  <span className={`flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-mono font-medium tracking-wide ${pillClass}`}>
-                    {m.membershipNumber}
+                  <span
+                    title={m.membershipNumber || undefined}
+                    className={`flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide ${pillClass}`}
+                  >
+                    {m.tierName || m.membershipNumber}
+                    {m.status !== 'active' && ` · ${m.status}`}
                   </span>
                 )}
               </button>

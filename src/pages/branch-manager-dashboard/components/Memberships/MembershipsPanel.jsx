@@ -59,16 +59,18 @@ const MembershipsPanel = () => {
   // Client-side filter (panel applies both the status pill click and the search box).
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((m) => {
-      if (statusFilter !== 'all' && m.status !== statusFilter) return false;
-      if (q) {
-        const name = (m.customerName || '').toLowerCase();
-        const phone = m.customerPhone || '';
-        const number = (m.membershipNumber || '').toLowerCase();
-        if (!name.includes(q) && !phone.includes(q) && !number.includes(q)) return false;
-      }
-      return true;
-    });
+    return rows
+      .filter((m) => {
+        if (statusFilter !== 'all' && m.status !== statusFilter) return false;
+        if (q) {
+          const name = (m.customerName || '').toLowerCase();
+          const phone = m.customerPhone || '';
+          const number = (m.membershipNumber || '').toLowerCase();
+          if (!name.includes(q) && !phone.includes(q) && !number.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
   }, [rows, search, statusFilter]);
 
   const summary = useMemo(() => ({
@@ -275,6 +277,10 @@ const MembershipsPanel = () => {
             setShowEnroll(false);
             loadData();
             if (newId) setSelectedId(newId);
+          }}
+          onRenewExisting={(membershipId) => {
+            setShowEnroll(false);
+            setSelectedId(membershipId);
           }}
         />
       )}
