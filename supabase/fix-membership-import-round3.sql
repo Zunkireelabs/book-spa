@@ -9,7 +9,7 @@
 -- Bimal Sawarthia, Lin, Barsha) still had a nonzero balance in the DB at
 -- renewal time and the renewal deposit was simply added on top of it. The
 -- same additive bug also affected any real renewal done through the app's
--- "Renew" button before migration-056 fixed renew_membership(). Symptom: a
+-- "Renew" button before migration-061 fixed renew_membership(). Symptom: a
 -- membership shows the sum of every deposit it ever received (e.g. 400000)
 -- instead of just its most recent renewal amount (e.g. 100000), which is
 -- what the source sheet and the RenewModal's "starts a fresh cycle" copy
