@@ -419,9 +419,13 @@ const BookingActionModal = ({
     // Over-limit discounts are routed to a chosen approver instead of blocked.
     const maxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
     const baseAmount = booking.baseAmount || 0;
+    // Combined base across every currently-checked booking — for a fixed-NPR discount this is
+    // the correct denominator (the entered amount is the total, not per-service).
+    const combinedBase = relatedBookings.reduce((s, rb) => s + (selectedDiscountIds.has(rb.id) ? Number(rb.base_amount || 0) : 0), 0)
+      + (selectedDiscountIds.has(booking.bookingId) ? baseAmount : 0);
     const effectivePercent = discountType === 'percentage'
       ? Number(discountValue)
-      : baseAmount > 0 ? (Number(discountValue) / baseAmount) * 100 : 0;
+      : combinedBase > 0 ? (Number(discountValue) / combinedBase) * 100 : 0;
 
     // Hard ceiling: staff requests capped at 50%, manager/admin can apply up to 100%.
     const hardCeiling = userRole === 'staff' ? 50 : 100;
@@ -445,14 +449,15 @@ const BookingActionModal = ({
       let failed = false;
 
       for (const bid of bookingIdsToDiscount) {
-        // For related bookings, compute the discount based on their base amount
+        // For fixed amounts, prorate the single entered NPR total across every checked
+        // booking's base amount so the sum of per-booking discounts equals discountValue —
+        // not discountValue applied again to each service.
         let dValue = Number(discountValue);
-        if (discountType === 'fixed' && bid !== booking.bookingId) {
-          // For fixed amount on related bookings, compute proportional or use same percentage
-          const rb = relatedBookings.find(r => r.id === bid);
-          const rbBase = Number(rb?.base_amount || 0);
-          // Convert the effective percentage and apply to this booking's base
-          const pct = baseAmount > 0 ? (dValue / baseAmount) : 0;
+        if (discountType === 'fixed') {
+          const rbBase = bid === booking.bookingId
+            ? baseAmount
+            : Number(relatedBookings.find(r => r.id === bid)?.base_amount || 0);
+          const pct = combinedBase > 0 ? (dValue / combinedBase) : 0;
           dValue = Math.round(rbBase * pct * 100) / 100;
         }
 
@@ -1072,6 +1077,11 @@ const BookingActionModal = ({
                     <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
                       {(() => {
                         const base = booking.baseAmount || 0;
+                        // Combined base across every currently-checked booking — denominator for
+                        // prorating one fixed-NPR discount across multiple selected services so the
+                        // entered amount is the total discount, not the amount applied per service.
+                        const combinedBase = relatedBookings.reduce((s, rb) => s + (selectedDiscountIds.has(rb.id) ? Number(rb.base_amount || 0) : 0), 0)
+                          + (selectedDiscountIds.has(booking.bookingId) ? base : 0);
                         let previewDiscountAmt = booking.discountAmount || 0;
                         let previewDiscountPct = base > 0 ? Math.round((previewDiscountAmt / base) * 100) : 0;
                         if (discountValue !== '' && discountValue !== null && discountValue !== undefined) {
@@ -1079,7 +1089,8 @@ const BookingActionModal = ({
                             previewDiscountPct = Number(discountValue) || 0;
                             previewDiscountAmt = Math.round(base * previewDiscountPct / 100 * 100) / 100;
                           } else {
-                            previewDiscountAmt = Number(discountValue) || 0;
+                            const fixedPct = combinedBase > 0 ? Number(discountValue) / combinedBase : 0;
+                            previewDiscountAmt = Math.round(base * fixedPct * 100) / 100;
                             previewDiscountPct = base > 0 ? Math.round((previewDiscountAmt / base) * 100 * 10) / 10 : 0;
                           }
                         }
@@ -1155,8 +1166,8 @@ const BookingActionModal = ({
                                     if (discountType === 'percentage') {
                                       rbPreviewDiscount = Math.round(rbBase * Number(discountValue) / 100 * 100) / 100;
                                     } else {
-                                      // Fixed: proportional based on base amounts
-                                      const pct = base > 0 ? Number(discountValue) / base : 0;
+                                      // Fixed: prorate the single entered NPR amount across the combined base of all checked services
+                                      const pct = combinedBase > 0 ? Number(discountValue) / combinedBase : 0;
                                       rbPreviewDiscount = Math.round(rbBase * pct * 100) / 100;
                                     }
                                   }
@@ -1226,7 +1237,7 @@ const BookingActionModal = ({
                                 if (rbChecked && hasLivePreview) {
                                   let rbDis;
                                   if (discountType === 'percentage') rbDis = Math.round(rbBase * Number(discountValue) / 100 * 100) / 100;
-                                  else { const pct = base > 0 ? Number(discountValue) / base : 0; rbDis = Math.round(rbBase * pct * 100) / 100; }
+                                  else { const pct = combinedBase > 0 ? Number(discountValue) / combinedBase : 0; rbDis = Math.round(rbBase * pct * 100) / 100; }
                                   total += Math.max(rbBase - rbDis, 0);
                                 } else {
                                   total += Number(rb.final_amount || rb.base_amount || 0);
