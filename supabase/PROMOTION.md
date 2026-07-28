@@ -59,11 +59,14 @@ FROM (VALUES
   ('028'),('029'),('030'),('031'),('032'),('033'),('034'),('035'),('036'),
   ('037'),('038'),('039'),('040'),('041'),('042'),('043'),('044'),('045'),
   ('046'),('047'),('048'),('049'),('051'),('052'),('053'),('054'),('055'),
-  ('056'),('057')
+  ('058'),('059'),('060'),('061'),('062')
   -- 050 ('backfill-service-categories') intentionally excluded — file was never
   -- committed to the repo (held back from prod, per project notes); don't add it
   -- back here unless it actually ships.
   -- 053/054 = this change's admin_viewer role.
+  -- 056/057 intentionally skipped — reserved numbers from a renumber (PR #82's
+  -- membership migrations collided with 053-055 above and were moved to 058-062
+  -- to avoid two different migrations sharing the same version).
   -- <-- add new versions here
 ) t(v)
 WHERE v NOT IN (SELECT version FROM public.schema_migrations)

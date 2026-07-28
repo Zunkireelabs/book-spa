@@ -17,5 +17,5 @@
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS gender text;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('053', 'customers-gender')
+VALUES ('058', 'customers-gender')
 ON CONFLICT (version) DO NOTHING;

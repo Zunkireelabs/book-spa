@@ -26,5 +26,5 @@ ALTER TABLE public.membership_transactions ADD CONSTRAINT membership_transaction
   );
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('055', 'membership-payment-mode')
+VALUES ('060', 'membership-payment-mode')
 ON CONFLICT (version) DO NOTHING;
