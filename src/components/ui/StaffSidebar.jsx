@@ -233,9 +233,15 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'memberships',
       label: 'Memberships',
       icon: 'CreditCard',
-      path: `${basePath}?view=memberships`,
       roles: ['manager', 'admin'],
       children: [
+        {
+          id: 'all-memberships',
+          label: 'All Memberships',
+          icon: 'CreditCard',
+          path: `${basePath}?view=memberships`,
+          roles: ['manager', 'admin'],
+        },
         {
           id: 'membership-collection',
           label: 'Collection',
