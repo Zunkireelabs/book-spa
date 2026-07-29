@@ -1178,8 +1178,9 @@ const BookingActionModal = ({
                               min="0"
                               value={rowDiscountOverrides[id] ?? ''}
                               onChange={(e) => setRowOverride(id, e.target.value)}
-                              placeholder={discountType === 'percentage' ? 'Same as shared %' : 'Same as shared NPR'}
-                              className="w-32 px-2 py-1 border border-border rounded-spa bg-surface text-text-primary text-xs focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                              placeholder={discountType === 'percentage' ? 'Same %' : 'Same NPR'}
+                              title={discountType === 'percentage' ? 'Same as shared %' : 'Same as shared NPR'}
+                              className="w-20 px-2 py-1 border border-border rounded-spa bg-surface text-text-primary text-xs focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
                             />
                             <span className="font-caption text-[10px] text-text-secondary">
                               {discountType === 'percentage' ? '% for just this service' : 'NPR for just this service'}
