@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
-import { searchBookings } from '../../../services/api';
-import { transformBookings } from '../../../services/bookingTransformers';
+import { searchBookings, fetchBookingById } from '../../../services/api';
+import { transformBookings, transformBooking } from '../../../services/bookingTransformers';
 import { useBranch } from '../../../contexts/BranchContext';
 
 const BookingLookupPanel = ({
@@ -48,6 +48,18 @@ const BookingLookupPanel = ({
   const openBooking = (booking) => {
     setSelectedBooking(booking);
     setShowModal(true);
+  };
+
+  // Refetch and replace the open modal's booking when the payment just recorded
+  // was for it, so the wallet balance/status shown update immediately instead of
+  // requiring the modal to be closed and reopened.
+  const handleRecordPaymentWrapper = async (bookingId, opts) => {
+    const result = await onRecordPayment(bookingId, opts);
+    if (!result?.error && selectedBooking && bookingId === selectedBooking.bookingId) {
+      const refreshed = await fetchBookingById(bookingId);
+      if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    }
+    return result;
   };
 
   const handleModalClose = () => {
@@ -252,7 +264,7 @@ const BookingLookupPanel = ({
         therapists={therapists}
         onAssignTherapist={onAssignTherapist}
         onUpdateStatus={onStatusUpdate}
-        onRecordPayment={onRecordPayment}
+        onRecordPayment={handleRecordPaymentWrapper}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
       />

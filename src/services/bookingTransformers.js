@@ -50,7 +50,7 @@ export function transformBooking(dbBooking) {
     therapists = [therapist];
   }
 
-  const finalAmount = Number(dbBooking.final_amount || dbBooking.base_amount || 0);
+  const finalAmount = Number(dbBooking.final_amount ?? dbBooking.base_amount ?? 0);
   const paymentStatus = dbBooking.payment_status || 'unpaid';
 
   // amountPaid is derived from joined payment rows when present; otherwise fall
@@ -92,9 +92,12 @@ export function transformBooking(dbBooking) {
     startTime: dbBooking.start_time || null,
     specialRequests: dbBooking.special_requests || null,
     referredBy: dbBooking.referred_by || null,
-    price: formatNPR(dbBooking.final_amount || dbBooking.base_amount || 0),
+    price: formatNPR(dbBooking.final_amount ?? dbBooking.base_amount ?? 0),
     isLocked: dbBooking.is_locked || false,
     bookingGroupId: dbBooking.booking_group_id || null,
+    payments: paymentRows
+      ? paymentRows.map(p => ({ amount: Number(p.amount || 0), paymentMode: p.payment_mode, createdAt: p.created_at }))
+      : [],
   };
 }
 
@@ -132,6 +135,7 @@ export function transformMembership(dbMembership) {
     customerId: dbMembership.customer_id,
     customerName: customer?.full_name || null,
     customerPhone: customer?.phone || null,
+    customerGender: customer?.gender || null,
     membershipNumber: dbMembership.membership_number || null,
     tierId: dbMembership.tier_id,
     tierName: tier?.name || null,

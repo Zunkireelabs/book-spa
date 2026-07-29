@@ -376,7 +376,22 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     const remaining = Math.round((finalAmount - collected) * 100) / 100;
 
     if (remaining <= 0) {
-      return { data: null, error: { code: 'ALREADY_PAID', message: 'This booking is already fully paid.' } };
+      // payment_status isn't 'paid' yet (checked in step 3) but there's genuinely
+      // nothing left to collect — e.g. a 100% discount left final_amount at 0.
+      // Settle it with a zero-amount row (same trigger-driven path applyDiscount's
+      // auto-settle uses) instead of blocking a bundled payment that includes a
+      // real balance on another booking.
+      const { error: settleError } = await supabase
+        .from('payments')
+        .insert({
+          booking_id: bookingId,
+          amount: 0,
+          payment_mode: (Array.isArray(tenders) && tenders[0]?.paymentMode) || paymentMode || 'No Charge',
+          recorded_by: user.id,
+          notes: notes || 'Auto-settled — no balance due',
+        });
+      if (settleError) throw settleError;
+      return { data: { success: true, settledWithoutPayment: true }, error: null };
     }
 
     // 7. Normalize tenders (fall back to a single full-remaining tender)
@@ -1258,6 +1273,24 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       .single();
 
     if (updateError) throw updateError;
+
+    // A 100%-approved discount leaves nothing to collect — settle it immediately
+    // rather than leaving payment_status stuck on "unpaid" waiting for a Record
+    // Payment click that would otherwise be rejected as "already fully paid".
+    // Insert a zero-amount payment row so the existing SUM-based trigger
+    // (update_booking_payment_status) recomputes payment_status to 'paid'.
+    if (updated.discount_status === 'approved' && Number(updated.final_amount) <= 0 && booking.payment_status !== 'paid') {
+      const { error: settleError } = await supabase
+        .from('payments')
+        .insert({
+          booking_id: bookingId,
+          amount: 0,
+          payment_mode: 'No Charge',
+          recorded_by: user.id,
+          notes: 'Auto-settled — 100% discount leaves no balance due',
+        });
+      if (settleError) throw settleError;
+    }
 
     capture(updated.discount_status === 'pending' ? 'staff_discount_requested' : 'staff_discount_applied', {
       discount_type: discountType,
@@ -2947,7 +2980,10 @@ export async function createBooking({
     let customerId = null;
     const orgId = branchData?.org_id || null;
     try {
-      const phone = customerPhone?.replace(/\D/g, '') || null;
+      // Normalize to the last 10 digits so "9803023766" and "+9779803023766"
+      // (same number, with/without country code) resolve to the same customer
+      // instead of silently creating a duplicate record.
+      const phone = customerPhone ? customerPhone.replace(/\D/g, '').slice(-10) || null : null;
       const email = customerEmail?.trim().toLowerCase() || null;
 
       // Try to find existing customer by phone or email across the whole org
@@ -2955,7 +2991,7 @@ export async function createBooking({
       if (orgId && phone) {
         const { data } = await supabase
           .from('customers')
-          .select('id')
+          .select('id, gender')
           .eq('org_id', orgId)
           .eq('phone', phone)
           .limit(1)
@@ -2965,7 +3001,7 @@ export async function createBooking({
       if (!existingCustomer && orgId && email) {
         const { data } = await supabase
           .from('customers')
-          .select('id')
+          .select('id, gender')
           .eq('org_id', orgId)
           .eq('email', email)
           .limit(1)
@@ -2975,10 +3011,17 @@ export async function createBooking({
 
       if (existingCustomer) {
         customerId = existingCustomer.id;
-        // Update name if changed
+        // Update name if changed. Backfill gender onto the profile only when it's
+        // not already set — a booking-time pick shouldn't clobber a previously
+        // confirmed value (e.g. from membership enrollment).
         await supabase
           .from('customers')
-          .update({ full_name: customerName, phone: phone || undefined, email: email || undefined })
+          .update({
+            full_name: customerName,
+            phone: phone || undefined,
+            email: email || undefined,
+            gender: (!existingCustomer.gender && customerGender) ? customerGender : undefined,
+          })
           .eq('id', customerId);
       } else {
         // Create new customer record (org-wide identity; branch_id kept as origin)
@@ -2990,6 +3033,7 @@ export async function createBooking({
             full_name: customerName,
             phone: phone || null,
             email: email || null,
+            gender: customerGender || null,
           })
           .select('id')
           .single();
@@ -4344,27 +4388,33 @@ export async function fetchCustomersLightweight(branchId) {
 
     const { data, error } = await supabase
       .from('customers')
-      .select(`id, full_name, phone${membershipSelect}`)
+      .select(`id, full_name, phone, email, gender${membershipSelect}`)
       .eq('org_id', branch.org_id)
       .eq('is_active', true)
       .order('full_name');
 
     if (error) throw error;
 
-    // Attach a `primaryMembership` to each customer (the most-recent non-depleted
-    // membership, transformed to include the computed status). Drives the
-    // membership badge in the booking-creation customer autocomplete.
+    // Attach a `primaryMembership` to each customer (their most-recent
+    // membership regardless of status, transformed to include the computed
+    // status). Drives the membership badge in the booking-creation customer
+    // autocomplete AND the "already a member" / "renew instead" hint in the
+    // Enroll Member modal -- depleted/lapsed cards are surfaced too (not
+    // filtered out) so staff sees a returning member's ended card instead of
+    // it looking like they've never had one.
     const enriched = (data || []).map((c) => {
       const memberships = MEMBERSHIP_ENABLED
         ? (c.memberships || [])
             .map((row) => transformMembership({ ...row, customer_id: c.id, org_id: branch.org_id }))
-            .filter((m) => m && m.status !== 'depleted')
+            .filter(Boolean)
             .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
         : [];
       return {
         id: c.id,
         full_name: c.full_name,
         phone: c.phone,
+        email: c.email,
+        gender: c.gender,
         primaryMembership: memberships[0] || null,
       };
     });
@@ -6215,20 +6265,24 @@ export const MEMBERSHIP_DEPOSIT_MODES = ['Cash', 'Card', 'MobileBanking', 'Chequ
 // createBooking() (look up by org+phone first, then org+email; fall back to INSERT;
 // re-fetch on the customers_org_nphone_uniq race per migration-036). Used by walk-in
 // flows such as direct membership enrollment where there is no booking yet.
-export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email }) {
+export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email, gender }) {
   try {
     if (!orgId || !branchId || !fullName) {
       return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
     }
-    const normalizedPhone = phone ? String(phone).replace(/\D/g, '') : null;
+    // Normalize to the last 10 digits so "9803023766" and "+9779803023766"
+    // (same number, with/without country code) resolve to the same customer
+    // instead of silently creating a duplicate record.
+    const normalizedPhone = phone ? String(phone).replace(/\D/g, '').slice(-10) || null : null;
     const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+    const normalizedGender = gender || null;
 
     // 1. Look up an existing customer in the org by phone.
     let existing = null;
     if (normalizedPhone) {
       const { data } = await supabase
         .from('customers')
-        .select('id, full_name, phone, email')
+        .select('id, full_name, phone, email, gender')
         .eq('org_id', orgId)
         .eq('phone', normalizedPhone)
         .limit(1)
@@ -6238,7 +6292,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     if (!existing && normalizedEmail) {
       const { data } = await supabase
         .from('customers')
-        .select('id, full_name, phone, email')
+        .select('id, full_name, phone, email, gender')
         .eq('org_id', orgId)
         .eq('email', normalizedEmail)
         .limit(1)
@@ -6254,6 +6308,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
           full_name: fullName,
           phone: normalizedPhone || existing.phone,
           email: normalizedEmail || existing.email,
+          gender: normalizedGender || existing.gender,
         })
         .eq('id', existing.id);
       return { data: { customerId: existing.id, isNew: false }, error: null };
@@ -6268,6 +6323,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
         full_name: fullName,
         phone: normalizedPhone,
         email: normalizedEmail,
+        gender: normalizedGender,
       })
       .select('id')
       .single();
@@ -6399,7 +6455,7 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone ),
+        customer:customers ( id, full_name, phone, gender ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .order('created_at', { ascending: false });
@@ -6433,7 +6489,7 @@ export async function fetchMembership(membershipId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone ),
+        customer:customers ( id, full_name, phone, gender ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('id', membershipId)
@@ -6461,6 +6517,83 @@ export async function fetchMembershipTransactions(membershipId) {
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchMembershipTransactions error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Org-wide membership ledger report, powering both the Wallet Usage and
+// Membership Collection pages. Replays the full ledger per membership in
+// chronological order to compute two things the `memberships` table doesn't
+// store directly:
+//
+// 1. `usage` — the point-in-time balance immediately after each deduction
+//    (the `balance` column is itself SUM(amount) over ALL kinds — see the
+//    membership_recompute trigger in migration-045-memberships.sql — so this
+//    matches the current Memberships page's Balance exactly at the most
+//    recent transaction).
+//
+// 2. `cycleDeposited` — how much was deposited in the CURRENT wallet cycle
+//    only, not the lifetime sum across every renewal. `total_deposited` on
+//    `memberships` never resets on renewal (e.g. two 100,000 cycles read as
+//    200,000), which is correct as a lifetime audit figure but wrong for "how
+//    much is this membership worth right now" reporting. renew_membership()
+//    (migration-056) marks the fresh cycle's deposit with notes containing
+//    "renewal" ('Renewal deposit') right after forfeiting the old balance —
+//    the same '%renewal%' marker convention already relied on to audit
+//    historical renewals in fix-membership-import-round3.sql — so we reset
+//    the running deposited total whenever we hit one of those rows.
+export async function fetchMembershipLedgerReport() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('membership_transactions')
+      .select(`
+        id, membership_id, kind, amount, notes, created_at, booking_id,
+        membership:memberships (
+          membership_number,
+          customer:customers ( full_name ),
+          tier:membership_tiers ( name )
+        ),
+        booking:bookings ( service_name_snapshot )
+      `)
+      .order('membership_id', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+
+    const runningByMembership = new Map();
+    const cycleDeposited = new Map();
+    const usage = [];
+    for (const row of data || []) {
+      const prevBalance = runningByMembership.get(row.membership_id) || 0;
+      const newBalance = prevBalance + Number(row.amount || 0);
+      runningByMembership.set(row.membership_id, newBalance);
+
+      if (row.kind === 'deposit') {
+        const isRenewal = /renewal/i.test(row.notes || '');
+        const prevCycleDeposited = isRenewal ? 0 : (cycleDeposited.get(row.membership_id) || 0);
+        cycleDeposited.set(row.membership_id, prevCycleDeposited + Number(row.amount || 0));
+      }
+
+      if (row.kind === 'deduction') {
+        usage.push({
+          id: row.id,
+          membershipId: row.membership_id,
+          date: row.created_at,
+          memberName: row.membership?.customer?.full_name || '—',
+          cardNo: row.membership?.membership_number || '—',
+          tierName: row.membership?.tier?.name || '—',
+          service: row.booking?.service_name_snapshot || row.notes || 'Other',
+          amountUsed: Math.abs(Number(row.amount || 0)),
+          remainingBalance: newBalance,
+        });
+      }
+    }
+    usage.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return { data: { usage, cycleDeposited }, error: null };
+  } catch (error) {
+    console.error('[API] fetchMembershipLedgerReport error:', error.message);
     return { data: null, error };
   }
 }
@@ -6498,7 +6631,7 @@ export async function fetchMembershipForCustomer(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone ),
+        customer:customers ( id, full_name, phone, gender ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
@@ -6553,6 +6686,53 @@ export async function topUpMembership({ membershipId, amount, paymentMode, notes
     return { data: { transactionId: data }, error: null };
   } catch (error) {
     console.error('[API] topUpMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Renews a depleted/lapsed membership: records the deposit AND starts a fresh
+// validity cycle from today (optionally on a different tier) -- unlike
+// topUpMembership, which just adds to the balance without touching dates.
+export async function renewMembership({ membershipId, amount, paymentMode, tierId = null, notes = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('renew_membership', {
+      p_membership_id: membershipId,
+      p_amount: amount,
+      p_payment_mode: paymentMode,
+      p_tier_id: tierId,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_renewed', { membership_id: membershipId, amount, payment_mode: paymentMode, tier_id: tierId });
+    return { data: { transactionId: data }, error: null };
+  } catch (error) {
+    console.error('[API] renewMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Reactivates a LAPSED membership (expiry passed, balance still > 0) by moving
+// the expiry date forward. Unlike renewMembership, this never touches balance/
+// total_deposited/tier -- the existing wallet balance is simply made usable
+// again. Only valid while the membership is actually lapsed (enforced in the RPC).
+export async function extendMembership({ membershipId, newExpiryDate, notes = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('extend_membership', {
+      p_membership_id: membershipId,
+      p_new_expiry_date: newExpiryDate,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('staff_membership_extended', { membership_id: membershipId, new_expiry_date: newExpiryDate });
+    return { data: { transactionId: data }, error: null };
+  } catch (error) {
+    console.error('[API] extendMembership error:', error.message);
     return { data: null, error };
   }
 }

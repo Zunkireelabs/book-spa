@@ -147,6 +147,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   }, [branchId]);
 
   const handleCustomerSelect = useCallback((customer) => {
+    // Clicking a specific suggestion is a disambiguated choice — the row already
+    // showed this exact phone (and membership badge, when duplicate names exist)
+    // for staff to verify before clicking — so it's safe to fill from here.
     setCustomerName(customer.full_name);
     const { dial, national } = parsePhone(customer.phone);
     setCustomerPhone(national);
@@ -1984,6 +1987,15 @@ const OperationalCalendar = ({ branchId }) => {
       return { error: result.error };
     }
     showToast('Payment recorded successfully');
+    // Only refresh the modal's displayed booking when this payment was for the
+    // booking currently open (not a bundled previous-due/related payment for a
+    // different booking) — otherwise the modal would flip to showing whichever
+    // bundled booking happened to be paid last.
+    if (selectedBooking && bookingId === selectedBooking.bookingId) {
+      const refreshed = await fetchBookingById(bookingId);
+      if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    }
+    refreshCalendar();
     return { error: null };
   };
 

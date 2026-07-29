@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
 import PaymentMethodSelector from './PaymentMethodSelector';
+import MembershipWalletCard from './MembershipWalletCard';
 import { fetchMembershipForBooking } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { useOrg } from '../../contexts/OrgContext';
@@ -17,13 +18,6 @@ function firstLeafValue(tree) {
   }
   return undefined;
 }
-
-const MEMBERSHIP_STATUS_STYLES = {
-  active:   { container: 'bg-primary/5 border-primary/20',    pill: 'bg-success/10 text-success',  label: 'Active' },
-  pending:  { container: 'bg-amber-50 border-amber-200',      pill: 'bg-amber-100 text-amber-800', label: 'Pending' },
-  lapsed:   { container: 'bg-warning/5 border-warning/20',    pill: 'bg-warning/10 text-warning',  label: 'Lapsed' },
-  depleted: { container: 'bg-gray-50 border-gray-200',        pill: 'bg-gray-100 text-gray-600',   label: 'Depleted' },
-};
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
@@ -54,11 +48,11 @@ const PaymentModal = ({
   const bookingRemaining = (b) => {
     if (b.amountDue !== undefined && b.amountDue !== null) return Number(b.amountDue);
     const already = Number(b.amountPaid ?? b.amount_paid ?? 0);
-    const final = Number(b.final_amount || b.finalAmount || b.base_amount || b.baseAmount || 0);
+    const final = Number(b.final_amount ?? b.finalAmount ?? b.base_amount ?? b.baseAmount ?? 0);
     return Math.max(round2(final - already), 0);
   };
 
-  const finalAmount = Number(booking.final_amount || booking.finalAmount || 0);
+  const finalAmount = Number(booking.final_amount ?? booking.finalAmount ?? 0);
   const alreadyPaid = round2(booking.amountPaid || booking.amount_paid || 0);
   const remaining = round2(Math.max(finalAmount - alreadyPaid, 0));
 
@@ -92,8 +86,23 @@ const PaymentModal = ({
   // wallet attached to this booking's customer AND the wallet still has balance.
   const membershipUsable = membership && membership.balance > 0 && membership.status !== 'depleted';
   const membershipLeaf = membershipUsable
-    ? { value: 'Membership', label: `Membership (${membership.tierName})` }
+    ? { value: 'Membership', label: 'Membership' }
     : null;
+
+  // Once the membership wallet loads, default the tender to it when the balance
+  // fully covers the total due — otherwise staff have to notice the wallet card
+  // and manually switch off Cash. Only fires while the tender is still untouched
+  // (pristine), so it never overwrites a choice staff already made.
+  useEffect(() => {
+    if (!membershipUsable || membership.balance < grandTotal) return;
+    const pristine = tenders.length === 1
+      && tenders[0].paymentMode === firstLeafValue(PAYMENT_TREE)
+      && tenders[0].amount === String(grandTotal || '');
+    if (pristine) {
+      setTenders([{ amount: String(grandTotal || ''), paymentMode: 'Membership' }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [membershipUsable, membership?.balance, grandTotal]);
 
   // How much of the Membership wallet is already committed by other tenders in
   // this submission. Used to cap each Membership tender input.
@@ -261,45 +270,7 @@ const PaymentModal = ({
             </div>
           </div>
 
-          {/* Membership wallet banner (Phase 3) — surfaces when this booking's
-              customer has a wallet. Active = primary color, lapsed = warning, depleted = gray. */}
-          {membership && (() => {
-            const styleKey = membership.status || 'pending';
-            const styles = MEMBERSHIP_STATUS_STYLES[styleKey] || MEMBERSHIP_STATUS_STYLES.pending;
-            return (
-              <div className={`rounded-spa border ${styles.container} px-3 py-2.5`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2 min-w-0">
-                    <Icon name="Wallet" size={14} className="text-primary flex-shrink-0" />
-                    <span className="font-body font-body-medium text-sm text-text-primary truncate">{membership.tierName}</span>
-                    {membership.membershipNumber && (
-                      <span className="font-data font-data-medium text-[11px] tracking-widest text-text-secondary">{membership.membershipNumber}</span>
-                    )}
-                    <span className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${styles.pill}`}>
-                      {styles.label}
-                    </span>
-                  </div>
-                  <span className="font-data font-data-medium text-sm text-primary flex-shrink-0">{formatNPR(membership.balance)}</span>
-                </div>
-                {membership.status === 'lapsed' && (
-                  <p className="mt-1.5 font-caption text-[11px] text-warning">
-                    Membership expired on {membership.expiryDate || '—'}. Wallet balance is still spendable but
-                    discount privileges no longer apply.
-                  </p>
-                )}
-                {membership.status === 'pending' && (
-                  <p className="mt-1.5 font-caption text-[11px] text-amber-700">
-                    Pending activation — wallet is not yet usable for booking payments. Top up to NPR {Number(membership.tierAdvanceAmount).toLocaleString('en-IN')} to activate.
-                  </p>
-                )}
-                {membership.status === 'depleted' && (
-                  <p className="mt-1.5 font-caption text-[11px] text-text-tertiary">
-                    Wallet is depleted.
-                  </p>
-                )}
-              </div>
-            );
-          })()}
+          <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />
 
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}
           <div className="space-y-3">

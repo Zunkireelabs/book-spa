@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
+import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useBranch } from '../../../../contexts/BranchContext';
+import { useOrg } from '../../../../contexts/OrgContext';
+import { buildPaymentMethodTree } from '../../../../services/paymentMethods';
 import {
   fetchMembershipTiers,
   fetchCustomersLightweight,
   findOrCreateCustomer,
   enrollMember,
-  MEMBERSHIP_DEPOSIT_MODES,
 } from '../../../../services/api';
 
 function formatNPR(amount) {
@@ -19,10 +22,24 @@ function normalizePhone(v) {
   return String(v || '').replace(/\D/g, '');
 }
 
-const EnrollMemberModal = ({ onClose, onEnrolled }) => {
+// First immediately-selectable leaf value in the tree — a plain method, or a
+// group's first sub-method (the group name itself isn't selectable once it has
+// sub-methods). Mirrors PaymentModal.jsx's default-tender logic.
+function firstLeafValue(tree) {
+  for (const item of tree) {
+    if (!item.subMethods || item.subMethods.length === 0) return item.value;
+    if (item.subMethods.length > 0) return item.subMethods[0].value;
+  }
+  return undefined;
+}
+
+const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
   const { profile } = useAuth();
   const { branchId } = useBranch();
+  const { paymentMethods } = useOrg();
   const orgId = profile?.org_id;
+
+  const paymentTree = useMemo(() => buildPaymentMethodTree(paymentMethods), [paymentMethods]);
 
   const [tiers, setTiers] = useState([]);
   const [tierId, setTierId] = useState('');
@@ -32,11 +49,13 @@ const EnrollMemberModal = ({ onClose, onEnrolled }) => {
   // disabled and the membership is enrolled against that existing row.
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [customerCountryCode, setCustomerCountryCode] = useState('+977');
   const [email, setEmail] = useState('');
+  const [gender, setGender] = useState('');
   const [lockedCustomer, setLockedCustomer] = useState(null);
 
   const [deposit, setDeposit] = useState('');
-  const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentMode, setPaymentMode] = useState(() => firstLeafValue(paymentTree));
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -93,8 +112,11 @@ const EnrollMemberModal = ({ onClose, onEnrolled }) => {
   const handlePickExisting = (c) => {
     setLockedCustomer(c);
     setName(c.full_name || '');
-    setPhone(c.phone || '');
+    const { dial, national } = parsePhone(c.phone);
+    setCustomerCountryCode(dial);
+    setPhone(national);
     setEmail(''); // lightweight payload doesn't include email; leave blank
+    setGender(c.gender || '');
   };
 
   const handleUnlock = () => {
@@ -121,8 +143,9 @@ const EnrollMemberModal = ({ onClose, onEnrolled }) => {
         orgId,
         branchId,
         fullName: name.trim(),
-        phone: normalizePhone(phone),
+        phone: `${customerCountryCode}${normalizePhone(phone)}`,
         email: email.trim() || null,
+        gender: gender || null,
       });
       if (custErr) {
         setSubmitting(false);
@@ -159,7 +182,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled }) => {
       >
         <form
           onSubmit={handleSubmit}
-          className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-md max-h-[90vh] overflow-y-auto"
+          className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-lg max-h-[90vh] overflow-y-auto"
         >
           <div className="sticky top-0 bg-surface border-b border-border px-5 py-3 flex items-center justify-between z-header">
             <h2 id="enroll-member-title" className="font-heading font-heading-semibold text-base text-text-primary">
@@ -184,58 +207,102 @@ const EnrollMemberModal = ({ onClose, onEnrolled }) => {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 relative">
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Full name"
-                  disabled={!!lockedCustomer}
-                  className="h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
-                />
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Phone (98XXXXXXXX)"
-                  disabled={!!lockedCustomer}
-                  className="h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
-                />
+              <div className="space-y-2 relative">
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Full name"
+                    disabled={!!lockedCustomer}
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
+                  />
+                  <div className="flex">
+                    <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} disabled={!!lockedCustomer} />
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="98XXXXXXXX"
+                      disabled={!!lockedCustomer}
+                      className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
+                    />
+                  </div>
+                </div>
 
                 {suggestions.length > 0 && (
-                  <div className="col-span-2 absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-48 overflow-y-auto">
-                    {suggestions.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => handlePickExisting(c)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
-                      >
-                        <span className="min-w-0 truncate">
-                          <span className="font-medium text-text-primary">{c.full_name}</span>
-                          {c.phone && <span className="ml-2 text-text-secondary">{c.phone}</span>}
-                        </span>
-                        {c.primaryMembership && (
-                          <span className="flex-shrink-0 inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
-                            <Icon name="AlertTriangle" size={10} />
-                            <span className="font-mono tracking-wide">{c.primaryMembership.membershipNumber}</span>
-                            <span>· already a member</span>
-                          </span>
-                        )}
-                      </button>
-                    ))}
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-48 overflow-y-auto">
+                    {suggestions.map((c) => {
+                      const pm = c.primaryMembership;
+                      const needsRenewal = pm && (pm.status === 'depleted' || pm.status === 'lapsed');
+                      return (
+                        <div key={c.id} className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-gray-50">
+                          <button
+                            type="button"
+                            onClick={() => handlePickExisting(c)}
+                            className="min-w-0 flex-1 text-left truncate"
+                          >
+                            <span className="font-medium text-text-primary">{c.full_name}</span>
+                            {c.phone && <span className="ml-2 text-text-secondary">{c.phone}</span>}
+                          </button>
+                          {pm && needsRenewal && onRenewExisting ? (
+                            <button
+                              type="button"
+                              onClick={() => onRenewExisting(pm.id)}
+                              className="flex-shrink-0 inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 spa-transition-fast"
+                            >
+                              <Icon name={pm.status === 'lapsed' ? 'CalendarClock' : 'RefreshCw'} size={10} />
+                              <span className="font-mono tracking-wide">{pm.membershipNumber}</span>
+                              <span>· {pm.status === 'lapsed' ? 'card lapsed, extend instead' : 'card depleted, renew instead'}</span>
+                            </button>
+                          ) : pm && (
+                            <span className="flex-shrink-0 inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
+                              <Icon name="AlertTriangle" size={10} />
+                              <span className="font-mono tracking-wide">{pm.membershipNumber}</span>
+                              <span>· already a member</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email (optional)"
-                disabled={!!lockedCustomer}
-                className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Email (optional)</span>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    disabled={!!lockedCustomer}
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
+                  />
+                </div>
+
+                <div>
+                  <span className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Gender (optional)</span>
+                  <div className="flex h-10 rounded-spa border border-border overflow-hidden">
+                    {['Male', 'Female'].map((g, i) => (
+                      <button
+                        key={g}
+                        type="button"
+                        disabled={!!lockedCustomer}
+                        onClick={() => setGender(gender === g.toLowerCase() ? '' : g.toLowerCase())}
+                        className={`flex-1 h-full text-sm transition-colors disabled:opacity-50 ${i === 1 ? 'border-l border-border' : ''} ${
+                          gender === g.toLowerCase()
+                            ? 'bg-primary/10 text-primary font-body font-body-medium'
+                            : 'bg-surface text-text-secondary hover:bg-background'
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
               {!lockedCustomer && exactPhoneMatch && (
                 <div className="bg-amber-50 border border-amber-200 rounded-spa px-3 py-2 flex items-start space-x-2">
@@ -290,10 +357,10 @@ const EnrollMemberModal = ({ onClose, onEnrolled }) => {
               </div>
               <div>
                 <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Payment mode</label>
-                <CustomSelect
+                <PaymentMethodSelector
                   value={paymentMode}
                   onChange={setPaymentMode}
-                  options={MEMBERSHIP_DEPOSIT_MODES.map((m) => ({ value: m, label: m }))}
+                  paymentMethods={paymentMethods}
                 />
               </div>
             </div>
