@@ -6441,6 +6441,23 @@ export async function fetchMembershipTiers(orgId, { includeInactive = false } = 
   }
 }
 
+// How much was deposited in the CURRENT wallet cycle only, not the lifetime sum
+// across every renewal. `total_deposited` on `memberships` never resets on renewal
+// (e.g. two 100,000 cycles read as 200,000) -- correct as a lifetime audit figure,
+// wrong for "how much is this membership worth right now" display. renew_membership()
+// (migration-056) marks the fresh cycle's deposit with notes containing "renewal", so
+// we reset the running total whenever we hit one of those rows. Same convention as
+// fetchMembershipLedgerReport's cycleDeposited below.
+function computeCycleDeposited(depositTxns) {
+  const cycleDeposited = new Map();
+  for (const row of depositTxns) {
+    const isRenewal = /renewal/i.test(row.notes || '');
+    const prev = isRenewal ? 0 : (cycleDeposited.get(row.membership_id) || 0);
+    cycleDeposited.set(row.membership_id, prev + Number(row.amount || 0));
+  }
+  return cycleDeposited;
+}
+
 // Returns memberships scoped to the caller's org (RLS) joined with tier + customer
 // for list rendering. Optional client-side filters: search (name/phone), statusFilter.
 export async function fetchMemberships({ search, statusFilter } = {}) {
@@ -6462,6 +6479,19 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
     if (error) throw error;
 
     const rows = transformMemberships(data || []);
+
+    const membershipIds = rows.map((m) => m.id);
+    if (membershipIds.length > 0) {
+      const { data: depositTxns, error: txnError } = await supabase
+        .from('membership_transactions')
+        .select('membership_id, amount, notes, created_at')
+        .in('membership_id', membershipIds)
+        .eq('kind', 'deposit')
+        .order('created_at', { ascending: true });
+      const cycleDeposited = txnError ? new Map() : computeCycleDeposited(depositTxns || []);
+      rows.forEach((m) => { m.cycleDeposited = cycleDeposited.get(m.id) ?? m.totalDeposited; });
+    }
+
     const filtered = rows.filter((m) => {
       if (statusFilter && statusFilter !== 'all' && m.status !== statusFilter) return false;
       if (search && search.trim().length > 0) {
@@ -6495,7 +6525,19 @@ export async function fetchMembership(membershipId) {
       .eq('id', membershipId)
       .single();
     if (error) throw error;
-    return { data: transformMembership(data), error: null };
+
+    const membership = transformMembership(data);
+
+    const { data: depositTxns, error: txnError } = await supabase
+      .from('membership_transactions')
+      .select('membership_id, amount, notes, created_at')
+      .eq('membership_id', membershipId)
+      .eq('kind', 'deposit')
+      .order('created_at', { ascending: true });
+    const cycleDeposited = txnError ? new Map() : computeCycleDeposited(depositTxns || []);
+    membership.cycleDeposited = cycleDeposited.get(membershipId) ?? membership.totalDeposited;
+
+    return { data: membership, error: null };
   } catch (error) {
     console.error('[API] fetchMembership error:', error.message);
     return { data: null, error };
