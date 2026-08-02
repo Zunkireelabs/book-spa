@@ -426,10 +426,11 @@ const BookingActionModal = ({
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
   const isLocked = booking.isLocked || false;
   const isSettled = booking.paymentStatus === 'paid';
-  // Being paid does not itself lock a booking — only day-close or a terminal
-  // status should block further mutation. Elapsed start time no longer locks
-  // therapist/room reassignment.
-  const isMutationBlocked = isTerminal || isLocked;
+  const isServiceStarted = booking.status === 'in-progress';
+  // Clicking Start locks everything except Discount/Payment (still needed to
+  // settle the bill); being paid locks Discount/Payment too (via canDiscount/
+  // canPay below) and everything else. Day-close and terminal status always lock.
+  const isMutationBlocked = isTerminal || isLocked || isServiceStarted || isSettled;
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
@@ -658,7 +659,9 @@ const BookingActionModal = ({
                         ? { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' }
                         : isSettled
                           ? { bg: 'bg-success/5', border: 'border-success/20', iconColor: 'text-success', textColor: 'text-success', icon: 'CheckCircle', label: 'Paid — Settled' }
-                          : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Booking Locked' };
+                          : isServiceStarted
+                            ? { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Service Started — Locked (Discount/Payment still open)' }
+                            : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Booking Locked' };
                   return (
                     <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
                       <Icon name={banner.icon} size={16} className={banner.iconColor} />
