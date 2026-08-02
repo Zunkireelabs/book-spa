@@ -690,7 +690,7 @@ const BookingActionModal = ({
                       {booking.status.replace('-', ' ')}
                     </span>
                   </div>
-                  {!isMutationBlocked && nextStatuses.length > 0 && (
+                  {!isTerminal && !isLocked && nextStatuses.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => (
                         <Button
