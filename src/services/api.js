@@ -1925,7 +1925,7 @@ export async function getDailySummary(branchId, date) {
         netRevenue += amount;
         if (p.payment_mode === 'Cash') {
           paymentBreakdown.cash += amount;
-        } else if (p.payment_mode === 'Card') {
+        } else if (p.payment_mode.includes('Card')) {
           paymentBreakdown.card += amount;
         } else {
           // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
@@ -2200,7 +2200,7 @@ export async function getDailyOperationalReport(branchId, date) {
         const amount = Number(p.amount);
         if (p.payment_mode === 'Cash') {
           paymentBreakdown.cash += amount;
-        } else if (p.payment_mode === 'Card') {
+        } else if (p.payment_mode.includes('Card')) {
           paymentBreakdown.card += amount;
         } else {
           // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
