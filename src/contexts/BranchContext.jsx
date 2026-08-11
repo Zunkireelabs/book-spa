@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { fetchAllBranches, OVERALL_BRANCH_ID } from '../services/api';
+import { fetchAllBranches, fetchManagerBranches, OVERALL_BRANCH_ID } from '../services/api';
 
 export { OVERALL_BRANCH_ID };
 
@@ -8,6 +8,9 @@ const BranchContext = createContext(null);
 
 // Use org-specific storage key to prevent cross-tenant branch selection
 const getStorageKey = (orgId) => `bookspa_admin_branch_id_${orgId}`;
+// Manager storage key is per-user too — a manager's accessible-branch set is
+// theirs alone, unlike admins who all see the same org-wide list.
+const getManagerStorageKey = (orgId, userId) => `bookspa_manager_branch_id_${orgId}_${userId}`;
 // Legacy key (remove on first load to clean up)
 const LEGACY_STORAGE_KEY = 'bookspa_admin_branch_id';
 
@@ -28,6 +31,7 @@ export const BranchProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'admin_viewer';
+  const isManager = profile?.role === 'manager';
 
   // Load branches for admin, resolve branchId for all roles
   useEffect(() => {
@@ -43,8 +47,11 @@ export const BranchProvider = ({ children }) => {
     if (isAdmin) {
       // Admin: load all branches, restore from localStorage or default to first
       loadAdminBranches();
+    } else if (isManager) {
+      // Manager: primary branch + any additional grants (migration-063)
+      loadManagerBranches();
     } else {
-      // Manager/Staff: fixed to their assigned branch
+      // Staff: fixed to their assigned branch
       setBranchId(profile.branch_id);
       setBranchName(profile.branches?.name || null);
       setBranches([]);
@@ -100,29 +107,70 @@ export const BranchProvider = ({ children }) => {
     setLoading(false);
   };
 
-  const switchBranch = useCallback((newBranchId) => {
-    if (!isAdmin) return;
+  const loadManagerBranches = async () => {
+    setLoading(true);
+    const result = await fetchManagerBranches();
+    const accessible = result.data || [];
+    setBranches(accessible);
 
-    // "Overall" — org-wide aggregate view (not a real branch row)
-    if (newBranchId === OVERALL_BRANCH_ID) {
-      setBranchId(OVERALL_BRANCH_ID);
-      setBranchName('Overall');
+    if (accessible.length <= 1) {
+      // Common case — unchanged from prior single-branch behavior.
+      setBranchId(profile.branch_id);
+      setBranchName(profile.branches?.name || accessible[0]?.name || null);
+      setLoading(false);
+      return;
+    }
+
+    const storageKey = getManagerStorageKey(profile.org_id, profile.id);
+    const savedId = localStorage.getItem(storageKey);
+    const savedBranch = savedId ? accessible.find(b => b.id === savedId) : null;
+
+    if (savedBranch) {
+      setBranchId(savedBranch.id);
+      setBranchName(savedBranch.name);
+    } else {
+      // Default to their primary branch
+      const primary = accessible.find(b => b.id === profile.branch_id) || accessible[0];
+      setBranchId(primary.id);
+      setBranchName(primary.name);
+    }
+    setLoading(false);
+  };
+
+  const switchBranch = useCallback((newBranchId) => {
+    if (isAdmin) {
+      // "Overall" — org-wide aggregate view (not a real branch row), admin-only
+      if (newBranchId === OVERALL_BRANCH_ID) {
+        setBranchId(OVERALL_BRANCH_ID);
+        setBranchName('Overall');
+        if (profile?.org_id) {
+          localStorage.setItem(getStorageKey(profile.org_id), OVERALL_BRANCH_ID);
+        }
+        return;
+      }
+
+      const branch = branches.find(b => b.id === newBranchId);
+      if (!branch) return;
+
+      setBranchId(branch.id);
+      setBranchName(branch.name);
       if (profile?.org_id) {
-        localStorage.setItem(getStorageKey(profile.org_id), OVERALL_BRANCH_ID);
+        localStorage.setItem(getStorageKey(profile.org_id), branch.id);
       }
       return;
     }
 
-    const branch = branches.find(b => b.id === newBranchId);
-    if (!branch) return;
+    if (isManager) {
+      const branch = branches.find(b => b.id === newBranchId);
+      if (!branch) return;
 
-    setBranchId(branch.id);
-    setBranchName(branch.name);
-    // Use org-specific storage key
-    if (profile?.org_id) {
-      localStorage.setItem(getStorageKey(profile.org_id), branch.id);
+      setBranchId(branch.id);
+      setBranchName(branch.name);
+      if (profile?.org_id && profile?.id) {
+        localStorage.setItem(getManagerStorageKey(profile.org_id, profile.id), branch.id);
+      }
     }
-  }, [isAdmin, branches, profile?.org_id]);
+  }, [isAdmin, isManager, branches, profile?.org_id, profile?.id]);
 
   const isOverall = branchId === OVERALL_BRANCH_ID;
 
@@ -132,6 +180,7 @@ export const BranchProvider = ({ children }) => {
       branchName,
       branches,
       isAdmin,
+      isManager,
       isOverall,
       switchBranch,
       loading,

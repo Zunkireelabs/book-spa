@@ -5481,6 +5481,44 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
   }
 }
 
+// Manager's accessible branches: their primary users.branch_id plus any
+// additional grants in user_branches (migration-063). Staff stay single-branch.
+export async function fetchManagerBranches() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError || !profile?.id) {
+      console.warn('[API] fetchManagerBranches: skipped — no profile. authError:', authError);
+      return { data: [], error: null };
+    }
+
+    const { data: grants, error } = await supabase
+      .from('user_branches')
+      .select('branches(id, name, address, phone, is_active)')
+      .eq('user_id', profile.id);
+
+    if (error) throw error;
+
+    const byId = new Map();
+    if (profile.branch_id) {
+      byId.set(profile.branch_id, {
+        id: profile.branch_id,
+        name: profile.branches?.name || null,
+        address: profile.branches?.address || null,
+        phone: profile.branches?.phone || null,
+        is_active: profile.branches?.is_active,
+      });
+    }
+    for (const g of grants || []) {
+      if (g.branches) byId.set(g.branches.id, g.branches);
+    }
+
+    return { data: Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || '')), error: null };
+  } catch (error) {
+    console.error('[API] fetchManagerBranches error:', error.message);
+    return { data: [], error };
+  }
+}
+
 export async function fetchAllBranches() {
   try {
     // Get authenticated user's org_id for tenant isolation
