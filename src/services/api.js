@@ -853,6 +853,75 @@ export async function getReferralsReport({ branchId, from, to } = {}) {
   }
 }
 
+// Revenue per service, broken out by branch, for PAID bookings only in the
+// given date range. Always returns every branch that has at least one
+// matching paid booking (1 column when branchId is a concrete branch —
+// withBranch scopes the query — N columns when branchId is Overall).
+// from/to are ISO dates (inclusive); omit for all-time.
+export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select('service_name_snapshot, final_amount, branch_id, branches(name)')
+      .eq('payment_status', 'paid');
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    query = withBranch(query, branchId);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const branchMap = new Map();     // branch_id -> branch name
+    const serviceMap = new Map();    // service name -> { [branchId]: { revenue, count } }
+    const branchTotals = {};         // branch_id -> { revenue, count }
+    let grandTotalRevenue = 0;
+    let grandTotalCount = 0;
+
+    for (const b of (bookings || [])) {
+      const svc = b.service_name_snapshot || 'Unknown Service';
+      const bId = b.branch_id;
+      const bName = b.branches?.name || 'Unknown Branch';
+      const amount = Number(b.final_amount) || 0;
+
+      if (!branchMap.has(bId)) branchMap.set(bId, bName);
+      if (!serviceMap.has(svc)) serviceMap.set(svc, {});
+      const svcRow = serviceMap.get(svc);
+      if (!svcRow[bId]) svcRow[bId] = { revenue: 0, count: 0 };
+      svcRow[bId].revenue = Math.round((svcRow[bId].revenue + amount) * 100) / 100;
+      svcRow[bId].count += 1;
+
+      if (!branchTotals[bId]) branchTotals[bId] = { revenue: 0, count: 0 };
+      branchTotals[bId].revenue = Math.round((branchTotals[bId].revenue + amount) * 100) / 100;
+      branchTotals[bId].count += 1;
+
+      grandTotalRevenue = Math.round((grandTotalRevenue + amount) * 100) / 100;
+      grandTotalCount += 1;
+    }
+
+    const branches = Array.from(branchMap.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const services = Array.from(serviceMap.entries()).map(([name, byBranch]) => {
+      const totalRevenue = branches.reduce((s, br) => s + (byBranch[br.id]?.revenue || 0), 0);
+      const totalCount = branches.reduce((s, br) => s + (byBranch[br.id]?.count || 0), 0);
+      return {
+        serviceName: name,
+        byBranch,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        totalCount,
+      };
+    }).sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    return {
+      data: { branches, services, branchTotals, grandTotalRevenue, grandTotalCount },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getServiceRevenueByBranch error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function updateBookingStatus({ bookingId, newStatus }) {
   try {
     // 1. Fetch booking
@@ -5499,17 +5568,19 @@ export async function fetchManagerBranches() {
     if (error) throw error;
 
     const byId = new Map();
-    if (profile.branch_id) {
-      byId.set(profile.branch_id, {
-        id: profile.branch_id,
-        name: profile.branches?.name || null,
-        address: profile.branches?.address || null,
-        phone: profile.branches?.phone || null,
-        is_active: profile.branches?.is_active,
-      });
-    }
     for (const g of grants || []) {
       if (g.branches) byId.set(g.branches.id, g.branches);
+    }
+
+    // Primary branch isn't embedded on `profile` (getAuthenticatedUser only
+    // selects branch_id) — fetch it directly so it doesn't render blank/"(Inactive)".
+    if (profile.branch_id && !byId.has(profile.branch_id)) {
+      const { data: primaryBranch } = await supabase
+        .from('branches')
+        .select('id, name, address, phone, is_active')
+        .eq('id', profile.branch_id)
+        .single();
+      if (primaryBranch) byId.set(primaryBranch.id, primaryBranch);
     }
 
     return { data: Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || '')), error: null };
