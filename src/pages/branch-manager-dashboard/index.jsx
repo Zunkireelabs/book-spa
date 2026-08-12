@@ -43,6 +43,7 @@ import AttendanceReportPanel from './components/AttendanceReportPanel';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
+import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPanel from './components/Memberships/MembershipsPanel';
 import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
@@ -633,6 +634,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'transfer-report' && <TransferReportPanel />}
               {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
               {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
+              {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
               {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
