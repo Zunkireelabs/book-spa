@@ -5499,17 +5499,19 @@ export async function fetchManagerBranches() {
     if (error) throw error;
 
     const byId = new Map();
-    if (profile.branch_id) {
-      byId.set(profile.branch_id, {
-        id: profile.branch_id,
-        name: profile.branches?.name || null,
-        address: profile.branches?.address || null,
-        phone: profile.branches?.phone || null,
-        is_active: profile.branches?.is_active,
-      });
-    }
     for (const g of grants || []) {
       if (g.branches) byId.set(g.branches.id, g.branches);
+    }
+
+    // Primary branch isn't embedded on `profile` (getAuthenticatedUser only
+    // selects branch_id) — fetch it directly so it doesn't render blank/"(Inactive)".
+    if (profile.branch_id && !byId.has(profile.branch_id)) {
+      const { data: primaryBranch } = await supabase
+        .from('branches')
+        .select('id, name, address, phone, is_active')
+        .eq('id', profile.branch_id)
+        .single();
+      if (primaryBranch) byId.set(primaryBranch.id, primaryBranch);
     }
 
     return { data: Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || '')), error: null };
