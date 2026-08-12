@@ -50,7 +50,7 @@ async function fetchProfile(userId, accessToken) {
   try {
     if (accessToken) {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/users`
-        + `?select=*,branches(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
+        + `?select=*,branches!users_branch_id_fkey(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
       const res = await fetch(url, {
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -69,7 +69,7 @@ async function fetchProfile(userId, accessToken) {
     // Fallback: use supabase client (session from localStorage)
     const { data, error } = await supabase
       .from('users')
-      .select('*, branches(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
+      .select('*, branches!users_branch_id_fkey(name), organizations(id, name, code, slug, industry_type, industries(id, name, staff_label, staff_label_plural, location_label, location_label_plural, enable_rooms, enable_staff_gender))')
       .eq('id', userId)
       .single();
 
