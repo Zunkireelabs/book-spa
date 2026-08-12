@@ -860,15 +860,21 @@ export async function getReferralsReport({ branchId, from, to } = {}) {
 // from/to are ISO dates (inclusive); omit for all-time.
 export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
   try {
-    let query = supabase
-      .from('bookings')
-      .select('service_name_snapshot, final_amount, branch_id, branches(name)')
-      .eq('payment_status', 'paid');
-    if (from) query = query.gte('date', from);
-    if (to) query = query.lte('date', to);
-    query = withBranch(query, branchId);
-    const { data: bookings, error } = await query;
-    if (error) throw error;
+    const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
+    const bookings = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      let query = supabase
+        .from('bookings')
+        .select('service_name_snapshot, final_amount, branch_id, branches(name)')
+        .eq('payment_status', 'paid');
+      if (from) query = query.gte('date', from);
+      if (to) query = query.lte('date', to);
+      query = withBranch(query, branchId);
+      const { data: page, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+      if (error) throw error;
+      bookings.push(...(page || []));
+      if (!page || page.length < PAGE_SIZE) break;
+    }
 
     const branchMap = new Map();     // branch_id -> branch name
     const serviceMap = new Map();    // service name -> { [branchId]: { revenue, count } }
