@@ -27,6 +27,15 @@ const ServiceRevenueReportPanel = ({ branchId }) => {
   const [sortKey, setSortKey] = useState('total'); // 'name' | 'total'
   const [sortDir, setSortDir] = useState('desc');
 
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpand = (key) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
   const isPreset = mode === 'preset';
 
   const range = useMemo(() => {
@@ -97,15 +106,14 @@ const ServiceRevenueReportPanel = ({ branchId }) => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Service', ...data.branches.map(b => b.name), 'Total'];
+    const header = ['Service', 'Branch', 'Revenue', 'Bookings'];
     let csv = header.join(',') + '\n';
     sorted.forEach((s) => {
-      const row = [
-        esc(s.serviceName),
-        ...data.branches.map(b => esc(s.byBranch[b.id]?.revenue ?? 0)),
-        esc(s.totalRevenue),
-      ];
-      csv += row.join(',') + '\n';
+      data.branches.forEach((b) => {
+        const cell = s.byBranch[b.id];
+        if (!cell) return;
+        csv += [esc(s.serviceName), esc(b.name), esc(cell.revenue), esc(cell.count)].join(',') + '\n';
+      });
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -201,46 +209,76 @@ const ServiceRevenueReportPanel = ({ branchId }) => {
                       <span>Service</span>{sortIcon('name')}
                     </button>
                   </th>
-                  {data.branches.map((b) => (
-                    <th key={b.id} className="text-right px-4 py-3">
-                      <span className="font-body font-body-medium text-sm text-text-secondary whitespace-nowrap">{b.name}</span>
-                    </th>
-                  ))}
                   <th className="text-right px-4 py-3">
                     <button type="button" onClick={() => handleSort('total')} className="inline-flex items-center gap-1 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary whitespace-nowrap ml-auto">
                       <span>Total</span>{sortIcon('total')}
                     </button>
                   </th>
+                  <th className="text-right px-4 py-3">
+                    <span className="font-body font-body-medium text-sm text-text-secondary whitespace-nowrap"># Bookings</span>
+                  </th>
+                  <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((s) => (
-                  <tr key={s.serviceName} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
-                    <td className="px-4 py-3">
-                      <span className="font-body font-body-medium text-sm text-text-primary">{s.serviceName}</span>
-                    </td>
-                    {data.branches.map((b) => (
-                      <td key={b.id} className="px-4 py-3 text-right font-data text-sm text-text-secondary whitespace-nowrap">
-                        {s.byBranch[b.id]?.revenue ? formatNPR(s.byBranch[b.id].revenue) : '—'}
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-success font-semibold whitespace-nowrap">
-                      {formatNPR(s.totalRevenue)}
-                    </td>
-                  </tr>
-                ))}
+                {sorted.map((s) => {
+                  const key = s.serviceName;
+                  const isOpen = expanded.has(key);
+                  const branchRows = data.branches.filter(b => s.byBranch[b.id]);
+                  return (
+                    <React.Fragment key={key}>
+                      <tr
+                        className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast cursor-pointer"
+                        onClick={() => toggleExpand(key)}
+                      >
+                        <td className="px-4 py-3">
+                          <span className="font-body font-body-medium text-sm text-text-primary">{s.serviceName}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-data font-data-medium text-sm text-success font-semibold whitespace-nowrap">
+                          {formatNPR(s.totalRevenue)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-data text-sm text-text-secondary whitespace-nowrap">
+                          {s.totalCount}
+                        </td>
+                        <td className="px-2 py-3 text-text-tertiary">
+                          <Icon name={isOpen ? 'ChevronUp' : 'ChevronDown'} size={16} />
+                        </td>
+                      </tr>
+
+                      {isOpen && branchRows.map((b) => (
+                        <tr key={b.id} className="border-b border-border last:border-b-0 bg-background/30">
+                          <td colSpan={4} className="px-4 py-2.5">
+                            <div className="flex items-center justify-between gap-3 flex-wrap pl-4">
+                              <span className="inline-flex items-center gap-1.5 font-body text-sm text-text-primary">
+                                <Icon name="Building2" size={14} className="text-primary" />
+                                {b.name}
+                              </span>
+                              <div className="flex items-center gap-4 flex-shrink-0">
+                                <span className="font-body text-xs text-text-secondary">
+                                  {s.byBranch[b.id].count} booking{s.byBranch[b.id].count !== 1 ? 's' : ''}
+                                </span>
+                                <span className="font-data text-sm text-success font-semibold w-24 text-right">
+                                  {formatNPR(s.byBranch[b.id].revenue)}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
                   <td className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
-                  {data.branches.map((b) => (
-                    <td key={b.id} className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-secondary whitespace-nowrap">
-                      {formatNPR(data.branchTotals[b.id]?.revenue ?? 0)}
-                    </td>
-                  ))}
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-success whitespace-nowrap">
                     {formatNPR(data.grandTotalRevenue)}
                   </td>
+                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-secondary whitespace-nowrap">
+                    {data.grandTotalCount}
+                  </td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
