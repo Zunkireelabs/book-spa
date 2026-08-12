@@ -197,6 +197,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=referrals`,
           roles: ['manager', 'admin', 'admin_viewer']
         },
+        {
+          id: 'service-revenue',
+          label: 'Service Revenue',
+          icon: 'PieChart',
+          path: `${basePath}?view=service-revenue`,
+          roles: ['manager', 'admin', 'admin_viewer']
+        },
       ]
     },
     {
