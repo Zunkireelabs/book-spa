@@ -90,6 +90,11 @@ same script in the staging dashboard/MCP and the production dashboard.
 
 ## Bootstrapping a brand-new database
 
-Run in order: `schema.sql` → `rls.sql` → `seed.sql` (or a tenant seed) → then any
-`migration-NNN-*.sql` newer than the schema baseline. `schema.sql` already creates an empty
-`schema_migrations` table; record migrations as you apply them.
+Run in order: `schema.sql` → `rls.sql` → then every `migration-NNN-*.sql` (`002` and `050` can be
+skipped — see `supabase/LOCAL_DEV.md`) → `seed.sql` (or a tenant seed) last. `seed.sql` inserts
+`branches.org_id`/`therapists.org_id`, columns added by the multi-tenancy migrations
+(`009`/`010`/`038`), so it must run after migrations, not before. `schema.sql` already creates an
+empty `schema_migrations` table; record migrations as you apply them.
+
+For a working, scripted example of this exact order, see `scripts/local-db-bootstrap.sh` (used
+for local OrbStack dev — see `supabase/LOCAL_DEV.md`).
