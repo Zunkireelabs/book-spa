@@ -65,7 +65,7 @@ create index on bookings (customer_account_id);
 3. On success, call a Postgres RPC `create_customer_account(org_id, email, phone, full_name)`
    (security definer, called with the new session) that atomically:
    - Inserts the `customer_accounts` row.
-   - Auto-links history: `update bookings set customer_account_id = new.id where org_id = :org_id and customer_email = :email and customer_account_id is null`.
+   - Auto-links history: `update bookings set customer_account_id = new.id where branch_id in (select id from branches where org_id = :org_id) and customer_email = :email and customer_account_id is null` (`bookings` has no `org_id` column directly — org scoping goes through `branches.org_id` via `branch_id`).
    Wrapping both in one RPC avoids a partial-success state from two separate client
    round trips.
 
