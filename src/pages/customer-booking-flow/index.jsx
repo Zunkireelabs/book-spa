@@ -31,6 +31,12 @@ const CustomerBookingFlow = () => {
     email: '',
     phone: '',
     gender: '',
+    referralSource: '',
+    referralClientName: '',
+    referralPhone: '',
+    referralCountryCode: '+977',
+    referralSocialPlatform: '',
+    referralStaffName: '',
     specialRequests: '',
     agreeToTerms: false
   });
@@ -83,6 +89,12 @@ const CustomerBookingFlow = () => {
             email: '',
             phone: '',
             gender: '',
+            referralSource: '',
+            referralClientName: '',
+            referralPhone: '',
+            referralCountryCode: '+977',
+            referralSocialPlatform: '',
+            referralStaffName: '',
             specialRequests: '',
             agreeToTerms: false
           });
@@ -155,7 +167,14 @@ const CustomerBookingFlow = () => {
     // Only customer name is required per US-CUS-003; email, phone, gender are optional
     if (!customerInfo.firstName.trim()) return false;
     if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
-    if (customerInfo.phone.trim() && !/^[0-9]{10}$/.test(customerInfo.phone.replace(/\s+/g, ''))) return false;
+    if (customerInfo.phone.trim()) {
+      // Nepal keeps the strict 10-digit check; other country codes get a loose
+      // sanity-length bound (see CustomerForm.jsx's matching validateField logic).
+      const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
+      const digits = customerInfo.phone.replace(/\D/g, '');
+      const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+      if (!phoneValid) return false;
+    }
     return true;
   };
 
@@ -274,12 +293,14 @@ const CustomerBookingFlow = () => {
             selectedService={selectedService}
             selectedDateTime={selectedDateTime}
             genderPreference={genderPreference}
+            orgSlug={orgSlug}
           />
         );
       
       case 5:
         return (
           <BookingConfirmation
+            orgSlug={orgSlug}
             selectedBranch={selectedBranch}
             selectedService={selectedService}
             selectedDateTime={selectedDateTime}

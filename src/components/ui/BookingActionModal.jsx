@@ -5,7 +5,7 @@ import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, fetchRewardCatalog, resolveCustomerReferralReward } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
@@ -110,6 +110,13 @@ const BookingActionModal = ({
 
   // Who created this booking (lazy-loaded on open)
   const [creator, setCreator] = useState(null);
+  const [customerReferral, setCustomerReferral] = useState(null);
+  const [rewardType, setRewardType] = useState('wallet');
+  const [rewardAmount, setRewardAmount] = useState('');
+  const [rewardCatalog, setRewardCatalog] = useState([]);
+  const [rewardCatalogId, setRewardCatalogId] = useState('');
+  const [rewardSubmitting, setRewardSubmitting] = useState(false);
+  const [rewardError, setRewardError] = useState(null);
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
@@ -211,6 +218,56 @@ const BookingActionModal = ({
       setCreator(null);
     }
   }, [isOpen, booking?.bookingId]);
+
+  // Load the customer-to-customer referral attached to this booking (if this is
+  // the referred customer's first booking) — distinct from the legacy free-text
+  // referredBy field below.
+  useEffect(() => {
+    if (isOpen && booking?.bookingId) {
+      fetchCustomerReferralForBooking(booking.bookingId).then(result => setCustomerReferral(result.data || null));
+    } else {
+      setCustomerReferral(null);
+    }
+  }, [isOpen, booking?.bookingId]);
+
+  // Reset the reward picker each time a different booking's pending referral is shown
+  useEffect(() => {
+    setRewardType('wallet');
+    setRewardAmount('');
+    setRewardCatalogId('');
+    setRewardError(null);
+  }, [customerReferral?.referralId]);
+
+  // Voucher catalog for the pending-referral reward picker (manager/admin only)
+  useEffect(() => {
+    if (customerReferral?.rewardStatus === 'pending' && rewardType === 'voucher') {
+      fetchRewardCatalog({ rewardType: 'voucher' }).then(result => setRewardCatalog(result.data || []));
+    }
+  }, [customerReferral?.rewardStatus, rewardType]);
+
+  const handleResolveReferralReward = async () => {
+    if (!customerReferral?.referralId) return;
+    setRewardSubmitting(true);
+    setRewardError(null);
+    try {
+      const { error } = await resolveCustomerReferralReward({
+        referralId: customerReferral.referralId,
+        rewardType,
+        rewardAmount: rewardType === 'wallet' ? (rewardAmount ? Number(rewardAmount) : null) : null,
+        rewardCatalogId: rewardType === 'voucher' ? (rewardCatalogId || null) : null,
+      });
+      if (error) {
+        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        return;
+      }
+      const refreshed = await fetchCustomerReferralForBooking(booking.bookingId);
+      setCustomerReferral(refreshed.data || null);
+    } catch (err) {
+      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+    } finally {
+      setRewardSubmitting(false);
+    }
+  };
 
   // Load eligible approvers the first time the discount tab is opened
   useEffect(() => {
@@ -915,6 +972,93 @@ const BookingActionModal = ({
                     <p className="font-body font-body-normal text-sm text-text-secondary italic">None</p>
                   )}
                 </div>
+
+                {/* Customer-to-customer referral reward — separate from the legacy
+                    staff/therapist referredBy field above. Only present when this
+                    booking was the referred customer's first booking. */}
+                {customerReferral && (
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by (customer)</label>
+                    <div className="p-2.5 sm:p-3 bg-background rounded-spa flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-body font-body-normal text-sm text-text-primary truncate">
+                          {customerReferral.referrerName}
+                          {customerReferral.referrerPhone ? ` · ${customerReferral.referrerPhone}` : ''}
+                        </p>
+                        <p className="font-caption text-xs text-text-tertiary">
+                          {customerReferral.rewardType === 'voucher'
+                            ? (customerReferral.rewardLabel || 'Gift Voucher')
+                            : 'Wallet credit'}
+                          {customerReferral.rewardAmount > 0 ? ` — NPR ${customerReferral.rewardAmount.toLocaleString('en-IN')}` : ''}
+                        </p>
+                      </div>
+                      <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[11px] font-caption font-caption-medium ${
+                        customerReferral.rewardStatus === 'credited' ? 'bg-success/10 text-success' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {customerReferral.rewardStatus === 'credited' ? 'Credited' : 'Pending'}
+                      </span>
+                    </div>
+
+                    {customerReferral.rewardStatus === 'pending' && ['manager', 'admin'].includes(userRole) && (
+                      <div className="p-2.5 sm:p-3 bg-background rounded-spa space-y-2">
+                        <p className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Choose a reward</p>
+                        <div className="flex gap-2">
+                          {[
+                            { value: 'wallet', label: 'Wallet' },
+                            { value: 'voucher', label: 'Gift Voucher' },
+                          ].map((r) => (
+                            <button
+                              key={r.value}
+                              type="button"
+                              onClick={() => setRewardType(r.value)}
+                              className={`px-3 py-2 rounded-md text-sm transition-colors border ${
+                                rewardType === r.value
+                                  ? 'border-primary bg-blue-50 text-primary'
+                                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                              }`}
+                            >
+                              {r.label}
+                            </button>
+                          ))}
+                        </div>
+                        {rewardType === 'wallet' && (
+                          <input
+                            type="number"
+                            min="0"
+                            value={rewardAmount}
+                            onChange={(e) => setRewardAmount(e.target.value)}
+                            placeholder="e.g. 500 (leave blank for the org default)"
+                            className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                          />
+                        )}
+                        {rewardType === 'voucher' && (
+                          <CustomSelect
+                            value={rewardCatalogId}
+                            onChange={setRewardCatalogId}
+                            options={rewardCatalog.map((item) => ({
+                              value: item.id,
+                              label: item.value != null ? `${item.name} (NPR ${item.value.toLocaleString('en-IN')})` : item.name,
+                            }))}
+                            placeholder={rewardCatalog.length > 0 ? 'Select a gift voucher...' : 'No options set up yet — ask a manager to add one'}
+                            searchable
+                          />
+                        )}
+                        {rewardError && (
+                          <p className="font-caption text-xs text-error">{rewardError}</p>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleResolveReferralReward}
+                          loading={rewardSubmitting}
+                          disabled={rewardSubmitting || (rewardType === 'voucher' && !rewardCatalogId)}
+                        >
+                          Issue Reward
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Created-by audit line — only when a staff creator was recorded */}
                 {!isEditing && creator?.createdByName && (

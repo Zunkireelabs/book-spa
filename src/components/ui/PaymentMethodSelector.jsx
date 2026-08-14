@@ -37,7 +37,8 @@ const PaymentMethodSelector = ({
 
   const tree = useMemo(() => {
     const base = buildPaymentMethodTree(paymentMethods);
-    return extraLeaf ? [...base, extraLeaf] : base;
+    const extras = Array.isArray(extraLeaf) ? extraLeaf.filter(Boolean) : (extraLeaf ? [extraLeaf] : []);
+    return extras.length > 0 ? [...base, ...extras] : base;
   }, [paymentMethods, extraLeaf]);
 
   const selectedLabel = useMemo(() => {

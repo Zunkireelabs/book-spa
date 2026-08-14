@@ -3,10 +3,11 @@ import Icon from '../AppIcon';
 import Button from './Button';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchMembershipForBooking } from '../../services/api';
+import ReferralRewardCard from './ReferralRewardCard';
+import { fetchMembershipForBooking, fetchReferralRewardForBooking } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { useOrg } from '../../contexts/OrgContext';
-import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED } from '../../lib/featureFlags';
 
 // First immediately-selectable leaf value in the tree — a plain method, or a
 // group's first sub-method (the group name itself isn't selectable once it has
@@ -114,6 +115,52 @@ const PaymentModal = ({
   }, [tenders, membershipUsable]);
   const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
 
+  // --- referral reward wallet + voucher (migration-065) ---
+  const [referralReward, setReferralReward] = useState(null);
+  useEffect(() => {
+    if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchReferralRewardForBooking(bookingId);
+      if (!cancelled) setReferralReward(data || null);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId]);
+
+  const referralWalletUsable = referralReward && referralReward.walletBalance > 0;
+  const referralWalletLeaf = referralWalletUsable
+    ? { value: 'ReferralWallet', label: 'Referral Wallet' }
+    : null;
+
+  // Referral rewards are a bonus on top of normal payment — unlike Membership,
+  // there's no auto-select default here; staff opt in explicitly (or leave the
+  // reward untouched for the customer's next visit).
+  const referralWalletCommitted = useMemo(() => {
+    if (!referralWalletUsable) return 0;
+    return round2(
+      tenders.reduce((s, t) => s + (t.paymentMode === 'ReferralWallet' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)
+    );
+  }, [tenders, referralWalletUsable]);
+  const referralWalletRemaining = referralWalletUsable
+    ? Math.max(0, round2(referralReward.walletBalance - referralWalletCommitted))
+    : 0;
+
+  const appliedVoucherReferralIds = useMemo(
+    () => tenders.filter(t => t.paymentMode === 'ReferralVoucher').map(t => t.referralId),
+    [tenders]
+  );
+  const availableVouchers = useMemo(
+    () => (referralReward?.vouchers || []).filter(v => !appliedVoucherReferralIds.includes(v.referralId)),
+    [referralReward, appliedVoucherReferralIds]
+  );
+
+  const applyReferralVoucher = (voucher) => {
+    setTenders(prev => [
+      ...prev,
+      { amount: String(voucher.value), paymentMode: 'ReferralVoucher', referralId: voucher.referralId, voucherLabel: voucher.label },
+    ]);
+  };
+
   const entered = useMemo(
     () => round2(tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0)),
     [tenders]
@@ -149,7 +196,11 @@ const PaymentModal = ({
         const t = pool[idx];
         const amt = Math.min(t.amount, needed);
         if (amt > 0) {
-          consumed.push({ amount: round2(amt), paymentMode: t.paymentMode });
+          consumed.push({
+            amount: round2(amt),
+            paymentMode: t.paymentMode,
+            ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
+          });
           t.amount = round2(t.amount - amt);
           needed = round2(needed - amt);
         }
@@ -186,10 +237,18 @@ const PaymentModal = ({
       setError(`Membership tenders total ${formatNPR(membershipCommitted)} but the wallet balance is only ${formatNPR(membership.balance)}.`);
       return;
     }
+    if (referralWalletUsable && referralWalletCommitted > referralReward.walletBalance) {
+      setError(`Referral wallet tenders total ${formatNPR(referralWalletCommitted)} but the balance is only ${formatNPR(referralReward.walletBalance)}.`);
+      return;
+    }
     setError(null);
     const cleanedTenders = tenders
       .filter(t => Number(t.amount) > 0)
-      .map(t => ({ amount: round2(t.amount), paymentMode: t.paymentMode }));
+      .map(t => ({
+        amount: round2(t.amount),
+        paymentMode: t.paymentMode,
+        ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
+      }));
     const { primaryTenders, additionalAllocations } = allocateTenders(cleanedTenders);
     const result = await onConfirm({
       tenders: primaryTenders,
@@ -272,6 +331,12 @@ const PaymentModal = ({
 
           <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />
 
+          <ReferralRewardCard
+            referralReward={referralReward ? { walletBalance: referralReward.walletBalance, vouchers: availableVouchers } : null}
+            pendingWalletDeduction={referralWalletCommitted}
+            onApplyVoucher={applyReferralVoucher}
+          />
+
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}
           <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -289,14 +354,38 @@ const PaymentModal = ({
 
               {tenders.map((t, i) => {
                 const isMembership = t.paymentMode === 'Membership';
+                const isReferralWallet = t.paymentMode === 'ReferralWallet';
+                const isReferralVoucher = t.paymentMode === 'ReferralVoucher';
                 const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
+                const overReferralWallet = isReferralWallet && Number(t.amount) > Number(referralReward?.walletBalance || 0);
+
+                if (isReferralVoucher) {
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-spa border border-accent/30 bg-accent/5">
+                        <Icon name="Gift" size={14} className="text-accent flex-shrink-0" />
+                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.voucherLabel}</span>
+                        <span className="font-data font-data-medium text-sm text-accent ml-auto">{formatNPR(t.amount)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeTender(i)}
+                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                        aria-label="Remove voucher"
+                      >
+                        <Icon name="Trash2" size={16} />
+                      </button>
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={i} className="space-y-1">
                     <div className="flex items-center gap-2">
                       <div className="w-36 flex-shrink-0">
                         <PaymentMethodSelector
                           paymentMethods={paymentMethods}
-                          extraLeaf={membershipLeaf}
+                          extraLeaf={[membershipLeaf, referralWalletLeaf]}
                           value={t.paymentMode}
                           onChange={(v) => updateTender(i, { paymentMode: v })}
                           size="md"
@@ -311,7 +400,7 @@ const PaymentModal = ({
                           value={t.amount}
                           onChange={(e) => updateTender(i, { amount: e.target.value })}
                           placeholder="0"
-                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
+                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet || overReferralWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
                         />
                       </div>
                       {tenders.length > 1 && (
@@ -330,6 +419,13 @@ const PaymentModal = ({
                         {overWallet
                           ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
                           : `Wallet available: ${formatNPR(walletRemaining)}`}
+                      </p>
+                    )}
+                    {isReferralWallet && (
+                      <p className={`text-[11px] font-caption ml-[8.5rem] ${overReferralWallet ? 'text-error' : 'text-text-tertiary'}`}>
+                        {overReferralWallet
+                          ? `Exceeds referral wallet balance (${formatNPR(referralReward?.walletBalance || 0)}).`
+                          : `Referral wallet available: ${formatNPR(referralWalletRemaining)}`}
                       </p>
                     )}
                   </div>

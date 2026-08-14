@@ -3,8 +3,10 @@ import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../components/ui/CustomerAutocomplete';
-import { fetchServices, createBooking, getCustomerOutstandingBalance } from '../../../services/api';
+import CustomSelect from '../../../components/ui/CustomSelect';
+import { fetchServices, createBooking, getCustomerOutstandingBalance, fetchRewardCatalog, fetchCustomersLightweight } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
+import { CUSTOMER_REFERRALS_ENABLED } from '../../../lib/featureFlags';
 
 const StaffBookingForm = ({ onBookingCreated }) => {
   const { branchId } = useBranch();
@@ -30,6 +32,46 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   // proceed with the booking; the due gets bundled into payment collection later.
   const [previousDue, setPreviousDue] = useState(null);
   const nameInputRef = useRef(null);
+
+  // Live "already a customer?" check — same purpose as CustomerForm.jsx's public-flow
+  // version. createBooking()'s own isNewCustomer check (unchanged) remains the sole
+  // authority over whether the referral reward is granted; this just gates whether the
+  // "Referred by" picker shows at all, catching the case where staff type a phone
+  // without picking an autocomplete suggestion (isExistingCustomer only flips via
+  // handleCustomerSelect). The picker stays hidden until this confirms 'new' — no
+  // notice banner, it just quietly doesn't open for an existing customer.
+  //   'idle' | 'checking' | 'new' | 'existing'
+  const [customerCheckStatus, setCustomerCheckStatus] = useState('idle');
+
+  // Customer referral (migration-058). isExistingCustomer flips true only when
+  // staff picks a suggestion from CustomerAutocomplete — that's the one signal
+  // available client-side that this isn't a new customer. It's a UI convenience
+  // only: the authoritative new-vs-existing check happens server-side in
+  // createBooking(), which silently ignores referringCustomerId if it turns out
+  // the customer already existed.
+  const [isExistingCustomer, setIsExistingCustomer] = useState(false);
+  const [referringCustomerId, setReferringCustomerId] = useState('');
+  const [referringCustomerPhone, setReferringCustomerPhone] = useState('');
+  const [referringCustomerCountryCode, setReferringCustomerCountryCode] = useState('+977');
+  const [referringCustomerName, setReferringCustomerName] = useState('');
+  const [referringRewardType, setReferringRewardType] = useState('wallet');
+  const [referringRewardAmount, setReferringRewardAmount] = useState('');
+  const [referringRewardCatalogId, setReferringRewardCatalogId] = useState('');
+  const [rewardCatalog, setRewardCatalog] = useState([]);
+
+  useEffect(() => {
+    setReferringRewardCatalogId('');
+    if (!CUSTOMER_REFERRALS_ENABLED || referringRewardType === 'wallet') {
+      setRewardCatalog([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchRewardCatalog({ rewardType: referringRewardType });
+      if (!cancelled && data) setRewardCatalog(data);
+    })();
+    return () => { cancelled = true; };
+  }, [referringRewardType]);
 
   // Restore the autofocus the plain name input used to get on step 3
   useEffect(() => {
@@ -101,6 +143,12 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       customerPhone: customerPhone.trim() ? `${customerCountryCode}${customerPhone.replace(/\D/g, '')}` : null,
       customerGender: customerGender || null,
       specialRequests: specialRequests.trim() || null,
+      referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
+      referringRewardType: (!isExistingCustomer && referringCustomerId && referringRewardType) || undefined,
+      referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardType === 'wallet' && referringRewardAmount.trim())
+        ? Number(referringRewardAmount)
+        : undefined,
+      referringRewardCatalogId: (!isExistingCustomer && referringCustomerId && referringRewardType !== 'wallet' && referringRewardCatalogId) || undefined,
     });
 
     if (result.error) {
@@ -125,6 +173,44 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setCustomerCountryCode(dial);
     setCustomerEmail(customer.email || '');
     setCustomerGender(customer.gender || '');
+    setIsExistingCustomer(true);
+    setReferringCustomerId('');
+    setReferringCustomerPhone('');
+    setReferringCustomerCountryCode('+977');
+    setReferringCustomerName('');
+    setReferringRewardType('wallet');
+    setReferringRewardAmount('');
+    setReferringRewardCatalogId('');
+  }, []);
+
+  const handleReferringPhoneChange = useCallback((v) => {
+    setReferringCustomerPhone(v.replace(/\D/g, '').slice(0, 15));
+    setReferringCustomerId('');
+  }, []);
+
+  const handleReferringNameChange = useCallback((v) => {
+    setReferringCustomerName(v);
+    setReferringCustomerId('');
+  }, []);
+
+  const handleReferringCustomerSelect = useCallback((customer) => {
+    setReferringCustomerName(customer.full_name);
+    const { dial, national } = parsePhone(customer.phone);
+    setReferringCustomerPhone(national);
+    setReferringCustomerCountryCode(dial);
+    setReferringCustomerId(customer.id);
+  }, []);
+
+  const handleCustomerNameChange = useCallback((v) => {
+    setCustomerName(v);
+    setIsExistingCustomer(false);
+    setCustomerCheckStatus('idle');
+  }, []);
+
+  const handleCustomerPhoneChange = useCallback((v) => {
+    setCustomerPhone(v.replace(/\D/g, '').slice(0, 15));
+    setIsExistingCustomer(false);
+    setCustomerCheckStatus('idle');
   }, []);
 
   const checkPreviousDue = async () => {
@@ -138,6 +224,25 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       branchId,
     });
     setPreviousDue(data && data.totalDue > 0 ? data : null);
+  };
+
+  // Companion to checkPreviousDue, same onBlur trigger. Reuses the same org-wide
+  // customer list CustomerAutocomplete already fetches on mount (fetchCustomersLightweight)
+  // instead of a new RPC — staff is authenticated, so a normal RLS-scoped read suffices.
+  // Deliberately does NOT touch isExistingCustomer (that stays keyed off picking an
+  // autocomplete suggestion, per the comment above). Only runs once BOTH name and phone
+  // are filled in, matching CustomerForm.jsx's public-flow gating — the "Referred by"
+  // picker stays hidden until this resolves to 'new'.
+  const checkExistingCustomer = async () => {
+    const last10 = customerPhone.replace(/\D/g, '').slice(-10);
+    if (!customerName.trim() || last10.length < 10 || !branchId) {
+      setCustomerCheckStatus('idle');
+      return;
+    }
+    setCustomerCheckStatus('checking');
+    const { data } = await fetchCustomersLightweight(branchId);
+    const match = (data || []).some((c) => (c.phone || '').replace(/\D/g, '').slice(-10) === last10);
+    setCustomerCheckStatus(match ? 'existing' : 'new');
   };
 
   const resetForm = () => {
@@ -154,6 +259,8 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setError(null);
     setCreatedBooking(null);
     setPreviousDue(null);
+    setIsExistingCustomer(false);
+    setReferringCustomerId('');
   };
 
   const canProceed = () => {
@@ -342,8 +449,9 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               </label>
               <CustomerAutocomplete
                 value={customerName}
-                onChange={setCustomerName}
+                onChange={handleCustomerNameChange}
                 onSelect={handleCustomerSelect}
+                onBlur={checkExistingCustomer}
                 branchId={branchId}
                 inputRef={nameInputRef}
                 inputClassName="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
@@ -359,9 +467,9 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                   <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
                   <CustomerAutocomplete
                     value={customerPhone}
-                    onChange={(v) => setCustomerPhone(v.replace(/\D/g, '').slice(0, 15))}
+                    onChange={handleCustomerPhoneChange}
                     onSelect={handleCustomerSelect}
-                    onBlur={checkPreviousDue}
+                    onBlur={() => { checkPreviousDue(); checkExistingCustomer(); }}
                     branchId={branchId}
                     searchBy="phone"
                     placeholder="9800000000"
@@ -416,6 +524,98 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                 ))}
               </div>
             </div>
+
+            {CUSTOMER_REFERRALS_ENABLED && customerCheckStatus === 'new' && !isExistingCustomer && (
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-gray-700 -mb-2">
+                  Referred by (customer)
+                </label>
+                <div>
+                  <CustomerAutocomplete
+                    value={referringCustomerName}
+                    onChange={handleReferringNameChange}
+                    onSelect={handleReferringCustomerSelect}
+                    branchId={branchId}
+                    placeholder="Referrer's name"
+                    inputClassName="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Phone
+                  </label>
+                  <div className="flex">
+                    <CountryCodeSelect value={referringCustomerCountryCode} onChange={setReferringCustomerCountryCode} />
+                    <CustomerAutocomplete
+                      value={referringCustomerPhone}
+                      onChange={handleReferringPhoneChange}
+                      onSelect={handleReferringCustomerSelect}
+                      branchId={branchId}
+                      searchBy="phone"
+                      placeholder="9800000000"
+                      inputClassName="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                    />
+                  </div>
+                </div>
+
+                {referringCustomerId && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Reward
+                    </label>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 'wallet', label: 'Wallet' },
+                        { value: 'voucher', label: 'Gift Voucher' },
+                      ].map((r) => (
+                        <button
+                          key={r.value}
+                          type="button"
+                          onClick={() => setReferringRewardType(r.value)}
+                          className={`px-3 py-2 rounded-md text-sm transition-colors border ${
+                            referringRewardType === r.value
+                              ? 'border-primary bg-blue-50 text-primary'
+                              : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                    {referringRewardType === 'wallet' && (
+                      <input
+                        type="number"
+                        min="0"
+                        value={referringRewardAmount}
+                        onChange={(e) => setReferringRewardAmount(e.target.value)}
+                        placeholder="e.g. 500"
+                        className="mt-2 w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    )}
+                    {referringRewardType !== 'wallet' && (
+                      <div className="mt-2">
+                        <CustomSelect
+                          value={referringRewardCatalogId}
+                          onChange={setReferringRewardCatalogId}
+                          options={rewardCatalog.map((item) => ({
+                            value: item.id,
+                            label: item.value != null ? `${item.name} (NPR ${item.value.toLocaleString('en-IN')})` : item.name,
+                          }))}
+                          placeholder={rewardCatalog.length > 0 ? 'Select a gift voucher...' : 'No options set up yet — ask a manager to add one'}
+                          searchable
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-400">
+                  This looks like a new customer. If an existing customer referred them, enter their
+                  phone number or name and pick them from the suggestions, then choose their reward —
+                  it'll be credited once this booking is completed and paid.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">

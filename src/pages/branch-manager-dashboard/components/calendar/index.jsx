@@ -22,12 +22,14 @@ import {
   updateTherapistTime,
   applyDiscount,
   getCustomerOutstandingBalance,
+  fetchRewardCatalog,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -136,6 +138,33 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // gated on this; the due gets bundled into payment collection later.
   const [previousDue, setPreviousDue] = useState(null);
 
+  // Customer referral (migration-058) — individual mode only. isExistingCustomer
+  // flips true only when staff picks a suggestion from CustomerAutocomplete; the
+  // authoritative new-vs-existing check happens server-side in createBooking().
+  const [isExistingCustomer, setIsExistingCustomer] = useState(false);
+  const [referringCustomerId, setReferringCustomerId] = useState('');
+  const [referringCustomerPhone, setReferringCustomerPhone] = useState('');
+  const [referringCustomerCountryCode, setReferringCustomerCountryCode] = useState('+977');
+  const [referringCustomerName, setReferringCustomerName] = useState('');
+  const [referringRewardType, setReferringRewardType] = useState('wallet');
+  const [referringRewardAmount, setReferringRewardAmount] = useState('');
+  const [referringRewardCatalogId, setReferringRewardCatalogId] = useState('');
+  const [rewardCatalog, setRewardCatalog] = useState([]);
+
+  useEffect(() => {
+    setReferringRewardCatalogId('');
+    if (!CUSTOMER_REFERRALS_ENABLED || referringRewardType === 'wallet') {
+      setRewardCatalog([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchRewardCatalog({ rewardType: referringRewardType });
+      if (!cancelled && data) setRewardCatalog(data);
+    })();
+    return () => { cancelled = true; };
+  }, [referringRewardType]);
+
   const checkPreviousDue = useCallback(async (phone) => {
     const digits = (phone || '').replace(/\D/g, '');
     if (digits.length < 7) {
@@ -156,8 +185,44 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCustomerCountryCode(dial);
     setCustomerEmail(customer.email || '');
     setCustomerGender(customer.gender || '');
+    setIsExistingCustomer(true);
+    setReferringCustomerId('');
+    setReferringCustomerPhone('');
+    setReferringCustomerCountryCode('+977');
+    setReferringCustomerName('');
+    setReferringRewardType('wallet');
+    setReferringRewardAmount('');
+    setReferringRewardCatalogId('');
     checkPreviousDue(customer.phone);
   }, [checkPreviousDue]);
+
+  const handleCustomerNameChange = useCallback((v) => {
+    setCustomerName(v);
+    setIsExistingCustomer(false);
+  }, []);
+
+  const handleCustomerPhoneChange = useCallback((v) => {
+    setCustomerPhone(v);
+    setIsExistingCustomer(false);
+  }, []);
+
+  const handleReferringPhoneChange = useCallback((v) => {
+    setReferringCustomerPhone(v.replace(/\D/g, '').slice(0, 15));
+    setReferringCustomerId('');
+  }, []);
+
+  const handleReferringNameChange = useCallback((v) => {
+    setReferringCustomerName(v);
+    setReferringCustomerId('');
+  }, []);
+
+  const handleReferringCustomerSelect = useCallback((customer) => {
+    setReferringCustomerName(customer.full_name);
+    const { dial, national } = parsePhone(customer.phone);
+    setReferringCustomerPhone(national);
+    setReferringCustomerCountryCode(dial);
+    setReferringCustomerId(customer.id);
+  }, []);
 
   // Reset form when slot changes + pre-select therapist/room from column
   useEffect(() => {
@@ -168,6 +233,14 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
+    setIsExistingCustomer(false);
+    setReferringCustomerId('');
+    setReferringCustomerPhone('');
+    setReferringCustomerCountryCode('+977');
+    setReferringCustomerName('');
+    setReferringRewardType('wallet');
+    setReferringRewardAmount('');
+    setReferringRewardCatalogId('');
     setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
@@ -422,6 +495,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           roomId: roomId || null,
           bookingDate,
           bookingTime,
+          referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
+          referringRewardType: (!isExistingCustomer && referringCustomerId && referringRewardType) || undefined,
+          referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardType === 'wallet' && referringRewardAmount.trim())
+            ? Number(referringRewardAmount)
+            : undefined,
+          referringRewardCatalogId: (!isExistingCustomer && referringCustomerId && referringRewardType !== 'wallet' && referringRewardCatalogId) || undefined,
         };
     const err = await onSubmit(payload);
     if (err) {
@@ -701,7 +780,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </label>
               <CustomerAutocomplete
                 value={customerName}
-                onChange={setCustomerName}
+                onChange={handleCustomerNameChange}
                 onSelect={handleCustomerSelect}
                 branchId={branchId}
                 inputRef={nameRef}
@@ -717,7 +796,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
                 <CustomerAutocomplete
                   value={customerPhone}
-                  onChange={setCustomerPhone}
+                  onChange={handleCustomerPhoneChange}
                   onSelect={handleCustomerSelect}
                   onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
                   branchId={branchId}
@@ -1039,6 +1118,96 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               ))}
             </div>
             </>
+            )}
+
+            {CUSTOMER_REFERRALS_ENABLED && customerName.trim() && customerPhone.replace(/\D/g, '').length >= 7 && !isExistingCustomer && (
+              <div className="space-y-3">
+                <label className="block font-body font-body-medium text-sm text-text-primary -mb-2">
+                  Referred by (customer)
+                </label>
+                <div>
+                  <CustomerAutocomplete
+                    value={referringCustomerName}
+                    onChange={handleReferringNameChange}
+                    onSelect={handleReferringCustomerSelect}
+                    branchId={branchId}
+                    placeholder="Referrer's name"
+                  />
+                </div>
+                <div>
+                  <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                    Phone
+                  </label>
+                  <div className="flex">
+                    <CountryCodeSelect value={referringCustomerCountryCode} onChange={setReferringCustomerCountryCode} />
+                    <CustomerAutocomplete
+                      value={referringCustomerPhone}
+                      onChange={handleReferringPhoneChange}
+                      onSelect={handleReferringCustomerSelect}
+                      branchId={branchId}
+                      searchBy="phone"
+                      inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
+                </div>
+
+                {referringCustomerId && (
+                  <div>
+                    <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                      Reward
+                    </label>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 'wallet', label: 'Wallet' },
+                        { value: 'voucher', label: 'Gift Voucher' },
+                      ].map((r) => (
+                        <button
+                          key={r.value}
+                          type="button"
+                          onClick={() => setReferringRewardType(r.value)}
+                          className={`px-3 py-2 text-sm border rounded-spa transition-colors ${
+                            referringRewardType === r.value
+                              ? 'border-primary bg-primary/10 text-primary font-medium'
+                              : 'border-border bg-surface text-text-secondary hover:bg-background'
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                    {referringRewardType === 'wallet' && (
+                      <input
+                        type="number"
+                        min="0"
+                        value={referringRewardAmount}
+                        onChange={(e) => setReferringRewardAmount(e.target.value)}
+                        placeholder="e.g. 500"
+                        className="mt-2 w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                      />
+                    )}
+                    {referringRewardType !== 'wallet' && (
+                      <div className="mt-2">
+                        <CustomSelect
+                          value={referringRewardCatalogId}
+                          onChange={setReferringRewardCatalogId}
+                          options={rewardCatalog.map((item) => ({
+                            value: item.id,
+                            label: item.value != null ? `${item.name} (NPR ${item.value.toLocaleString('en-IN')})` : item.name,
+                          }))}
+                          placeholder={rewardCatalog.length > 0 ? 'Select a gift voucher...' : 'No options set up yet — ask a manager to add one'}
+                          searchable
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <p className="font-body text-xs text-text-secondary">
+                  This looks like a new customer. If an existing customer referred them, enter their
+                  phone number or name and pick them from the suggestions, then choose their reward —
+                  it'll be credited once this booking is completed and paid.
+                </p>
+              </div>
             )}
 
             {/* Special requests */}
@@ -1821,6 +1990,10 @@ const OperationalCalendar = ({ branchId }) => {
       specialRequests: formData.specialRequests,
       therapistIds: formData.therapistIds || (formData.therapistId ? [formData.therapistId] : null),
       roomId: formData.roomId || 'none',
+      referringCustomerId: formData.referringCustomerId,
+      referringRewardType: formData.referringRewardType,
+      referringRewardAmount: formData.referringRewardAmount,
+      referringRewardCatalogId: formData.referringRewardCatalogId,
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
