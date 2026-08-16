@@ -5,6 +5,12 @@
 # public.schema_migrations with ON CONFLICT (version) DO NOTHING (enforced by
 # scripts/check-migrations.sh in CI), so a partial failure is safe to re-run —
 # already-committed files simply no-op on retry.
+#
+# Connection is via standard libpq PG* env vars (PGHOST/PGPORT/PGUSER/
+# PGDATABASE/PGPASSWORD/PGSSLMODE), not a connection-string secret — a URI
+# requires percent-encoding any special character in the password, which is
+# an easy way to silently mis-parse the host. Locally, if PGPASSWORD is
+# unset, psql falls back to ~/.pgpass automatically.
 set -euo pipefail
 
 TARGET="${1:?usage: migrate-apply.sh <local|stage|prod> [--dry-run]}"
@@ -12,15 +18,13 @@ DRY_RUN="${2:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCK_KEY=7834521099
 
-case "$TARGET" in
-  local) DB_URL="${LOCAL_DB_URL:?LOCAL_DB_URL not set}" ;;
-  stage) DB_URL="${STAGE_DB_URL:?STAGE_DB_URL not set}" ;;
-  prod)  DB_URL="${PROD_DB_URL:?PROD_DB_URL not set}" ;;
-  *) echo "unknown target '$TARGET' (expected local|stage|prod)"; exit 1 ;;
-esac
+: "${PGHOST:?PGHOST not set}"
+: "${PGUSER:?PGUSER not set}"
+: "${PGDATABASE:?PGDATABASE not set}"
+export PGSSLMODE="${PGSSLMODE:-require}"
 
-echo "Checking connectivity to $TARGET..."
-CONNECT_ERR="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc "SELECT 1;" 2>&1 >/dev/null)" || {
+echo "Checking connectivity to $TARGET ($PGUSER@$PGHOST/$PGDATABASE)..."
+CONNECT_ERR="$(psql -v ON_ERROR_STOP=1 -tAc "SELECT 1;" 2>&1 >/dev/null)" || {
   echo "$CONNECT_ERR"
   echo "FAIL: could not connect to $TARGET database. Aborting — will not assume an empty ledger."
   exit 1
@@ -28,7 +32,7 @@ CONNECT_ERR="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc "SELECT 1;" 2>&1 >/dev/nul
 
 declare -A APPLIED
 LEDGER_ERR=""
-LEDGER_OUT="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc \
+LEDGER_OUT="$(psql -v ON_ERROR_STOP=1 -tAc \
   "SELECT version FROM public.schema_migrations ORDER BY version;" 2>&1)" || LEDGER_ERR="1"
 
 if [ -n "$LEDGER_ERR" ]; then
@@ -80,5 +84,5 @@ trap 'rm -f "$SESSION_FILE"' EXIT
   echo "SELECT pg_advisory_unlock($LOCK_KEY);"
 } > "$SESSION_FILE"
 
-psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$SESSION_FILE"
+psql -v ON_ERROR_STOP=1 -f "$SESSION_FILE"
 echo "Applied ${#PENDING[@]} migration(s) to $TARGET."

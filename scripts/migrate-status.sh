@@ -3,20 +3,23 @@
 # in repo) for a given target database. Replaces the hand-maintained VALUES
 # manifest in supabase/PROMOTION.md — this reads the live ledger instead, so
 # it cannot go stale the way the manifest did (see the 2026-06-13 incident).
+#
+# Connection is via standard libpq PG* env vars (PGHOST/PGPORT/PGUSER/
+# PGDATABASE/PGPASSWORD/PGSSLMODE) — see migrate-apply.sh for why (URI
+# percent-encoding of special password characters is an easy footgun).
+# Locally, if PGPASSWORD is unset, psql falls back to ~/.pgpass.
 set -euo pipefail
 
 TARGET="${1:?usage: migrate-status.sh <local|stage|prod>}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-case "$TARGET" in
-  local) DB_URL="${LOCAL_DB_URL:?LOCAL_DB_URL not set}" ;;
-  stage) DB_URL="${STAGE_DB_URL:?STAGE_DB_URL not set}" ;;
-  prod)  DB_URL="${PROD_DB_URL:?PROD_DB_URL not set}" ;;
-  *) echo "unknown target '$TARGET' (expected local|stage|prod)"; exit 1 ;;
-esac
+: "${PGHOST:?PGHOST not set}"
+: "${PGUSER:?PGUSER not set}"
+: "${PGDATABASE:?PGDATABASE not set}"
+export PGSSLMODE="${PGSSLMODE:-require}"
 
-if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc "SELECT 1;" >/dev/null 2>&1; then
-  echo "FAIL: could not connect to $TARGET database."
+if ! psql -v ON_ERROR_STOP=1 -tAc "SELECT 1;" >/dev/null 2>&1; then
+  echo "FAIL: could not connect to $TARGET database ($PGUSER@$PGHOST/$PGDATABASE)."
   exit 1
 fi
 
@@ -27,7 +30,7 @@ mapfile -t FILE_VERSIONS < <(
 )
 
 mapfile -t LEDGER_OUTPUT < <(
-  psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc \
+  psql -v ON_ERROR_STOP=1 -tAc \
     "SELECT version FROM public.schema_migrations ORDER BY version;" 2>&1
 ) || {
   if [[ "${LEDGER_OUTPUT[*]}" == *"does not exist"* ]]; then
@@ -41,7 +44,7 @@ mapfile -t LEDGER_OUTPUT < <(
 
 mapfile -t LEDGER_VERSIONS < <(printf '%s\n' "${LEDGER_OUTPUT[@]}" | sed '/^$/d' | sort)
 
-echo "=== $TARGET ($DB_URL) ==="
+echo "=== $TARGET ($PGUSER@$PGHOST/$PGDATABASE) ==="
 echo ""
 echo "Pending (in repo, not applied):"
 comm -23 <(printf '%s\n' "${FILE_VERSIONS[@]}") <(printf '%s\n' "${LEDGER_VERSIONS[@]}") | sed '/^$/d' | sed 's/^/  /'

@@ -106,7 +106,10 @@ jobs:
 
       - name: Apply pending migrations to production
         env:
-          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+          PGHOST: ${{ secrets.PROD_PGHOST }}
+          PGUSER: ${{ secrets.PROD_PGUSER }}
+          PGPASSWORD: ${{ secrets.PROD_PGPASSWORD }}
+          PGDATABASE: ${{ secrets.PROD_PGDATABASE }}
         run: scripts/migrate-apply.sh prod
 
   deploy:
