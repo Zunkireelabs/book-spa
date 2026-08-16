@@ -136,6 +136,9 @@ jobs:
           script: |
             set -e
             cd /home/zunkireelabs/devprojects/nuad-thai-web-app-prod
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker compose pull
             docker compose up -d
