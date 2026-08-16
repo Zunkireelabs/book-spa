@@ -17,6 +17,12 @@ TARGET="${1:?usage: migrate-apply.sh <local|stage|prod> [--dry-run]}"
 DRY_RUN="${2:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCK_KEY=7834521099
+# Files numbered below this were baselined into the ledger as a group by
+# migration-027 (some under non-matching version keys, e.g. the two -008-
+# files were recorded as '008a'/'008b' — the filenames themselves don't
+# carry that letter). Only 028+ are expected to self-record 1:1 with their
+# own filename, so only scan those for pending application.
+LEDGER_FLOOR=28
 
 : "${PGHOST:?PGHOST not set}"
 : "${PGUSER:?PGUSER not set}"
@@ -52,8 +58,10 @@ fi
 PENDING=()
 while IFS= read -r f; do
   base="$(basename "$f")"
-  [[ "$base" =~ ^migration-([0-9]{3}[a-z]?)-.*\.sql$ ]] || continue
-  version="${BASH_REMATCH[1]}"
+  [[ "$base" =~ ^migration-([0-9]{3})([a-z]?)-.*\.sql$ ]] || continue
+  num10=$((10#${BASH_REMATCH[1]}))
+  [ "$num10" -lt "$LEDGER_FLOOR" ] && continue
+  version="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
   if [ -z "${APPLIED[$version]+x}" ]; then
     PENDING+=("$f")
   fi
