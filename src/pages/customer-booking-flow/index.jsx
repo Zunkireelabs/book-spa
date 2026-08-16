@@ -12,14 +12,16 @@ import CustomerForm from './components/CustomerForm';
 import BookingConfirmation from './components/BookingConfirmation';
 import BookingSuccess from './components/BookingSuccess';
 import { useTenant } from '../../contexts/TenantContext';
+import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 
 const CustomerBookingFlow = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
+  const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
@@ -41,6 +43,23 @@ const CustomerBookingFlow = () => {
     agreeToTerms: false
   });
   const [bookingData, setBookingData] = useState(null);
+  const prefilledFromProfile = useRef(false);
+
+  // Prefill from a logged-in customer's saved details, once, without
+  // overwriting anything the customer has already typed.
+  useEffect(() => {
+    if (!customerProfile || prefilledFromProfile.current) return;
+    prefilledFromProfile.current = true;
+
+    const [firstName, ...rest] = (customerProfile.full_name || '').split(' ');
+    setCustomerInfo((prev) => ({
+      ...prev,
+      firstName: prev.firstName || firstName || '',
+      lastName: prev.lastName || rest.join(' '),
+      email: prev.email || customerProfile.email || '',
+      phone: prev.phone || customerProfile.phone || '',
+    }));
+  }, [customerProfile]);
 
   const totalSteps = 6;
   const stepNames = ['branch_selection', 'service_selection', 'datetime_selection', 'customer_details', 'booking_confirmation', 'booking_success'];

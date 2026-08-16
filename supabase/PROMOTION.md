@@ -3,6 +3,17 @@
 How to promote database changes (schema migrations + credential/seed SQL) from **staging** to
 **production**. This is the source of truth — follow it for every DB change.
 
+> [!NOTE]
+> **Migrations are now applied automatically by CI, not by hand.** Every push to `stage` runs
+> `scripts/migrate-apply.sh stage` against the staging DB before the app deploys. Every push to
+> `main` that touches a `supabase/migration-NNN-*.sql` file runs `scripts/migrate-apply.sh prod`
+> against the production DB, gated behind the `production-db` GitHub Environment's required
+> reviewer — a human still approves before it runs, but no longer has to find + paste the SQL by
+> hand or trust a manifest. `scripts/check-migrations.sh` enforces in CI that every new migration
+> actually self-records (see "Writing a new migration" below — unchanged). The sections below
+> describe *what* the automation does; you shouldn't need to run these steps by hand anymore
+> except to investigate or recover from a failure.
+
 ## The two-database reality
 
 Zenly runs **two completely separate Supabase databases that share no data**:
@@ -12,9 +23,9 @@ Zenly runs **two completely separate Supabase databases that share no data**:
 | Staging | `snzcckzfmpboeqkktmwy` | `dev-zenly.zunkireelabs.com` | Supabase **MCP** + dashboard |
 | Production | `pmbvogiphelmpjdalmtv` | `zenly.zunkireelabs.com` | Dashboard SQL editor **only** (MCP does not reach prod) |
 
-**Deploys ship frontend code only.** No CI job runs SQL. Merging `stage → main` deploys the React
-app — it does **NOT** copy schema, rows, or migrations between the two databases. Every DB change
-must be applied to **each** database by hand.
+**App deploys and DB migrations are separate CI jobs against separate databases.** Merging
+`stage → main` does **NOT** copy schema, rows, or migrations between the two databases — each push
+runs its own `migrate-apply.sh` against that branch's database (see the automation note above).
 
 The `public.schema_migrations` table (added by `migration-027`) records which migrations have run
 in **that** database, so you can always tell what staging vs production is missing.
@@ -29,59 +40,39 @@ in **that** database, so you can always tell what staging vs production is missi
    INSERT INTO public.schema_migrations (version, name)
    VALUES ('NNN','short-name') ON CONFLICT (version) DO NOTHING;
    ```
-4. Add the new version to the **manifest** in the pending-check query below.
+4. That's it — `migrate-status.sh` (below) diffs `schema_migrations` against disk directly, so
+   there's no manifest to keep updated.
 
 ## Promotion order (every migration)
 
-1. **Staging** — apply via Supabase MCP `apply_migration` (or the staging dashboard). Test the app.
-2. **Git** — commit the migration on a feature branch → PR to `stage` → after testing, merge
-   `stage → main`. (This records the file in the repo; it does **not** run any SQL.)
-3. **Production** — open the prod dashboard SQL editor (`pmbvogiphelmpjdalmtv`) and **paste + run
-   the same migration**. MCP cannot reach prod, so this step is manual by design.
-4. **Confirm** — run the pending-check below against **production**. Empty result = up to date.
+1. **Staging** — commit the migration on a feature branch → PR to `stage`. Once merged,
+   `scripts/migrate-apply.sh stage` runs automatically in CI before the app deploys. Test the app.
+2. **Production** — after testing, PR `stage → main`. If the merge touches a
+   `supabase/migration-NNN-*.sql` file, the `migrate` job in `.github/workflows/deploy.yml` runs
+   `scripts/migrate-apply.sh prod` automatically, gated behind the `production-db` environment's
+   required reviewer — approve that run in the Actions tab to let it proceed. The app deploy is
+   blocked if this step fails.
+3. **Confirm** — `PGHOST=... PGUSER=... PGDATABASE=... scripts/migrate-status.sh prod` shows
+   nothing pending (leave `PGPASSWORD` unset locally — psql reads it from `~/.pgpass`).
 
-## Pending-check query ("what is this database missing?")
+**Manual fallback** (CI unavailable, or investigating a failed automated run): apply via Supabase
+MCP `apply_migration` for staging, or the prod dashboard SQL editor (`pmbvogiphelmpjdalmtv`,
+MCP cannot reach prod) — paste the same migration file. The self-recording `INSERT ...
+ON CONFLICT (version) DO NOTHING` at the end of every migration makes this safe to combine with
+the automated path; whichever runs first "wins" and the other is a no-op.
 
-Paste into either database's SQL editor. Keep the `VALUES` manifest updated — add each new version
-as you create it.
+## Pending-check ("what is this database missing?")
 
-```sql
-SELECT v AS pending
-FROM (VALUES
-  -- manifest: every migration version that should exist, in order.
-  -- !!! WHEN YOU ADD A MIGRATION, APPEND ITS VERSION HERE !!!
-  -- (an out-of-date manifest silently hides pending migrations — this is how the
-  --  2026-06-13 prod "staff_transfers missing" outage happened; 038–041 were live
-  --  on staging for days but the manifest still ended at 027.)
-  ('001'),('002'),('003'),('004'),('005'),('006'),('007'),('008a'),('008b'),
-  ('009'),('010'),('011'),('012'),('014'),('015'),('016'),('017'),('018'),
-  ('019'),('020'),('021'),('022'),('023'),('024'),('025'),('026'),('027'),
-  ('028'),('029'),('030'),('031'),('032'),('033'),('034'),('035'),('036'),
-  ('037'),('038'),('039'),('040'),('041'),('042'),('043'),('044'),('045'),
-  ('046'),('047'),('048'),('049'),('051'),('052'),('053'),('054'),('055'),
-  ('058'),('059'),('060'),('061'),('062'),('063'),('064'),('065'),('066'),
-  ('067'),('068'),('069'),('070'),('071'),('072'),('073'),('074'),('075'),
-  ('076'),('077'),('078'),('079')
-  -- 050 ('backfill-service-categories') intentionally excluded — file was never
-  -- committed to the repo (held back from prod, per project notes); don't add it
-  -- back here unless it actually ships.
-  -- 053/054 = this change's admin_viewer role.
-  -- 056/057 intentionally skipped — reserved numbers from a renumber (PR #82's
-  -- membership migrations collided with 053-055 above and were moved to 058-062
-  -- to avoid two different migrations sharing the same version).
-  -- 063/064 collided a second time: stage independently shipped 063
-  -- (multi-branch-manager-access) and 064 (customer-accounts) while this branch
-  -- had its own 063 (customer-referrals) and 064 (branch-hours) in flight. This
-  -- branch's two were moved to 078/079 to keep stage's originals at 063/064.
-  -- !!! migration-064-customer-accounts.sql is NOT idempotent (plain CREATE
-  -- TABLE / unguarded ALTER TABLE ADD COLUMN) and does not self-record into
-  -- schema_migrations — it must be patched before the next `migrate-apply.sh`
-  -- run against stage re-attempts it and fails on the already-existing table.
-  -- <-- add new versions here
-) t(v)
-WHERE v NOT IN (SELECT version FROM public.schema_migrations)
-ORDER BY v;
+```bash
+PGHOST=db.snzcckzfmpboeqkktmwy.supabase.co PGUSER=postgres PGDATABASE=postgres \
+  scripts/migrate-status.sh stage   # swap host/target for prod; PGPASSWORD comes from ~/.pgpass
 ```
+
+Reads `public.schema_migrations` directly and diffs it against the `.sql` files on disk — no
+hand-maintained manifest to go stale. (The old manifest-based pending-check query used to live
+here; it's what silently hid the 038–041 migrations during the 2026-06-13 outage, since nobody
+had appended their versions to it. `migrate-status.sh` structurally can't do that — it has no
+manifest to fall out of sync.)
 
 `013` and a standalone `001` file never existed — `001` represents the base schema
 (`schema.sql` + `rls.sql`); `008` shipped as two files (`008a`, `008b`).

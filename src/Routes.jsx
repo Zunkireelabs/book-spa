@@ -13,6 +13,9 @@ import BookingDetailsAssignmentModal from "pages/booking-details-assignment-moda
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import AttendanceCalendarPage from "pages/attendance-calendar";
 import OrgFinder from "pages/org-finder";
+import CustomerLoginAuthentication from "pages/customer-login";
+import CustomerSignup from "pages/customer-signup";
+import CustomerAccount from "pages/customer-account";
 import NotFound from "pages/NotFound";
 
 // External redirect component for root URL
@@ -167,6 +170,11 @@ const AppRoutes = () => {
         {/* Customer booking flow */}
         <Route path="/:orgSlug/book" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
         <Route path="/:orgSlug/manage" element={<TenantWrapper><BookingManagementPortal /></TenantWrapper>} />
+
+        {/* Customer login / signup / account */}
+        <Route path="/:orgSlug/customer-login" element={<TenantWrapper><CustomerLoginAuthentication /></TenantWrapper>} />
+        <Route path="/:orgSlug/signup" element={<TenantWrapper><CustomerSignup /></TenantWrapper>} />
+        <Route path="/:orgSlug/account" element={<TenantWrapper><CustomerAccount /></TenantWrapper>} />
 
         {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
         <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />

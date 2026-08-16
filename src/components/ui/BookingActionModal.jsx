@@ -31,19 +31,6 @@ function formatCreatedAt(iso) {
 // Rooms that are self-service experiences — no therapist needed (Thamel branch hotfix)
 const THERAPIST_OPTIONAL_ROOM_NAMES = ['JACUZZI', 'SAUNA', 'STEAM'];
 
-function getNepalNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
-}
-
-// Confirmed/In-Progress lock once their start time has passed; Pending stays
-// editable even if overdue, since staff still need to reschedule/assign it.
-function isTimeLocked(booking) {
-  if (booking.status === 'pending') return false;
-  if (!booking.date || !booking.startTime) return false;
-  const start = new Date(`${booking.date}T${booking.startTime}`);
-  return getNepalNow() >= start;
-}
-
 // Status badge styles
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -483,11 +470,12 @@ const BookingActionModal = ({
 
   const isTerminal = ['completed', 'cancelled', 'no show'].includes(booking.status);
   const isLocked = booking.isLocked || false;
-  const isStarted = isTimeLocked(booking);
   const isSettled = booking.paymentStatus === 'paid';
-  // Being paid does not itself lock a booking — only day-close, a terminal status,
-  // or the service actually starting (isStarted) should block further mutation.
-  const isMutationBlocked = isTerminal || isLocked || isStarted;
+  const isServiceStarted = booking.status === 'in-progress';
+  // Clicking Start locks everything except Discount/Payment (still needed to
+  // settle the bill); being paid locks Discount/Payment too (via canDiscount/
+  // canPay below) and everything else. Day-close and terminal status always lock.
+  const isMutationBlocked = isTerminal || isLocked || isServiceStarted || isSettled;
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
@@ -716,7 +704,9 @@ const BookingActionModal = ({
                         ? { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' }
                         : isSettled
                           ? { bg: 'bg-success/5', border: 'border-success/20', iconColor: 'text-success', textColor: 'text-success', icon: 'CheckCircle', label: 'Paid — Settled' }
-                          : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Booking Started — Locked' };
+                          : isServiceStarted
+                            ? { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Service Started — Locked (Discount/Payment still open)' }
+                            : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Booking Locked' };
                   return (
                     <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
                       <Icon name={banner.icon} size={16} className={banner.iconColor} />
@@ -735,7 +725,7 @@ const BookingActionModal = ({
                       {booking.status.replace('-', ' ')}
                     </span>
                   </div>
-                  {!isMutationBlocked && nextStatuses.length > 0 && (
+                  {!isTerminal && !isLocked && nextStatuses.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => (
                         <Button
@@ -1277,8 +1267,9 @@ const BookingActionModal = ({
                               min="0"
                               value={rowDiscountOverrides[id] ?? ''}
                               onChange={(e) => setRowOverride(id, e.target.value)}
-                              placeholder={discountType === 'percentage' ? 'Same as shared %' : 'Same as shared NPR'}
-                              className="w-32 px-2 py-1 border border-border rounded-spa bg-surface text-text-primary text-xs focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
+                              placeholder={discountType === 'percentage' ? 'Same %' : 'Same NPR'}
+                              title={discountType === 'percentage' ? 'Same as shared %' : 'Same as shared NPR'}
+                              className="w-20 px-2 py-1 border border-border rounded-spa bg-surface text-text-primary text-xs focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast"
                             />
                             <span className="font-caption text-[10px] text-text-secondary">
                               {discountType === 'percentage' ? '% for just this service' : 'NPR for just this service'}

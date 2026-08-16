@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useTenant } from 'contexts/TenantContext';
+import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 
 const CustomerHeader = () => {
   const location = useLocation();
@@ -16,6 +17,18 @@ const CustomerHeader = () => {
   }
 
   const { orgName, isCleaning, isSalon } = tenantData;
+
+  // Try to get customer auth context, but don't fail if not available
+  let customerAuth = { customer: null, customerProfile: null };
+  try {
+    customerAuth = useCustomerAuth();
+  } catch {
+    // CustomerAuthContext not available, use defaults
+  }
+
+  const { customer, customerProfile } = customerAuth;
+  const loginPath = orgSlug ? `/${orgSlug}/customer-login` : '/login';
+  const accountPath = orgSlug ? `/${orgSlug}/account` : '/';
 
   // Build tenant-aware paths
   const bookingPath = orgSlug ? `/${orgSlug}` : '/';
@@ -98,6 +111,17 @@ const CustomerHeader = () => {
                 +977-1-4441234
               </span>
             </a>
+
+            {/* Login / Account */}
+            <Link
+              to={customer && customerProfile ? accountPath : loginPath}
+              className="flex items-center space-x-2 px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target"
+            >
+              <Icon name="User" size={16} className="text-text-primary" />
+              <span className="font-body font-body-medium text-sm text-text-primary">
+                {customer && customerProfile ? customerProfile.full_name.split(' ')[0] : 'Login'}
+              </span>
+            </Link>
 
             {/* Support Button */}
             <button className="flex items-center space-x-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target">

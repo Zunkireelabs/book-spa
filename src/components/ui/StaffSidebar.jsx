@@ -232,6 +232,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=reward-catalog`,
           roles: ['manager', 'admin']
         }] : []),
+        {
+          id: 'service-revenue',
+          label: 'Service Revenue',
+          icon: 'PieChart',
+          path: `${basePath}?view=service-revenue`,
+          roles: ['manager', 'admin', 'admin_viewer']
+        },
       ]
     },
     {
@@ -268,9 +275,15 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'memberships',
       label: 'Memberships',
       icon: 'CreditCard',
-      path: `${basePath}?view=memberships`,
       roles: ['manager', 'admin'],
       children: [
+        {
+          id: 'all-memberships',
+          label: 'All Memberships',
+          icon: 'CreditCard',
+          path: `${basePath}?view=memberships`,
+          roles: ['manager', 'admin'],
+        },
         {
           id: 'membership-collection',
           label: 'Collection',

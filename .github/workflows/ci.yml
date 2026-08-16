@@ -9,6 +9,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  promotion-guard:
+    name: Promotion Guard
+    runs-on: ubuntu-latest
+    if: github.base_ref == 'main'
+    steps:
+      - name: Only stage or promote/* may target main
+        run: |
+          HEAD_REF="${{ github.head_ref }}"
+          if [ "$HEAD_REF" != "stage" ] && [[ "$HEAD_REF" != promote/* ]]; then
+            echo "PRs into main must come from 'stage' or a 'promote/*' branch (got '$HEAD_REF')."
+            echo "Feature branches merge to stage only — see CLAUDE.md branching strategy."
+            exit 1
+          fi
+
+  migration-guard:
+    name: Migration Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check new/modified migrations self-record
+        run: scripts/check-migrations.sh "origin/${{ github.base_ref }}"
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -26,3 +51,5 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+          VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}

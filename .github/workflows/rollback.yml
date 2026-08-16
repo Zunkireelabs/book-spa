@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: "Commit SHA to rollback to"
+        description: "Commit SHA to roll back to (must have a prod-<sha> image already in GHCR)"
         required: true
         type: string
       reason:
@@ -12,6 +12,9 @@ on:
         required: false
         type: string
         default: "Production issue"
+
+env:
+  IMAGE: ghcr.io/zunkireelabs/book-spa
 
 jobs:
   rollback:
@@ -21,17 +24,36 @@ jobs:
     steps:
       - name: Rollback via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ secrets.GHCR_PULL_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          TARGET_SHA: ${{ inputs.commit_sha }}
+          REASON: ${{ inputs.reason }}
+          IMAGE: ${{ env.IMAGE }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 25m
+          envs: GHCR_USER,GHCR_TOKEN,TARGET_SHA,REASON,IMAGE
           script: |
+            set -e
             cd /home/zunkireelabs/devprojects/nuad-thai-web-app-prod
-            echo "Rolling back to ${{ inputs.commit_sha }}"
-            echo "Reason: ${{ inputs.reason }}"
-            git fetch origin
-            git checkout ${{ inputs.commit_sha }}
-            docker compose up -d --build
+            echo "Rolling back to $TARGET_SHA"
+            echo "Reason: $REASON"
+            echo "NOTE: this rolls back CODE ONLY — the database is never touched."
+            echo "If the bad deploy included a migration, resolve that manually first,"
+            echo "then roll FORWARD to a real commit rather than staying pinned here."
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            if ! docker manifest inspect "$IMAGE:prod-$TARGET_SHA" > /dev/null 2>&1; then
+              echo "ERROR: image $IMAGE:prod-$TARGET_SHA not found in GHCR."
+              echo "That SHA was never built & pushed via the normal deploy pipeline."
+              exit 1
+            fi
+            docker pull "$IMAGE:prod-$TARGET_SHA"
+            docker tag "$IMAGE:prod-$TARGET_SHA" "$IMAGE:prod"
+            docker compose up -d
+            docker image prune -f
             echo "Waiting for container to be healthy..."
             sleep 10
             for i in $(seq 1 12); do
