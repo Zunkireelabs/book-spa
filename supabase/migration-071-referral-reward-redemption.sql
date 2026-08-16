@@ -1,6 +1,6 @@
--- Migration 070: referral reward redemption at checkout (additive, REVERSIBLE)
+-- Migration 071: referral reward redemption at checkout (additive, REVERSIBLE)
 --
--- migration-078/067/068/069 built the customer_referrals + customer_referral_credits
+-- migration-067/068/069/070 built the customer_referrals + customer_referral_credits
 -- ledger, but nothing ever let a referring customer actually SPEND a reward: wallet
 -- credits were an append-only ledger with no debit/spend mechanism, and vouchers were
 -- just a reporting label with no redemption tracking at all.
@@ -30,7 +30,7 @@
 --   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS redeemed_booking_id;
 --   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS redeemed_by;
 --   DROP TABLE IF EXISTS public.customer_referral_debits;
---   -- get_referral_credit_balance: re-run migration-078's original definition to revert.
+--   -- get_referral_credit_balance: re-run migration-067's original definition to revert.
 
 -- ============================================================
 -- 1. TABLE: customer_referral_debits (append-only spend ledger)
@@ -281,5 +281,5 @@ GRANT EXECUTE ON FUNCTION public.redeem_referral_voucher(uuid, uuid) TO authenti
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('070', 'referral-reward-redemption')
+VALUES ('071', 'referral-reward-redemption')
 ON CONFLICT (version) DO NOTHING;

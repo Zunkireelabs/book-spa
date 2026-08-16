@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration 077: Referrer wallet credit requires payment fully settled
+-- Migration 078: Referrer wallet credit requires payment fully settled
 -- ============================================================
 --
 -- credit_pending_referral_for_booking() previously gated purely on
@@ -21,7 +21,7 @@
 --
 -- Idempotent: CREATE OR REPLACE FUNCTION. Same signature, no schema change.
 --
--- Reversible (manual): re-run migration-072's original definition (RAISE
+-- Reversible (manual): re-run migration-073's original definition (RAISE
 -- EXCEPTION on non-Completed status, no payment_status check).
 -- ============================================================
 
@@ -128,5 +128,5 @@ GRANT EXECUTE ON FUNCTION public.credit_pending_referral_for_booking(uuid) TO au
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('077', 'referral-credit-requires-paid')
+VALUES ('078', 'referral-credit-requires-paid')
 ON CONFLICT (version) DO NOTHING;

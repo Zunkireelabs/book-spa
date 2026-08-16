@@ -1,4 +1,4 @@
--- Migration 071: voucher system (issue / redeem / balance tracking)
+-- Migration 072: voucher system (issue / redeem / balance tracking)
 --
 -- Replaces the manually-maintained "Nuad Thai Voucher Tracking System" Excel
 -- workbook. Four tables + one view:
@@ -409,5 +409,5 @@ ON CONFLICT (org_id, name) DO NOTHING;
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('071', 'vouchers')
+VALUES ('072', 'vouchers')
 ON CONFLICT (version) DO NOTHING;

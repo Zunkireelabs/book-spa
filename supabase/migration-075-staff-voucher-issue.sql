@@ -1,8 +1,8 @@
 -- ============================================================
--- Migration 074: Let staff issue vouchers
+-- Migration 075: Let staff issue vouchers
 -- ============================================================
 --
--- migration-071-vouchers.sql shipped vouchers as manager/admin only, end to
+-- migration-072-vouchers.sql shipped vouchers as manager/admin only, end to
 -- end, per a product decision at the time ("vouchers are not part of the
 -- staff workflow for now"). That's changed — staff now need to be able to
 -- issue a new voucher from their own dashboard.
@@ -124,5 +124,5 @@ GRANT EXECUTE ON FUNCTION public.issue_voucher(uuid, uuid, text, text, numeric, 
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('074', 'staff-voucher-issue')
+VALUES ('075', 'staff-voucher-issue')
 ON CONFLICT (version) DO NOTHING;

@@ -1,6 +1,6 @@
--- Migration 067: staff-selectable referral reward type + amount (additive, REVERSIBLE)
+-- Migration 068: staff-selectable referral reward type + amount (additive, REVERSIBLE)
 --
--- Extends migration-078's customer referral program: previously the reward was always a
+-- Extends migration-067's customer referral program: previously the reward was always a
 -- fixed wallet credit (organizations.referral_reward_amount) applied automatically when the
 -- referred customer's booking hit status = 'Completed'. Staff now pick a reward_type
 -- (wallet / gift_card / voucher) and, for wallet, a specific amount when they log the
@@ -15,7 +15,7 @@
 --   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS reward_type;
 --   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS requested_reward_amount;
 --   -- then restore record_customer_referral / credit_pending_referral_for_booking from
---   -- migration-078-customer-referrals.sql
+--   -- migration-067-customer-referrals.sql
 
 -- ============================================================
 -- 1. CUSTOMER_REFERRALS: reward type + staff-requested amount
@@ -214,4 +214,4 @@ GRANT EXECUTE ON FUNCTION public.credit_pending_referral_for_booking(uuid) TO au
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('067', 'referral-reward-type') ON CONFLICT (version) DO NOTHING;
+VALUES ('068', 'referral-reward-type') ON CONFLICT (version) DO NOTHING;

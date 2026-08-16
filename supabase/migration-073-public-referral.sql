@@ -1,4 +1,4 @@
--- Migration 072: public referral source picker + staff-decided reward
+-- Migration 073: public referral source picker + staff-decided reward
 -- (additive + one security fix, REVERSIBLE)
 --
 -- Adds a customer-facing "how were you referred" picker to the public booking flow
@@ -65,7 +65,7 @@
 --   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS requires_manual_reward;
 --   ALTER TABLE public.bookings DROP COLUMN IF EXISTS referral_source;
 --   ALTER TABLE public.bookings DROP COLUMN IF EXISTS referral_source_detail;
---   -- then restore credit_pending_referral_for_booking from migration-068-reward-catalog.sql
+--   -- then restore credit_pending_referral_for_booking from migration-069-reward-catalog.sql
 --   CREATE POLICY "anon_select_customers" ON public.customers FOR SELECT TO anon USING (true);
 
 -- ============================================================
@@ -467,4 +467,4 @@ GRANT EXECUTE ON FUNCTION public.resolve_customer_referral_reward(uuid, text, nu
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('072', 'public-referral') ON CONFLICT (version) DO NOTHING;
+VALUES ('073', 'public-referral') ON CONFLICT (version) DO NOTHING;

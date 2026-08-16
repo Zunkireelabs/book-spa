@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration 076: Referral rewards are Wallet-only
+-- Migration 077: Referral rewards are Wallet-only
 -- ============================================================
 --
 -- Referral rewards previously let staff/managers choose between Wallet credit
@@ -10,8 +10,8 @@
 -- This migration tightens the two SECURITY DEFINER RPCs that accept a
 -- reward_type from the client, so the restriction holds even against a
 -- direct RPC call, not just a hidden UI control:
---   - record_customer_referral (migration-067): now only accepts 'wallet'.
---   - resolve_customer_referral_reward (migration-072): now only accepts
+--   - record_customer_referral (migration-068): now only accepts 'wallet'.
+--   - resolve_customer_referral_reward (migration-073): now only accepts
 --     'wallet'; the 'voucher' branch (credit-via-catalog, never touching the
 --     wallet ledger) is removed since it's unreachable once validation
 --     rejects anything but 'wallet'.
@@ -25,12 +25,12 @@
 --
 -- Idempotent: CREATE OR REPLACE FUNCTION.
 --
--- Reversible (manual): re-run migration-067/072's original function bodies.
+-- Reversible (manual): re-run migration-068/073's original function bodies.
 -- ============================================================
 
 -- ---- record_customer_referral: wallet only ------------------------------------
--- Two overloads exist in the DB — a legacy 6-arg one (migration-067) that's no
--- longer called by the frontend, and the 7-arg one (migration-069, with
+-- Two overloads exist in the DB — a legacy 6-arg one (migration-068) that's no
+-- longer called by the frontend, and the 7-arg one (migration-070, with
 -- p_reward_catalog_id) that createBooking()/StaffBookingForm actually calls
 -- today. Both are tightened to wallet-only for defense-in-depth, but the
 -- 7-arg version is the one that matters — the catalog-lookup logic is dropped
@@ -312,5 +312,5 @@ GRANT EXECUTE ON FUNCTION public.resolve_customer_referral_reward(uuid, text, nu
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('076', 'referral-wallet-only')
+VALUES ('077', 'referral-wallet-only')
 ON CONFLICT (version) DO NOTHING;

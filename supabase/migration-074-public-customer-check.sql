@@ -1,4 +1,4 @@
--- Migration 073: public "is this phone already a customer?" existence check
+-- Migration 074: public "is this phone already a customer?" existence check
 -- (additive, REVERSIBLE)
 --
 -- The customer-to-customer referral program (migrations 063/067-070/072) already only
@@ -15,9 +15,9 @@
 -- any reward-eligibility logic.
 --
 -- Deliberately returns a boolean ONLY -- no id, no name, not even the masked display
--- name public_lookup_referrer_by_phone (migration-072) returns -- since this check
+-- name public_lookup_referrer_by_phone (migration-073) returns -- since this check
 -- doesn't need to identify who the phone belongs to, just whether it's known. Same
--- security posture as migration-072's anon-safe RPCs: org resolved by slug, active-only,
+-- security posture as migration-073's anon-safe RPCs: org resolved by slug, active-only,
 -- SECURITY DEFINER with search_path locked.
 --
 -- Idempotent: CREATE OR REPLACE FUNCTION, REVOKE/GRANT re-runnable, ON CONFLICT DO NOTHING.
@@ -51,5 +51,5 @@ REVOKE ALL ON FUNCTION public.public_check_customer_exists(text, text) FROM PUBL
 GRANT EXECUTE ON FUNCTION public.public_check_customer_exists(text, text) TO anon;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('073', 'public-customer-check')
+VALUES ('074', 'public-customer-check')
 ON CONFLICT (version) DO NOTHING;
