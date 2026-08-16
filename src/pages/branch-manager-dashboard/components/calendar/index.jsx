@@ -22,7 +22,6 @@ import {
   updateTherapistTime,
   applyDiscount,
   getCustomerOutstandingBalance,
-  fetchRewardCatalog,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -146,24 +145,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [referringCustomerPhone, setReferringCustomerPhone] = useState('');
   const [referringCustomerCountryCode, setReferringCustomerCountryCode] = useState('+977');
   const [referringCustomerName, setReferringCustomerName] = useState('');
-  const [referringRewardType, setReferringRewardType] = useState('wallet');
   const [referringRewardAmount, setReferringRewardAmount] = useState('');
-  const [referringRewardCatalogId, setReferringRewardCatalogId] = useState('');
-  const [rewardCatalog, setRewardCatalog] = useState([]);
-
-  useEffect(() => {
-    setReferringRewardCatalogId('');
-    if (!CUSTOMER_REFERRALS_ENABLED || referringRewardType === 'wallet') {
-      setRewardCatalog([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data } = await fetchRewardCatalog({ rewardType: referringRewardType });
-      if (!cancelled && data) setRewardCatalog(data);
-    })();
-    return () => { cancelled = true; };
-  }, [referringRewardType]);
 
   const checkPreviousDue = useCallback(async (phone) => {
     const digits = (phone || '').replace(/\D/g, '');
@@ -190,9 +172,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerPhone('');
     setReferringCustomerCountryCode('+977');
     setReferringCustomerName('');
-    setReferringRewardType('wallet');
     setReferringRewardAmount('');
-    setReferringRewardCatalogId('');
     checkPreviousDue(customer.phone);
   }, [checkPreviousDue]);
 
@@ -238,9 +218,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setReferringCustomerPhone('');
     setReferringCustomerCountryCode('+977');
     setReferringCustomerName('');
-    setReferringRewardType('wallet');
     setReferringRewardAmount('');
-    setReferringRewardCatalogId('');
     setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
@@ -496,11 +474,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
-          referringRewardType: (!isExistingCustomer && referringCustomerId && referringRewardType) || undefined,
-          referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardType === 'wallet' && referringRewardAmount.trim())
+          referringRewardType: (!isExistingCustomer && referringCustomerId) ? 'wallet' : undefined,
+          referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardAmount.trim())
             ? Number(referringRewardAmount)
             : undefined,
-          referringRewardCatalogId: (!isExistingCustomer && referringCustomerId && referringRewardType !== 'wallet' && referringRewardCatalogId) || undefined,
         };
     const err = await onSubmit(payload);
     if (err) {
@@ -1154,51 +1131,16 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 {referringCustomerId && (
                   <div>
                     <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
-                      Reward
+                      Reward (wallet credit)
                     </label>
-                    <div className="flex gap-2">
-                      {[
-                        { value: 'wallet', label: 'Wallet' },
-                        { value: 'voucher', label: 'Gift Voucher' },
-                      ].map((r) => (
-                        <button
-                          key={r.value}
-                          type="button"
-                          onClick={() => setReferringRewardType(r.value)}
-                          className={`px-3 py-2 text-sm border rounded-spa transition-colors ${
-                            referringRewardType === r.value
-                              ? 'border-primary bg-primary/10 text-primary font-medium'
-                              : 'border-border bg-surface text-text-secondary hover:bg-background'
-                          }`}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                    {referringRewardType === 'wallet' && (
-                      <input
-                        type="number"
-                        min="0"
-                        value={referringRewardAmount}
-                        onChange={(e) => setReferringRewardAmount(e.target.value)}
-                        placeholder="e.g. 500"
-                        className="mt-2 w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                      />
-                    )}
-                    {referringRewardType !== 'wallet' && (
-                      <div className="mt-2">
-                        <CustomSelect
-                          value={referringRewardCatalogId}
-                          onChange={setReferringRewardCatalogId}
-                          options={rewardCatalog.map((item) => ({
-                            value: item.id,
-                            label: item.value != null ? `${item.name} (NPR ${item.value.toLocaleString('en-IN')})` : item.name,
-                          }))}
-                          placeholder={rewardCatalog.length > 0 ? 'Select a gift voucher...' : 'No options set up yet — ask a manager to add one'}
-                          searchable
-                        />
-                      </div>
-                    )}
+                    <input
+                      type="number"
+                      min="0"
+                      value={referringRewardAmount}
+                      onChange={(e) => setReferringRewardAmount(e.target.value)}
+                      placeholder="e.g. 500 (leave blank for the org default)"
+                      className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
                   </div>
                 )}
 
@@ -1993,7 +1935,6 @@ const OperationalCalendar = ({ branchId }) => {
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,
-      referringRewardCatalogId: formData.referringRewardCatalogId,
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';

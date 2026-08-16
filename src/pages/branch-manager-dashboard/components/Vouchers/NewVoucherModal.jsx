@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import { useBranch } from '../../../../contexts/BranchContext';
+import { useAuth } from '../../../../contexts/AuthContext';
 import { fetchVoucherTypes, issueVoucher } from '../../../../services/api';
 
 function formatNPR(amount) {
@@ -20,6 +22,7 @@ const DEFAULT_VALIDITY_DAYS = 90;
 // the old Excel workbook's pre-allocated master code list.
 const NewVoucherModal = ({ onClose, onIssued }) => {
   const { branchId, branchName, isOverall } = useBranch();
+  const { profile } = useAuth();
 
   const [types, setTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
@@ -27,7 +30,8 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
 
   const [voucherTypeId, setVoucherTypeId] = useState('');
   const [guestName, setGuestName] = useState('');
-  const [guestInfo, setGuestInfo] = useState('');
+  const [guestCountryCode, setGuestCountryCode] = useState('+977');
+  const [guestPhone, setGuestPhone] = useState('');
   const [actualPrice, setActualPrice] = useState('');
   const [discountPercent, setDiscountPercent] = useState('0');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
@@ -96,11 +100,12 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
 
     setSubmitting(true);
+    const guestPhoneDigits = guestPhone.replace(/\D/g, '');
     const { data, error: rpcError } = await issueVoucher({
       branchId,
       voucherTypeId,
       guestName: guestName.trim(),
-      guestInfo: guestInfo.trim() || null,
+      guestInfo: guestPhoneDigits ? `${guestCountryCode}${guestPhoneDigits}` : null,
       discountPercent: discountNum,
       actualPrice: actualPriceNum,
       issuedDate,
@@ -175,6 +180,11 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                   Issuing branch: <span className="font-body font-body-medium text-text-secondary">{branchName}</span>
                 </p>
               )}
+              {profile?.full_name && (
+                <p className="font-caption text-xs text-text-tertiary">
+                  Issued by: <span className="font-body font-body-medium text-text-secondary">{profile.full_name}</span>
+                </p>
+              )}
 
               {loadError && (
                 <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 flex items-start space-x-2">
@@ -182,6 +192,32 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                   <p className="font-body text-xs text-error">{loadError}</p>
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest name</label>
+                  <input
+                    type="text"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="Full name"
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Phone number (optional)</label>
+                  <div className="flex">
+                    <CountryCodeSelect value={guestCountryCode} onChange={setGuestCountryCode} />
+                    <input
+                      type="tel"
+                      value={guestPhone}
+                      onChange={(e) => setGuestPhone(e.target.value)}
+                      placeholder="9841234567"
+                      className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
+                </div>
+              </div>
 
               <div>
                 <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Voucher type</label>
@@ -200,29 +236,6 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     Stored-value voucher — the guest can redeem it across multiple partial visits until the balance runs out.
                   </p>
                 )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest name</label>
-                  <input
-                    type="text"
-                    value={guestName}
-                    onChange={(e) => setGuestName(e.target.value)}
-                    placeholder="Full name"
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                  />
-                </div>
-                <div>
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest info (optional)</label>
-                  <input
-                    type="text"
-                    value={guestInfo}
-                    onChange={(e) => setGuestInfo(e.target.value)}
-                    placeholder="Phone, email, or company"
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                  />
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

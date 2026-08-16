@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
-import { fetchVoucherOverview } from '../../../../services/api';
+import { fetchVoucherOverview, fetchVoucherTypes } from '../../../../services/api';
 import NewVoucherModal from './NewVoucherModal';
 
 function formatNPR(amount) {
@@ -12,6 +12,7 @@ function formatNPR(amount) {
 // branch has been given and what it still owes against them.
 const VoucherOverviewPanel = () => {
   const [overview, setOverview] = useState(null);
+  const [voucherTypes, setVoucherTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewVoucher, setShowNewVoucher] = useState(false);
@@ -19,13 +20,17 @@ const VoucherOverviewPanel = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: fetchError } = await fetchVoucherOverview();
+    const [{ data, error: fetchError }, { data: types, error: typesError }] = await Promise.all([
+      fetchVoucherOverview(),
+      fetchVoucherTypes(),
+    ]);
     if (fetchError) {
       setError(fetchError.message || 'Failed to load voucher overview.');
       setLoading(false);
       return;
     }
     setOverview(data);
+    setVoucherTypes(typesError ? [] : types);
     setLoading(false);
   }, []);
 
@@ -156,6 +161,47 @@ const VoucherOverviewPanel = () => {
             {formatNPR(walletSummary.remainingAmount)} remaining
           </p>
         </div>
+      </div>
+
+      {/* Voucher types catalog — the same name + price list used in the New Voucher dropdown */}
+      <div className="bg-surface rounded-spa-lg border border-border overflow-hidden">
+        <div className="px-4 py-2.5 bg-background border-b border-border">
+          <span className="font-body font-body-medium text-xs text-text-secondary">Voucher Types</span>
+        </div>
+        {voucherTypes.length === 0 ? (
+          <div className="text-center py-12">
+            <Icon name="Ticket" size={32} className="text-text-tertiary mx-auto mb-3" />
+            <p className="font-body font-body-medium text-sm text-text-secondary">No voucher types found</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-background border-b border-border">
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Name</th>
+                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {voucherTypes.map((t) => (
+                  <tr key={t.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3">
+                      <span className="font-body font-body-medium text-sm text-text-primary">{t.name}</span>
+                      {t.is_wallet && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-caption text-[10px] uppercase tracking-wide">
+                          Wallet
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="font-data font-data-medium text-sm text-text-primary">{formatNPR(t.standard_price)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Branch breakdown */}

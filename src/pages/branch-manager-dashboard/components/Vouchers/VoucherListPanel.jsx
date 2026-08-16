@@ -73,7 +73,8 @@ const VoucherListPanel = () => {
       rows = rows.filter((v) =>
         v.guestName.toLowerCase().includes(q) ||
         v.voucherCode.toLowerCase().includes(q) ||
-        v.voucherTypeName.toLowerCase().includes(q)
+        v.voucherTypeName.toLowerCase().includes(q) ||
+        v.issuedByName.toLowerCase().includes(q)
       );
     }
     return [...rows].sort((a, b) => a.guestName.localeCompare(b.guestName));
@@ -192,7 +193,9 @@ const VoucherListPanel = () => {
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Voucher Code</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Type</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Issued By</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Expiry</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Redeem date</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Issued</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remaining</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
@@ -225,7 +228,13 @@ const VoucherListPanel = () => {
                         <span className="font-body font-body-normal text-sm text-text-secondary">{v.branchName}</span>
                       </td>
                       <td className="px-4 py-3">
+                        <span className="font-body font-body-normal text-sm text-text-secondary">{v.issuedByName}</span>
+                      </td>
+                      <td className="px-4 py-3">
                         <span className="font-caption text-xs text-text-tertiary">{formatDate(v.expiryDate)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-caption text-xs text-text-tertiary">{formatDate(v.lastClaimDate)}</span>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(v.totalAmountIssued)}</span>
@@ -245,7 +254,7 @@ const VoucherListPanel = () => {
               </tbody>
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
-                  <td colSpan={5} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
+                  <td colSpan={7} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(totals.issued)}</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-primary">{formatNPR(totals.outstanding)}</td>
                   <td />

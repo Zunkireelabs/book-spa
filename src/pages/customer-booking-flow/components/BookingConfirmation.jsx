@@ -52,6 +52,22 @@ const BookingConfirmation = ({
     return dateStr + ' at ' + timeStr;
   };
 
+  const referralSummary = () => {
+    if (customerInfo.referralSource === 'client') {
+      const name = customerInfo.referralClientName?.trim();
+      const dialCode = customerInfo.referralCountryCode || '+977';
+      const phone = customerInfo.referralPhone ? `${dialCode} ${customerInfo.referralPhone}` : '';
+      return [name, phone].filter(Boolean).join(' · ') || null;
+    }
+    if (customerInfo.referralSource === 'social_media') {
+      return customerInfo.referralSocialPlatform || null;
+    }
+    if (customerInfo.referralSource === 'staff') {
+      return customerInfo.referralStaffName?.trim() || null;
+    }
+    return null;
+  };
+
   const formatPrice = (price) => {
     return new Intl.NumberFormat('ne-NP', {
       style: 'currency',
@@ -141,6 +157,14 @@ const BookingConfirmation = ({
           <div className="space-y-3">
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Name</span><span className="font-medium">{customerInfo.firstName} {customerInfo.lastName}</span></div>
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Phone</span><span className="font-medium">{customerInfo.phoneCountryCode || '+977'} {customerInfo.phone}</span></div>
+            {referralSummary() && (
+              <div className="flex justify-between text-sm gap-3">
+                <span className="text-text-secondary flex-shrink-0">
+                  {customerInfo.referralSource === 'client' ? 'Referred by' : 'Heard about us'}
+                </span>
+                <span className="font-medium text-right">{referralSummary()}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

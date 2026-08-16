@@ -3,8 +3,7 @@ import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../components/ui/CustomerAutocomplete';
-import CustomSelect from '../../../components/ui/CustomSelect';
-import { fetchServices, createBooking, getCustomerOutstandingBalance, fetchRewardCatalog, fetchCustomersLightweight } from '../../../services/api';
+import { fetchServices, createBooking, getCustomerOutstandingBalance, fetchCustomersLightweight } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../lib/featureFlags';
 
@@ -54,24 +53,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   const [referringCustomerPhone, setReferringCustomerPhone] = useState('');
   const [referringCustomerCountryCode, setReferringCustomerCountryCode] = useState('+977');
   const [referringCustomerName, setReferringCustomerName] = useState('');
-  const [referringRewardType, setReferringRewardType] = useState('wallet');
   const [referringRewardAmount, setReferringRewardAmount] = useState('');
-  const [referringRewardCatalogId, setReferringRewardCatalogId] = useState('');
-  const [rewardCatalog, setRewardCatalog] = useState([]);
-
-  useEffect(() => {
-    setReferringRewardCatalogId('');
-    if (!CUSTOMER_REFERRALS_ENABLED || referringRewardType === 'wallet') {
-      setRewardCatalog([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data } = await fetchRewardCatalog({ rewardType: referringRewardType });
-      if (!cancelled && data) setRewardCatalog(data);
-    })();
-    return () => { cancelled = true; };
-  }, [referringRewardType]);
 
   // Restore the autofocus the plain name input used to get on step 3
   useEffect(() => {
@@ -144,11 +126,10 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       customerGender: customerGender || null,
       specialRequests: specialRequests.trim() || null,
       referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
-      referringRewardType: (!isExistingCustomer && referringCustomerId && referringRewardType) || undefined,
-      referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardType === 'wallet' && referringRewardAmount.trim())
+      referringRewardType: (!isExistingCustomer && referringCustomerId) ? 'wallet' : undefined,
+      referringRewardAmount: (!isExistingCustomer && referringCustomerId && referringRewardAmount.trim())
         ? Number(referringRewardAmount)
         : undefined,
-      referringRewardCatalogId: (!isExistingCustomer && referringCustomerId && referringRewardType !== 'wallet' && referringRewardCatalogId) || undefined,
     });
 
     if (result.error) {
@@ -561,51 +542,16 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                 {referringCustomerId && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Reward
+                      Reward (wallet credit)
                     </label>
-                    <div className="flex gap-2">
-                      {[
-                        { value: 'wallet', label: 'Wallet' },
-                        { value: 'voucher', label: 'Gift Voucher' },
-                      ].map((r) => (
-                        <button
-                          key={r.value}
-                          type="button"
-                          onClick={() => setReferringRewardType(r.value)}
-                          className={`px-3 py-2 rounded-md text-sm transition-colors border ${
-                            referringRewardType === r.value
-                              ? 'border-primary bg-blue-50 text-primary'
-                              : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                          }`}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                    {referringRewardType === 'wallet' && (
-                      <input
-                        type="number"
-                        min="0"
-                        value={referringRewardAmount}
-                        onChange={(e) => setReferringRewardAmount(e.target.value)}
-                        placeholder="e.g. 500"
-                        className="mt-2 w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                      />
-                    )}
-                    {referringRewardType !== 'wallet' && (
-                      <div className="mt-2">
-                        <CustomSelect
-                          value={referringRewardCatalogId}
-                          onChange={setReferringRewardCatalogId}
-                          options={rewardCatalog.map((item) => ({
-                            value: item.id,
-                            label: item.value != null ? `${item.name} (NPR ${item.value.toLocaleString('en-IN')})` : item.name,
-                          }))}
-                          placeholder={rewardCatalog.length > 0 ? 'Select a gift voucher...' : 'No options set up yet — ask a manager to add one'}
-                          searchable
-                        />
-                      </div>
-                    )}
+                    <input
+                      type="number"
+                      min="0"
+                      value={referringRewardAmount}
+                      onChange={(e) => setReferringRewardAmount(e.target.value)}
+                      placeholder="e.g. 500 (leave blank for the org default)"
+                      className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                    />
                   </div>
                 )}
 

@@ -60,7 +60,7 @@ FROM (VALUES
   ('037'),('038'),('039'),('040'),('041'),('042'),('043'),('044'),('045'),
   ('046'),('047'),('048'),('049'),('051'),('052'),('053'),('054'),('055'),
   ('056'),('057'),('058'),('059'),('060'),('061'),('062'),('063'),('064'),
-  ('065'),('066'),('067'),('068')
+  ('065'),('066'),('067'),('068'),('069'),('070'),('071'),('072')
   -- 050 ('backfill-service-categories') intentionally excluded — file was never
   -- committed to the repo (held back from prod, per project notes); don't add it
   -- back here unless it actually ships.

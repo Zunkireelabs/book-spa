@@ -5,7 +5,7 @@ import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, fetchRewardCatalog, resolveCustomerReferralReward } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
@@ -111,10 +111,7 @@ const BookingActionModal = ({
   // Who created this booking (lazy-loaded on open)
   const [creator, setCreator] = useState(null);
   const [customerReferral, setCustomerReferral] = useState(null);
-  const [rewardType, setRewardType] = useState('wallet');
   const [rewardAmount, setRewardAmount] = useState('');
-  const [rewardCatalog, setRewardCatalog] = useState([]);
-  const [rewardCatalogId, setRewardCatalogId] = useState('');
   const [rewardSubmitting, setRewardSubmitting] = useState(false);
   const [rewardError, setRewardError] = useState(null);
 
@@ -232,18 +229,9 @@ const BookingActionModal = ({
 
   // Reset the reward picker each time a different booking's pending referral is shown
   useEffect(() => {
-    setRewardType('wallet');
     setRewardAmount('');
-    setRewardCatalogId('');
     setRewardError(null);
   }, [customerReferral?.referralId]);
-
-  // Voucher catalog for the pending-referral reward picker (manager/admin only)
-  useEffect(() => {
-    if (customerReferral?.rewardStatus === 'pending' && rewardType === 'voucher') {
-      fetchRewardCatalog({ rewardType: 'voucher' }).then(result => setRewardCatalog(result.data || []));
-    }
-  }, [customerReferral?.rewardStatus, rewardType]);
 
   const handleResolveReferralReward = async () => {
     if (!customerReferral?.referralId) return;
@@ -252,9 +240,9 @@ const BookingActionModal = ({
     try {
       const { error } = await resolveCustomerReferralReward({
         referralId: customerReferral.referralId,
-        rewardType,
-        rewardAmount: rewardType === 'wallet' ? (rewardAmount ? Number(rewardAmount) : null) : null,
-        rewardCatalogId: rewardType === 'voucher' ? (rewardCatalogId || null) : null,
+        rewardType: 'wallet',
+        rewardAmount: rewardAmount ? Number(rewardAmount) : null,
+        rewardCatalogId: null,
       });
       if (error) {
         setRewardError(error.message || 'Failed to save reward. Please try again.');
@@ -999,50 +987,17 @@ const BookingActionModal = ({
                       </span>
                     </div>
 
-                    {customerReferral.rewardStatus === 'pending' && ['manager', 'admin'].includes(userRole) && (
+                    {customerReferral.rewardStatus === 'pending' && customerReferral.requiresManualReward && ['manager', 'admin'].includes(userRole) && (
                       <div className="p-2.5 sm:p-3 bg-background rounded-spa space-y-2">
-                        <p className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Choose a reward</p>
-                        <div className="flex gap-2">
-                          {[
-                            { value: 'wallet', label: 'Wallet' },
-                            { value: 'voucher', label: 'Gift Voucher' },
-                          ].map((r) => (
-                            <button
-                              key={r.value}
-                              type="button"
-                              onClick={() => setRewardType(r.value)}
-                              className={`px-3 py-2 rounded-md text-sm transition-colors border ${
-                                rewardType === r.value
-                                  ? 'border-primary bg-blue-50 text-primary'
-                                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                              }`}
-                            >
-                              {r.label}
-                            </button>
-                          ))}
-                        </div>
-                        {rewardType === 'wallet' && (
-                          <input
-                            type="number"
-                            min="0"
-                            value={rewardAmount}
-                            onChange={(e) => setRewardAmount(e.target.value)}
-                            placeholder="e.g. 500 (leave blank for the org default)"
-                            className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                          />
-                        )}
-                        {rewardType === 'voucher' && (
-                          <CustomSelect
-                            value={rewardCatalogId}
-                            onChange={setRewardCatalogId}
-                            options={rewardCatalog.map((item) => ({
-                              value: item.id,
-                              label: item.value != null ? `${item.name} (NPR ${item.value.toLocaleString('en-IN')})` : item.name,
-                            }))}
-                            placeholder={rewardCatalog.length > 0 ? 'Select a gift voucher...' : 'No options set up yet — ask a manager to add one'}
-                            searchable
-                          />
-                        )}
+                        <p className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Wallet credit amount</p>
+                        <input
+                          type="number"
+                          min="0"
+                          value={rewardAmount}
+                          onChange={(e) => setRewardAmount(e.target.value)}
+                          placeholder="e.g. 500 (leave blank for the org default)"
+                          className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                        />
                         {rewardError && (
                           <p className="font-caption text-xs text-error">{rewardError}</p>
                         )}
@@ -1051,7 +1006,7 @@ const BookingActionModal = ({
                           size="sm"
                           onClick={handleResolveReferralReward}
                           loading={rewardSubmitting}
-                          disabled={rewardSubmitting || (rewardType === 'voucher' && !rewardCatalogId)}
+                          disabled={rewardSubmitting}
                         >
                           Issue Reward
                         </Button>

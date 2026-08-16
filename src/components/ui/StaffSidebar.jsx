@@ -126,6 +126,20 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['staff', 'manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
+        ...(MEMBERSHIP_ENABLED ? [{
+          id: 'new-membership',
+          label: 'New Membership',
+          icon: 'CreditCard',
+          path: `${basePath}?view=new-membership`,
+          roles: ['staff'],
+        }] : []),
+        ...(VOUCHER_ENABLED ? [{
+          id: 'new-voucher',
+          label: 'New Voucher',
+          icon: 'Ticket',
+          path: `${basePath}?view=new-voucher`,
+          roles: ['staff'],
+        }] : []),
       ]
     },
     {
@@ -205,6 +219,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['manager', 'admin', 'admin_viewer']
         }] : []),
         ...(CUSTOMER_REFERRALS_ENABLED ? [{
+          id: 'referral-wallet',
+          label: 'Referral Wallet',
+          icon: 'Wallet',
+          path: `${basePath}?view=referral-wallet`,
+          roles: ['manager', 'admin', 'admin_viewer']
+        }] : []),
+        ...(CUSTOMER_REFERRALS_ENABLED ? [{
           id: 'reward-catalog',
           label: 'Reward Catalog',
           icon: 'Gift',
@@ -265,13 +286,6 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['manager', 'admin'],
         },
       ],
-    }] : []),
-    ...(MEMBERSHIP_ENABLED ? [{
-      id: 'new-membership',
-      label: 'New Membership',
-      icon: 'CreditCard',
-      path: `${basePath}?view=new-membership`,
-      roles: ['staff'],
     }] : []),
     ...(VOUCHER_ENABLED ? [{
       id: 'vouchers',
