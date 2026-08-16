@@ -7827,6 +7827,7 @@ export async function fetchVouchers() {
 export async function issueVoucher({
   branchId, voucherTypeId, guestName, guestInfo = null, discountPercent = 0,
   actualPrice = null, issuedDate = null, expiryDate = null, remarks = null,
+  customerId = null,
 }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
@@ -7842,12 +7843,78 @@ export async function issueVoucher({
       p_issued_date: issuedDate,
       p_expiry_date: expiryDate,
       p_remarks: remarks,
+      p_customer_id: customerId,
     });
     if (error) throw error;
-    capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId });
+    capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
     return { data, error: null };
   } catch (error) {
     console.error('[API] issueVoucher error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Customer-session counterparts — run against supabaseCustomer so RLS
+// resolves via customer_accounts, not the staff users/get_user_role() path
+// (same pattern as getCustomerMembership / getCustomerMembershipTransactions).
+export async function getCustomerVouchers(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+
+    const { data: vouchers, error } = await supabaseCustomer
+      .from('vouchers')
+      .select(`
+        id, voucher_code, issued_date, expiry_date, actual_price,
+        discount_percent, total_amount_issued, remarks,
+        voucher_type:voucher_types ( id, name, is_wallet )
+      `)
+      .eq('customer_id', customerId)
+      .order('issued_date', { ascending: false });
+    if (error) throw error;
+    if (!vouchers || vouchers.length === 0) return { data: [], error: null };
+
+    const { data: balances, error: balanceError } = await supabaseCustomer
+      .from('voucher_balances')
+      .select('voucher_id, total_claimed, remaining_balance, status, last_claim_date')
+      .in('voucher_id', vouchers.map((v) => v.id));
+    if (balanceError) throw balanceError;
+
+    const balanceByVoucher = new Map((balances || []).map((b) => [b.voucher_id, b]));
+    const merged = vouchers.map((v) => ({ ...v, ...(balanceByVoucher.get(v.id) || {}) }));
+    return { data: merged, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerVouchers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function getCustomerReferralStats(customerId) {
+  try {
+    if (!customerId) return { data: null, error: null };
+
+    const { data, error } = await supabaseCustomer
+      .from('customer_referrals')
+      .select('id, reward_status, reward_amount, reward_type, reward_label, created_at, credited_at')
+      .eq('referring_customer_id', customerId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const rows = data || [];
+    const totalCredited = rows
+      .filter((r) => r.reward_status === 'credited')
+      .reduce((sum, r) => sum + Number(r.reward_amount || 0), 0);
+
+    return {
+      data: {
+        referrals: rows,
+        totalReferred: rows.length,
+        totalCredited,
+        pendingCount: rows.filter((r) => r.reward_status === 'pending').length,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getCustomerReferralStats error:', error.message);
     return { data: null, error };
   }
 }

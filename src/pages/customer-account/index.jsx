@@ -3,10 +3,15 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
-import { getCustomerBookingHistory, getCustomerMembership, getCustomerMembershipTransactions } from 'services/api';
+import {
+  getCustomerBookingHistory, getCustomerMembership, getCustomerMembershipTransactions,
+  getCustomerVouchers, getCustomerReferralStats,
+} from 'services/api';
 import { transformBooking } from 'services/bookingTransformers';
-import { MEMBERSHIP_ENABLED } from 'lib/featureFlags';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, CUSTOMER_REFERRALS_ENABLED } from 'lib/featureFlags';
 import CustomerMembershipSection from 'components/ui/CustomerMembershipSection';
+import CustomerVouchersSection from 'components/ui/CustomerVouchersSection';
+import CustomerReferralStats from 'components/ui/CustomerReferralStats';
 
 const STATUS_BADGE = {
   pending: 'bg-warning/10 text-warning',
@@ -26,6 +31,8 @@ const CustomerAccount = () => {
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [membership, setMembership] = useState(null);
   const [membershipTransactions, setMembershipTransactions] = useState([]);
+  const [vouchers, setVouchers] = useState([]);
+  const [referralStats, setReferralStats] = useState(null);
   const hasRedirected = useRef(false);
 
   useEffect(() => {
@@ -70,6 +77,28 @@ const CustomerAccount = () => {
       getCustomerMembershipTransactions(m.id).then(({ data: t }) => {
         if (!cancelled) setMembershipTransactions(t || []);
       });
+    });
+
+    return () => { cancelled = true; };
+  }, [customerProfile?.customer_id]);
+
+  useEffect(() => {
+    if (!VOUCHER_ENABLED || !customerProfile?.customer_id) return;
+
+    let cancelled = false;
+    getCustomerVouchers(customerProfile.customer_id).then(({ data }) => {
+      if (!cancelled) setVouchers(data || []);
+    });
+
+    return () => { cancelled = true; };
+  }, [customerProfile?.customer_id]);
+
+  useEffect(() => {
+    if (!CUSTOMER_REFERRALS_ENABLED || !customerProfile?.customer_id) return;
+
+    let cancelled = false;
+    getCustomerReferralStats(customerProfile.customer_id).then(({ data }) => {
+      if (!cancelled) setReferralStats(data);
     });
 
     return () => { cancelled = true; };
@@ -123,6 +152,8 @@ const CustomerAccount = () => {
         </div>
 
         <CustomerMembershipSection membership={membership} transactions={membershipTransactions} />
+        <CustomerVouchersSection vouchers={vouchers} />
+        <CustomerReferralStats stats={referralStats} />
 
         <h2 className="text-lg font-semibold text-text-primary mb-4">Your bookings</h2>
 

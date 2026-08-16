@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
+import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { fetchVoucherTypes, issueVoucher } from '../../../../services/api';
@@ -30,6 +31,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
 
   const [voucherTypeId, setVoucherTypeId] = useState('');
   const [guestName, setGuestName] = useState('');
+  const [linkedCustomerId, setLinkedCustomerId] = useState(null);
   const [guestCountryCode, setGuestCountryCode] = useState('+977');
   const [guestPhone, setGuestPhone] = useState('');
   const [actualPrice, setActualPrice] = useState('');
@@ -111,6 +113,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
       issuedDate,
       expiryDate,
       remarks: remarks.trim() || null,
+      customerId: linkedCustomerId,
     });
     setSubmitting(false);
 
@@ -195,14 +198,28 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="min-w-0">
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest name</label>
-                  <input
-                    type="text"
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                    Guest name
+                    {linkedCustomerId && (
+                      <span className="ml-1.5 text-primary font-caption text-[10px]">· linked to account</span>
+                    )}
+                  </label>
+                  <CustomerAutocomplete
                     value={guestName}
-                    onChange={(e) => setGuestName(e.target.value)}
+                    onChange={(val) => { setGuestName(val); setLinkedCustomerId(null); }}
+                    onSelect={(customer) => {
+                      setGuestName(customer.full_name);
+                      setLinkedCustomerId(customer.id);
+                      if (customer.phone) setGuestPhone(customer.phone.replace(/\D/g, '').slice(-10));
+                    }}
+                    branchId={branchId}
+                    searchBy="name"
                     placeholder="Full name"
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    inputClassName="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
+                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
+                    Pick a suggestion to link this voucher to that customer's account, or type a name for a guest without one.
+                  </p>
                 </div>
                 <div className="min-w-0">
                   <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Phone number (optional)</label>
