@@ -95,32 +95,33 @@ etc.) must be **re-created directly in the production database** via SQL or the 
 dashboard. Merging `stage → main` will never make staging data appear in production.
 
 **DB promotion process:** see `supabase/PROMOTION.md` for the migration + credential promotion
-runbook and the `schema_migrations` "what's pending on prod?" check.
+runbook and `scripts/migrate-status.sh` for the "what's pending?" check.
 
 > [!IMPORTANT]
-> **CRITICAL — whenever code is promoted to `main` (production), check if the DB needs updating.**
-> Any time changes go from `stage → main`, or a feature branch goes directly to `main`, and those
-> changes depend on a database change (new/changed table, column, enum, trigger, RLS policy,
-> function, migration, or seed/credential data), you MUST:
-> 1. **Tell the user explicitly** that production's database needs to be updated — never assume the
->    deploy handles it. Deploys ship **frontend only**; SQL is **never** auto-run, and the MCP
->    reaches **staging only**.
-> 2. **Provide a ready-to-paste SQL script** for the user to run in the **production** Supabase SQL
->    editor (project `pmbvogiphelmpjdalmtv`). Make it **idempotent** and **portable** (resolve by
->    name/email, not UUID) per `supabase/PROMOTION.md`.
-> 3. **Do not consider the promotion complete** until the production DB script has been handed off
->    (and ideally verified). If a change is frontend-only with no DB impact, say so explicitly.
-> 4. **When adding a new migration**, append its version to the manifest in
->    `supabase/PROMOTION.md`'s pending-check query — an out-of-date manifest silently hides pending
->    migrations.
+> **Schema migrations are applied automatically by CI** (`.github/workflows/deploy.yml`'s
+> `migrate` job runs `scripts/migrate-apply.sh prod` against the production DB, gated behind the
+> `production-db` GitHub Environment's required reviewer) — this no longer needs a manual
+> dashboard-paste step for `supabase/migration-NNN-*.sql` files. Every new migration must still
+> self-record into `public.schema_migrations` (enforced in CI by
+> `scripts/check-migrations.sh` — see `supabase/PROMOTION.md`). What's still **not** automated,
+> and still needs a manual handoff when you promote code that depends on it:
+> 1. **Credential/seed SQL** (`supabase/seed-prod-*.sql` and similar) — these are data, not
+>    tracked migrations, and stay a manual dashboard/MCP step per `supabase/PROMOTION.md`.
+> 2. **Anything not expressed as a `supabase/migration-NNN-*.sql` file** — if a DB change was
+>    applied ad hoc (dashboard, one-off script) instead of as a proper migration file, CI has
+>    nothing to apply. Always land schema changes as a migration file, never as an ad hoc edit.
+>
+> When either applies, **tell the user explicitly** and provide a ready-to-paste, idempotent,
+> portable (resolve by name/email, not UUID) SQL script per `supabase/PROMOTION.md`. Don't
+> consider the promotion complete until it's handed off (and ideally verified).
 >
 > **Past incident (2026-06-13):** Migrations 038–041 shipped to `main` with the frontend but were
-> never run on prod. The Transfer Report page surfaced this as a runtime
-> `Could not find the table 'public.staff_transfers' in the schema cache` error. The
-> `supabase/PROMOTION.md` pending-check manifest was also stale (ended at `027`) so it falsely
-> reported prod as up to date. **Schema-touching code is not safe to merge to `main` without
-> running each new migration on prod via the dashboard SQL editor AND confirming the manifest is
-> current.**
+> never run on prod (this was back when the whole process was manual). The Transfer Report page
+> surfaced this as a runtime `Could not find the table 'public.staff_transfers' in the schema
+> cache` error. The old hand-maintained `PROMOTION.md` pending-check manifest was also stale
+> (ended at `027`) so it falsely reported prod as up to date. This is exactly the failure class
+> the CI migration automation now closes — `migrate-status.sh` reads the live ledger instead of a
+> manifest, so it can't go stale the same way.
 
 ```bash
 cp .env.example .env            # defaults to staging
@@ -148,11 +149,11 @@ book-spa/
 │   ├── styles/             # Tailwind CSS entry
 │   └── utils/              # periodPresets.js (date-range presets for reports)
 ├── supabase/               # Migrations and seed data
-├── scripts/                # onboard-tenant.sql — multi-industry tenant bootstrap (spa/cleaning/salon)
+├── scripts/                # onboard-tenant.sql (tenant bootstrap) + migrate-*.sh, check-migrations.sh (CI migration automation)
 ├── .claude/skills/         # Claude Code skills
-├── Dockerfile              # Multi-stage Docker build (node → nginx)
-├── docker-compose.yml      # Production compose (Vite build args baked in)
-├── docker-compose.dev.yml  # Local container compose (uses dev-nuad.nginx.conf)
+├── Dockerfile              # Multi-stage Docker build (node → nginx), built by CI and pushed to GHCR
+├── docker-compose.yml      # Production compose — pulls ghcr.io/zunkireelabs/book-spa:prod
+├── docker-compose.dev.yml  # Staging deploy compose — pulls ghcr.io/zunkireelabs/book-spa:stage
 ├── jsconfig.json           # Absolute imports: baseUrl "./src"
 └── CLAUDE.md
 ```
@@ -277,12 +278,12 @@ Frontend → POST /functions/v1/pin-login (email, pin, org_slug)
 
 ### Analytics (`lib/analytics.js`)
 
-Thin PostHog wrapper — every export (`init / identify / reset / capture / setGroup / isFeatureEnabled`) no-ops if `VITE_POSTHOG_KEY` is unset. **Staging is intentionally silent**; production bakes the key at build time via `docker-compose.yml` build args (not GitHub Actions secrets — CI's `npm run build` is verification only; the real prod bundle is built on the prod server by `docker compose up -d --build`).
+Thin PostHog wrapper — every export (`init / identify / reset / capture / setGroup / isFeatureEnabled`) no-ops if `VITE_POSTHOG_KEY` is unset. **Staging is intentionally silent** — the `VITE_POSTHOG_KEY`/`VITE_POSTHOG_HOST` GitHub Environment secrets are only set on `production`, not `staging`. The prod image is built by CI (`deploy.yml`'s `build-push` job) with those secrets as Docker `build-args`, pushed to GHCR, and the VPS only pulls — it is not built on the server anymore.
 
 - `autocapture: false`, `capture_pageview: false` — explicit captures only
 - `session_recording.maskAllInputs: true` + `[data-ph-mask]` selector for PII (email, phone, special-requests inputs in the customer flow)
 - `respect_dnt: true`
-- `phc_` project keys are publishable (same posture as Supabase `anon` keys) and safe to commit to `docker-compose.yml`
+- `phc_` project keys are publishable (same posture as Supabase `anon` keys) and safe to hold as GitHub Actions secrets/build-args
 
 ---
 
@@ -359,7 +360,12 @@ Thin PostHog wrapper — every export (`init / identify / reset / capture / setG
 | `deploy.yml` | Push to `main` | `zenly.zunkireelabs.com` (production) |
 | `rollback.yml` | Manual | Rollback production |
 
-Deploy process: SSH → `git pull` → `docker compose up -d --build` → health check (2 min timeout).
+Deploy process: CI builds the Docker image and pushes it to GHCR
+(`ghcr.io/zunkireelabs/book-spa:stage`/`:prod`, plus an immutable `-<sha>` tag used by
+`rollback.yml`) → any pending `supabase/migration-NNN-*.sql` files are applied via
+`scripts/migrate-apply.sh` (prod gated behind the `production-db` environment's required
+reviewer) → SSH → `docker compose pull` → `docker compose up -d` → health check (2 min timeout).
+The VPS no longer builds the image itself.
 
 ---
 

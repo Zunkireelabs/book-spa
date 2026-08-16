@@ -8,3 +8,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Separate client for customer-facing auth (own storage key) so a customer
+// logging in on /:orgSlug/book doesn't clobber a staff session in the same
+// browser, and vice versa.
+export const supabaseCustomer = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { storageKey: 'zenly-customer-auth' },
+});

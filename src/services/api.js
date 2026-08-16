@@ -2807,6 +2807,31 @@ export async function searchBookings(branchId, query) {
   }
 }
 
+export async function getCustomerBookingHistory(customerAccountId) {
+  try {
+    if (!customerAccountId) {
+      return { data: [], error: null };
+    }
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        *,
+        service:services(id, name, duration_minutes),
+        therapist:therapists(id, name, gender),
+        room:rooms(id, name)
+      `)
+      .eq('customer_account_id', customerAccountId)
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] getCustomerBookingHistory error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function fetchBookingById(bookingId) {
   try {
     const { data, error } = await supabase
