@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED } from '../lib/featureFlags';
@@ -2813,7 +2813,7 @@ export async function getCustomerBookingHistory(customerAccountId) {
       return { data: [], error: null };
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseCustomer
       .from('bookings')
       .select(`
         *,
@@ -6782,6 +6782,54 @@ export async function fetchMembershipForCustomer(customerId) {
     return { data: data ? transformMembership(data) : null, error: null };
   } catch (error) {
     console.error('[API] fetchMembershipForCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Customer-session counterparts of fetchMembershipForCustomer /
+// fetchMembershipTransactions — same query shape, but run against
+// supabaseCustomer so RLS resolves via customer_accounts, not the staff
+// users table (a customer session has no row there).
+export async function getCustomerMembership(customerId) {
+  try {
+    if (!customerId) return { data: null, error: null };
+    const { data, error } = await supabaseCustomer
+      .from('memberships')
+      .select(`
+        id, org_id, customer_id, tier_id, membership_number,
+        total_deposited, balance,
+        activation_date, expiry_date, birthday_perk_used_at,
+        notes, created_by, created_at,
+        customer:customers ( id, full_name, phone, gender ),
+        tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
+      `)
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return { data: data ? transformMembership(data) : null, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function getCustomerMembershipTransactions(membershipId) {
+  try {
+    if (!membershipId) return { data: [], error: null };
+    const { data, error } = await supabaseCustomer
+      .from('membership_transactions')
+      .select(`
+        id, kind, amount, payment_mode, booking_id, payment_id,
+        performed_by, notes, created_at
+      `)
+      .eq('membership_id', membershipId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] getCustomerMembershipTransactions error:', error.message);
     return { data: null, error };
   }
 }

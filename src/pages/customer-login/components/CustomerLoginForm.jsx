@@ -123,6 +123,14 @@ const CustomerLoginForm = () => {
           {errors.password && (
             <p className="mt-1.5 text-xs text-error">{errors.password}</p>
           )}
+          <p className="mt-2 text-right">
+            <Link
+              to={`/${orgSlug}/forgot-password`}
+              className="text-xs text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors"
+            >
+              Forgot password?
+            </Link>
+          </p>
         </div>
 
         <button

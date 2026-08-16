@@ -3,8 +3,10 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
-import { getCustomerBookingHistory } from 'services/api';
+import { getCustomerBookingHistory, getCustomerMembership, getCustomerMembershipTransactions } from 'services/api';
 import { transformBooking } from 'services/bookingTransformers';
+import { MEMBERSHIP_ENABLED } from 'lib/featureFlags';
+import CustomerMembershipSection from 'components/ui/CustomerMembershipSection';
 
 const STATUS_BADGE = {
   pending: 'bg-warning/10 text-warning',
@@ -22,6 +24,8 @@ const CustomerAccount = () => {
   const { customer, customerProfile, loading: authLoading, signOut } = useCustomerAuth();
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
+  const [membership, setMembership] = useState(null);
+  const [membershipTransactions, setMembershipTransactions] = useState([]);
   const hasRedirected = useRef(false);
 
   useEffect(() => {
@@ -50,6 +54,26 @@ const CustomerAccount = () => {
 
     return () => { cancelled = true; };
   }, [customerProfile?.id]);
+
+  useEffect(() => {
+    if (!MEMBERSHIP_ENABLED || !customerProfile?.customer_id) return;
+
+    let cancelled = false;
+
+    getCustomerMembership(customerProfile.customer_id).then(({ data: m, error }) => {
+      if (cancelled) return;
+      if (error || !m) {
+        setMembership(null);
+        return;
+      }
+      setMembership(m);
+      getCustomerMembershipTransactions(m.id).then(({ data: t }) => {
+        if (!cancelled) setMembershipTransactions(t || []);
+      });
+    });
+
+    return () => { cancelled = true; };
+  }, [customerProfile?.customer_id]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -97,6 +121,8 @@ const CustomerAccount = () => {
             Book a service
           </Link>
         </div>
+
+        <CustomerMembershipSection membership={membership} transactions={membershipTransactions} />
 
         <h2 className="text-lg font-semibold text-text-primary mb-4">Your bookings</h2>
 

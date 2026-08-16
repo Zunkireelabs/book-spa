@@ -88,6 +88,16 @@ export const CustomerAuthProvider = ({ children }) => {
     if (error) console.error('[CustomerAuth] Sign out error:', error.message);
   };
 
+  const resetPassword = async (email, redirectTo) => {
+    const { error } = await supabaseCustomer.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) throw error;
+  };
+
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabaseCustomer.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  };
+
   useEffect(() => {
     const { data: { subscription } } = supabaseCustomer.auth.onAuthStateChange(
       (event, session) => {
@@ -134,7 +144,7 @@ export const CustomerAuthProvider = ({ children }) => {
   }, [customer?.id]);
 
   return (
-    <CustomerAuthContext.Provider value={{ customer, customerProfile, loading, signUp, signIn, signOut }}>
+    <CustomerAuthContext.Provider value={{ customer, customerProfile, loading, signUp, signIn, signOut, resetPassword, updatePassword }}>
       {children}
     </CustomerAuthContext.Provider>
   );
