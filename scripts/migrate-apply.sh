@@ -20,10 +20,11 @@ case "$TARGET" in
 esac
 
 echo "Checking connectivity to $TARGET..."
-if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc "SELECT 1;" >/dev/null 2>&1; then
+CONNECT_ERR="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -tAc "SELECT 1;" 2>&1 >/dev/null)" || {
+  echo "$CONNECT_ERR"
   echo "FAIL: could not connect to $TARGET database. Aborting — will not assume an empty ledger."
   exit 1
-fi
+}
 
 declare -A APPLIED
 LEDGER_ERR=""
