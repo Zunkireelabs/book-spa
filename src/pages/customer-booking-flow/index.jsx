@@ -102,21 +102,18 @@ const CustomerBookingFlow = () => {
           setSelectedService(parsed.selectedService);
           setSelectedDateTime(parsed.selectedDateTime || { date: '', time: '' });
           setGenderPreference(parsed.genderPreference || 'no-preference');
-          setCustomerInfo(parsed.customerInfo || {
-            firstName: '',
-            lastName: '',
-            email: '',
-            phone: '',
-            gender: '',
-            referralSource: '',
-            referralClientName: '',
-            referralPhone: '',
-            referralCountryCode: '+977',
-            referralSocialPlatform: '',
-            referralStaffName: '',
-            specialRequests: '',
-            agreeToTerms: false
-          });
+          // Merge into prev rather than replacing outright — if the
+          // customer-profile prefill effect already landed (e.g. profile
+          // was already resolved at mount from an in-app navigation), a
+          // stale saved draft must not clobber it.
+          setCustomerInfo((prev) => ({
+            ...prev,
+            ...(parsed.customerInfo || {}),
+            firstName: prev.firstName || parsed.customerInfo?.firstName || '',
+            lastName: prev.lastName || parsed.customerInfo?.lastName || '',
+            email: prev.email || parsed.customerInfo?.email || '',
+            phone: prev.phone || parsed.customerInfo?.phone || '',
+          }));
         }
       } catch (error) {
         console.error('Error loading saved booking state:', error);
