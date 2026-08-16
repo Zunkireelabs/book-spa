@@ -1,91 +1,37 @@
--- Migration 063: gift card / voucher reward catalog (additive, REVERSIBLE)
+-- Migration 069: simplify referral reward types to Wallet + Gift Voucher only (additive, REVERSIBLE)
 --
--- Extends migration-062's referral reward_type (wallet / gift_card / voucher). Wallet rewards
--- take a free-typed amount; gift_card and voucher rewards instead pick from a small
--- org-managed catalog (e.g. "NPR 500 Gift Card", "Free Facial Voucher") so staff logging a
--- referral choose from a dropdown instead of typing free text. Manager+admin manage the
--- catalog (same posture as migration-049's services write policy); all staff can read it
--- org-wide to populate the dropdown.
+-- migration-067/068 introduced three reward types (wallet / gift_card / voucher). Product
+-- decision: collapse gift_card and voucher into a single "Gift Voucher" option (stored as
+-- 'voucher') so staff only ever choose between Wallet (free amount) and Gift Voucher
+-- (catalog dropdown). Any existing 'gift_card' rows are remapped to 'voucher' before the
+-- CHECK constraints are tightened.
 --
 -- Safe to re-run.
 --
--- ROLLBACK:
---   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS reward_catalog_id;
---   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS reward_label;
---   DROP TABLE IF EXISTS public.reward_catalog;
---   -- then restore record_customer_referral from migration-062-referral-reward-type.sql
+-- ROLLBACK: re-run migration-068-reward-catalog.sql's constraint/function definitions to
+-- restore the three-way ('wallet','gift_card','voucher') check.
 
 -- ============================================================
--- 1. REWARD_CATALOG table
+-- 1. Remap existing 'gift_card' data to 'voucher'
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS public.reward_catalog (
-  id           uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id       uuid          NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-  reward_type  text          NOT NULL CHECK (reward_type IN ('gift_card', 'voucher')),
-  name         text          NOT NULL,
-  value        numeric(12,2) CHECK (value IS NULL OR value >= 0),
-  is_active    boolean       NOT NULL DEFAULT true,
-  created_by   uuid          REFERENCES public.users(id),
-  created_at   timestamptz   NOT NULL DEFAULT now(),
-  CONSTRAINT reward_catalog_name_uniq UNIQUE (org_id, reward_type, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_reward_catalog_org_type_active
-  ON public.reward_catalog(org_id, reward_type)
-  WHERE is_active;
-
-ALTER TABLE public.reward_catalog ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Users can read own org reward catalog" ON public.reward_catalog;
-CREATE POLICY "Users can read own org reward catalog"
-  ON public.reward_catalog FOR SELECT
-  TO authenticated
-  USING (org_id = get_user_org_id());
-
-DROP POLICY IF EXISTS "Manager and admin can create org reward catalog" ON public.reward_catalog;
-CREATE POLICY "Manager and admin can create org reward catalog"
-  ON public.reward_catalog FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    get_user_role() IN ('manager', 'admin')
-    AND org_id = get_user_org_id()
-  );
-
-DROP POLICY IF EXISTS "Manager and admin can update org reward catalog" ON public.reward_catalog;
-CREATE POLICY "Manager and admin can update org reward catalog"
-  ON public.reward_catalog FOR UPDATE
-  TO authenticated
-  USING (
-    get_user_role() IN ('manager', 'admin')
-    AND org_id = get_user_org_id()
-  )
-  WITH CHECK (
-    get_user_role() IN ('manager', 'admin')
-    AND org_id = get_user_org_id()
-  );
-
-DROP POLICY IF EXISTS "Manager and admin can delete org reward catalog" ON public.reward_catalog;
-CREATE POLICY "Manager and admin can delete org reward catalog"
-  ON public.reward_catalog FOR DELETE
-  TO authenticated
-  USING (
-    get_user_role() IN ('manager', 'admin')
-    AND org_id = get_user_org_id()
-  );
+UPDATE public.reward_catalog SET reward_type = 'voucher' WHERE reward_type = 'gift_card';
+UPDATE public.customer_referrals SET reward_type = 'voucher' WHERE reward_type = 'gift_card';
 
 -- ============================================================
--- 2. CUSTOMER_REFERRALS: which catalog item was picked
+-- 2. Tighten CHECK constraints to (wallet, voucher) only
 -- ============================================================
 
+ALTER TABLE public.reward_catalog DROP CONSTRAINT IF EXISTS reward_catalog_reward_type_check;
+ALTER TABLE public.reward_catalog
+  ADD CONSTRAINT reward_catalog_reward_type_check CHECK (reward_type IN ('voucher'));
+
+ALTER TABLE public.customer_referrals DROP CONSTRAINT IF EXISTS customer_referrals_reward_type_check;
 ALTER TABLE public.customer_referrals
-  ADD COLUMN IF NOT EXISTS reward_catalog_id uuid REFERENCES public.reward_catalog(id) ON DELETE SET NULL;
-
-ALTER TABLE public.customer_referrals
-  ADD COLUMN IF NOT EXISTS reward_label text;
+  ADD CONSTRAINT customer_referrals_reward_type_check CHECK (reward_type IN ('wallet', 'voucher'));
 
 -- ============================================================
--- 3. record_customer_referral — accept catalog selection
+-- 3. record_customer_referral — validate against the 2-way set
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.record_customer_referral(
@@ -123,7 +69,7 @@ BEGIN
     RAISE EXCEPTION 'record_customer_referral: a customer cannot refer themselves';
   END IF;
 
-  IF p_reward_type NOT IN ('wallet', 'gift_card', 'voucher') THEN
+  IF p_reward_type NOT IN ('wallet', 'voucher') THEN
     RAISE EXCEPTION 'record_customer_referral: invalid reward_type %', p_reward_type;
   END IF;
 
@@ -197,13 +143,98 @@ REVOKE ALL ON FUNCTION public.record_customer_referral(uuid, uuid, uuid, text, t
 REVOKE ALL ON FUNCTION public.record_customer_referral(uuid, uuid, uuid, text, text, numeric, uuid) FROM anon;
 GRANT EXECUTE ON FUNCTION public.record_customer_referral(uuid, uuid, uuid, text, text, numeric, uuid) TO authenticated;
 
--- Drop the migration-062 six-arg overload so callers can't accidentally hit the old
--- signature (which has no catalog awareness) via PostgREST function-name resolution.
-DROP FUNCTION IF EXISTS public.record_customer_referral(uuid, uuid, uuid, text, text, numeric);
+-- ============================================================
+-- 4. credit_pending_referral_for_booking — 'gift_card' branch collapses to 'voucher'
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.credit_pending_referral_for_booking(
+  p_booking_id uuid
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_referral_id   uuid;
+  v_org_id        uuid;
+  v_referrer      uuid;
+  v_status        text;
+  v_reward_type   text;
+  v_requested     numeric(12,2);
+  v_booking_status booking_status;
+  v_amount        numeric(12,2);
+  v_credit_id     uuid;
+BEGIN
+  SELECT id, org_id, referring_customer_id, reward_status, reward_type, requested_reward_amount
+    INTO v_referral_id, v_org_id, v_referrer, v_status, v_reward_type, v_requested
+  FROM public.customer_referrals
+  WHERE booking_id = p_booking_id
+  FOR UPDATE;
+
+  IF v_referral_id IS NULL THEN
+    RETURN NULL; -- no referral attached to this booking; normal case
+  END IF;
+
+  IF v_status <> 'pending' THEN
+    RETURN NULL; -- already credited or voided; idempotent no-op
+  END IF;
+
+  SELECT status INTO v_booking_status FROM public.bookings WHERE id = p_booking_id;
+  IF v_booking_status IS DISTINCT FROM 'Completed' THEN
+    RAISE EXCEPTION 'credit_pending_referral_for_booking: booking % is not Completed', p_booking_id;
+  END IF;
+
+  -- Gift Voucher rewards are fulfilled by staff outside the system — mark credited for
+  -- reporting, but never touch the wallet ledger.
+  IF v_reward_type = 'voucher' THEN
+    UPDATE public.customer_referrals
+       SET reward_status = 'credited',
+           reward_amount = v_requested,
+           credited_at   = now(),
+           credited_by   = auth.uid()
+     WHERE id = v_referral_id;
+    RETURN NULL;
+  END IF;
+
+  -- Wallet: staff-entered amount wins; fall back to the org-wide default.
+  v_amount := v_requested;
+  IF v_amount IS NULL THEN
+    SELECT referral_reward_amount INTO v_amount FROM public.organizations WHERE id = v_org_id;
+  END IF;
+
+  IF v_amount IS NULL OR v_amount = 0 THEN
+    UPDATE public.customer_referrals
+       SET reward_status = 'credited',
+           reward_amount = 0,
+           credited_at   = now(),
+           credited_by   = auth.uid()
+     WHERE id = v_referral_id;
+    RETURN NULL; -- confirmed, but no reward configured — nothing to ledger
+  END IF;
+
+  INSERT INTO public.customer_referral_credits (org_id, referral_id, customer_id, amount)
+  VALUES (v_org_id, v_referral_id, v_referrer, v_amount)
+  RETURNING id INTO v_credit_id;
+
+  UPDATE public.customer_referrals
+     SET reward_status = 'credited',
+         reward_amount = v_amount,
+         credited_at   = now(),
+         credited_by   = auth.uid()
+   WHERE id = v_referral_id;
+
+  RETURN v_credit_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.credit_pending_referral_for_booking(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.credit_pending_referral_for_booking(uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.credit_pending_referral_for_booking(uuid) TO authenticated;
 
 -- ============================================================
--- 4. Record migration
+-- 5. Record migration
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('063', 'reward-catalog') ON CONFLICT (version) DO NOTHING;
+VALUES ('069', 'simplify-reward-types') ON CONFLICT (version) DO NOTHING;

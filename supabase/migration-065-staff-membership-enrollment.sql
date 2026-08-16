@@ -1,4 +1,4 @@
--- Migration 060: staff can enroll members, but cannot read the membership
+-- Migration 065: staff can enroll members, but cannot read the membership
 -- list, balances, or the deposit ledger.
 --
 -- Before this migration:
@@ -123,5 +123,5 @@ REVOKE ALL ON FUNCTION public.enroll_member(uuid, uuid, numeric, text, text) FRO
 GRANT EXECUTE ON FUNCTION public.enroll_member(uuid, uuid, numeric, text, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('060', 'staff-membership-enrollment')
+VALUES ('065', 'staff-membership-enrollment')
 ON CONFLICT (version) DO NOTHING;

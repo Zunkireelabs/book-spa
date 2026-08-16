@@ -16,7 +16,7 @@ function toDateInputValue(date) {
 
 const DEFAULT_VALIDITY_DAYS = 90;
 
-// Manager/admin only — issues a new voucher via issue_voucher() (migration-066).
+// Manager/admin only — issues a new voucher via issue_voucher() (migration-071).
 // The voucher code is minted server-side (sequential per branch+type, e.g.
 // "NT 4326-0001") — there's no code field here to type or clash on, unlike
 // the old Excel workbook's pre-allocated master code list.

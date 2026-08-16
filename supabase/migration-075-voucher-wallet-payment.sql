@@ -1,15 +1,15 @@
 -- ============================================================
--- Migration 070: Voucher wallet balance as a booking payment tender
+-- Migration 075: Voucher wallet balance as a booking payment tender
 -- ============================================================
 --
--- Vouchers (migration-066) and booking payments have been entirely disconnected
+-- Vouchers (migration-071) and booking payments have been entirely disconnected
 -- until now — a voucher could only be redeemed from the standalone manager/
 -- admin-only Vouchers panel, never applied toward a booking's bill. This lets
 -- staff apply part (or all) of a voucher's remaining balance as one payment
 -- tender on a booking, with any shortfall collected via another payment
 -- method in the same payment — mirroring record_referral_wallet_payment
--- (migration-065) exactly, combined with claim_voucher()'s balance-check
--- logic (migration-066).
+-- (migration-070) exactly, combined with claim_voucher()'s balance-check
+-- logic (migration-071).
 --
 -- Two new pieces:
 --   1. voucher_claims gets nullable booking_id/payment_id columns, so a claim
@@ -149,7 +149,7 @@ GRANT EXECUTE ON FUNCTION public.record_voucher_wallet_payment(uuid, uuid, numer
 -- ---- 3. search_vouchers_for_payment -------------------------------------------
 -- Lets any authenticated org member (staff included) find a voucher by code or
 -- guest name to attach to a payment, without granting broad SELECT on
--- `vouchers` itself (that stays manager/admin-only, per migration-066/069).
+-- `vouchers` itself (that stays manager/admin-only, per migration-071/074).
 
 CREATE OR REPLACE FUNCTION public.search_vouchers_for_payment(p_query text)
 RETURNS TABLE (
@@ -195,5 +195,9 @@ REVOKE ALL ON FUNCTION public.search_vouchers_for_payment(text) FROM anon;
 GRANT EXECUTE ON FUNCTION public.search_vouchers_for_payment(text) TO authenticated;
 
 -- ============================================================
--- MIGRATION 070 COMPLETE
+-- MIGRATION 075 COMPLETE
 -- ============================================================
+
+INSERT INTO public.schema_migrations (version, name)
+VALUES ('075', 'voucher-wallet-payment')
+ON CONFLICT (version) DO NOTHING;

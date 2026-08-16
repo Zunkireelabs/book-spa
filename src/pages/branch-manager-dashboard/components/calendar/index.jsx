@@ -137,7 +137,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // gated on this; the due gets bundled into payment collection later.
   const [previousDue, setPreviousDue] = useState(null);
 
-  // Customer referral (migration-058) — individual mode only. isExistingCustomer
+  // Customer referral (migration-078) — individual mode only. isExistingCustomer
   // flips true only when staff picks a suggestion from CustomerAutocomplete; the
   // authoritative new-vs-existing check happens server-side in createBooking().
   const [isExistingCustomer, setIsExistingCustomer] = useState(false);

@@ -59,12 +59,24 @@ FROM (VALUES
   ('028'),('029'),('030'),('031'),('032'),('033'),('034'),('035'),('036'),
   ('037'),('038'),('039'),('040'),('041'),('042'),('043'),('044'),('045'),
   ('046'),('047'),('048'),('049'),('051'),('052'),('053'),('054'),('055'),
-  ('056'),('057'),('058'),('059'),('060'),('061'),('062'),('063'),('064'),
-  ('065'),('066'),('067'),('068'),('069'),('070'),('071'),('072')
+  ('058'),('059'),('060'),('061'),('062'),('063'),('064'),('065'),('066'),
+  ('067'),('068'),('069'),('070'),('071'),('072'),('073'),('074'),('075'),
+  ('076'),('077'),('078'),('079')
   -- 050 ('backfill-service-categories') intentionally excluded — file was never
   -- committed to the repo (held back from prod, per project notes); don't add it
   -- back here unless it actually ships.
   -- 053/054 = this change's admin_viewer role.
+  -- 056/057 intentionally skipped — reserved numbers from a renumber (PR #82's
+  -- membership migrations collided with 053-055 above and were moved to 058-062
+  -- to avoid two different migrations sharing the same version).
+  -- 063/064 collided a second time: stage independently shipped 063
+  -- (multi-branch-manager-access) and 064 (customer-accounts) while this branch
+  -- had its own 063 (customer-referrals) and 064 (branch-hours) in flight. This
+  -- branch's two were moved to 078/079 to keep stage's originals at 063/064.
+  -- !!! migration-064-customer-accounts.sql is NOT idempotent (plain CREATE
+  -- TABLE / unguarded ALTER TABLE ADD COLUMN) and does not self-record into
+  -- schema_migrations — it must be patched before the next `migrate-apply.sh`
+  -- run against stage re-attempts it and fails on the already-existing table.
   -- <-- add new versions here
 ) t(v)
 WHERE v NOT IN (SELECT version FROM public.schema_migrations)

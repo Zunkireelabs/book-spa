@@ -42,7 +42,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   //   'idle' | 'checking' | 'new' | 'existing'
   const [customerCheckStatus, setCustomerCheckStatus] = useState('idle');
 
-  // Customer referral (migration-058). isExistingCustomer flips true only when
+  // Customer referral (migration-078). isExistingCustomer flips true only when
   // staff picks a suggestion from CustomerAutocomplete — that's the one signal
   // available client-side that this isn't a new customer. It's a UI convenience
   // only: the authoritative new-vs-existing check happens server-side in

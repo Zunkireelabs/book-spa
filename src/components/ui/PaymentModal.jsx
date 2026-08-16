@@ -126,7 +126,7 @@ const PaymentModal = ({
   }, [tenders, membershipUsable]);
   const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
 
-  // --- referral reward wallet + voucher (migration-065) ---
+  // --- referral reward wallet + voucher (migration-070) ---
   const [referralReward, setReferralReward] = useState(null);
   useEffect(() => {
     if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return;
@@ -172,7 +172,7 @@ const PaymentModal = ({
     ]);
   };
 
-  // --- voucher wallet (migration-070) ---
+  // --- voucher wallet (migration-075) ---
   // Vouchers have no customer_id link (guest_name/guest_info are free text at
   // issue time), so unlike Membership/ReferralWallet there's nothing to
   // auto-load for this booking — staff pick "Voucher" from the Payment Method
@@ -216,10 +216,10 @@ const PaymentModal = ({
   };
 
   // --- pending self-service referral reward this customer earned as a referrer
-  // (migration-067's "requires_manual_reward" — the customer flow never
+  // (migration-072's "requires_manual_reward" — the customer flow never
   // auto-credits a self-service referral, so we prompt staff here at their
   // next checkout instead of relying on someone reopening the referred
-  // customer's own booking). Always credited as wallet — see migration-071. ---
+  // customer's own booking). Always credited as wallet — see migration-076. ---
   const [pendingReferralRewards, setPendingReferralRewards] = useState([]);
   const [rewardAmount, setRewardAmount] = useState('');
   const [rewardSubmitting, setRewardSubmitting] = useState(false);

@@ -7,7 +7,7 @@ function formatNPR(amount) {
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
-// Voucher balance banner at checkout (migration-070) — same "balance → balance
+// Voucher balance banner at checkout (migration-075) — same "balance → balance
 // after this payment" pattern as MembershipWalletCard, for a gift voucher
 // picked via the Voucher payment-method search. Vouchers have no customer_id
 // link, so unlike Membership there's nothing to auto-load; this only ever

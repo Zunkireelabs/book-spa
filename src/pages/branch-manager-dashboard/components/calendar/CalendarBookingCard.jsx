@@ -53,10 +53,11 @@ function isTimeLocked(booking) {
 function canDragBooking(booking) {
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
+  // Cannot drag paid bookings
+  if (booking.paymentStatus === 'paid') return false;
   // Cannot drag locked bookings (day-closed)
   if (booking.isLocked) return false;
-  // Cannot drag once the booking has started — being paid ahead of time
-  // doesn't itself lock it, only the service actually starting does.
+  // Cannot drag once the booking has started
   if (isTimeLocked(booking)) return false;
   return true;
 }

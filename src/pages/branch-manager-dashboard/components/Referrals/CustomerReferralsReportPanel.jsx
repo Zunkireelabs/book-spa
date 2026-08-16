@@ -23,7 +23,7 @@ const STATUS_STYLES = {
 };
 
 // Manager-facing report for the customer-to-customer referral reward program
-// (migration-058). Distinct from ReferralsReportPanel (staff/therapist
+// (migration-078). Distinct from ReferralsReportPanel (staff/therapist
 // commission) — different table, different money, kept as a separate query
 // and component rather than merged into that report.
 const CustomerReferralsReportPanel = ({ branchId }) => {

@@ -1,6 +1,6 @@
--- Migration 061: services.category / services.image_url
+-- Migration 066: services.category / services.image_url
 --
--- Same class of drift as migration-059 (branches.open_time/close_time/timezone):
+-- Same class of drift as migration-079 (branches.open_time/close_time/timezone):
 -- these columns are already live on staging (added directly via the dashboard
 -- SQL editor at some point, never captured in a migration) — fetchServices(),
 -- fetchServicesForManagement(), createService(), and updateServicePricing() in
@@ -34,5 +34,5 @@ UPDATE services SET category = 'Specialty'   WHERE name = 'Prenatal Massage' AND
 UPDATE services SET category = 'Therapeutic' WHERE name = 'Foot Reflexology' AND category = 'Spa';
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('061', 'services-category-image')
+VALUES ('066', 'services-category-image')
 ON CONFLICT (version) DO NOTHING;

@@ -1,4 +1,4 @@
--- Migration 067: public referral source picker + staff-decided reward
+-- Migration 072: public referral source picker + staff-decided reward
 -- (additive + one security fix, REVERSIBLE)
 --
 -- Adds a customer-facing "how were you referred" picker to the public booking flow
@@ -9,7 +9,7 @@
 -- a manager/admin picks Wallet or Voucher later, from the booking's action modal.
 -- Social Media / Staff are purely informational (tracked on the booking row, no
 -- reward pipeline). This reuses the existing customer-to-customer referral program
--- (customer_referrals table, migrations 058/062/063) for the Client/reward path —
+-- (customer_referrals table, migrations 063/067/068) for the Client/reward path —
 -- it does NOT introduce a new reward ledger.
 --
 -- While building this we found migration-008 gave `anon` UNCONDITIONAL SELECT on the
@@ -65,7 +65,7 @@
 --   ALTER TABLE public.customer_referrals DROP COLUMN IF EXISTS requires_manual_reward;
 --   ALTER TABLE public.bookings DROP COLUMN IF EXISTS referral_source;
 --   ALTER TABLE public.bookings DROP COLUMN IF EXISTS referral_source_detail;
---   -- then restore credit_pending_referral_for_booking from migration-063-reward-catalog.sql
+--   -- then restore credit_pending_referral_for_booking from migration-068-reward-catalog.sql
 --   CREATE POLICY "anon_select_customers" ON public.customers FOR SELECT TO anon USING (true);
 
 -- ============================================================
@@ -467,4 +467,4 @@ GRANT EXECUTE ON FUNCTION public.resolve_customer_referral_reward(uuid, text, nu
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('067', 'public-referral') ON CONFLICT (version) DO NOTHING;
+VALUES ('072', 'public-referral') ON CONFLICT (version) DO NOTHING;

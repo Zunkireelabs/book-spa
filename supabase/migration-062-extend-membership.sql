@@ -119,5 +119,5 @@ REVOKE ALL ON FUNCTION public.extend_membership(uuid, date, text) FROM anon;
 GRANT EXECUTE ON FUNCTION public.extend_membership(uuid, date, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('057', 'extend-membership')
+VALUES ('062', 'extend-membership')
 ON CONFLICT (version) DO NOTHING;

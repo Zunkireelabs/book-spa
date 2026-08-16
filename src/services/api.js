@@ -526,7 +526,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     // already Completed, credit any pending referral tied to it. Non-blocking —
     // same reasoning as updateBookingStatus()'s call to the same RPC: a crediting
     // failure must never block payment recording. The RPC itself now checks both
-    // status='Completed' AND payment_status='paid' before crediting (migration-072),
+    // status='Completed' AND payment_status='paid' before crediting (migration-077),
     // so calling it unconditionally here is safe even if status isn't Completed yet.
     if (leftover === 0) {
       try {
@@ -927,7 +927,7 @@ export async function getReferralsReport({ branchId, from, to } = {}) {
   }
 }
 
-// Customer-to-customer referral reward report (migration-058). Distinct from
+// Customer-to-customer referral reward report (migration-078). Distinct from
 // getReferralsReport above (staff/therapist commission) — reads
 // customer_referrals/customer_referral_credits, grouped by referring customer.
 export async function getCustomerReferralsReport({ branchId, from, to } = {}) {
@@ -996,13 +996,13 @@ export async function getCustomerReferralsReport({ branchId, from, to } = {}) {
   }
 }
 
-// Flat, one-row-per-referral Referral Wallet ledger (migration-058/065). Distinct
+// Flat, one-row-per-referral Referral Wallet ledger (migration-078/070). Distinct
 // from getCustomerReferralsReport above (which groups by referrer with an
 // expandable list) — this is the "who referred whom, how much they got, have
 // they used it, when, and what's left" view.
 //
 // customer_referral_credits is 1:1 with a referral (UNIQUE(referral_id) —
-// migration-058), so the granted amount is unambiguous per row. But spend
+// migration-078), so the granted amount is unambiguous per row. But spend
 // (customer_referral_debits) is only linked to the referring customer, not to
 // a specific referral — the wallet is one fungible balance per customer, not
 // a per-referral bucket (see record_referral_wallet_payment). To answer "how
@@ -1128,7 +1128,7 @@ export async function getReferralWalletReport({ branchId, from, to } = {}) {
 
 // Referral reward(s) available to redeem for the customer attached to a booking —
 // used by PaymentModal to surface an optional wallet-credit/voucher card at
-// checkout (migration-065). Returns null in `data` if referrals are disabled, the
+// checkout (migration-070). Returns null in `data` if referrals are disabled, the
 // booking has no customer, or the customer has neither a wallet balance nor an
 // unredeemed voucher. `walletBalance` nets earned credits minus prior spend
 // (get_referral_credit_balance RPC); vouchers are `customer_referrals` rows of
@@ -1218,7 +1218,7 @@ export async function fetchCustomerReferralForBooking(bookingId) {
 
 // Self-service (public-flow) referral rewards this booking's customer has EARNED
 // as a referrer but that still await a manager/admin's Wallet-vs-Voucher decision
-// (customer_referrals.requires_manual_reward = true — see migration-067). Only
+// (customer_referrals.requires_manual_reward = true — see migration-072). Only
 // includes rows where the referred customer's original booking is Completed, i.e.
 // the reward is actually earned, not just pending on a future visit. Used by
 // PaymentModal to prompt staff at the REFERRER's next checkout, since the
@@ -3420,7 +3420,7 @@ export async function createBooking({
 
       // Try to find existing customer by phone or email across the whole org.
       // Goes through the find_customer_for_booking RPC (not a direct table SELECT) —
-      // anon has no raw SELECT grant on customers, see migration-067.
+      // anon has no raw SELECT grant on customers, see migration-072.
       let existingCustomer = null;
       if (orgId && (phone || email)) {
         const { data } = await supabase
@@ -3639,7 +3639,7 @@ export async function lookupReferrerByPhone(orgSlug, phone) {
   }
 }
 
-// Public/customer-facing "is this phone already a customer?" check (migration-068) —
+// Public/customer-facing "is this phone already a customer?" check (migration-073) —
 // purely informational, boolean only, no id/name returned. Used so the public booking
 // form can show a live "looks like you're already a customer" notice while the person
 // types their phone, since a referral for an existing customer gets silently skipped
@@ -4699,7 +4699,7 @@ export async function deleteService({ serviceId }) {
 }
 
 // ============================================================
-// Reward Catalog CRUD (migration-063) — gift card / voucher options
+// Reward Catalog CRUD (migration-068) — gift card / voucher options
 // for customer referral rewards. Org-scoped; read by any staff role
 // (to populate the dropdown when logging a referral), write by
 // manager + admin only (same posture as services, migration-049).
@@ -7553,7 +7553,7 @@ export async function adjustMembership({ membershipId, amount, notes }) {
 }
 
 // ============================================================
-// VOUCHERS (migration-066) — manager/admin only, RLS-enforced.
+// VOUCHERS (migration-071) — manager/admin only, RLS-enforced.
 // ============================================================
 
 export async function fetchVoucherTypes() {
@@ -7792,7 +7792,7 @@ export async function fetchVoucherClaims(voucherId) {
 // outstanding liability — the value still unredeemed out of what IT issued).
 // Unlike the old Excel Dashboard, "amount claimed" here is never silently
 // dropped by a blank branch cell — voucher_claims.branch_claimed_id is
-// NOT NULL at the DB level (see migration-066), and outstanding is read
+// NOT NULL at the DB level (see migration-071), and outstanding is read
 // straight off voucher_balances (computed from ALL claims against a voucher,
 // regardless of which branch claimed it).
 export async function fetchVoucherOverview() {

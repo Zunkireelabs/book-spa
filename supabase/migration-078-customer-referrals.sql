@@ -1,4 +1,4 @@
--- Migration 058: customer referral reward program (additive, REVERSIBLE)
+-- Migration 078: customer referral reward program (additive, REVERSIBLE)
 --
 -- A "refer a friend" system distinct from the existing staff/therapist referral
 -- commission feature (bookings.referred_by, migration-031/043, computeReferralCommission,
@@ -298,5 +298,5 @@ GRANT EXECUTE ON FUNCTION public.get_referral_credit_balance(uuid) TO authentica
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('058', 'customer-referrals')
+VALUES ('078', 'customer-referrals')
 ON CONFLICT (version) DO NOTHING;

@@ -5,7 +5,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-// Referral reward banner at checkout (migration-065) — shown when the booking's
+// Referral reward banner at checkout (migration-070) — shown when the booking's
 // customer is a referrer with an unspent wallet credit and/or an unredeemed
 // voucher. Purely optional: staff apply what they want via the tender rows
 // (wallet) or the "Apply" buttons below (vouchers); anything left untouched

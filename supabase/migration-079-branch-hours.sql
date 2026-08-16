@@ -1,4 +1,4 @@
--- Migration 059: branches.open_time / close_time / timezone
+-- Migration 079: branches.open_time / close_time / timezone
 --
 -- These columns are already live on staging/production (added directly via
 -- the dashboard SQL editor at some point, never captured in a migration) —
@@ -21,5 +21,5 @@ ALTER TABLE branches
   ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'Asia/Kathmandu';
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('059', 'branch-hours')
+VALUES ('079', 'branch-hours')
 ON CONFLICT (version) DO NOTHING;
