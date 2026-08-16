@@ -1,15 +1,7 @@
 services:
   app:
     container_name: nuad-thai-prod
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VITE_SUPABASE_URL: https://pmbvogiphelmpjdalmtv.supabase.co
-        VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBtYnZvZ2lwaGVsbXBqZGFsbXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4ODEzODcsImV4cCI6MjA4NjQ1NzM4N30.gB-ry-pn0-mOHBqj0MbTVLg5RBjp6MrgX1s_czsSBc4
-        VITE_POSTHOG_KEY: phc_nFcXjHjhDRhsiQgMG3ogCJWYieThL2iWmjzzEZNZxTXm
-        VITE_POSTHOG_HOST: https://us.i.posthog.com
-        VITE_ENABLE_MEMBERSHIP: "false"
+    image: ghcr.io/zunkireelabs/book-spa:prod
     networks:
       - hosting
     restart: unless-stopped
@@ -20,6 +12,7 @@ services:
       retries: 3
       start_period: 15s
     labels:
+      - "autoheal=true"
       - "traefik.enable=true"
       - "traefik.docker.network=hosting"
       - "traefik.http.routers.nuad-thai-prod.rule=Host(`zenly.zunkireelabs.com`)"
