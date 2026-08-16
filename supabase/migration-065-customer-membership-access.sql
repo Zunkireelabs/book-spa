@@ -12,12 +12,14 @@ CREATE INDEX IF NOT EXISTS idx_customer_accounts_customer_id ON customer_account
 
 -- Backfill: link existing customer_accounts to a matching customers row by
 -- (org, lower(email)) — same trust level as migration-064's anonymous-booking
--- auto-link (exact email match, case-insensitive).
+-- auto-link (exact email match, case-insensitive). customers has no org_id
+-- column directly (only branch_id) — join through branches.
 UPDATE customer_accounts ca
 SET customer_id = c.id
 FROM customers c
+JOIN branches b ON b.id = c.branch_id
 WHERE ca.customer_id IS NULL
-  AND c.org_id = ca.org_id
+  AND b.org_id = ca.org_id
   AND lower(c.email) = lower(ca.email);
 
 -- Extend signup to also resolve+set customer_id, mirroring the existing
@@ -34,9 +36,10 @@ DECLARE
   v_account customer_accounts;
   v_customer_id uuid;
 BEGIN
-  SELECT id INTO v_customer_id
-  FROM customers
-  WHERE org_id = p_org_id AND lower(email) = lower(p_email)
+  SELECT c.id INTO v_customer_id
+  FROM customers c
+  JOIN branches b ON b.id = c.branch_id
+  WHERE b.org_id = p_org_id AND lower(c.email) = lower(p_email)
   LIMIT 1;
 
   INSERT INTO customer_accounts (org_id, auth_user_id, email, phone, full_name, customer_id)
