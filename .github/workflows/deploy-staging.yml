@@ -83,7 +83,10 @@ jobs:
 
       - name: Apply pending migrations to staging
         env:
-          STAGE_DB_URL: ${{ secrets.STAGE_DB_URL }}
+          PGHOST: ${{ secrets.STAGE_PGHOST }}
+          PGUSER: ${{ secrets.STAGE_PGUSER }}
+          PGPASSWORD: ${{ secrets.STAGE_PGPASSWORD }}
+          PGDATABASE: ${{ secrets.STAGE_PGDATABASE }}
         run: scripts/migrate-apply.sh stage
 
   deploy:

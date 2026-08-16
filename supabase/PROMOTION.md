@@ -51,8 +51,8 @@ in **that** database, so you can always tell what staging vs production is missi
    `scripts/migrate-apply.sh prod` automatically, gated behind the `production-db` environment's
    required reviewer — approve that run in the Actions tab to let it proceed. The app deploy is
    blocked if this step fails.
-3. **Confirm** — `scripts/migrate-status.sh prod` (needs `PROD_DB_URL` set locally, see
-   `~/.pgpass`) shows nothing pending.
+3. **Confirm** — `PGHOST=... PGUSER=... PGDATABASE=... scripts/migrate-status.sh prod` shows
+   nothing pending (leave `PGPASSWORD` unset locally — psql reads it from `~/.pgpass`).
 
 **Manual fallback** (CI unavailable, or investigating a failed automated run): apply via Supabase
 MCP `apply_migration` for staging, or the prod dashboard SQL editor (`pmbvogiphelmpjdalmtv`,
@@ -63,7 +63,8 @@ the automated path; whichever runs first "wins" and the other is a no-op.
 ## Pending-check ("what is this database missing?")
 
 ```bash
-LOCAL_DB_URL=... scripts/migrate-status.sh local   # or STAGE_DB_URL/PROD_DB_URL + stage/prod
+PGHOST=db.snzcckzfmpboeqkktmwy.supabase.co PGUSER=postgres PGDATABASE=postgres \
+  scripts/migrate-status.sh stage   # swap host/target for prod; PGPASSWORD comes from ~/.pgpass
 ```
 
 Reads `public.schema_migrations` directly and diffs it against the `.sql` files on disk — no
