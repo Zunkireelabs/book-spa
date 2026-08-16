@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabaseCustomer } from '../lib/supabase';
-import { useTenant } from './TenantContext';
 
 const CustomerAuthContext = createContext(null);
 
@@ -32,7 +31,6 @@ async function fetchCustomerProfile(authUserId) {
 }
 
 export const CustomerAuthProvider = ({ children }) => {
-  const { orgId } = useTenant();
   const [customer, setCustomer] = useState(null);
   const [customerProfile, setCustomerProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -41,7 +39,7 @@ export const CustomerAuthProvider = ({ children }) => {
   // onAuthStateChange listener must not race them with a duplicate fetch.
   const authActiveRef = useRef(false);
 
-  const signUp = async (email, password, fullName, phone) => {
+  const signUp = async (orgId, email, password, fullName, phone) => {
     authActiveRef.current = true;
 
     try {

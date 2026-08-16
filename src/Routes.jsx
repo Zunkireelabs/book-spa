@@ -4,7 +4,6 @@ import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
 import { TenantProvider } from "contexts/TenantContext";
-import { CustomerAuthProvider } from "contexts/CustomerAuthContext";
 import { useAuth } from "contexts/AuthContext";
 import CustomerBookingFlow from "pages/customer-booking-flow";
 import StaffLoginAuthentication from "pages/login";
@@ -39,15 +38,6 @@ const ExternalRedirect = ({ to }) => {
 const TenantWrapper = ({ children }) => (
   <TenantProvider>
     {children}
-  </TenantProvider>
-);
-
-// Wrapper for customer-facing routes: tenant context + customer auth/session
-const CustomerWrapper = ({ children }) => (
-  <TenantProvider>
-    <CustomerAuthProvider>
-      {children}
-    </CustomerAuthProvider>
   </TenantProvider>
 );
 
@@ -178,13 +168,13 @@ const AppRoutes = () => {
         {/* ==================== CUSTOMER-FACING ROUTES ==================== */}
 
         {/* Customer booking flow */}
-        <Route path="/:orgSlug/book" element={<CustomerWrapper><CustomerBookingFlow /></CustomerWrapper>} />
-        <Route path="/:orgSlug/manage" element={<CustomerWrapper><BookingManagementPortal /></CustomerWrapper>} />
+        <Route path="/:orgSlug/book" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
+        <Route path="/:orgSlug/manage" element={<TenantWrapper><BookingManagementPortal /></TenantWrapper>} />
 
         {/* Customer login / signup / account */}
-        <Route path="/:orgSlug/customer-login" element={<CustomerWrapper><CustomerLoginAuthentication /></CustomerWrapper>} />
-        <Route path="/:orgSlug/signup" element={<CustomerWrapper><CustomerSignup /></CustomerWrapper>} />
-        <Route path="/:orgSlug/account" element={<CustomerWrapper><CustomerAccount /></CustomerWrapper>} />
+        <Route path="/:orgSlug/customer-login" element={<TenantWrapper><CustomerLoginAuthentication /></TenantWrapper>} />
+        <Route path="/:orgSlug/signup" element={<TenantWrapper><CustomerSignup /></TenantWrapper>} />
+        <Route path="/:orgSlug/account" element={<TenantWrapper><CustomerAccount /></TenantWrapper>} />
 
         {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
         <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
@@ -193,7 +183,7 @@ const AppRoutes = () => {
         {/* ==================== CATCH-ALL ==================== */}
 
         {/* Org slug without explicit path - treat as customer booking (existing behavior) */}
-        <Route path="/:orgSlug" element={<CustomerWrapper><CustomerBookingFlow /></CustomerWrapper>} />
+        <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
 
         <Route path="*" element={<NotFound />} />
       </RouterRoutes>

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
@@ -22,9 +22,11 @@ const CustomerAccount = () => {
   const { customer, customerProfile, loading: authLoading, signOut } = useCustomerAuth();
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
+  const hasRedirected = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && !customer) {
+    if (!authLoading && !customer && !hasRedirected.current) {
+      hasRedirected.current = true;
       navigate(`/${orgSlug}/customer-login`, { replace: true });
     }
   }, [authLoading, customer, orgSlug, navigate]);
@@ -79,12 +81,21 @@ const CustomerAccount = () => {
       </header>
 
       <main className="max-w-2xl mx-auto px-5 py-8">
-        <div className="mb-8 p-5 bg-surface border border-border rounded-spa-lg">
-          <h1 className="text-xl font-semibold text-text-primary mb-1">{customerProfile.full_name}</h1>
-          <p className="text-sm text-text-secondary">{customerProfile.email}</p>
-          {customerProfile.phone && (
-            <p className="text-sm text-text-secondary">{customerProfile.phone}</p>
-          )}
+        <div className="mb-8 p-5 bg-surface border border-border rounded-spa-lg flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-text-primary mb-1">{customerProfile.full_name}</h1>
+            <p className="text-sm text-text-secondary">{customerProfile.email}</p>
+            {customerProfile.phone && (
+              <p className="text-sm text-text-secondary">{customerProfile.phone}</p>
+            )}
+          </div>
+          <Link
+            to={`/${orgSlug}/book`}
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa text-sm font-medium spa-transition-fast"
+          >
+            <Icon name="Calendar" size={16} />
+            Book a service
+          </Link>
         </div>
 
         <h2 className="text-lg font-semibold text-text-primary mb-4">Your bookings</h2>

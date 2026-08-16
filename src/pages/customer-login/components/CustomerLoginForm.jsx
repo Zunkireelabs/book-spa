@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
@@ -12,9 +12,14 @@ const CustomerLoginForm = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
+  const hasRedirected = useRef(false);
 
+  // Single source of truth for the post-login redirect (also covers the
+  // case where this page loads while already signed in). handleSubmit does
+  // NOT navigate itself, to avoid a second, racing navigation.
   useEffect(() => {
-    if (customer && customerProfile) {
+    if (customer && customerProfile && !hasRedirected.current) {
+      hasRedirected.current = true;
       navigate(`/${orgSlug}/account`, { replace: true });
     }
   }, [customer, customerProfile, orgSlug, navigate]);
@@ -48,7 +53,7 @@ const CustomerLoginForm = () => {
 
     try {
       await signIn(email, password);
-      navigate(`/${orgSlug}/account`, { replace: true });
+      // Redirect happens via the effect above once customer/customerProfile land.
     } catch (error) {
       setErrors({
         submit: error.message === 'Invalid login credentials'

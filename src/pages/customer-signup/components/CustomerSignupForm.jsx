@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
+import { useTenant } from 'contexts/TenantContext';
 
 const CustomerSignupForm = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
+  const { orgId } = useTenant();
   const { signUp, customer, customerProfile } = useCustomerAuth();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -14,9 +16,13 @@ const CustomerSignupForm = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
+  const hasRedirected = useRef(false);
 
+  // Single source of truth for the post-signup redirect. handleSubmit does
+  // NOT navigate itself, to avoid a second, racing navigation.
   useEffect(() => {
-    if (customer && customerProfile) {
+    if (customer && customerProfile && !hasRedirected.current) {
+      hasRedirected.current = true;
       navigate(`/${orgSlug}/account`, { replace: true });
     }
   }, [customer, customerProfile, orgSlug, navigate]);
@@ -57,8 +63,8 @@ const CustomerSignupForm = () => {
     setErrors({});
 
     try {
-      await signUp(email, password, fullName.trim(), phone.trim());
-      navigate(`/${orgSlug}/account`, { replace: true });
+      await signUp(orgId, email, password, fullName.trim(), phone.trim());
+      // Redirect happens via the effect above once customer/customerProfile land.
     } catch (error) {
       setErrors({
         submit: error.message || 'An unexpected error occurred. Please try again.'
