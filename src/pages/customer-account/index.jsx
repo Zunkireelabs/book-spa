@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useTenant } from 'contexts/TenantContext';
@@ -20,6 +20,60 @@ const STATUS_BADGE = {
   completed: 'bg-success/10 text-success',
   cancelled: 'bg-error/10 text-error',
   'no show': 'bg-error/10 text-error',
+};
+
+const UPCOMING_STATUSES = new Set(['pending', 'confirmed', 'in-progress']);
+
+function formatNPR(amount) {
+  return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
+}
+
+function formatRelativeDate(dateStr) {
+  if (!dateStr) return '';
+  const target = new Date(dateStr + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((target - today) / 86400000);
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays === -1) return 'Yesterday';
+  return target.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function formatTime12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+const TONE_STYLES = {
+  primary:   { chip: 'bg-primary/10', icon: 'text-primary' },
+  secondary: { chip: 'bg-secondary/10', icon: 'text-secondary' },
+  accent:    { chip: 'bg-accent/10', icon: 'text-accent' },
+  success:   { chip: 'bg-success/10', icon: 'text-success' },
+};
+
+const StatTile = ({ icon, label, value, tone = 'primary', empty, emptyLabel, to }) => {
+  const toneStyle = TONE_STYLES[tone] || TONE_STYLES.primary;
+  const content = (
+    <div className={`h-full p-4 bg-surface border border-border rounded-spa-lg shadow-spa-resting hover:shadow-spa-elevated spa-transition-fast ${to ? 'cursor-pointer' : ''}`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className={`w-8 h-8 rounded-spa flex items-center justify-center ${toneStyle.chip}`}>
+          <Icon name={icon} size={15} className={toneStyle.icon} />
+        </div>
+      </div>
+      {empty ? (
+        <p className="font-caption text-xs text-text-tertiary leading-snug">{emptyLabel}</p>
+      ) : (
+        <p className="font-data font-data-semibold text-lg text-text-primary leading-tight">{value}</p>
+      )}
+      <p className="font-caption text-[11px] text-text-secondary mt-0.5 uppercase tracking-wide">{label}</p>
+    </div>
+  );
+  return to ? <Link to={to}>{content}</Link> : content;
 };
 
 const CustomerAccount = () => {
@@ -104,6 +158,22 @@ const CustomerAccount = () => {
     return () => { cancelled = true; };
   }, [customerProfile?.customer_id]);
 
+  const { nextBooking, upcomingBookings, pastBookings } = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const upcoming = bookings
+      .filter((b) => UPCOMING_STATUSES.has(b.status) && b.date >= todayStr)
+      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const past = bookings
+      .filter((b) => !(UPCOMING_STATUSES.has(b.status) && b.date >= todayStr))
+      .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+    return { nextBooking: upcoming[0] || null, upcomingBookings: upcoming.slice(1), pastBookings: past };
+  }, [bookings]);
+
+  const voucherValue = useMemo(
+    () => vouchers.reduce((sum, v) => sum + Number(v.remaining_balance ?? v.total_amount_issued ?? 0), 0),
+    [vouchers]
+  );
+
   const handleSignOut = async () => {
     await signOut();
     navigate(`/${orgSlug}/book`);
@@ -117,10 +187,12 @@ const CustomerAccount = () => {
     );
   }
 
+  const firstName = (customerProfile.full_name || '').split(' ')[0];
+
   return (
     <div className="min-h-screen bg-background">
-      <header className="px-6 md:px-8 py-5 flex items-center justify-between border-b border-border">
-        <span className="text-lg font-semibold text-text-primary tracking-tight">
+      <header className="px-6 md:px-8 py-5 flex items-center justify-between border-b border-border bg-surface">
+        <span className="font-heading font-heading-semibold text-lg text-text-primary tracking-tight">
           {orgName || 'Zenly'}
         </span>
         <button
@@ -133,56 +205,151 @@ const CustomerAccount = () => {
         </button>
       </header>
 
-      <main className="max-w-2xl mx-auto px-5 py-8">
-        <div className="mb-8 p-5 bg-surface border border-border rounded-spa-lg flex items-center justify-between gap-4">
+      <main className="max-w-4xl mx-auto px-5 py-10">
+        {/* Hero greeting */}
+        <div className="mb-8 flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-text-primary mb-1">{customerProfile.full_name}</h1>
-            <p className="text-sm text-text-secondary">{customerProfile.email}</p>
-            {customerProfile.phone && (
-              <p className="text-sm text-text-secondary">{customerProfile.phone}</p>
-            )}
+            <p className="font-accent italic text-3xl text-text-primary mb-1">Welcome back, {firstName}</p>
+            <p className="font-body text-sm text-text-secondary">
+              {customerProfile.email}{customerProfile.phone ? ` · ${customerProfile.phone}` : ''}
+            </p>
           </div>
           <Link
             to={`/${orgSlug}/book`}
-            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa text-sm font-medium spa-transition-fast"
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa text-sm font-medium shadow-spa-resting spa-transition-fast"
           >
             <Icon name="Calendar" size={16} />
             Book a service
           </Link>
         </div>
 
+        {/* Next appointment spotlight */}
+        {nextBooking && (
+          <div className="mb-8 relative overflow-hidden bg-surface border border-border rounded-spa-lg shadow-spa-elevated">
+            <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-accent" />
+            <div className="p-6 pl-7 flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="font-caption text-xs text-accent uppercase tracking-widest mb-1.5">Your next appointment</p>
+                <p className="font-heading font-heading-semibold text-xl text-text-primary mb-1">{nextBooking.service}</p>
+                <p className="font-body text-sm text-text-secondary">
+                  {formatRelativeDate(nextBooking.date)} at {formatTime12h(nextBooking.time)}
+                  {nextBooking.therapist ? ` · with ${nextBooking.therapist}` : ''}
+                </p>
+              </div>
+              <span className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize flex-shrink-0 ${STATUS_BADGE[nextBooking.status] || 'bg-background text-text-secondary'}`}>
+                {nextBooking.status}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Status strip — always visible, graceful empty states */}
+        <div className="mb-10 grid grid-cols-2 md:grid-cols-4 gap-3">
+          {MEMBERSHIP_ENABLED && (
+            <StatTile
+              icon="Wallet"
+              tone="primary"
+              label="Membership"
+              value={membership ? membership.tierName : null}
+              empty={!membership}
+              emptyLabel="Not a member yet"
+            />
+          )}
+          {VOUCHER_ENABLED && (
+            <StatTile
+              icon="Ticket"
+              tone="secondary"
+              label="Vouchers"
+              value={formatNPR(voucherValue)}
+              empty={vouchers.length === 0}
+              emptyLabel="No active vouchers"
+            />
+          )}
+          {CUSTOMER_REFERRALS_ENABLED && (
+            <StatTile
+              icon="Users"
+              tone="accent"
+              label="Referral earnings"
+              value={referralStats ? formatNPR(referralStats.totalCredited) : null}
+              empty={!referralStats || referralStats.totalReferred === 0}
+              emptyLabel="Refer a friend to earn"
+            />
+          )}
+          <StatTile
+            icon="Sparkles"
+            tone="success"
+            label="Total visits"
+            value={bookings.filter((b) => b.status === 'completed').length || null}
+            empty={bookings.filter((b) => b.status === 'completed').length === 0}
+            emptyLabel="Your first visit awaits"
+          />
+        </div>
+
         <CustomerMembershipSection membership={membership} transactions={membershipTransactions} />
         <CustomerVouchersSection vouchers={vouchers} />
         <CustomerReferralStats stats={referralStats} />
 
-        <h2 className="text-lg font-semibold text-text-primary mb-4">Your bookings</h2>
-
+        {/* Bookings */}
         {loadingBookings && (
           <p className="text-sm text-text-secondary">Loading bookings...</p>
         )}
 
         {!loadingBookings && bookings.length === 0 && (
-          <p className="text-sm text-text-secondary">No bookings yet.</p>
+          <div className="text-center py-12 bg-surface border border-border rounded-spa-lg">
+            <Icon name="CalendarPlus" size={28} className="text-text-tertiary mx-auto mb-3" />
+            <p className="font-body text-sm text-text-secondary mb-4">No bookings yet — your wellness journey starts here.</p>
+            <Link
+              to={`/${orgSlug}/book`}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa text-sm font-medium spa-transition-fast"
+            >
+              Book your first service
+            </Link>
+          </div>
         )}
 
-        <div className="space-y-3">
-          {bookings.map((booking) => (
-            <div key={booking.bookingId} className="p-4 bg-surface border border-border rounded-spa flex items-center justify-between gap-4">
-              <div>
-                <p className="font-medium text-text-primary">{booking.service}</p>
-                <p className="text-sm text-text-secondary">
-                  {booking.date} at {booking.time} &middot; {booking.price}
-                </p>
-              </div>
-              <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${STATUS_BADGE[booking.status] || 'bg-background text-text-secondary'}`}>
-                {booking.status}
-              </span>
+        {upcomingBookings.length > 0 && (
+          <div className="mb-8">
+            <h2 className="font-heading font-heading-medium text-base text-text-primary mb-3">Upcoming</h2>
+            <div className="space-y-2.5">
+              {upcomingBookings.map((booking) => (
+                <BookingRow key={booking.bookingId} booking={booking} accent />
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
+
+        {pastBookings.length > 0 && (
+          <div>
+            <h2 className="font-heading font-heading-medium text-base text-text-primary mb-3">Past bookings</h2>
+            <div className="space-y-2.5">
+              {pastBookings.map((booking) => (
+                <BookingRow key={booking.bookingId} booking={booking} />
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
 };
+
+const BookingRow = ({ booking, accent }) => (
+  <div className={`p-4 bg-surface border rounded-spa flex items-center justify-between gap-4 spa-transition-fast hover:shadow-spa-resting ${accent ? 'border-primary/20' : 'border-border'}`}>
+    <div className="flex items-center gap-3 min-w-0">
+      <div className="w-9 h-9 rounded-spa bg-primary/10 flex items-center justify-center flex-shrink-0">
+        <Icon name="Sparkles" size={15} className="text-primary" />
+      </div>
+      <div className="min-w-0">
+        <p className="font-body font-body-medium text-sm text-text-primary truncate">{booking.service}</p>
+        <p className="font-caption text-xs text-text-secondary">
+          {formatRelativeDate(booking.date)} at {formatTime12h(booking.time)} &middot; {booking.price}
+        </p>
+      </div>
+    </div>
+    <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize flex-shrink-0 ${STATUS_BADGE[booking.status] || 'bg-background text-text-secondary'}`}>
+      {booking.status}
+    </span>
+  </div>
+);
 
 export default CustomerAccount;
