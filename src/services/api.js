@@ -3384,6 +3384,7 @@ export async function createBooking({
   orgSlug,
   referralSource,
   referralSourceDetail,
+  customerAccountId,
 }) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -3633,6 +3634,7 @@ export async function createBooking({
         customer_email: customerEmail || null,
         customer_phone: customerPhone || null,
         customer_gender: customerGender || null,
+        customer_account_id: customerAccountId || null,
         date: date,
         start_time: startTime,
         base_amount: Number(service.price_npr),

@@ -11,6 +11,7 @@ const BookingConfirmation = ({
   selectedDateTime,
   customerInfo,
   genderPreference,
+  customerAccountId,
   onConfirmBooking,
   onEditBooking
 }) => {
@@ -117,6 +118,7 @@ const BookingConfirmation = ({
         orgSlug,
         referralSource: customerInfo.referralSource || null,
         referralSourceDetail,
+        customerAccountId,
       });
 
       if (error) {

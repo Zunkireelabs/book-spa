@@ -322,6 +322,7 @@ const CustomerBookingFlow = () => {
             selectedDateTime={selectedDateTime}
             customerInfo={customerInfo}
             genderPreference={genderPreference}
+            customerAccountId={customerProfile?.id}
             onConfirmBooking={handleConfirmBooking}
             onEditBooking={handleEditBooking}
           />
