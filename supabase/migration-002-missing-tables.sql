@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS customers (
   created_at timestamptz DEFAULT now()
 );
 
-CREATE INDEX idx_customers_branch ON customers(branch_id);
-CREATE INDEX idx_customers_phone ON customers(phone);
+CREATE INDEX IF NOT EXISTS idx_customers_branch ON customers(branch_id);
+CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 
 -- ============================================================
 -- 2. ADD customer_id + SNAPSHOT COLUMNS TO BOOKINGS

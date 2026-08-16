@@ -10,12 +10,15 @@ import StaffBookingForm from './components/StaffBookingForm';
 import CollectPaymentPanel from './components/CollectPaymentPanel';
 import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
+import EnrollMemberModal from '../branch-manager-dashboard/components/Memberships/EnrollMemberModal';
+import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 
 const BranchStaffDashboard = () => {
   const { profile, signOut, user } = useAuth();
@@ -648,6 +651,22 @@ const BranchStaffDashboard = () => {
             <CollectPaymentPanel onSuccess={showSuccess} />
           ) : viewMode === 'new-booking' ? (
             <StaffBookingForm onBookingCreated={loadData} />
+          ) : viewMode === 'new-membership' && MEMBERSHIP_ENABLED ? (
+            <EnrollMemberModal
+              onClose={() => setSearchParams({ view: 'dashboard' })}
+              onEnrolled={() => {
+                setSearchParams({ view: 'dashboard' });
+                showSuccess('Membership created.');
+              }}
+            />
+          ) : viewMode === 'new-voucher' && VOUCHER_ENABLED ? (
+            <NewVoucherModal
+              onClose={() => setSearchParams({ view: 'dashboard' })}
+              onIssued={() => {
+                setSearchParams({ view: 'dashboard' });
+                showSuccess('Voucher issued.');
+              }}
+            />
           ) : (
             <StaffBookingForm onBookingCreated={loadData} />
           )}

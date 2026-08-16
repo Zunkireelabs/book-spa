@@ -43,12 +43,18 @@ import AttendanceReportPanel from './components/AttendanceReportPanel';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
+import CustomerReferralsReportPanel from './components/Referrals/CustomerReferralsReportPanel';
+import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
+import RewardCatalogPanel from './components/Referrals/RewardCatalogPanel';
 import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPanel from './components/Memberships/MembershipsPanel';
-import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 import MembershipCollectionPanel from './components/Memberships/MembershipCollectionPanel';
 import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
+import VoucherListPanel from './components/Vouchers/VoucherListPanel';
+import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
+import VoucherWalletPanel from './components/Vouchers/VoucherWalletPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -634,11 +640,17 @@ const BranchManagerDashboard = () => {
               {viewMode === 'transfer-report' && <TransferReportPanel />}
               {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
               {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
+              {viewMode === 'customer-referrals' && CUSTOMER_REFERRALS_ENABLED && <CustomerReferralsReportPanel branchId={branchId} />}
+              {viewMode === 'referral-wallet' && CUSTOMER_REFERRALS_ENABLED && <ReferralWalletPanel branchId={branchId} />}
+              {viewMode === 'reward-catalog' && CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) && <RewardCatalogPanel />}
               {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
               {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
+              {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}
+              {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin'].includes(profile?.role) && <VoucherListPanel />}
+              {VOUCHER_ENABLED && viewMode === 'voucher-wallet' && ['manager','admin'].includes(profile?.role) && <VoucherWalletPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}

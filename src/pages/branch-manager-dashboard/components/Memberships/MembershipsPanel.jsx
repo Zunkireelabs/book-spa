@@ -254,7 +254,7 @@ const MembershipsPanel = () => {
                         <span className="font-data font-data-medium text-sm text-text-primary">{formatNPR(m.balance)}</span>
                       </td>
                       <td className="px-4 py-3 text-right hidden md:table-cell">
-                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.totalDeposited)}</span>
+                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.cycleDeposited)}</span>
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         <span className="font-caption font-caption-normal text-xs text-text-secondary">
