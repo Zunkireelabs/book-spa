@@ -5,7 +5,7 @@ import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { fetchPendingApprovalCount } from 'services/api';
-import { MEMBERSHIP_ENABLED } from 'lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from 'lib/featureFlags';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
@@ -126,6 +126,20 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['staff', 'manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
+        ...(MEMBERSHIP_ENABLED ? [{
+          id: 'new-membership',
+          label: 'New Membership',
+          icon: 'CreditCard',
+          path: `${basePath}?view=new-membership`,
+          roles: ['staff'],
+        }] : []),
+        ...(VOUCHER_ENABLED ? [{
+          id: 'new-voucher',
+          label: 'New Voucher',
+          icon: 'Ticket',
+          path: `${basePath}?view=new-voucher`,
+          roles: ['staff'],
+        }] : []),
       ]
     },
     {
@@ -197,6 +211,27 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=referrals`,
           roles: ['manager', 'admin', 'admin_viewer']
         },
+        ...(CUSTOMER_REFERRALS_ENABLED ? [{
+          id: 'customer-referrals',
+          label: 'Customer Referrals',
+          icon: 'Users',
+          path: `${basePath}?view=customer-referrals`,
+          roles: ['manager', 'admin', 'admin_viewer']
+        }] : []),
+        ...(CUSTOMER_REFERRALS_ENABLED ? [{
+          id: 'referral-wallet',
+          label: 'Referral Wallet',
+          icon: 'Wallet',
+          path: `${basePath}?view=referral-wallet`,
+          roles: ['manager', 'admin', 'admin_viewer']
+        }] : []),
+        ...(CUSTOMER_REFERRALS_ENABLED ? [{
+          id: 'reward-catalog',
+          label: 'Reward Catalog',
+          icon: 'Gift',
+          path: `${basePath}?view=reward-catalog`,
+          roles: ['manager', 'admin']
+        }] : []),
         {
           id: 'service-revenue',
           label: 'Service Revenue',
@@ -261,6 +296,35 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: 'Wallet Usage',
           icon: 'Wallet',
           path: `${basePath}?view=wallet-usage`,
+          roles: ['manager', 'admin'],
+        },
+      ],
+    }] : []),
+    ...(VOUCHER_ENABLED ? [{
+      id: 'vouchers',
+      label: 'Vouchers',
+      icon: 'Ticket',
+      roles: ['manager', 'admin'],
+      children: [
+        {
+          id: 'voucher-overview',
+          label: 'All Voucher',
+          icon: 'LayoutDashboard',
+          path: `${basePath}?view=voucher-overview`,
+          roles: ['manager', 'admin'],
+        },
+        {
+          id: 'voucher-list',
+          label: 'Voucher Issued',
+          icon: 'Ticket',
+          path: `${basePath}?view=vouchers`,
+          roles: ['manager', 'admin'],
+        },
+        {
+          id: 'voucher-wallet',
+          label: 'Wallet',
+          icon: 'Wallet',
+          path: `${basePath}?view=voucher-wallet`,
           roles: ['manager', 'admin'],
         },
       ],

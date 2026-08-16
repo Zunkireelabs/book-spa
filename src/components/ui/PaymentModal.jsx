@@ -3,10 +3,19 @@ import Icon from '../AppIcon';
 import Button from './Button';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchMembershipForBooking } from '../../services/api';
+import ReferralRewardCard from './ReferralRewardCard';
+import VoucherWalletCard from './VoucherWalletCard';
+import {
+  fetchMembershipForBooking,
+  fetchReferralRewardForBooking,
+  fetchPendingReferralRewardsForBooking,
+  resolveCustomerReferralReward,
+  searchVouchersForPayment,
+} from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { useOrg } from '../../contexts/OrgContext';
-import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
+import { useAuth } from '../../contexts/AuthContext';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 
 // First immediately-selectable leaf value in the tree — a plain method, or a
 // group's first sub-method (the group name itself isn't selectable once it has
@@ -34,6 +43,9 @@ const PaymentModal = ({
   dueHolderSuggestions = [],
 }) => {
   const { paymentMethods } = useOrg();
+  const { profile } = useAuth();
+  const userRole = profile?.role || 'staff';
+  const canResolveReferralReward = ['manager', 'admin'].includes(userRole);
   const PAYMENT_TREE = useMemo(
     () => buildPaymentMethodTree(paymentMethods),
     [paymentMethods]
@@ -114,6 +126,150 @@ const PaymentModal = ({
   }, [tenders, membershipUsable]);
   const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
 
+  // --- referral reward wallet + voucher (migration-070) ---
+  const [referralReward, setReferralReward] = useState(null);
+  useEffect(() => {
+    if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchReferralRewardForBooking(bookingId);
+      if (!cancelled) setReferralReward(data || null);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId]);
+
+  const referralWalletUsable = referralReward && referralReward.walletBalance > 0;
+  const referralWalletLeaf = referralWalletUsable
+    ? { value: 'ReferralWallet', label: 'Referral Wallet' }
+    : null;
+
+  // Referral rewards are a bonus on top of normal payment — unlike Membership,
+  // there's no auto-select default here; staff opt in explicitly (or leave the
+  // reward untouched for the customer's next visit).
+  const referralWalletCommitted = useMemo(() => {
+    if (!referralWalletUsable) return 0;
+    return round2(
+      tenders.reduce((s, t) => s + (t.paymentMode === 'ReferralWallet' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)
+    );
+  }, [tenders, referralWalletUsable]);
+  const referralWalletRemaining = referralWalletUsable
+    ? Math.max(0, round2(referralReward.walletBalance - referralWalletCommitted))
+    : 0;
+
+  const appliedVoucherReferralIds = useMemo(
+    () => tenders.filter(t => t.paymentMode === 'ReferralVoucher').map(t => t.referralId),
+    [tenders]
+  );
+  const availableVouchers = useMemo(
+    () => (referralReward?.vouchers || []).filter(v => !appliedVoucherReferralIds.includes(v.referralId)),
+    [referralReward, appliedVoucherReferralIds]
+  );
+
+  const applyReferralVoucher = (voucher) => {
+    setTenders(prev => [
+      ...prev,
+      { amount: String(voucher.value), paymentMode: 'ReferralVoucher', referralId: voucher.referralId, voucherLabel: voucher.label },
+    ]);
+  };
+
+  // --- voucher wallet (migration-075) ---
+  // Vouchers have no customer_id link (guest_name/guest_info are free text at
+  // issue time), so unlike Membership/ReferralWallet there's nothing to
+  // auto-load for this booking — staff pick "Voucher" from the Payment Method
+  // dropdown on a tender row, search inline, and once picked that row is
+  // capped at its own remaining balance (not pooled with other vouchers,
+  // since they're distinct). See VoucherSearchInline + the tenders.map render
+  // branch below for the picker UI.
+  const voucherLeaf = VOUCHER_ENABLED ? { value: 'VoucherWallet', label: 'Voucher' } : null;
+
+  const voucherWalletCommittedByVoucher = useMemo(() => {
+    const map = new Map();
+    tenders.forEach((t) => {
+      if (t.paymentMode === 'VoucherWallet' && t.voucherId && Number(t.amount) > 0) {
+        map.set(t.voucherId, round2((map.get(t.voucherId) || 0) + Number(t.amount)));
+      }
+    });
+    return map;
+  }, [tenders]);
+
+  // One entry per distinct voucher referenced by any tender (all tenders for
+  // the same voucherId carry the same voucherRemainingBalance, set when it
+  // was picked) — used to validate committed amounts against each voucher's
+  // own balance in handleSubmit.
+  const appliedVoucherBalances = useMemo(() => {
+    const map = new Map();
+    tenders.forEach((t) => {
+      if (t.paymentMode === 'VoucherWallet' && t.voucherId && !map.has(t.voucherId)) {
+        map.set(t.voucherId, { code: t.voucherLabel, remainingBalance: t.voucherRemainingBalance });
+      }
+    });
+    return Array.from(map.entries()).map(([voucherId, v]) => ({ voucherId, ...v }));
+  }, [tenders]);
+
+  const selectVoucherForTender = (i, v) => {
+    updateTender(i, {
+      voucherId: v.voucher_id,
+      voucherLabel: v.voucher_code,
+      voucherRemainingBalance: Number(v.remaining_balance),
+      amount: String(round2(Math.min(Number(v.remaining_balance), Math.max(leftover, 0) || Number(v.remaining_balance)))),
+    });
+  };
+
+  // --- pending self-service referral reward this customer earned as a referrer
+  // (migration-072's "requires_manual_reward" — the customer flow never
+  // auto-credits a self-service referral, so we prompt staff here at their
+  // next checkout instead of relying on someone reopening the referred
+  // customer's own booking). Always credited as wallet — see migration-076. ---
+  const [pendingReferralRewards, setPendingReferralRewards] = useState([]);
+  const [rewardAmount, setRewardAmount] = useState('');
+  const [rewardSubmitting, setRewardSubmitting] = useState(false);
+  const [rewardError, setRewardError] = useState(null);
+
+  useEffect(() => {
+    if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchPendingReferralRewardsForBooking(bookingId);
+      if (!cancelled) setPendingReferralRewards(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId]);
+
+  const activePendingReward = pendingReferralRewards[0] || null;
+
+  useEffect(() => {
+    setRewardAmount('');
+    setRewardError(null);
+  }, [activePendingReward?.referralId]);
+
+  const handleResolveReferralReward = async () => {
+    if (!activePendingReward?.referralId) return;
+    setRewardSubmitting(true);
+    setRewardError(null);
+    try {
+      const { error } = await resolveCustomerReferralReward({
+        referralId: activePendingReward.referralId,
+        rewardType: 'wallet',
+        rewardAmount: rewardAmount ? Number(rewardAmount) : null,
+        rewardCatalogId: null,
+      });
+      if (error) {
+        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        return;
+      }
+      setPendingReferralRewards(prev => prev.filter(r => r.referralId !== activePendingReward.referralId));
+    } catch (err) {
+      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+    } finally {
+      setRewardSubmitting(false);
+    }
+  };
+
+  // Blocks final payment only when the reward is actually resolvable here (staff
+  // without manager/admin rights can't call resolve_customer_referral_reward at
+  // all, so they aren't blocked — the reward just waits for a manager/admin).
+  const referralRewardBlocksPayment = !!activePendingReward && canResolveReferralReward;
+
   const entered = useMemo(
     () => round2(tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0)),
     [tenders]
@@ -149,7 +305,12 @@ const PaymentModal = ({
         const t = pool[idx];
         const amt = Math.min(t.amount, needed);
         if (amt > 0) {
-          consumed.push({ amount: round2(amt), paymentMode: t.paymentMode });
+          consumed.push({
+            amount: round2(amt),
+            paymentMode: t.paymentMode,
+            ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
+            ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
+          });
           t.amount = round2(t.amount - amt);
           needed = round2(needed - amt);
         }
@@ -170,6 +331,10 @@ const PaymentModal = ({
   };
 
   const handleSubmit = async () => {
+    if (referralRewardBlocksPayment) {
+      setError('Apply this customer\'s referral wallet reward before completing payment.');
+      return;
+    }
     if (entered <= 0) {
       setError('Enter a payment amount.');
       return;
@@ -186,10 +351,26 @@ const PaymentModal = ({
       setError(`Membership tenders total ${formatNPR(membershipCommitted)} but the wallet balance is only ${formatNPR(membership.balance)}.`);
       return;
     }
+    if (referralWalletUsable && referralWalletCommitted > referralReward.walletBalance) {
+      setError(`Referral wallet tenders total ${formatNPR(referralWalletCommitted)} but the balance is only ${formatNPR(referralReward.walletBalance)}.`);
+      return;
+    }
+    for (const v of appliedVoucherBalances) {
+      const committed = voucherWalletCommittedByVoucher.get(v.voucherId) || 0;
+      if (committed > v.remainingBalance) {
+        setError(`Voucher ${v.code} tenders total ${formatNPR(committed)} but its remaining balance is only ${formatNPR(v.remainingBalance)}.`);
+        return;
+      }
+    }
     setError(null);
     const cleanedTenders = tenders
       .filter(t => Number(t.amount) > 0)
-      .map(t => ({ amount: round2(t.amount), paymentMode: t.paymentMode }));
+      .map(t => ({
+        amount: round2(t.amount),
+        paymentMode: t.paymentMode,
+        ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
+        ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
+      }));
     const { primaryTenders, additionalAllocations } = allocateTenders(cleanedTenders);
     const result = await onConfirm({
       tenders: primaryTenders,
@@ -272,6 +453,63 @@ const PaymentModal = ({
 
           <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />
 
+          {activePendingReward && (
+            <div className="rounded-spa border border-amber-300 bg-amber-50 p-3 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <Icon name="Gift" size={14} className="text-amber-700 flex-shrink-0" />
+                <p className="font-body font-body-medium text-sm text-amber-900">
+                  {activePendingReward.referredName} they referred has completed a visit — this customer has earned a referral reward.
+                </p>
+              </div>
+
+              {canResolveReferralReward ? (
+                <>
+                  <p className="font-body font-body-medium text-xs text-text-primary">Wallet credit amount</p>
+                  <input
+                    type="number"
+                    min="0"
+                    value={rewardAmount}
+                    onChange={(e) => setRewardAmount(e.target.value)}
+                    placeholder="e.g. 500 (leave blank for the org default)"
+                    className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResolveReferralReward}
+                    loading={rewardSubmitting}
+                    disabled={rewardSubmitting}
+                  >
+                    Apply as wallet credit
+                  </Button>
+                  {rewardError && (
+                    <p className="font-caption text-xs text-error">{rewardError}</p>
+                  )}
+                </>
+              ) : (
+                <p className="font-caption text-xs text-amber-800">
+                  Ask a manager or admin to apply this referral's wallet reward.
+                </p>
+              )}
+            </div>
+          )}
+
+          <ReferralRewardCard
+            referralReward={referralReward ? { walletBalance: referralReward.walletBalance, vouchers: availableVouchers } : null}
+            pendingWalletDeduction={referralWalletCommitted}
+            onApplyVoucher={applyReferralVoucher}
+          />
+
+          <VoucherWalletCard
+            vouchers={appliedVoucherBalances.map(v => ({
+              voucherId: v.voucherId,
+              code: v.code,
+              balance: v.remainingBalance,
+              pendingDeduction: voucherWalletCommittedByVoucher.get(v.voucherId) || 0,
+            }))}
+          />
+
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}
           <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -289,14 +527,108 @@ const PaymentModal = ({
 
               {tenders.map((t, i) => {
                 const isMembership = t.paymentMode === 'Membership';
+                const isReferralWallet = t.paymentMode === 'ReferralWallet';
+                const isReferralVoucher = t.paymentMode === 'ReferralVoucher';
+                const isVoucherWallet = t.paymentMode === 'VoucherWallet';
                 const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
+                const overReferralWallet = isReferralWallet && Number(t.amount) > Number(referralReward?.walletBalance || 0);
+                const overVoucherWallet = isVoucherWallet && t.voucherId &&
+                  (voucherWalletCommittedByVoucher.get(t.voucherId) || 0) > t.voucherRemainingBalance;
+
+                if (isVoucherWallet && !t.voucherId) {
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="w-36 flex-shrink-0">
+                        <PaymentMethodSelector
+                          paymentMethods={paymentMethods}
+                          extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
+                          value={t.paymentMode}
+                          onChange={(v) => updateTender(i, { paymentMode: v })}
+                          size="md"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <VoucherSearchInline onSelect={(v) => selectVoucherForTender(i, v)} />
+                      </div>
+                      {tenders.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTender(i)}
+                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                          aria-label="Remove method"
+                        >
+                          <Icon name="Trash2" size={16} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                if (isVoucherWallet) {
+                  return (
+                    <div key={i} className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-spa border border-primary/30 bg-primary/5 flex-shrink-0">
+                          <Icon name="Ticket" size={14} className="text-primary" />
+                          <span className="font-data font-data-medium text-xs text-text-primary">{t.voucherLabel}</span>
+                        </div>
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={t.amount}
+                            onChange={(e) => updateTender(i, { amount: e.target.value })}
+                            placeholder="0"
+                            className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overVoucherWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeTender(i)}
+                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                          aria-label="Remove voucher"
+                        >
+                          <Icon name="Trash2" size={16} />
+                        </button>
+                      </div>
+                      <p className={`text-[11px] font-caption ${overVoucherWallet ? 'text-error' : 'text-text-tertiary'}`}>
+                        {overVoucherWallet
+                          ? `Exceeds this voucher's balance (${formatNPR(t.voucherRemainingBalance)}).`
+                          : `Voucher balance: ${formatNPR(t.voucherRemainingBalance)}`}
+                      </p>
+                    </div>
+                  );
+                }
+
+                if (isReferralVoucher) {
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-spa border border-accent/30 bg-accent/5">
+                        <Icon name="Gift" size={14} className="text-accent flex-shrink-0" />
+                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.voucherLabel}</span>
+                        <span className="font-data font-data-medium text-sm text-accent ml-auto">{formatNPR(t.amount)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeTender(i)}
+                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                        aria-label="Remove voucher"
+                      >
+                        <Icon name="Trash2" size={16} />
+                      </button>
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={i} className="space-y-1">
                     <div className="flex items-center gap-2">
                       <div className="w-36 flex-shrink-0">
                         <PaymentMethodSelector
                           paymentMethods={paymentMethods}
-                          extraLeaf={membershipLeaf}
+                          extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
                           value={t.paymentMode}
                           onChange={(v) => updateTender(i, { paymentMode: v })}
                           size="md"
@@ -311,7 +643,7 @@ const PaymentModal = ({
                           value={t.amount}
                           onChange={(e) => updateTender(i, { amount: e.target.value })}
                           placeholder="0"
-                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
+                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet || overReferralWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
                         />
                       </div>
                       {tenders.length > 1 && (
@@ -330,6 +662,13 @@ const PaymentModal = ({
                         {overWallet
                           ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
                           : `Wallet available: ${formatNPR(walletRemaining)}`}
+                      </p>
+                    )}
+                    {isReferralWallet && (
+                      <p className={`text-[11px] font-caption ml-[8.5rem] ${overReferralWallet ? 'text-error' : 'text-text-tertiary'}`}>
+                        {overReferralWallet
+                          ? `Exceeds referral wallet balance (${formatNPR(referralReward?.walletBalance || 0)}).`
+                          : `Referral wallet available: ${formatNPR(referralWalletRemaining)}`}
                       </p>
                     )}
                   </div>
@@ -413,7 +752,7 @@ const PaymentModal = ({
             variant="success"
             onClick={handleSubmit}
             loading={isSubmitting}
-            disabled={entered <= 0}
+            disabled={entered <= 0 || referralRewardBlocksPayment}
             iconName="Check"
             iconPosition="left"
           >
@@ -421,6 +760,71 @@ const PaymentModal = ({
           </Button>
         </div>
       </div>
+    </div>
+  );
+};
+
+// Inline search box used inside a tender row once "Voucher" is picked from the
+// Payment Method dropdown, before a specific voucher has been selected yet.
+// Self-contained (owns its own debounced search state) so it can be dropped
+// into any tender row without threading per-row search state through the
+// parent's tenders array.
+const VoucherSearchInline = ({ onSelect }) => {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      const { data } = await searchVouchersForPayment(query.trim());
+      if (cancelled) return;
+      setResults(data || []);
+      setSearching(false);
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query]);
+
+  return (
+    <div className="space-y-1">
+      <div className="relative">
+        <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by voucher code or guest name..."
+          className="w-full h-10 pl-9 pr-3 rounded-spa border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+        />
+      </div>
+      {searching && (
+        <p className="font-caption text-xs text-text-tertiary">Searching...</p>
+      )}
+      {results.length > 0 && (
+        <div className="rounded-spa border border-border divide-y divide-border overflow-hidden">
+          {results.map((v) => (
+            <button
+              key={v.voucher_id}
+              type="button"
+              onClick={() => onSelect(v)}
+              className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-background spa-transition-fast"
+            >
+              <span className="min-w-0">
+                <span className="block font-data font-data-medium text-xs text-text-primary truncate">{v.voucher_code}</span>
+                <span className="block font-caption text-[11px] text-text-tertiary truncate">{v.guest_name}</span>
+              </span>
+              <span className="font-data font-data-medium text-sm text-primary flex-shrink-0 ml-2">
+                {formatNPR(v.remaining_balance)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

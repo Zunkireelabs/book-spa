@@ -131,9 +131,6 @@ CREATE TABLE bookings (
   discount_requested_to uuid REFERENCES users(id),
   discount_reason text,
 
-  -- CRM link (nullable for walk-ins)
-  customer_id uuid REFERENCES customers(id),
-
   -- Denormalized snapshots (populated by trigger at booking time)
   service_name_snapshot text,
   service_duration_snapshot integer,
@@ -409,6 +406,10 @@ CREATE TABLE customers (
 
 CREATE INDEX idx_customers_branch ON customers(branch_id);
 CREATE INDEX idx_customers_phone ON customers(phone);
+
+-- CRM link on bookings (nullable for walk-ins) — added via ALTER here, not as a column on the
+-- original CREATE TABLE bookings above, because customers doesn't exist yet at that point.
+ALTER TABLE bookings ADD COLUMN customer_id uuid REFERENCES customers(id);
 
 -- ============================================================
 -- THERAPIST ATTENDANCE

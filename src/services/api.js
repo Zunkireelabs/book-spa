@@ -1,7 +1,7 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
-import { MEMBERSHIP_ENABLED } from '../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED } from '../lib/featureFlags';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -400,7 +400,12 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       : [{ amount: remaining, paymentMode }];
 
     tenderList = tenderList
-      .map(t => ({ amount: Math.round(Number(t.amount) * 100) / 100, paymentMode: t.paymentMode }))
+      .map(t => ({
+        amount: Math.round(Number(t.amount) * 100) / 100,
+        paymentMode: t.paymentMode,
+        ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
+        ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
+      }))
       .filter(t => t.amount > 0);
 
     if (tenderList.length === 0) {
@@ -410,6 +415,12 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       const mode = (t.paymentMode || '').trim();
       if (!mode || mode.length > 40) {
         return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: `Invalid payment method: ${t.paymentMode}.` } };
+      }
+      if (mode === 'ReferralVoucher' && !t.referralId) {
+        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing voucher reference for referral voucher tender.' } };
+      }
+      if (mode === 'VoucherWallet' && !t.voucherId) {
+        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing voucher reference for voucher wallet tender.' } };
       }
     }
 
@@ -426,13 +437,20 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       return { data: null, error: { code: 'DUE_HOLDER_REQUIRED', message: 'Enter who the remaining due is under before leaving a balance unpaid.' } };
     }
 
-    // 9. Insert tenders (notes attached to the first row). Membership tenders are
-    // routed through the SECURITY DEFINER record_membership_payment RPC so the
-    // payments INSERT and the wallet deduction happen in the same transaction.
-    // Multiple Membership tenders in one submission are batched into a single
-    // wallet deduction (one ledger row) to keep the audit log tidy.
+    // 9. Insert tenders (notes attached to the first row). Membership and referral-
+    // reward tenders are routed through their own SECURITY DEFINER RPCs so the
+    // payments INSERT and the wallet/voucher deduction happen in the same
+    // transaction. Multiple Membership/ReferralWallet tenders in one submission are
+    // batched into a single ledger deduction to keep the audit log tidy. Each
+    // ReferralVoucher tender is a discrete reward row (not poolable), so it's
+    // redeemed one RPC call per tender.
     const membershipTenders = tenderList.filter((t) => t.paymentMode === 'Membership');
-    const otherTenders = tenderList.filter((t) => t.paymentMode !== 'Membership');
+    const referralWalletTenders = tenderList.filter((t) => t.paymentMode === 'ReferralWallet');
+    const referralVoucherTenders = tenderList.filter((t) => t.paymentMode === 'ReferralVoucher');
+    const voucherWalletTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet');
+    const otherTenders = tenderList.filter((t) =>
+      !['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet'].includes(t.paymentMode)
+    );
     const insertedIds = [];
 
     if (otherTenders.length > 0) {
@@ -465,7 +483,63 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (paymentId) insertedIds.push(paymentId);
     }
 
-    // 10. Maintain due_holder_name: keep whoever was last responsible even once fully
+    if (referralWalletTenders.length > 0) {
+      const referralWalletTotal = Math.round(
+        referralWalletTenders.reduce((s, t) => s + t.amount, 0) * 100
+      ) / 100;
+      const noteText = otherTenders.length === 0 && membershipTenders.length === 0
+        ? (notes || null)
+        : null;
+      const { data: paymentId, error: rpcError } = await supabase.rpc('record_referral_wallet_payment', {
+        p_booking_id: bookingId,
+        p_amount: referralWalletTotal,
+        p_notes: noteText,
+      });
+      if (rpcError) throw rpcError;
+      if (paymentId) insertedIds.push(paymentId);
+    }
+
+    for (const t of referralVoucherTenders) {
+      const { data: paymentId, error: rpcError } = await supabase.rpc('redeem_referral_voucher', {
+        p_referral_id: t.referralId,
+        p_booking_id: bookingId,
+      });
+      if (rpcError) throw rpcError;
+      if (paymentId) insertedIds.push(paymentId);
+    }
+
+    // Each VoucherWallet tender references a distinct voucher (unlike Membership/
+    // ReferralWallet's single pooled balance), so it's redeemed one RPC call per
+    // tender — same approach as referralVoucherTenders above.
+    for (const t of voucherWalletTenders) {
+      const { data: paymentId, error: rpcError } = await supabase.rpc('record_voucher_wallet_payment', {
+        p_booking_id: bookingId,
+        p_voucher_id: t.voucherId,
+        p_amount: t.amount,
+        p_notes: notes || null,
+      });
+      if (rpcError) throw rpcError;
+      if (paymentId) insertedIds.push(paymentId);
+    }
+
+    // 10. If this payment just fully settled the balance and the booking is also
+    // already Completed, credit any pending referral tied to it. Non-blocking —
+    // same reasoning as updateBookingStatus()'s call to the same RPC: a crediting
+    // failure must never block payment recording. The RPC itself now checks both
+    // status='Completed' AND payment_status='paid' before crediting (migration-077),
+    // so calling it unconditionally here is safe even if status isn't Completed yet.
+    if (leftover === 0) {
+      try {
+        const { error: creditError } = await supabase.rpc('credit_pending_referral_for_booking', {
+          p_booking_id: bookingId,
+        });
+        if (creditError) console.warn('[API] credit_pending_referral_for_booking failed:', creditError.message);
+      } catch (creditErr) {
+        console.warn('[API] credit_pending_referral_for_booking failed:', creditErr.message);
+      }
+    }
+
+    // 11. Maintain due_holder_name: keep whoever was last responsible even once fully
     // settled (never erase it), so it stands as a permanent "who paid this off"
     // record for the Settled history view.
     const newDueHolder = resolvedDueHolder || null;
@@ -853,6 +927,295 @@ export async function getReferralsReport({ branchId, from, to } = {}) {
   }
 }
 
+// Customer-to-customer referral reward report (migration-078). Distinct from
+// getReferralsReport above (staff/therapist commission) — reads
+// customer_referrals/customer_referral_credits, grouped by referring customer.
+export async function getCustomerReferralsReport({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('customer_referrals')
+      .select(`
+        id, reward_status, reward_amount, credited_at, created_at,
+        referring_customer_id, referred_customer_id, booking_id,
+        referrer:customers!customer_referrals_referring_customer_id_fkey(id, full_name, phone),
+        referred:customers!customer_referrals_referred_customer_id_fkey(id, full_name, phone),
+        booking:bookings!customer_referrals_booking_id_fkey(id, booking_number, branch_id, date, status, service_name_snapshot, final_amount)
+      `)
+      .order('created_at', { ascending: false });
+    if (from) query = query.gte('created_at', from);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
+
+    const { data: rows, error } = await query;
+    if (error) throw error;
+
+    const inBranch = isOverallBranch(branchId)
+      ? () => true
+      : (r) => r.booking?.branch_id === resolveBranchId(branchId);
+
+    const groups = {};
+    for (const r of (rows || [])) {
+      if (!inBranch(r)) continue;
+      const key = r.referring_customer_id;
+      if (!groups[key]) {
+        groups[key] = {
+          referringCustomerId: key,
+          referrerName: r.referrer?.full_name || 'Unknown',
+          referrerPhone: r.referrer?.phone || null,
+          totalCredited: 0,
+          pendingCount: 0,
+          creditedCount: 0,
+          referrals: [],
+        };
+      }
+      const g = groups[key];
+      if (r.reward_status === 'credited') {
+        g.totalCredited = Math.round((g.totalCredited + Number(r.reward_amount || 0)) * 100) / 100;
+        g.creditedCount += 1;
+      } else if (r.reward_status === 'pending') {
+        g.pendingCount += 1;
+      }
+      g.referrals.push({
+        referralId: r.id,
+        referredCustomerName: r.referred?.full_name || 'Unknown',
+        bookingId: r.booking_id,
+        bookingNumber: r.booking?.booking_number || null,
+        bookingStatus: r.booking?.status || null,
+        bookingDate: r.booking?.date || null,
+        rewardStatus: r.reward_status,
+        rewardAmount: r.reward_amount != null ? Number(r.reward_amount) : null,
+        createdAt: r.created_at,
+        creditedAt: r.credited_at,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalCredited - a.totalCredited);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerReferralsReport error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Flat, one-row-per-referral Referral Wallet ledger (migration-078/070). Distinct
+// from getCustomerReferralsReport above (which groups by referrer with an
+// expandable list) — this is the "who referred whom, how much they got, have
+// they used it, when, and what's left" view.
+//
+// customer_referral_credits is 1:1 with a referral (UNIQUE(referral_id) —
+// migration-078), so the granted amount is unambiguous per row. But spend
+// (customer_referral_debits) is only linked to the referring customer, not to
+// a specific referral — the wallet is one fungible balance per customer, not
+// a per-referral bucket (see record_referral_wallet_payment). To answer "how
+// much of THIS referral's reward is left", debits are allocated FIFO against
+// a customer's credits ordered oldest-first, mirroring how the balance was
+// actually built up.
+export async function getReferralWalletReport({ branchId, from, to } = {}) {
+  try {
+    let query = supabase
+      .from('customer_referrals')
+      .select(`
+        id, reward_status, reward_amount, requested_reward_amount, credited_at, created_at,
+        referring_customer_id, referred_customer_id, booking_id,
+        referrer:customers!customer_referrals_referring_customer_id_fkey(id, full_name, phone),
+        referred:customers!customer_referrals_referred_customer_id_fkey(id, full_name, phone),
+        booking:bookings!customer_referrals_booking_id_fkey(id, booking_number, branch_id, date, status, final_amount)
+      `)
+      .order('created_at', { ascending: false });
+    if (from) query = query.gte('created_at', from);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
+
+    const { data: referrals, error } = await query;
+    if (error) throw error;
+
+    const inBranch = isOverallBranch(branchId)
+      ? () => true
+      : (r) => r.booking?.branch_id === resolveBranchId(branchId);
+
+    const rows = (referrals || []).filter(inBranch);
+    const referrerIds = [...new Set(rows.map((r) => r.referring_customer_id).filter(Boolean))];
+
+    let credits = [];
+    let debits = [];
+    if (referrerIds.length > 0) {
+      const [{ data: creditRows, error: creditError }, { data: debitRows, error: debitError }] = await Promise.all([
+        supabase
+          .from('customer_referral_credits')
+          .select('id, referral_id, customer_id, amount, created_at')
+          .in('customer_id', referrerIds),
+        supabase
+          .from('customer_referral_debits')
+          .select('id, customer_id, amount, created_at')
+          .in('customer_id', referrerIds),
+      ]);
+      if (creditError) throw creditError;
+      if (debitError) throw debitError;
+      credits = creditRows || [];
+      debits = debitRows || [];
+    }
+
+    // FIFO-allocate each customer's debits against their credits, oldest credit first.
+    const creditsByCustomer = {};
+    for (const c of credits) {
+      (creditsByCustomer[c.customer_id] ||= []).push({
+        referralId: c.referral_id,
+        remaining: Number(c.amount),
+        usedAmount: 0,
+        lastUsedAt: null,
+        createdAt: c.created_at,
+      });
+    }
+    for (const bucket of Object.values(creditsByCustomer)) {
+      bucket.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+    }
+    const debitsByCustomer = {};
+    for (const d of debits) {
+      (debitsByCustomer[d.customer_id] ||= []).push(d);
+    }
+    for (const [customerId, custDebits] of Object.entries(debitsByCustomer)) {
+      const bucket = creditsByCustomer[customerId] || [];
+      const sorted = [...custDebits].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      for (const d of sorted) {
+        let toAllocate = Number(d.amount);
+        for (const c of bucket) {
+          if (toAllocate <= 0) break;
+          if (c.remaining <= 0) continue;
+          const take = Math.min(c.remaining, toAllocate);
+          c.remaining = Math.round((c.remaining - take) * 100) / 100;
+          c.usedAmount = Math.round((c.usedAmount + take) * 100) / 100;
+          c.lastUsedAt = d.created_at;
+          toAllocate = Math.round((toAllocate - take) * 100) / 100;
+        }
+      }
+    }
+    const creditByReferralId = {};
+    for (const bucket of Object.values(creditsByCustomer)) {
+      for (const c of bucket) creditByReferralId[c.referralId] = c;
+    }
+
+    const result = rows.map((r) => {
+      const credit = creditByReferralId[r.id];
+      const walletAmount = r.reward_status === 'credited'
+        ? Number(r.reward_amount || 0)
+        : Number(r.requested_reward_amount || 0);
+      const usedAmount = credit ? credit.usedAmount : 0;
+      const remainingAmount = credit ? credit.remaining : (r.reward_status === 'credited' ? walletAmount : null);
+      return {
+        referralId: r.id,
+        referrerName: r.referrer?.full_name || 'Unknown',
+        referrerPhone: r.referrer?.phone || null,
+        referredCustomerName: r.referred?.full_name || 'Unknown',
+        referredPhone: r.referred?.phone || null,
+        bookingId: r.booking_id,
+        bookingNumber: r.booking?.booking_number || null,
+        bookingDate: r.booking?.date || null,
+        rewardStatus: r.reward_status,
+        createdAt: r.created_at,
+        creditedAt: r.credited_at,
+        walletAmount,
+        usedAmount,
+        remainingAmount,
+        used: usedAmount > 0,
+        usedAt: credit ? credit.lastUsedAt : null,
+      };
+    });
+
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getReferralWalletReport error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Referral reward(s) available to redeem for the customer attached to a booking —
+// used by PaymentModal to surface an optional wallet-credit/voucher card at
+// checkout (migration-070). Returns null in `data` if referrals are disabled, the
+// booking has no customer, or the customer has neither a wallet balance nor an
+// unredeemed voucher. `walletBalance` nets earned credits minus prior spend
+// (get_referral_credit_balance RPC); vouchers are `customer_referrals` rows of
+// type 'voucher' that are credited but not yet redeemed.
+export async function fetchReferralRewardForBooking(bookingId) {
+  try {
+    if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return { data: null, error: null };
+
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (bErr) throw bErr;
+    if (!booking?.customer_id) return { data: null, error: null };
+    const customerId = booking.customer_id;
+
+    const [{ data: balance, error: balanceError }, { data: vouchers, error: voucherError }] = await Promise.all([
+      supabase.rpc('get_referral_credit_balance', { p_customer_id: customerId }),
+      supabase
+        .from('customer_referrals')
+        .select('id, reward_label, requested_reward_amount, reward_catalog:reward_catalog_id(value)')
+        .eq('referring_customer_id', customerId)
+        .eq('reward_type', 'voucher')
+        .eq('reward_status', 'credited')
+        .is('redeemed_at', null),
+    ]);
+    if (balanceError) throw balanceError;
+    if (voucherError) throw voucherError;
+
+    const walletBalance = Math.round(Number(balance || 0) * 100) / 100;
+    const voucherList = (vouchers || []).map((v) => ({
+      referralId: v.id,
+      label: v.reward_label || 'Gift Voucher',
+      value: Number(v.reward_catalog?.value ?? v.requested_reward_amount ?? 0),
+    })).filter((v) => v.value > 0);
+
+    if (walletBalance <= 0 && voucherList.length === 0) return { data: null, error: null };
+    return { data: { customerId, walletBalance, vouchers: voucherList }, error: null };
+  } catch (error) {
+    console.error('[API] fetchReferralRewardForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// The customer_referrals row attached to THIS booking, if this booking is the
+// referred customer's first booking (customer_referrals.booking_id is unique
+// per booking — set at creation time via record_customer_referral). Used by
+// BookingActionModal to show "this customer was referred by X" on the
+// referred customer's own booking, distinct from the legacy free-text
+// bookings.referred_by staff/therapist commission field. Returns null in
+// `data` when referrals are disabled or this booking has no referral attached.
+export async function fetchCustomerReferralForBooking(bookingId) {
+  try {
+    if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return { data: null, error: null };
+    const { data, error } = await supabase
+      .from('customer_referrals')
+      .select(`
+        id, reward_type, reward_status, reward_amount, requested_reward_amount, reward_label,
+        requires_manual_reward,
+        referrer:customers!customer_referrals_referring_customer_id_fkey(id, full_name, phone)
+      `)
+      .eq('booking_id', bookingId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return { data: null, error: null };
+    return {
+      data: {
+        referralId: data.id,
+        referrerName: data.referrer?.full_name || 'Unknown',
+        referrerPhone: data.referrer?.phone || null,
+        rewardType: data.reward_type,
+        rewardStatus: data.reward_status,
+        rewardAmount: data.reward_status === 'credited'
+          ? Number(data.reward_amount || 0)
+          : Number(data.requested_reward_amount || 0),
+        rewardLabel: data.reward_label || null,
+        requiresManualReward: !!data.requires_manual_reward,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchCustomerReferralForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Revenue per service, broken out by branch, for PAID bookings only in the
 // given date range. Always returns every branch that has at least one
 // matching paid booking (1 column when branchId is a concrete branch —
@@ -928,6 +1291,52 @@ export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
   }
 }
 
+// Self-service (public-flow) referral rewards this booking's customer has EARNED
+// as a referrer but that still await a manager/admin's Wallet-vs-Voucher decision
+// (customer_referrals.requires_manual_reward = true — see migration-072). Only
+// includes rows where the referred customer's original booking is Completed, i.e.
+// the reward is actually earned, not just pending on a future visit. Used by
+// PaymentModal to prompt staff at the REFERRER's next checkout, since the
+// customer flow itself never gets to choose wallet vs voucher.
+export async function fetchPendingReferralRewardsForBooking(bookingId) {
+  try {
+    if (!CUSTOMER_REFERRALS_ENABLED || !bookingId) return { data: [], error: null };
+
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (bErr) throw bErr;
+    if (!booking?.customer_id) return { data: [], error: null };
+
+    const { data, error } = await supabase
+      .from('customer_referrals')
+      .select(`
+        id,
+        referred:customers!customer_referrals_referred_customer_id_fkey(id, full_name),
+        booking:bookings!customer_referrals_booking_id_fkey!inner(status)
+      `)
+      .eq('referring_customer_id', booking.customer_id)
+      .eq('reward_status', 'pending')
+      .eq('requires_manual_reward', true)
+      .eq('booking.status', 'Completed')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+
+    return {
+      data: (data || []).map((row) => ({
+        referralId: row.id,
+        referredName: row.referred?.full_name || 'A referred customer',
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchPendingReferralRewardsForBooking error:', error.message);
+    return { data: [], error };
+  }
+}
+
 export async function updateBookingStatus({ bookingId, newStatus }) {
   try {
     // 1. Fetch booking
@@ -965,6 +1374,21 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
       .single();
 
     if (updateError) throw updateError;
+
+    // 6. If this booking just completed and carries a pending customer referral,
+    // credit the referring customer's reward. Non-blocking — a crediting failure
+    // must never prevent marking a booking Completed; the pending referral row
+    // remains reconcilable later.
+    if (newStatus === 'Completed') {
+      try {
+        const { error: creditError } = await supabase.rpc('credit_pending_referral_for_booking', {
+          p_booking_id: bookingId,
+        });
+        if (creditError) console.warn('[API] credit_pending_referral_for_booking failed:', creditError.message);
+      } catch (creditErr) {
+        console.warn('[API] credit_pending_referral_for_booking failed:', creditErr.message);
+      }
+    }
 
     capture('staff_booking_status_changed', { from_status: booking.status, to_status: newStatus });
     return { data: { success: true, bookingId, status: updated.status }, error: null };
@@ -2953,6 +3377,13 @@ export async function createBooking({
   therapistIds,
   roomId,
   bookingGroupId,
+  referringCustomerId,
+  referringRewardType,
+  referringRewardAmount,
+  referringRewardCatalogId,
+  orgSlug,
+  referralSource,
+  referralSourceDetail,
 }) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -3078,6 +3509,7 @@ export async function createBooking({
     // Identity is org-wide (org_id + normalized phone), so a returning customer first
     // seen at another branch links to their single profile instead of duplicating.
     let customerId = null;
+    let isNewCustomer = false;
     const orgId = branchData?.org_id || null;
     try {
       // Normalize to the last 10 digits so "9803023766" and "+9779803023766"
@@ -3086,25 +3518,13 @@ export async function createBooking({
       const phone = customerPhone ? customerPhone.replace(/\D/g, '').slice(-10) || null : null;
       const email = customerEmail?.trim().toLowerCase() || null;
 
-      // Try to find existing customer by phone or email across the whole org
+      // Try to find existing customer by phone or email across the whole org.
+      // Goes through the find_customer_for_booking RPC (not a direct table SELECT) —
+      // anon has no raw SELECT grant on customers, see migration-072.
       let existingCustomer = null;
-      if (orgId && phone) {
+      if (orgId && (phone || email)) {
         const { data } = await supabase
-          .from('customers')
-          .select('id, gender')
-          .eq('org_id', orgId)
-          .eq('phone', phone)
-          .limit(1)
-          .maybeSingle();
-        existingCustomer = data;
-      }
-      if (!existingCustomer && orgId && email) {
-        const { data } = await supabase
-          .from('customers')
-          .select('id, gender')
-          .eq('org_id', orgId)
-          .eq('email', email)
-          .limit(1)
+          .rpc('find_customer_for_booking', { p_org_id: orgId, p_phone: phone, p_email: email })
           .maybeSingle();
         existingCustomer = data;
       }
@@ -3139,6 +3559,7 @@ export async function createBooking({
           .single();
         if (newCustomer) {
           customerId = newCustomer.id;
+          isNewCustomer = true;
         } else if (insertCustErr?.code === '23505' && orgId && phone) {
           // Lost a race against customers_org_nphone_uniq — re-fetch the winner
           const { data } = await supabase
@@ -3219,6 +3640,8 @@ export async function createBooking({
         special_requests: specialRequests || null,
         created_by: authUser?.id || null,
         booking_group_id: bookingGroupId || null,
+        referral_source: referralSource || null,
+        referral_source_detail: referralSourceDetail || null,
         // Phase 9A: Snapshot fields — preserve original values at booking time
         service_name_snapshot: service.name,
         service_duration_snapshot: service.duration_minutes,
@@ -3238,6 +3661,38 @@ export async function createBooking({
         return { data: null, error: { code: 'ROOMS_FULL', message: 'Scheduling conflict. Please try a different time or room.' } };
       }
       throw insertError;
+    }
+
+    // 7a2. Log customer-to-customer referral, if staff supplied one for a genuinely
+    // new customer. Non-blocking — a referral logging failure must not fail the booking.
+    // Reward is NOT credited here; it's credited later when this booking is marked
+    // Completed (see updateBookingStatus).
+    if (isNewCustomer && referringCustomerId && customerId) {
+      try {
+        if (orgSlug) {
+          // Public/customer-facing booking — unauthenticated, so this goes through the
+          // anon-safe RPC (wallet reward only, no gift-card/voucher/catalog choice).
+          const { error: referralError } = await supabase.rpc('public_record_customer_referral', {
+            p_org_slug: orgSlug,
+            p_referring_customer_id: referringCustomerId,
+            p_referred_customer_id: customerId,
+            p_booking_id: booking.id,
+          });
+          if (referralError) console.warn('[API] public_record_customer_referral failed:', referralError.message);
+        } else {
+          const { error: referralError } = await supabase.rpc('record_customer_referral', {
+            p_referring_customer_id: referringCustomerId,
+            p_referred_customer_id: customerId,
+            p_booking_id: booking.id,
+            p_reward_type: referringRewardType || 'wallet',
+            p_reward_amount: referringRewardAmount ?? null,
+            p_reward_catalog_id: referringRewardCatalogId || null,
+          });
+          if (referralError) console.warn('[API] record_customer_referral failed:', referralError.message);
+        }
+      } catch (referralErr) {
+        console.warn('[API] record_customer_referral failed:', referralErr.message);
+      }
     }
 
     // 7b. Insert into junction table for all therapists
@@ -3260,6 +3715,67 @@ export async function createBooking({
     return { data: booking, error: null };
   } catch (error) {
     console.error('[API] createBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Public/customer-facing referral lookup — exact phone match, scoped to the org by
+// slug, returns a masked display name (e.g. "Sita K."). Used by the public booking
+// flow's "Referred by a friend?" field before calling createBooking().
+export async function lookupReferrerByPhone(orgSlug, phone) {
+  try {
+    const normalizedPhone = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
+    if (!orgSlug || !normalizedPhone) return { data: null, error: null };
+
+    const { data, error } = await supabase
+      .rpc('public_lookup_referrer_by_phone', { p_org_slug: orgSlug, p_phone: normalizedPhone })
+      .maybeSingle();
+
+    if (error) throw error;
+    return { data: data || null, error: null };
+  } catch (error) {
+    console.error('[API] lookupReferrerByPhone error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Public/customer-facing "is this phone already a customer?" check (migration-073) —
+// purely informational, boolean only, no id/name returned. Used so the public booking
+// form can show a live "looks like you're already a customer" notice while the person
+// types their phone, since a referral for an existing customer gets silently skipped
+// by createBooking()'s isNewCustomer check further down the flow. Does NOT change that
+// eligibility logic — this is a separate, read-only signal.
+export async function checkExistingCustomerByPhone(orgSlug, phone) {
+  try {
+    const normalizedPhone = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
+    if (!orgSlug || !normalizedPhone || normalizedPhone.length < 10) return { data: false, error: null };
+
+    const { data, error } = await supabase
+      .rpc('public_check_customer_exists', { p_org_slug: orgSlug, p_phone: normalizedPhone });
+
+    if (error) throw error;
+    return { data: !!data, error: null };
+  } catch (error) {
+    console.error('[API] checkExistingCustomerByPhone error:', error.message);
+    return { data: false, error };
+  }
+}
+
+// Manager/admin explicitly picks Wallet or Voucher for a pending Client referral
+// (customer-facing "how were you referred" flow) and credits it immediately.
+// Used by BookingActionModal.jsx's referral reward picker.
+export async function resolveCustomerReferralReward({ referralId, rewardType, rewardAmount, rewardCatalogId }) {
+  try {
+    const { data, error } = await supabase.rpc('resolve_customer_referral_reward', {
+      p_referral_id: referralId,
+      p_reward_type: rewardType,
+      p_reward_amount: rewardAmount ?? null,
+      p_reward_catalog_id: rewardCatalogId || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] resolveCustomerReferralReward error:', error.message);
     return { data: null, error };
   }
 }
@@ -4278,6 +4794,189 @@ export async function deleteService({ serviceId }) {
     return { data: { deleted: true, serviceId, serviceName: service.name }, error: null };
   } catch (error) {
     console.error('[API] deleteService error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Reward Catalog CRUD (migration-068) — gift card / voucher options
+// for customer referral rewards. Org-scoped; read by any staff role
+// (to populate the dropdown when logging a referral), write by
+// manager + admin only (same posture as services, migration-049).
+// ============================================================
+
+// Active catalog items for a given reward type, for the booking-form dropdown.
+// Any authenticated staff role can read — no role gate.
+export async function fetchRewardCatalog({ rewardType }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('reward_catalog')
+      .select('id, name, value')
+      .eq('org_id', profile.org_id)
+      .eq('reward_type', rewardType)
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchRewardCatalog error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchRewardCatalogForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage the reward catalog.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('reward_catalog')
+      .select('id, reward_type, name, value, is_active, created_at')
+      .eq('org_id', profile.org_id)
+      .order('reward_type')
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchRewardCatalogForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createRewardCatalogItem({ rewardType, name, value }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can add reward catalog items.' } };
+    }
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Name is required.' } };
+    }
+    if (!['voucher'].includes(rewardType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid reward type.' } };
+    }
+
+    const { data: existing } = await supabase
+      .from('reward_catalog')
+      .select('id')
+      .eq('org_id', profile.org_id)
+      .eq('reward_type', rewardType)
+      .ilike('name', name.trim())
+      .maybeSingle();
+
+    if (existing) {
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A reward with this name already exists.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('reward_catalog')
+      .insert({
+        org_id: profile.org_id,
+        reward_type: rewardType,
+        name: name.trim(),
+        value: value === '' || value == null ? null : Number(value),
+        created_by: profile.id,
+      })
+      .select('id, reward_type, name, value, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createRewardCatalogItem error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateRewardCatalogItem({ id, name, value }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can edit reward catalog items.' } };
+    }
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Name is required.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('reward_catalog')
+      .update({ name: name.trim(), value: value === '' || value == null ? null : Number(value) })
+      .eq('id', id)
+      .eq('org_id', profile.org_id)
+      .select('id, reward_type, name, value, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateRewardCatalogItem error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function toggleRewardCatalogActive({ id, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update reward catalog items.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('reward_catalog')
+      .update({ is_active: isActive })
+      .eq('id', id)
+      .eq('org_id', profile.org_id)
+      .select('id, reward_type, name, value, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleRewardCatalogActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteRewardCatalogItem({ id }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete reward catalog items.' } };
+    }
+
+    const { error } = await supabase
+      .from('reward_catalog')
+      .delete()
+      .eq('id', id)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { deleted: true, id }, error: null };
+  } catch (error) {
+    console.error('[API] deleteRewardCatalogItem error:', error.message);
     return { data: null, error };
   }
 }
@@ -6581,6 +7280,23 @@ export async function fetchMembershipTiers(orgId, { includeInactive = false } = 
   }
 }
 
+// How much was deposited in the CURRENT wallet cycle only, not the lifetime sum
+// across every renewal. `total_deposited` on `memberships` never resets on renewal
+// (e.g. two 100,000 cycles read as 200,000) -- correct as a lifetime audit figure,
+// wrong for "how much is this membership worth right now" display. renew_membership()
+// (migration-056) marks the fresh cycle's deposit with notes containing "renewal", so
+// we reset the running total whenever we hit one of those rows. Same convention as
+// fetchMembershipLedgerReport's cycleDeposited below.
+function computeCycleDeposited(depositTxns) {
+  const cycleDeposited = new Map();
+  for (const row of depositTxns) {
+    const isRenewal = /renewal/i.test(row.notes || '');
+    const prev = isRenewal ? 0 : (cycleDeposited.get(row.membership_id) || 0);
+    cycleDeposited.set(row.membership_id, prev + Number(row.amount || 0));
+  }
+  return cycleDeposited;
+}
+
 // Returns memberships scoped to the caller's org (RLS) joined with tier + customer
 // for list rendering. Optional client-side filters: search (name/phone), statusFilter.
 export async function fetchMemberships({ search, statusFilter } = {}) {
@@ -6602,6 +7318,19 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
     if (error) throw error;
 
     const rows = transformMemberships(data || []);
+
+    const membershipIds = rows.map((m) => m.id);
+    if (membershipIds.length > 0) {
+      const { data: depositTxns, error: txnError } = await supabase
+        .from('membership_transactions')
+        .select('membership_id, amount, notes, created_at')
+        .in('membership_id', membershipIds)
+        .eq('kind', 'deposit')
+        .order('created_at', { ascending: true });
+      const cycleDeposited = txnError ? new Map() : computeCycleDeposited(depositTxns || []);
+      rows.forEach((m) => { m.cycleDeposited = cycleDeposited.get(m.id) ?? m.totalDeposited; });
+    }
+
     const filtered = rows.filter((m) => {
       if (statusFilter && statusFilter !== 'all' && m.status !== statusFilter) return false;
       if (search && search.trim().length > 0) {
@@ -6635,7 +7364,19 @@ export async function fetchMembership(membershipId) {
       .eq('id', membershipId)
       .single();
     if (error) throw error;
-    return { data: transformMembership(data), error: null };
+
+    const membership = transformMembership(data);
+
+    const { data: depositTxns, error: txnError } = await supabase
+      .from('membership_transactions')
+      .select('membership_id, amount, notes, created_at')
+      .eq('membership_id', membershipId)
+      .eq('kind', 'deposit')
+      .order('created_at', { ascending: true });
+    const cycleDeposited = txnError ? new Map() : computeCycleDeposited(depositTxns || []);
+    membership.cycleDeposited = cycleDeposited.get(membershipId) ?? membership.totalDeposited;
+
+    return { data: membership, error: null };
   } catch (error) {
     console.error('[API] fetchMembership error:', error.message);
     return { data: null, error };
@@ -6995,6 +7736,425 @@ export async function adjustMembership({ membershipId, amount, notes }) {
     return { data: { transactionId: data }, error: null };
   } catch (error) {
     console.error('[API] adjustMembership error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// VOUCHERS (migration-071) — manager/admin only, RLS-enforced.
+// ============================================================
+
+export async function fetchVoucherTypes() {
+  try {
+    const { data, error } = await supabase
+      .from('voucher_types')
+      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchVoucherTypes error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Vouchers joined with their live balance (from the voucher_balances view, computed
+// from voucher_claims — not stored, so it can't drift the way the old Excel sheet's
+// hand-maintained Balance Tracking sheet did). Sorted alphabetically by guest name.
+export async function fetchVouchers() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [vouchersRes, balancesRes] = await Promise.all([
+      supabase
+        .from('vouchers')
+        .select(`
+          id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
+          actual_price, discount_percent, total_amount_issued, remarks, created_at,
+          branch:branches ( id, name ),
+          voucher_type:voucher_types ( id, name, is_wallet ),
+          issuer:users!issued_by ( id, full_name )
+        `)
+        .order('guest_name', { ascending: true }),
+      supabase
+        .from('voucher_balances')
+        .select('voucher_id, total_claimed, remaining_balance, status, last_claim_date'),
+    ]);
+    if (vouchersRes.error) throw vouchersRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+
+    const balanceByVoucher = new Map((balancesRes.data || []).map((b) => [b.voucher_id, b]));
+
+    const rows = (vouchersRes.data || []).map((v) => {
+      const balance = balanceByVoucher.get(v.id) || {};
+      return {
+        id: v.id,
+        voucherCode: v.voucher_code,
+        issuedDate: v.issued_date,
+        expiryDate: v.expiry_date,
+        guestName: v.guest_name,
+        guestInfo: v.guest_info,
+        branchId: v.branch?.id || null,
+        branchName: v.branch?.name || '—',
+        voucherTypeId: v.voucher_type?.id || null,
+        voucherTypeName: v.voucher_type?.name || '—',
+        isWallet: !!v.voucher_type?.is_wallet,
+        actualPrice: Number(v.actual_price || 0),
+        discountPercent: Number(v.discount_percent || 0),
+        totalAmountIssued: Number(v.total_amount_issued || 0),
+        remarks: v.remarks,
+        issuedByName: v.issuer?.full_name || '—',
+        totalClaimed: Number(balance.total_claimed || 0),
+        remainingBalance: balance.remaining_balance != null
+          ? Number(balance.remaining_balance)
+          : Number(v.total_amount_issued || 0),
+        status: balance.status || 'unused',
+        lastClaimDate: balance.last_claim_date || null,
+      };
+    });
+
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchVouchers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function issueVoucher({
+  branchId, voucherTypeId, guestName, guestInfo = null, discountPercent = 0,
+  actualPrice = null, issuedDate = null, expiryDate = null, remarks = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('issue_voucher', {
+      p_branch_id: branchId,
+      p_voucher_type_id: voucherTypeId,
+      p_guest_name: guestName,
+      p_guest_info: guestInfo,
+      p_discount_percent: discountPercent,
+      p_actual_price: actualPrice,
+      p_issued_date: issuedDate,
+      p_expiry_date: expiryDate,
+      p_remarks: remarks,
+    });
+    if (error) throw error;
+    capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] issueVoucher error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function claimVoucher({
+  voucherId, amountClaimed, redeemedDate = null, guestNameUsedBy = null,
+  serviceClaimed = null, branchClaimedId, notes = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('claim_voucher', {
+      p_voucher_id: voucherId,
+      p_amount_claimed: amountClaimed,
+      p_redeemed_date: redeemedDate,
+      p_guest_name_used_by: guestNameUsedBy,
+      p_service_claimed: serviceClaimed,
+      p_branch_claimed_id: branchClaimedId,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    capture('voucher_claimed', { voucher_id: voucherId, amount_claimed: amountClaimed });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] claimVoucher error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Voucher lookup for the booking payment screen — by code or guest name.
+// Uses a SECURITY DEFINER RPC so any authenticated org member (staff
+// included) can find a voucher to attach to a payment, without needing the
+// broader manager/admin-only SELECT on `vouchers` itself. Only returns
+// non-expired vouchers with a remaining balance > 0.
+export async function searchVouchersForPayment(query) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('search_vouchers_for_payment', { p_query: query });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] searchVouchersForPayment error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Single voucher + its live balance, for the detail/claim modal.
+export async function fetchVoucher(voucherId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [voucherRes, balanceRes] = await Promise.all([
+      supabase
+        .from('vouchers')
+        .select(`
+          id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
+          actual_price, discount_percent, total_amount_issued, remarks, created_at,
+          branch:branches ( id, name ),
+          voucher_type:voucher_types ( id, name, is_wallet ),
+          issuer:users!issued_by ( id, full_name )
+        `)
+        .eq('id', voucherId)
+        .single(),
+      supabase
+        .from('voucher_balances')
+        .select('total_claimed, remaining_balance, status, last_claim_date')
+        .eq('voucher_id', voucherId)
+        .maybeSingle(),
+    ]);
+    if (voucherRes.error) throw voucherRes.error;
+
+    const v = voucherRes.data;
+    const balance = balanceRes.data || {};
+    return {
+      data: {
+        id: v.id,
+        voucherCode: v.voucher_code,
+        issuedDate: v.issued_date,
+        expiryDate: v.expiry_date,
+        guestName: v.guest_name,
+        guestInfo: v.guest_info,
+        branchId: v.branch?.id || null,
+        branchName: v.branch?.name || '—',
+        voucherTypeId: v.voucher_type?.id || null,
+        voucherTypeName: v.voucher_type?.name || '—',
+        isWallet: !!v.voucher_type?.is_wallet,
+        actualPrice: Number(v.actual_price || 0),
+        discountPercent: Number(v.discount_percent || 0),
+        totalAmountIssued: Number(v.total_amount_issued || 0),
+        remarks: v.remarks,
+        issuedByName: v.issuer?.full_name || '—',
+        totalClaimed: Number(balance.total_claimed || 0),
+        remainingBalance: balance.remaining_balance != null
+          ? Number(balance.remaining_balance)
+          : Number(v.total_amount_issued || 0),
+        status: balance.status || 'unused',
+        lastClaimDate: balance.last_claim_date || null,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchVoucher error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchVoucherClaims(voucherId) {
+  try {
+    const { data, error } = await supabase
+      .from('voucher_claims')
+      .select(`
+        id, redeemed_date, guest_name_used_by, service_claimed, amount_claimed, notes, created_at,
+        branch:branches ( id, name ),
+        performer:users!performed_by ( id, full_name )
+      `)
+      .eq('voucher_id', voucherId)
+      .order('redeemed_date', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchVoucherClaims error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// "All Voucher" dashboard: org-wide totals, status breakdown, wallet summary,
+// and a per-branch table (vouchers given to each branch, and that branch's
+// outstanding liability — the value still unredeemed out of what IT issued).
+// Unlike the old Excel Dashboard, "amount claimed" here is never silently
+// dropped by a blank branch cell — voucher_claims.branch_claimed_id is
+// NOT NULL at the DB level (see migration-071), and outstanding is read
+// straight off voucher_balances (computed from ALL claims against a voucher,
+// regardless of which branch claimed it).
+export async function fetchVoucherOverview() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [vouchersRes, balancesRes, claimsRes, branchesRes] = await Promise.all([
+      supabase.from('vouchers').select(`
+        id, branch_id, total_amount_issued,
+        voucher_type:voucher_types ( is_wallet )
+      `),
+      supabase.from('voucher_balances').select('voucher_id, total_claimed, remaining_balance, status'),
+      supabase.from('voucher_claims').select('branch_claimed_id, amount_claimed'),
+      supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
+    ]);
+    if (vouchersRes.error) throw vouchersRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+    if (claimsRes.error) throw claimsRes.error;
+    if (branchesRes.error) throw branchesRes.error;
+
+    const balanceByVoucher = new Map((balancesRes.data || []).map((b) => [b.voucher_id, b]));
+    const vouchers = (vouchersRes.data || []).map((v) => {
+      const balance = balanceByVoucher.get(v.id) || {};
+      return {
+        id: v.id,
+        branchId: v.branch_id,
+        isWallet: !!v.voucher_type?.is_wallet,
+        totalAmountIssued: Number(v.total_amount_issued || 0),
+        totalClaimed: Number(balance.total_claimed || 0),
+        remainingBalance: balance.remaining_balance != null
+          ? Number(balance.remaining_balance)
+          : Number(v.total_amount_issued || 0),
+        status: balance.status || 'unused',
+      };
+    });
+
+    const totals = vouchers.reduce((acc, v) => ({
+      totalVouchers: acc.totalVouchers + 1,
+      totalIssuedAmount: acc.totalIssuedAmount + v.totalAmountIssued,
+      totalClaimedAmount: acc.totalClaimedAmount + v.totalClaimed,
+      totalRemaining: acc.totalRemaining + v.remainingBalance,
+    }), { totalVouchers: 0, totalIssuedAmount: 0, totalClaimedAmount: 0, totalRemaining: 0 });
+
+    const statusCounts = vouchers.reduce((acc, v) => {
+      acc[v.status] = (acc[v.status] || 0) + 1;
+      return acc;
+    }, { unused: 0, partially_used: 0, fully_redeemed: 0 });
+
+    const walletVouchers = vouchers.filter((v) => v.isWallet);
+    const walletSummary = walletVouchers.reduce((acc, v) => ({
+      count: acc.count + 1,
+      issuedAmount: acc.issuedAmount + v.totalAmountIssued,
+      claimedAmount: acc.claimedAmount + v.totalClaimed,
+      remainingAmount: acc.remainingAmount + v.remainingBalance,
+    }), { count: 0, issuedAmount: 0, claimedAmount: 0, remainingAmount: 0 });
+
+    const claimsByBranch = new Map();
+    (claimsRes.data || []).forEach((c) => {
+      const row = claimsByBranch.get(c.branch_claimed_id) || { count: 0, amount: 0 };
+      row.count += 1;
+      row.amount += Number(c.amount_claimed || 0);
+      claimsByBranch.set(c.branch_claimed_id, row);
+    });
+
+    const issuedByBranch = new Map();
+    vouchers.forEach((v) => {
+      const row = issuedByBranch.get(v.branchId) || { count: 0, amount: 0, outstanding: 0 };
+      row.count += 1;
+      row.amount += v.totalAmountIssued;
+      row.outstanding += v.remainingBalance;
+      issuedByBranch.set(v.branchId, row);
+    });
+
+    const branches = (branchesRes.data || []).map((b) => {
+      const issued = issuedByBranch.get(b.id) || { count: 0, amount: 0, outstanding: 0 };
+      const claimed = claimsByBranch.get(b.id) || { count: 0, amount: 0 };
+      return {
+        branchId: b.id,
+        branchName: b.name,
+        issuedCount: issued.count,
+        issuedAmount: issued.amount,
+        claimedCount: claimed.count,
+        claimedAmount: claimed.amount,
+        outstanding: issued.outstanding,
+      };
+    });
+
+    return { data: { totals, statusCounts, walletSummary, branches }, error: null };
+  } catch (error) {
+    console.error('[API] fetchVoucherOverview error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Wallet-type ("Worth Voucher") detail view: who issued it, which branch(es)
+// claimed against it, and — for partially-used ones — the full claim
+// breakdown underneath. Mirrors WalletUsagePanel's membership pattern.
+export async function fetchVoucherWallets() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [vouchersRes, balancesRes] = await Promise.all([
+      supabase.from('vouchers').select(`
+        id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
+        total_amount_issued, remarks,
+        branch:branches ( id, name ),
+        voucher_type:voucher_types ( id, name, is_wallet ),
+        issuer:users!issued_by ( id, full_name )
+      `).order('guest_name', { ascending: true }),
+      supabase.from('voucher_balances').select('voucher_id, total_claimed, remaining_balance, status, last_claim_date'),
+    ]);
+    if (vouchersRes.error) throw vouchersRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+
+    const wallets = (vouchersRes.data || []).filter((v) => v.voucher_type?.is_wallet);
+    const balanceByVoucher = new Map((balancesRes.data || []).map((b) => [b.voucher_id, b]));
+
+    const walletIds = wallets.map((v) => v.id);
+    let claims = [];
+    if (walletIds.length > 0) {
+      const { data: claimsData, error: claimsError } = await supabase
+        .from('voucher_claims')
+        .select(`
+          id, voucher_id, redeemed_date, guest_name_used_by, service_claimed, amount_claimed, notes,
+          branch:branches ( id, name )
+        `)
+        .in('voucher_id', walletIds)
+        .order('redeemed_date', { ascending: true });
+      if (claimsError) throw claimsError;
+      claims = claimsData || [];
+    }
+    const claimsByVoucher = new Map();
+    claims.forEach((c) => {
+      if (!claimsByVoucher.has(c.voucher_id)) claimsByVoucher.set(c.voucher_id, []);
+      claimsByVoucher.get(c.voucher_id).push({
+        id: c.id,
+        redeemedDate: c.redeemed_date,
+        guestNameUsedBy: c.guest_name_used_by,
+        serviceClaimed: c.service_claimed,
+        amountClaimed: Number(c.amount_claimed || 0),
+        notes: c.notes,
+        branchName: c.branch?.name || '—',
+      });
+    });
+
+    const rows = wallets.map((v) => {
+      const balance = balanceByVoucher.get(v.id) || {};
+      return {
+        id: v.id,
+        voucherCode: v.voucher_code,
+        voucherTypeName: v.voucher_type?.name || '—',
+        issuedDate: v.issued_date,
+        expiryDate: v.expiry_date,
+        guestName: v.guest_name,
+        guestInfo: v.guest_info,
+        remarks: v.remarks,
+        issuedBranchName: v.branch?.name || '—',
+        issuedByName: v.issuer?.full_name || '—',
+        totalAmountIssued: Number(v.total_amount_issued || 0),
+        totalClaimed: Number(balance.total_claimed || 0),
+        remainingBalance: balance.remaining_balance != null
+          ? Number(balance.remaining_balance)
+          : Number(v.total_amount_issued || 0),
+        status: balance.status || 'unused',
+        lastClaimDate: balance.last_claim_date || null,
+        claims: claimsByVoucher.get(v.id) || [],
+      };
+    });
+
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchVoucherWallets error:', error.message);
     return { data: null, error };
   }
 }

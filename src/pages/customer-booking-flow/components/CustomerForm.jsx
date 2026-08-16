@@ -1,11 +1,23 @@
 import React, { useState } from 'react';
 
 import Input from '../../../components/ui/Input';
+import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import Icon from '../../../components/AppIcon';
+import { checkExistingCustomerByPhone } from '../../../services/api';
 
-const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, selectedService, selectedDateTime, genderPreference }) => {
+const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, selectedService, selectedDateTime, genderPreference, orgSlug }) => {
   const [errors, setErrors] = useState({});
   const [isValidating, setIsValidating] = useState(false);
+  // Purely informational — createBooking()'s isNewCustomer check (unchanged) is what
+  // actually decides referral eligibility. This just surfaces that same signal early
+  // once enough of the customer's own details are in (name + phone), so a referral
+  // doesn't get silently dropped without them knowing why. The referral section stays
+  // hidden until we've actually confirmed 'new' — it doesn't default to visible.
+  //   'idle'     — not enough info yet (no name and/or phone) to check
+  //   'checking' — request in flight
+  //   'new'      — confirmed not an existing customer -> referral section shown
+  //   'existing' — confirmed existing -> referral section stays hidden, notice shown
+  const [customerCheckStatus, setCustomerCheckStatus] = useState('idle');
 
   const validateField = (name, value) => {
     const newErrors = { ...errors };
@@ -40,14 +52,20 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
         }
         break;
 
-      case 'phone':
-        const phoneRegex = /^(\+977)?[0-9]{10}$/;
-        if (value.trim() && !phoneRegex.test(value.replace(/\s+/g, ''))) {
-          newErrors.phone = 'Please enter a valid Nepali phone number';
+      case 'phone': {
+        // Nepal keeps the strict 10-digit mobile format (the overwhelming common
+        // case); any other selected country code just gets a loose sanity-length
+        // check, since we don't carry per-country phone rules anywhere in this app.
+        const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
+        const digits = value.replace(/\D/g, '');
+        const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+        if (value.trim() && !phoneValid) {
+          newErrors.phone = isNepal ? 'Please enter a valid Nepali phone number' : 'Please enter a valid phone number';
         } else {
           delete newErrors.phone;
         }
         break;
+      }
 
       case 'gender':
         if (!value) {
@@ -68,12 +86,24 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     
-    // Format phone number
+    // Format phone number — Nepal stays capped at 10 digits (mobile numbers are
+    // always exactly 10); other country codes get a looser 15-digit ceiling since
+    // international numbers vary in length.
     let formattedValue = value;
     if (name === 'phone') {
-      formattedValue = value.replace(/\D/g, '').slice(0, 10);
+      const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
+      formattedValue = value.replace(/\D/g, '').slice(0, isNepal ? 10 : 15);
+    } else if (name === 'referralPhone') {
+      const isNepalReferral = (customerInfo.referralCountryCode || '+977') === '+977';
+      formattedValue = value.replace(/\D/g, '').slice(0, isNepalReferral ? 10 : 15);
     }
-    
+
+    // Any further edit to name or phone invalidates the last check result — back to
+    // 'idle' (referral section hidden again) until blur re-confirms new-vs-existing.
+    if (name === 'firstName' || name === 'phone') {
+      setCustomerCheckStatus('idle');
+    }
+
     onCustomerInfoChange({
       ...customerInfo,
       [name]: formattedValue
@@ -85,10 +115,32 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
     }
   };
 
-  const handleBlur = (e) => {
+  // Runs the existing-customer check once BOTH name and phone are filled in — not
+  // before. Fires on blur of either field (whichever the customer fills in last),
+  // so field order doesn't matter. Referral section only reveals once this resolves
+  // to 'new'; it never shows by default.
+  const maybeCheckExistingCustomer = async (nameValue, phoneValue) => {
+    const hasName = nameValue.trim().length > 0;
+    const hasPhone = phoneValue.replace(/\D/g, '').length >= 7;
+    if (!hasName || !hasPhone) {
+      setCustomerCheckStatus('idle');
+      return;
+    }
+    setCustomerCheckStatus('checking');
+    const { data } = await checkExistingCustomerByPhone(orgSlug, phoneValue);
+    setCustomerCheckStatus(data ? 'existing' : 'new');
+  };
+
+  const handleBlur = async (e) => {
     const { name, value } = e.target;
     setIsValidating(true);
     validateField(name, value);
+
+    if (name === 'firstName' || name === 'phone') {
+      const nameValue = name === 'firstName' ? value : customerInfo.firstName || '';
+      const phoneValue = name === 'phone' ? value : customerInfo.phone || '';
+      await maybeCheckExistingCustomer(nameValue, phoneValue);
+    }
   };
 
   const validateAllFields = () => {
@@ -254,10 +306,11 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
             <label className="font-body font-body-medium text-sm text-text-primary">
               Phone Number
             </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <span className="font-body font-body-normal text-sm text-text-secondary">+977</span>
-              </div>
+            <div className="flex">
+              <CountryCodeSelect
+                value={customerInfo.phoneCountryCode || '+977'}
+                onChange={(dial) => onCustomerInfoChange({ ...customerInfo, phoneCountryCode: dial })}
+              />
               <Input
                 type="tel"
                 name="phone"
@@ -266,7 +319,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
                 onChange={handleInputChange}
                 onBlur={handleBlur}
                 placeholder="9841234567"
-                className={`pl-16 ${errors.phone ? 'border-error' : ''}`}
+                className={`flex-1 rounded-l-none ${errors.phone ? 'border-error' : ''}`}
               />
             </div>
             {errors.phone && (
@@ -317,6 +370,110 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               </p>
             )}
           </div>
+
+          {/* Referral source — hidden until we've confirmed this is a genuinely new
+              customer (name + phone both filled in and checked). Never shown by
+              default, and stays hidden if the check comes back 'existing' — an
+              existing customer's referral is silently ignored by createBooking()
+              anyway (see the notice above), so there's no point asking. */}
+          {customerCheckStatus === 'new' && (
+          <div className="space-y-2 md:col-span-2">
+            <label className="font-body font-body-medium text-sm text-text-primary">
+              How did they hear about us? (Optional)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { value: 'client', label: 'Client', icon: 'Users' },
+                { value: 'social_media', label: 'Social Media', icon: 'Share2' },
+                { value: 'staff', label: 'Staff', icon: 'UserCheck' }
+              ].map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                    customerInfo.referralSource === option.value
+                      ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="referralSource"
+                    value={option.value}
+                    checked={customerInfo.referralSource === option.value}
+                    onChange={handleInputChange}
+                    className="text-primary focus:ring-primary"
+                  />
+                  <Icon name={option.icon} size={16} className="text-text-secondary" />
+                  <span className="font-body font-body-medium text-sm text-text-primary">
+                    {option.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {customerInfo.referralSource === 'client' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <Input
+                  type="text"
+                  name="referralClientName"
+                  value={customerInfo.referralClientName || ''}
+                  onChange={handleInputChange}
+                  placeholder="Name"
+                />
+                <div className="flex">
+                  <CountryCodeSelect
+                    value={customerInfo.referralCountryCode || '+977'}
+                    onChange={(dial) => onCustomerInfoChange({ ...customerInfo, referralCountryCode: dial })}
+                  />
+                  <Input
+                    type="tel"
+                    name="referralPhone"
+                    data-ph-mask
+                    value={customerInfo.referralPhone || ''}
+                    onChange={handleInputChange}
+                    placeholder="Phone number"
+                    className="flex-1 rounded-l-none"
+                  />
+                </div>
+                {customerInfo.referralPhone && customerInfo.phone && customerInfo.referralPhone === customerInfo.phone && (
+                  <p className="font-caption font-caption-normal text-xs text-warning flex items-center space-x-1 sm:col-span-2">
+                    <Icon name="AlertCircle" size={12} />
+                    <span>That's your own number</span>
+                  </p>
+                )}
+              </div>
+            )}
+
+            {customerInfo.referralSource === 'social_media' && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                {['Facebook', 'Instagram', 'TikTok', 'Other'].map((platform) => (
+                  <button
+                    key={platform}
+                    type="button"
+                    onClick={() => onCustomerInfoChange({ ...customerInfo, referralSocialPlatform: platform })}
+                    className={`px-3 py-2 rounded-spa border-2 text-sm font-body font-body-medium spa-transition-fast ${
+                      customerInfo.referralSocialPlatform === platform
+                        ? 'border-primary bg-primary/5 text-text-primary' :'border-border text-text-secondary hover:border-primary/50'
+                    }`}
+                  >
+                    {platform}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {customerInfo.referralSource === 'staff' && (
+              <div className="pt-2">
+                <Input
+                  type="text"
+                  name="referralStaffName"
+                  value={customerInfo.referralStaffName || ''}
+                  onChange={handleInputChange}
+                  placeholder="Staff member's name"
+                />
+              </div>
+            )}
+          </div>
+          )}
 
           {/* Special Requests */}
           <div className="space-y-2 md:col-span-2">
