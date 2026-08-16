@@ -94,15 +94,15 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ secrets.GHCR_PULL_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 25m
           envs: GHCR_USER,GHCR_TOKEN
-          env:
-            GHCR_USER: ${{ secrets.GHCR_PULL_USER }}
-            GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           script: |
             set -e
             cd /home/zunkireelabs/devprojects/nuad-thai-web-app
