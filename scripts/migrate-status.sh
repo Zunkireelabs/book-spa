@@ -12,6 +12,9 @@ set -euo pipefail
 
 TARGET="${1:?usage: migrate-status.sh <local|stage|prod>}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# See LEDGER_FLOOR comment in migrate-apply.sh — pre-028 files don't map
+# 1:1 to their ledger version keys (baselined as a group by migration-027).
+LEDGER_FLOOR=28
 
 : "${PGHOST:?PGHOST not set}"
 : "${PGUSER:?PGUSER not set}"
@@ -25,7 +28,8 @@ fi
 
 mapfile -t FILE_VERSIONS < <(
   find "$REPO_ROOT/supabase" -maxdepth 1 -name 'migration-*.sql' -printf '%f\n' \
-    | sed -E 's/^migration-([0-9]{3}[a-z]?)-.*\.sql$/\1/' \
+    | sed -E 's/^migration-([0-9]{3})([a-z]?)-.*\.sql$/\1 \2/' \
+    | awk -v floor="$LEDGER_FLOOR" '{ n=$1+0; if (n >= floor) print $1$2 }' \
     | sort
 )
 
