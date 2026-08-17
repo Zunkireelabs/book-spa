@@ -2561,7 +2561,24 @@ export async function getTodayInsights(branchId, from, to) {
       value: (issued || []).reduce((sum, v) => sum + Number(v.total_amount_issued), 0),
     };
 
-    // 5. Staff utilization (reuse existing intelligence function)
+    // 5. Memberships sold (deposits) in range — org-scoped via RLS (no branch column on
+    // membership_transactions), so do NOT withBranch() this query. rangeEnd is a Nepal calendar
+    // date; the exclusive upper bound is the next day's Nepal midnight (+05:45).
+    const nextDayBoundary = new Date(`${rangeEnd}T00:00:00+05:45`);
+    nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
+    const { data: deposits, error: depositsError } = await supabase
+      .from('membership_transactions')
+      .select('amount, created_at')
+      .eq('kind', 'deposit')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    if (depositsError) throw depositsError;
+    const membershipSold = {
+      count: (deposits || []).length,
+      value: (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0),
+    };
+
+    // 6. Staff utilization (reuse existing intelligence function)
     const { data: utilization, error: utilizationError } = await getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd });
     if (utilizationError) throw utilizationError;
 
@@ -2573,6 +2590,7 @@ export async function getTodayInsights(branchId, from, to) {
         digital,
         wallet,
         membershipRedeemed,
+        membershipSold,
         voucherClaimed,
         voucherDistributed,
         staffUtilization: {
