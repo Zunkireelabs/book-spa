@@ -1101,6 +1101,7 @@ export async function getReferralWalletReport({ branchId, from, to } = {}) {
       const remainingAmount = credit ? credit.remaining : (r.reward_status === 'credited' ? walletAmount : null);
       return {
         referralId: r.id,
+        referringCustomerId: r.referring_customer_id,
         referrerName: r.referrer?.full_name || 'Unknown',
         referrerPhone: r.referrer?.phone || null,
         referredCustomerName: r.referred?.full_name || 'Unknown',

@@ -13,6 +13,13 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function formatDateTime(d) {
+  if (!d) return 'Never';
+  return new Date(d).toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 const STATUS_STYLES = {
   credited: 'bg-success/10 text-success',
   pending: 'bg-warning/10 text-warning',
@@ -29,6 +36,7 @@ const ReferralWalletPanel = ({ branchId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [groupByCustomer, setGroupByCustomer] = useState(false);
 
   const [mode, setMode] = useState('all'); // 'all' | 'preset' | 'custom'
   const [activePreset, setActivePreset] = useState('monthly');
@@ -86,6 +94,37 @@ const ReferralWalletPanel = ({ branchId }) => {
     used: acc.used + r.usedAmount,
     remaining: acc.remaining + (r.remainingAmount || 0),
   }), { granted: 0, used: 0, remaining: 0 }), [filtered]);
+
+  // Per-customer rollup — only credited referrals count as "earned" (pending/void
+  // referrals have no well-defined walletAmount/remainingAmount yet).
+  const customerSummaries = useMemo(() => {
+    const groups = new Map();
+    for (const r of filtered) {
+      if (r.rewardStatus !== 'credited') continue;
+      const key = r.referringCustomerId || r.referrerName;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          referrerName: r.referrerName,
+          referrerPhone: r.referrerPhone,
+          referralCount: 0,
+          totalEarned: 0,
+          totalUsed: 0,
+          remainingBalance: 0,
+          lastUsedAt: null,
+        });
+      }
+      const g = groups.get(key);
+      g.referralCount += 1;
+      g.totalEarned += r.walletAmount;
+      g.totalUsed += r.usedAmount;
+      g.remainingBalance += r.remainingAmount || 0;
+      if (r.usedAt && (!g.lastUsedAt || new Date(r.usedAt) > new Date(g.lastUsedAt))) {
+        g.lastUsedAt = r.usedAt;
+      }
+    }
+    return [...groups.values()].sort((a, b) => a.referrerName.localeCompare(b.referrerName));
+  }, [filtered]);
 
   const presetItems = [
     { label: 'All Time', active: mode === 'all', onClick: () => setMode('all') },
@@ -156,6 +195,28 @@ const ReferralWalletPanel = ({ branchId }) => {
         onClear={() => setSearchQuery('')}
       />
 
+      {/* View toggle */}
+      <div className="inline-flex items-center rounded-spa border border-border bg-surface p-1">
+        <button
+          type="button"
+          onClick={() => setGroupByCustomer(false)}
+          className={`px-3 py-1.5 rounded text-sm font-body font-body-medium spa-transition-fast ${
+            !groupByCustomer ? 'bg-primary text-primary-foreground' : 'text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          By Referral
+        </button>
+        <button
+          type="button"
+          onClick={() => setGroupByCustomer(true)}
+          className={`px-3 py-1.5 rounded text-sm font-body font-body-medium spa-transition-fast ${
+            groupByCustomer ? 'bg-primary text-primary-foreground' : 'text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          By Customer
+        </button>
+      </div>
+
       {/* Error */}
       {error && (
         <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
@@ -178,6 +239,53 @@ const ReferralWalletPanel = ({ branchId }) => {
               {rows.length === 0 ? 'No customer referrals logged in this period.' : 'No referrals match the current filters.'}
             </p>
           </div>
+        ) : groupByCustomer ? (
+          customerSummaries.length === 0 ? (
+            <div className="py-12 text-center">
+              <Icon name="Wallet" size={32} className="text-text-tertiary mx-auto mb-3" />
+              <p className="font-body text-sm text-text-secondary">No credited referral wallets in this period.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-background border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Customer</th>
+                    <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Referrals</th>
+                    <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Total Earned</th>
+                    <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Total Used</th>
+                    <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remaining Balance</th>
+                    <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Last Used</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerSummaries.map((s) => (
+                    <tr key={s.key} className="border-b border-border last:border-0 spa-transition-fast hover:bg-background/50">
+                      <td className="px-4 py-3">
+                        <span className="font-body font-body-medium text-sm text-text-primary">{s.referrerName}</span>
+                        {s.referrerPhone && <span className="block font-caption text-xs text-text-tertiary">{s.referrerPhone}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-normal text-sm text-text-secondary">{s.referralCount}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(s.totalEarned)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-medium text-sm text-warning">{formatNPR(s.totalUsed)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-medium text-sm text-primary">{formatNPR(s.remainingBalance)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-body text-sm text-text-secondary">{formatDateTime(s.lastUsedAt)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
