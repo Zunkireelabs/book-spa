@@ -82,11 +82,16 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     <div className="space-y-4">
       {/* Static heading for loading/error/empty states */}
       {!showStickyBlock && (
-        <div className="flex items-center justify-center space-x-2 mb-4">
-          <Icon name="Sparkles" size={20} className="text-primary" />
-          <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-            Choose Service
-          </h1>
+        <div className="text-center mb-4">
+          <div className="flex items-center justify-center space-x-2 mb-2">
+            <Icon name="Sparkles" size={20} className="text-primary" />
+            <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+              Choose Service
+            </h1>
+          </div>
+          <p className="font-body font-body-normal text-text-secondary">
+            Step 2 of 5 - Complete your spa booking journey
+          </p>
         </div>
       )}
 
@@ -113,24 +118,27 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          {/* Unified sticky block: heading + search + category pills.
-              No "Step N of 5" subtitle here -- the progress stepper above
-              already shows that; repeating it just eats vertical space. */}
-          <div className="sticky top-[116px] z-sticky-filter bg-background pt-3 pb-2">
-            <div className="flex items-center justify-center space-x-2 mb-2">
-              <Icon name="Sparkles" size={18} className="text-primary" />
-              <h1 className="font-heading font-heading-semibold text-xl text-text-primary">
-                Choose Service
-              </h1>
+          {/* Unified sticky block: heading + search + category pills */}
+          <div className="sticky top-[116px] z-sticky-filter bg-background pt-7 pb-2">
+            <div className="text-center mb-3">
+              <div className="flex items-center justify-center space-x-2 mb-1">
+                <Icon name="Sparkles" size={20} className="text-primary" />
+                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                  Choose Service
+                </h1>
+              </div>
+              <p className="font-body font-body-normal text-text-secondary">
+                Step 2 of 5 - Complete your spa booking journey
+              </p>
             </div>
-            <div className="relative mb-2">
+            <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search services..."
-                className="w-full pl-10 pr-10 py-2 rounded-spa-lg border border-border bg-surface font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                className="w-full pl-10 pr-10 py-2.5 rounded-spa-lg border border-border bg-surface font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               />
               {searchQuery && (
                 <button
@@ -141,12 +149,12 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-2">
               {categories.map((category) => (
                 <button
                   key={category}
                   onClick={() => setSelectedCategory(category)}
-                  className={`whitespace-nowrap px-3 py-1 rounded-full text-xs font-body font-body-medium spa-transition-fast ${
+                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
                     selectedCategory === category
                       ? 'bg-primary text-white'
                       : 'bg-background text-text-secondary hover:bg-primary/10'
@@ -168,7 +176,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       )}
 
       {!loading && !error && filteredServices.length > 0 && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredServices.map((service) => (
             <div
               key={service.id}
