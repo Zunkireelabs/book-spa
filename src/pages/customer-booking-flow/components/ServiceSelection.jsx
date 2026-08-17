@@ -82,16 +82,11 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     <div className="space-y-4">
       {/* Static heading for loading/error/empty states */}
       {!showStickyBlock && (
-        <div className="text-center mb-4">
-          <div className="flex items-center justify-center space-x-2 mb-2">
-            <Icon name="Sparkles" size={20} className="text-primary" />
-            <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-              Choose Service
-            </h1>
-          </div>
-          <p className="font-body font-body-normal text-text-secondary">
-            Step 2 of 5 - Complete your spa booking journey
-          </p>
+        <div className="flex items-center justify-center space-x-2 mb-4">
+          <Icon name="Sparkles" size={20} className="text-primary" />
+          <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+            Choose Service
+          </h1>
         </div>
       )}
 
@@ -118,27 +113,24 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          {/* Unified sticky block: heading + search + category pills */}
-          <div className="sticky top-[116px] z-sticky-filter bg-background pt-7 pb-2">
-            <div className="text-center mb-3">
-              <div className="flex items-center justify-center space-x-2 mb-1">
-                <Icon name="Sparkles" size={20} className="text-primary" />
-                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                  Choose Service
-                </h1>
-              </div>
-              <p className="font-body font-body-normal text-text-secondary">
-                Step 2 of 5 - Complete your spa booking journey
-              </p>
+          {/* Unified sticky block: heading + search + category pills.
+              No "Step N of 5" subtitle here -- the progress stepper above
+              already shows that; repeating it just eats vertical space. */}
+          <div className="sticky top-[116px] z-sticky-filter bg-background pt-3 pb-2">
+            <div className="flex items-center justify-center space-x-2 mb-2">
+              <Icon name="Sparkles" size={18} className="text-primary" />
+              <h1 className="font-heading font-heading-semibold text-xl text-text-primary">
+                Choose Service
+              </h1>
             </div>
-            <div className="relative mb-3">
+            <div className="relative mb-2">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search services..."
-                className="w-full pl-10 pr-10 py-2.5 rounded-spa-lg border border-border bg-surface font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                className="w-full pl-10 pr-10 py-2 rounded-spa-lg border border-border bg-surface font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               />
               {searchQuery && (
                 <button
@@ -149,12 +141,12 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {categories.map((category) => (
                 <button
                   key={category}
                   onClick={() => setSelectedCategory(category)}
-                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                  className={`whitespace-nowrap px-3 py-1 rounded-full text-xs font-body font-body-medium spa-transition-fast ${
                     selectedCategory === category
                       ? 'bg-primary text-white'
                       : 'bg-background text-text-secondary hover:bg-primary/10'
@@ -176,7 +168,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       )}
 
       {!loading && !error && filteredServices.length > 0 && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredServices.map((service) => (
             <div
               key={service.id}
@@ -191,63 +183,71 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 <Image
                   src={service.image}
                   alt={service.name}
-                  className="w-full h-28 object-cover"
+                  className="w-full h-48 object-cover"
                 />
-                <div className="absolute top-2 left-2 flex flex-col space-y-1">
+                <div className="absolute top-4 left-4 flex flex-col space-y-2">
                   {service.popularity && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-accent text-accent-foreground">
+                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
                       {service.popularity}
                     </span>
                   )}
                   {service.specialty && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-primary text-primary-foreground">
+                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-primary text-primary-foreground">
                       {service.specialty}
                     </span>
                   )}
                 </div>
-                <div className="absolute top-2 right-2 bg-surface/90 backdrop-blur-sm rounded-spa px-2 py-0.5">
-                  <span className="font-heading font-heading-semibold text-sm text-text-primary">
+                <div className="absolute top-4 right-4 bg-surface/90 backdrop-blur-sm rounded-spa px-3 py-1">
+                  <span className="font-heading font-heading-semibold text-lg text-text-primary">
                     {formatPrice(service.price)}
                   </span>
                 </div>
               </div>
 
-              <div className="p-3">
-                <div className="flex items-start justify-between gap-2 mb-1.5">
-                  <h3 className="font-heading font-heading-medium text-sm text-text-primary leading-snug flex-1">
-                    {service.name}
-                  </h3>
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-1">
+                      {service.name}
+                    </h3>
+                    <div className="flex items-center space-x-4 text-text-secondary mb-2">
+                      <div className="flex items-center space-x-1">
+                        <Icon name="Clock" size={14} />
+                        <span className="font-body font-body-normal text-sm">
+                          {service.duration}
+                        </span>
+                      </div>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-background text-text-secondary">
+                        {service.category}
+                      </span>
+                    </div>
+                  </div>
                   {selectedService?.id === service.id && (
-                    <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
-                      <Icon name="Check" size={12} className="text-primary-foreground" />
+                    <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
+                      <Icon name="Check" size={14} className="text-primary-foreground" />
                     </div>
                   )}
                 </div>
 
-                <div className="flex items-center space-x-3 text-text-secondary mb-2">
-                  <div className="flex items-center space-x-1">
-                    <Icon name="Clock" size={12} />
-                    <span className="font-body font-body-normal text-xs">
-                      {service.duration}
-                    </span>
-                  </div>
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-background text-text-secondary">
-                    {service.category}
-                  </span>
-                </div>
+                <p className="font-body font-body-normal text-sm text-text-secondary mb-4 line-clamp-3">
+                  {service.description}
+                </p>
 
-                {service.benefits?.length > 0 && (
+                <div>
+                  <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
+                    Benefits
+                  </h4>
                   <div className="flex flex-wrap gap-1">
-                    {service.benefits.slice(0, 2).map((benefit) => (
+                    {service.benefits.map((benefit) => (
                       <span
                         key={benefit}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-success/10 text-success"
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
                       >
                         {benefit}
                       </span>
                     ))}
                   </div>
-                )}
+                </div>
               </div>
             </div>
         ))}
