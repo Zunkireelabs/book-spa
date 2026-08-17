@@ -4,7 +4,7 @@ import Icon from '../../../components/AppIcon';
 import { useIndustry } from '../../../hooks/useIndustry';
 import { getUtilizationIntelligence } from '../../../services/api';
 
-const TherapistUtilizationChart = ({ branchId }) => {
+const TherapistUtilizationChart = ({ branchId, period }) => {
   const { staffLabel, staffLabelPlural } = useIndustry();
   const [utilizationData, setUtilizationData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,7 +15,7 @@ const TherapistUtilizationChart = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const result = await getUtilizationIntelligence({ branchId });
+    const result = await getUtilizationIntelligence({ branchId, from: period?.from, to: period?.to });
 
     if (result.error) {
       setError(result.error.message || 'Failed to load utilization data.');
@@ -32,7 +32,7 @@ const TherapistUtilizationChart = ({ branchId }) => {
     }));
     setUtilizationData(chartData);
     setLoading(false);
-  }, [branchId]);
+  }, [branchId, period?.from, period?.to]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

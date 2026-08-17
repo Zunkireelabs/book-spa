@@ -5,6 +5,7 @@
 
 export const PERIOD_PRESETS = [
   { id: 'daily', label: 'Daily' },
+  { id: 'yesterday', label: 'Yesterday' },
   { id: 'weekly', label: 'Weekly' },
   { id: 'monthly', label: 'Monthly' },
   { id: 'quarterly', label: 'Quarterly' },
@@ -25,11 +26,14 @@ export const getTodayISO = () => toISO(new Date());
 
 export function getPeriodRange(presetId) {
   const today = new Date();
-  const end = toISO(today);
+  let end = toISO(today);
   let start;
   switch (presetId) {
     case 'daily':
       start = end;
+      break;
+    case 'yesterday':
+      start = end = toISO(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
       break;
     case 'weekly':
       start = toISO(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));

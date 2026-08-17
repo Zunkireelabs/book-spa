@@ -18,7 +18,6 @@ import MetricsCard from './components/MetricsCard';
 import TherapistUtilizationChart from './components/TherapistUtilizationChart';
 import BookingPipelineChart from './components/BookingPipelineChart';
 import RealtimeBookingFeed from './components/RealtimeBookingFeed';
-import DateRangePicker from './components/DateRangePicker';
 import RevenueAnalyticsChart from './components/RevenueAnalyticsChart';
 import DailyOperationalReportPanel from './components/DailyOperationalReportPanel';
 import OperationalCalendar from './components/calendar';
@@ -31,6 +30,9 @@ import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
 import RevenueCards from './components/RevenueCards';
+import TodayInsightsPanel from './components/TodayInsightsPanel';
+import PeriodFilter from './components/PeriodFilter';
+import { getTodayISO } from '../../utils/periodPresets';
 import UtilizationPanel from './components/UtilizationPanel';
 import RiskIndicatorsPanel from './components/RiskIndicatorsPanel';
 import AttendancePanel from './components/Operations/AttendancePanel';
@@ -69,6 +71,7 @@ const BranchManagerDashboard = () => {
   const profileDropdownRef = useRef(null);
 
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [period, setPeriod] = useState(() => ({ key: 'daily', from: getTodayISO(), to: getTodayISO() }));
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bookings, setBookings] = useState([]);
@@ -280,14 +283,6 @@ const BranchManagerDashboard = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const handleDateRangeChange = (dateRange) => {
-    // Date range filter — handled by individual panels
-  };
-
-  const handleExport = (format) => {
-    // Export handled by DailyOperationalReportPanel
-  };
-
   // Handle viewing a booking from the new booking notification
   const handleViewNewBooking = () => {
     setNewBookingNotification(null);
@@ -332,13 +327,16 @@ const BranchManagerDashboard = () => {
   const renderDashboardView = () => (
     <div className="space-y-3 sm:space-y-4 lg:space-y-6">
       {/* Revenue Intelligence Cards */}
-      <RevenueCards branchId={branchId} />
+      <RevenueCards branchId={branchId} period={period} />
+
+      {/* Today's Insights - sales by payment method, membership/voucher activity, staff utilization */}
+      <TodayInsightsPanel branchId={branchId} period={period} />
 
       {/* Utilization & Capacity Intelligence */}
-      <UtilizationPanel branchId={branchId} />
+      <UtilizationPanel branchId={branchId} period={period} />
 
       {/* Risk Indicators */}
-      <RiskIndicatorsPanel branchId={branchId} />
+      <RiskIndicatorsPanel branchId={branchId} date={period.to} />
 
       {/* Pending Discount Approvals */}
       <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
@@ -372,9 +370,9 @@ const BranchManagerDashboard = () => {
 
       {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
-        <TherapistUtilizationChart branchId={branchId} />
-        <BookingPipelineChart branchId={branchId} />
-        <TopPerformersCard branchId={branchId} />
+        <TherapistUtilizationChart branchId={branchId} period={period} />
+        <BookingPipelineChart branchId={branchId} period={period} />
+        <TopPerformersCard branchId={branchId} period={period} />
         <RealtimeBookingFeed
           bookings={bookings}
           branchId={branchId}
@@ -382,16 +380,8 @@ const BranchManagerDashboard = () => {
         />
       </div>
 
-      {/* Analytics and Controls Row - Stack on mobile, 3 cols on desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-        <DateRangePicker
-          onDateRangeChange={handleDateRangeChange}
-          onExport={handleExport}
-        />
-        <div className="lg:col-span-2">
-          <RevenueAnalyticsChart branchId={branchId} />
-        </div>
-      </div>
+      {/* Revenue Analytics */}
+      <RevenueAnalyticsChart branchId={branchId} period={period} />
     </div>
   );
 
@@ -434,6 +424,9 @@ const BranchManagerDashboard = () => {
                 {/* Left: Branch name + date/time */}
                 <div className="flex items-center space-x-3 min-w-0">
                   <BranchSwitcher />
+                  {viewMode === 'dashboard' && (
+                    <PeriodFilter value={period} onChange={setPeriod} />
+                  )}
                   <div className="hidden sm:block h-5 w-px bg-border"></div>
                   <p className="hidden sm:block font-caption font-caption-normal text-xs text-text-secondary">
                     {currentTime.toLocaleDateString('en-GB', {

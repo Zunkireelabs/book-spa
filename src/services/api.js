@@ -2466,6 +2466,128 @@ export async function getDailySummary(branchId, date) {
   }
 }
 
+// Payment-mode bucketing for the Today's Insights panel. Bank-card processors keep the
+// legacy 'Card' string check plus the named custom bank methods (migration-052 relaxed
+// payment_mode to a free string, so orgs can add more bank names later — this list covers
+// what's configured today). Wallet is internal credit only (Membership/Referral/Voucher
+// balances); Digital is external non-card electronic payment. See getDailySummary above
+// for the same 'today' semantics (bookings.date, not payment created_at).
+const CARD_MODES = new Set(['Card', 'Nabil', 'GlobalIME', 'NICAsia']);
+const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
+const DIGITAL_MODES = new Set(['Esewa', 'Khalti', 'MobileBanking', 'Cheque']);
+
+export async function getTodayInsights(branchId, from, to) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+
+    const rangeStart = from || new Date().toISOString().split('T')[0];
+    const rangeEnd = to || rangeStart;
+
+    // 1. Bookings for the branch in range, settled or partially settled
+    let bookingsQuery = supabase
+      .from('bookings')
+      .select('id, payment_status')
+      .gte('date', rangeStart)
+      .lte('date', rangeEnd);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
+    if (bookingsError) throw bookingsError;
+
+    const settledBookingIds = (bookings || [])
+      .filter(b => ['paid', 'partial'].includes(b.payment_status))
+      .map(b => b.id);
+
+    // 2. Bucket today's payments by mode
+    let totalSales = 0;
+    let cash = 0, card = 0, digital = 0, wallet = 0;
+    let membershipRedeemed = { count: 0, value: 0 };
+
+    if (settledBookingIds.length > 0) {
+      const { data: payments, error: paymentsError } = await supabase
+        .from('payments')
+        .select('amount, payment_mode')
+        .in('booking_id', settledBookingIds);
+      if (paymentsError) throw paymentsError;
+
+      for (const p of (payments || [])) {
+        const amount = Number(p.amount);
+        totalSales += amount;
+        if (p.payment_mode === 'Cash') {
+          cash += amount;
+        } else if (CARD_MODES.has(p.payment_mode) || p.payment_mode.includes('Card')) {
+          card += amount;
+        } else if (WALLET_MODES.has(p.payment_mode)) {
+          wallet += amount;
+          if (p.payment_mode === 'Membership') {
+            membershipRedeemed.count += 1;
+            membershipRedeemed.value += amount;
+          }
+        } else if (DIGITAL_MODES.has(p.payment_mode)) {
+          digital += amount;
+        } else {
+          // Unrecognized custom mode — treat as digital/other rather than drop it.
+          digital += amount;
+        }
+      }
+    }
+
+    // 3. Gift vouchers claimed in range (redemption ledger)
+    let claimsQuery = supabase
+      .from('voucher_claims')
+      .select('amount_claimed')
+      .gte('redeemed_date', rangeStart)
+      .lte('redeemed_date', rangeEnd);
+    claimsQuery = withBranch(claimsQuery, branchId, 'branch_claimed_id');
+    const { data: claims, error: claimsError } = await claimsQuery;
+    if (claimsError) throw claimsError;
+    const voucherClaimed = {
+      count: (claims || []).length,
+      value: (claims || []).reduce((sum, c) => sum + Number(c.amount_claimed), 0),
+    };
+
+    // 4. Gift vouchers distributed (issued) in range
+    let issuedQuery = supabase
+      .from('vouchers')
+      .select('total_amount_issued')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    issuedQuery = withBranch(issuedQuery, branchId, 'branch_id');
+    const { data: issued, error: issuedError } = await issuedQuery;
+    if (issuedError) throw issuedError;
+    const voucherDistributed = {
+      count: (issued || []).length,
+      value: (issued || []).reduce((sum, v) => sum + Number(v.total_amount_issued), 0),
+    };
+
+    // 5. Staff utilization (reuse existing intelligence function)
+    const { data: utilization, error: utilizationError } = await getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd });
+    if (utilizationError) throw utilizationError;
+
+    return {
+      data: {
+        totalSales,
+        cash,
+        card,
+        digital,
+        wallet,
+        membershipRedeemed,
+        voucherClaimed,
+        voucherDistributed,
+        staffUtilization: {
+          avgPercent: utilization?.summary?.avgTherapistUtilization ?? 0,
+          therapists: utilization?.therapistUtilization ?? [],
+        },
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getTodayInsights error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function closeDay(branchId, date) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -2956,6 +3078,22 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
   };
 }
 
+// Exposes computeRevenueForRange for callers that need an arbitrary single
+// period's totals (e.g. the dashboard's period filter) rather than the fixed
+// Today/Yesterday/WTD/MTD comparison getRevenueIntelligence returns.
+export async function getRevenueForPeriod({ branchId, from, to }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    const data = await computeRevenueForRange(branchId, from, to);
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] getRevenueForPeriod error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function getRevenueIntelligence({ branchId, date }) {
   try {
     if (!branchId) {
@@ -3000,7 +3138,7 @@ function timeToMinutes(timeStr) {
   return parts[0] * 60 + parts[1];
 }
 
-export async function getUtilizationIntelligence({ branchId, date }) {
+export async function getUtilizationIntelligence({ branchId, date, from, to }) {
   try {
     if (!branchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
@@ -3008,6 +3146,16 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     const overall = isOverallBranch(branchId);
     const targetDate = date || new Date().toISOString().split('T')[0];
+    // Range mode (multi-day period filter): aggregate across [from, to] instead
+    // of a single day. Attendance is tracked per-day, so a multi-day window
+    // skips the absent/leave exclusion below rather than trying to prorate it —
+    // available therapists = all active therapists for range mode.
+    const isRange = !!(from && to && from !== to);
+    const rangeStart = from || targetDate;
+    const rangeEnd = to || targetDate;
+    const dayCount = isRange
+      ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / 86400000) + 1)
+      : 1;
 
     // 1. Fetch branch operating hours. Overall: build a per-branch window map across the org.
     let branch = null;
@@ -3019,7 +3167,7 @@ export async function getUtilizationIntelligence({ branchId, date }) {
         .select('id, open_time, close_time');
       if (branchesError) throw branchesError;
       for (const br of (branches || [])) {
-        branchWindow[br.id] = timeToMinutes(br.close_time) - timeToMinutes(br.open_time);
+        branchWindow[br.id] = (timeToMinutes(br.close_time) - timeToMinutes(br.open_time)) * dayCount;
       }
     } else {
       const { data: branchRow, error: branchError } = await supabase
@@ -3032,7 +3180,7 @@ export async function getUtilizationIntelligence({ branchId, date }) {
       branch = branchRow;
       const openMin = timeToMinutes(branch.open_time);
       const closeMin = timeToMinutes(branch.close_time);
-      operatingMinutes = closeMin - openMin; // e.g. 720 for 9:00–21:00
+      operatingMinutes = (closeMin - openMin) * dayCount; // e.g. 720 for 9:00–21:00, ×days in range
     }
 
     // Operating window (minutes) attributable to a given resource's branch.
@@ -3058,14 +3206,14 @@ export async function getUtilizationIntelligence({ branchId, date }) {
     const [roomsResult, therapistsResult, attendanceResult] = await Promise.all([
       roomsQuery,
       therapistsQuery,
-      attendanceQuery,
+      isRange ? Promise.resolve({ data: [], error: null }) : attendanceQuery,
     ]);
 
     if (roomsResult.error) throw roomsResult.error;
     if (therapistsResult.error) throw therapistsResult.error;
     // Attendance errors are non-fatal — just ignore
     const absentIds = new Set();
-    if (!attendanceResult.error && attendanceResult.data) {
+    if (!isRange && !attendanceResult.error && attendanceResult.data) {
       for (const a of attendanceResult.data) {
         absentIds.add(a.therapist_id);
       }
@@ -3073,15 +3221,17 @@ export async function getUtilizationIntelligence({ branchId, date }) {
 
     const rooms = roomsResult.data || [];
     const therapists = therapistsResult.data || [];
-    // Available therapists = active minus absent/leave
+    // Available therapists = active minus absent/leave (single-day only; see isRange above)
     const availableTherapists = therapists.filter(t => !absentIds.has(t.id));
 
     // 3. Fetch qualifying bookings: Confirmed, In-Progress, Completed only
     let bookingsQuery = supabase
       .from('bookings')
       .select('id, room_id, therapist_id, start_time, end_time, service_duration_snapshot, status')
-      .eq('date', targetDate)
       .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+    bookingsQuery = isRange
+      ? bookingsQuery.gte('date', rangeStart).lte('date', rangeEnd)
+      : bookingsQuery.eq('date', targetDate);
     bookingsQuery = withBranch(bookingsQuery, branchId);
     const { data: bookings, error: bookingsError } = await bookingsQuery;
 
