@@ -4,6 +4,7 @@ import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
 import { TenantProvider } from "contexts/TenantContext";
+import { CustomerAuthProvider } from "contexts/CustomerAuthContext";
 import { useAuth } from "contexts/AuthContext";
 import CustomerBookingFlow from "pages/customer-booking-flow";
 import StaffLoginAuthentication from "pages/login";
@@ -220,7 +221,9 @@ const LegacyBookingRedirect = () => {
 
 const Routes = () => (
   <BrowserRouter>
-    <AppRoutes />
+    <CustomerAuthProvider>
+      <AppRoutes />
+    </CustomerAuthProvider>
   </BrowserRouter>
 );
 

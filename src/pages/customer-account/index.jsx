@@ -25,11 +25,13 @@ const CustomerAccount = () => {
   const hasRedirected = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && !customer && !hasRedirected.current) {
+    if (authLoading || hasRedirected.current) return;
+    // No session, or a session that isn't linked to an account in this org.
+    if (!customer || !customerProfile) {
       hasRedirected.current = true;
       navigate(`/${orgSlug}/customer-login`, { replace: true });
     }
-  }, [authLoading, customer, orgSlug, navigate]);
+  }, [authLoading, customer, customerProfile, orgSlug, navigate]);
 
   useEffect(() => {
     if (!customerProfile?.id) return;

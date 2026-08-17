@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabaseCustomer } from '../lib/supabase';
 
 const CustomerAuthContext = createContext(null);
@@ -11,13 +12,25 @@ export const useCustomerAuth = () => {
   return context;
 };
 
-async function fetchCustomerProfile(authUserId) {
+// A customer_accounts row belongs to exactly one org (auth_user_id is
+// globally unique). Since the provider is hoisted above every org-scoped
+// route, the profile fetch must be scoped to the org in the URL — otherwise
+// a customer signed in under org A still reads as "logged in" (with org A's
+// profile/booking history) after navigating to org B's pages.
+function getOrgSlugFromPath(pathname) {
+  return pathname.split('/').filter(Boolean)[0] || null;
+}
+
+async function fetchCustomerProfile(authUserId, orgSlug) {
+  if (!orgSlug) return null;
+
   try {
     const { data, error } = await supabaseCustomer
       .from('customer_accounts')
-      .select('*')
+      .select('*, organizations!inner(slug)')
       .eq('auth_user_id', authUserId)
-      .single();
+      .eq('organizations.slug', orgSlug)
+      .maybeSingle();
 
     if (error) {
       console.error('[CustomerAuth] Profile fetch error:', error.message);
@@ -31,6 +44,9 @@ async function fetchCustomerProfile(authUserId) {
 }
 
 export const CustomerAuthProvider = ({ children }) => {
+  const location = useLocation();
+  const orgSlug = getOrgSlugFromPath(location.pathname);
+
   const [customer, setCustomer] = useState(null);
   const [customerProfile, setCustomerProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,6 +54,11 @@ export const CustomerAuthProvider = ({ children }) => {
   // Guard: signUp/signIn already resolve user + profile themselves, so the
   // onAuthStateChange listener must not race them with a duplicate fetch.
   const authActiveRef = useRef(false);
+
+  // Which org slug customerProfile was resolved for — tracked separately
+  // from the DB row shape so signUp's raw RPC result (no joined org) and
+  // signIn/fetch's joined result both compare the same way.
+  const profileOrgSlugRef = useRef(null);
 
   const signUp = async (orgId, email, password, fullName, phone) => {
     authActiveRef.current = true;
@@ -52,6 +73,7 @@ export const CustomerAuthProvider = ({ children }) => {
       );
       if (rpcError) throw rpcError;
 
+      profileOrgSlugRef.current = orgSlug;
       setCustomer(data.user);
       setCustomerProfile(account);
       setLoading(false);
@@ -69,8 +91,16 @@ export const CustomerAuthProvider = ({ children }) => {
       const { data, error } = await supabaseCustomer.auth.signInWithPassword({ email, password });
       if (error) throw error;
 
-      const profile = await fetchCustomerProfile(data.user.id);
+      const profile = await fetchCustomerProfile(data.user.id, orgSlug);
+      if (!profile) {
+        await supabaseCustomer.auth.signOut();
+        setCustomer(null);
+        setCustomerProfile(null);
+        setLoading(false);
+        throw new Error('No account found for this organization.');
+      }
 
+      profileOrgSlugRef.current = orgSlug;
       setCustomer(data.user);
       setCustomerProfile(profile);
       setLoading(false);
@@ -82,6 +112,7 @@ export const CustomerAuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
+    profileOrgSlugRef.current = null;
     setCustomerProfile(null);
     setCustomer(null);
     const { error } = await supabaseCustomer.auth.signOut();
@@ -96,6 +127,7 @@ export const CustomerAuthProvider = ({ children }) => {
         if (session?.user) {
           setCustomer(session.user);
         } else {
+          profileOrgSlugRef.current = null;
           setCustomer(null);
           setCustomerProfile(null);
         }
@@ -119,19 +151,27 @@ export const CustomerAuthProvider = ({ children }) => {
 
     if (authActiveRef.current) return;
 
-    if (customerProfile && customerProfile.auth_user_id === customer.id) {
+    if (
+      customerProfile &&
+      customerProfile.auth_user_id === customer.id &&
+      profileOrgSlugRef.current === orgSlug
+    ) {
       setLoading(false);
       return;
     }
 
     setLoading(true);
 
-    fetchCustomerProfile(customer.id)
-      .then((p) => { if (!cancelled) setCustomerProfile(p); })
+    fetchCustomerProfile(customer.id, orgSlug)
+      .then((p) => {
+        if (cancelled) return;
+        profileOrgSlugRef.current = p ? orgSlug : null;
+        setCustomerProfile(p);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [customer?.id]);
+  }, [customer?.id, orgSlug]);
 
   return (
     <CustomerAuthContext.Provider value={{ customer, customerProfile, loading, signUp, signIn, signOut }}>
