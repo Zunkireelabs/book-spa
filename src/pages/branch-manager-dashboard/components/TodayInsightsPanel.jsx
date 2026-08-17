@@ -18,11 +18,11 @@ function formatNPR(amount, compact = false) {
   return `NPR ${num.toLocaleString('en-IN')}`;
 }
 
-const PAYMENT_TILES = [
-  { key: 'cash', label: 'Cash', icon: 'Banknote' },
-  { key: 'card', label: 'Card', icon: 'CreditCard' },
-  { key: 'digital', label: 'Digital', icon: 'Smartphone' },
-  { key: 'wallet', label: 'Wallet', icon: 'Wallet' },
+const PAYMENT_SEGMENTS = [
+  { key: 'cash', label: 'Cash', barClass: 'bg-primary', dotClass: 'bg-primary' },
+  { key: 'card', label: 'Card', barClass: 'bg-accent', dotClass: 'bg-accent' },
+  { key: 'digital', label: 'Digital', barClass: 'bg-secondary', dotClass: 'bg-secondary' },
+  { key: 'wallet', label: 'Wallet', barClass: 'bg-gray-400', dotClass: 'bg-gray-400' },
 ];
 
 const TodayInsightsPanel = ({ branchId, period }) => {
@@ -51,20 +51,17 @@ const TodayInsightsPanel = ({ branchId, period }) => {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-        {[0, 1, 2, 3].map(i => (
-          <div key={i} className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-5 animate-pulse">
-            <div className="h-4 bg-gray-100 rounded w-16 sm:w-24 mb-2 sm:mb-3" />
-            <div className="h-6 sm:h-7 bg-gray-100 rounded w-20 sm:w-32 mb-2" />
-          </div>
-        ))}
+      <div className="bg-surface border border-border rounded-spa-lg shadow-spa-resting p-4 sm:p-5 animate-pulse space-y-4">
+        <div className="h-4 bg-gray-100 rounded w-32" />
+        <div className="h-8 bg-gray-100 rounded w-48" />
+        <div className="h-3 bg-gray-100 rounded w-full" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+      <div className="bg-red-50 border border-red-200 rounded-spa-lg p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
         <div className="flex items-center gap-2">
           <Icon name="AlertCircle" size={18} className="text-red-600 flex-shrink-0" />
           <p className="text-xs sm:text-sm text-red-600">{error}</p>
@@ -78,110 +75,96 @@ const TodayInsightsPanel = ({ branchId, period }) => {
 
   if (!data) return null;
 
+  const totalSales = Number(data.totalSales) || 0;
+  const hasSales = totalSales > 0;
+
+  const utilizationPercent = Math.max(0, Math.min(100, Number(data.staffUtilization.avgPercent) || 0));
+  const therapistCount = data.staffUtilization.therapists.length;
+
   return (
-    <div className="space-y-2 sm:space-y-3">
-      {/* Total Sales — primary highlighted tile */}
-      <div className="bg-white rounded-lg border border-primary/30 ring-1 ring-primary/10 p-3 sm:p-4 lg:p-5">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-            <Icon name="TrendingUp" size={16} className="text-primary" />
-          </div>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total Sales — {periodLabel(period)}</span>
+    <div className="bg-surface border border-border rounded-spa-lg shadow-spa-resting divide-y divide-border">
+      {/* Section 1 — Total Sales + payment mix */}
+      <div className="p-4 sm:p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Total Sales · {periodLabel(period)}
+          </span>
         </div>
-        <p className="text-xl sm:text-2xl font-semibold text-gray-900">{formatNPR(data.totalSales)}</p>
+        <p className="text-2xl font-semibold text-gray-900">{formatNPR(totalSales)}</p>
+
+        {hasSales ? (
+          <div className="w-full h-2.5 rounded-full overflow-hidden bg-gray-100 flex">
+            {PAYMENT_SEGMENTS.map(seg => {
+              const value = Number(data[seg.key]) || 0;
+              const pct = (value / totalSales) * 100;
+              if (pct <= 0) return null;
+              return <div key={seg.key} className={seg.barClass} style={{ width: `${pct}%` }} />;
+            })}
+          </div>
+        ) : (
+          <div className="w-full h-2.5 rounded-full bg-gray-100" />
+        )}
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+          {PAYMENT_SEGMENTS.map(seg => (
+            <div key={seg.key} className="flex items-center gap-1.5 text-xs text-gray-600">
+              <span className={`w-2 h-2 rounded-full ${seg.dotClass}`} />
+              <span>{seg.label} {formatNPR(data[seg.key], true)}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Payment method breakdown */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-        {PAYMENT_TILES.map(tile => (
-          <div key={tile.key} className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-5">
-            <div className="flex items-center gap-1.5 sm:gap-2 mb-2 sm:mb-3">
-              <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-100 rounded-md sm:rounded-lg flex items-center justify-center flex-shrink-0">
-                <Icon name={tile.icon} size={14} className="sm:w-4 sm:h-4 text-gray-600" />
-              </div>
-              <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">
-                {tile.label}
+      {/* Section 2 — Sold vs Redeemed */}
+      <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Sold (value in)</span>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">Memberships</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {data.membershipSold.count} · {formatNPR(data.membershipSold.value)}
               </span>
             </div>
-            <p className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
-              <span className="sm:hidden">{formatNPR(data[tile.key], true)}</span>
-              <span className="hidden sm:inline">{formatNPR(data[tile.key])}</span>
-            </p>
+            <p className="text-[11px] text-gray-400">org-wide</p>
           </div>
-        ))}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">Gift Vouchers</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {data.voucherDistributed.count} · {formatNPR(data.voucherDistributed.value)}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Redeemed (value used)</span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">Memberships</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {data.membershipRedeemed.count} · {formatNPR(data.membershipRedeemed.value)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">Gift Vouchers</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {data.voucherClaimed.count} · {formatNPR(data.voucherClaimed.value)}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Membership / Voucher / Utilization activity */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-5">
-          <div className="flex items-center gap-1.5 sm:gap-2 mb-2 sm:mb-3">
-            <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-100 rounded-md sm:rounded-lg flex items-center justify-center flex-shrink-0">
-              <Icon name="Award" size={14} className="sm:w-4 sm:h-4 text-gray-600" />
-            </div>
-            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">
-              Membership Redeemed
-            </span>
-          </div>
-          <p className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
-            <span className="sm:hidden">{formatNPR(data.membershipRedeemed.value, true)}</span>
-            <span className="hidden sm:inline">{formatNPR(data.membershipRedeemed.value)}</span>
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {data.membershipRedeemed.count} {data.membershipRedeemed.count === 1 ? 'redemption' : 'redemptions'}
-          </p>
+      {/* Section 3 — Therapist utilization */}
+      <div className="p-4 sm:p-5 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Therapist Utilization · {utilizationPercent}%
+          </span>
+          <span className="text-xs text-gray-500">
+            {therapistCount} {therapistCount === 1 ? 'therapist' : 'therapists'}
+          </span>
         </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-5">
-          <div className="flex items-center gap-1.5 sm:gap-2 mb-2 sm:mb-3">
-            <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-100 rounded-md sm:rounded-lg flex items-center justify-center flex-shrink-0">
-              <Icon name="Gift" size={14} className="sm:w-4 sm:h-4 text-gray-600" />
-            </div>
-            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">
-              Voucher Claimed
-            </span>
-          </div>
-          <p className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
-            <span className="sm:hidden">{formatNPR(data.voucherClaimed.value, true)}</span>
-            <span className="hidden sm:inline">{formatNPR(data.voucherClaimed.value)}</span>
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {data.voucherClaimed.count} {data.voucherClaimed.count === 1 ? 'claim' : 'claims'}
-          </p>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-5">
-          <div className="flex items-center gap-1.5 sm:gap-2 mb-2 sm:mb-3">
-            <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-100 rounded-md sm:rounded-lg flex items-center justify-center flex-shrink-0">
-              <Icon name="Ticket" size={14} className="sm:w-4 sm:h-4 text-gray-600" />
-            </div>
-            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">
-              Voucher Distributed
-            </span>
-          </div>
-          <p className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
-            <span className="sm:hidden">{formatNPR(data.voucherDistributed.value, true)}</span>
-            <span className="hidden sm:inline">{formatNPR(data.voucherDistributed.value)}</span>
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {data.voucherDistributed.count} {data.voucherDistributed.count === 1 ? 'voucher' : 'vouchers'}
-          </p>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-5">
-          <div className="flex items-center gap-1.5 sm:gap-2 mb-2 sm:mb-3">
-            <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-100 rounded-md sm:rounded-lg flex items-center justify-center flex-shrink-0">
-              <Icon name="Users" size={14} className="sm:w-4 sm:h-4 text-gray-600" />
-            </div>
-            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">
-              Staff Utilization
-            </span>
-          </div>
-          <p className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
-            {data.staffUtilization.avgPercent}%
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {data.staffUtilization.therapists.length} {data.staffUtilization.therapists.length === 1 ? 'therapist' : 'therapists'}
-          </p>
+        <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
+          <div className="h-full bg-primary rounded-full" style={{ width: `${utilizationPercent}%` }} />
         </div>
       </div>
     </div>
