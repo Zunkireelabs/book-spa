@@ -42,7 +42,7 @@ function BarRow({ label, percent, bookedMinutes, totalMinutes, color }) {
   );
 }
 
-const UtilizationPanel = ({ branchId }) => {
+const UtilizationPanel = ({ branchId, period }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -52,7 +52,7 @@ const UtilizationPanel = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const result = await getUtilizationIntelligence({ branchId });
+    const result = await getUtilizationIntelligence({ branchId, from: period?.from, to: period?.to });
 
     if (result.error) {
       setError(result.error.message || 'Failed to load utilization data.');
@@ -62,7 +62,7 @@ const UtilizationPanel = ({ branchId }) => {
 
     setData(result.data);
     setLoading(false);
-  }, [branchId]);
+  }, [branchId, period?.from, period?.to]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

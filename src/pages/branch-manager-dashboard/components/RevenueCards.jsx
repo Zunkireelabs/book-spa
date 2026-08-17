@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
-import { getRevenueIntelligence } from '../../../services/api';
+import { getRevenueIntelligence, getRevenueForPeriod } from '../../../services/api';
+import { PERIOD_PRESETS } from '../../../utils/periodPresets';
+
+const PERIOD_LABELS = { ...Object.fromEntries(PERIOD_PRESETS.map(p => [p.id, p.label])), daily: 'Today' };
+function periodLabel(period) {
+  if (!period || period.key === 'daily') return 'Today';
+  if (period.key === 'custom') return `${period.from} – ${period.to}`;
+  return PERIOD_LABELS[period.key] || 'Selected Period';
+}
 
 function formatNPR(amount, compact = false) {
   const num = Number(amount);
@@ -27,7 +35,8 @@ const PERIOD_CONFIG = [
   { key: 'monthToDate', label: 'Month to Date', shortLabel: 'MTD', icon: 'CalendarDays' },
 ];
 
-const RevenueCards = ({ branchId }) => {
+const RevenueCards = ({ branchId, period }) => {
+  const isDaily = !period || period.key === 'daily';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,7 +46,9 @@ const RevenueCards = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const result = await getRevenueIntelligence({ branchId });
+    const result = isDaily
+      ? await getRevenueIntelligence({ branchId })
+      : await getRevenueForPeriod({ branchId, from: period.from, to: period.to });
 
     if (result.error) {
       setError(result.error.message || 'Failed to load revenue data.');
@@ -47,7 +58,7 @@ const RevenueCards = ({ branchId }) => {
 
     setData(result.data);
     setLoading(false);
-  }, [branchId]);
+  }, [branchId, isDaily, period?.from, period?.to]);
 
   useEffect(() => { loadRevenue(); }, [loadRevenue]);
 
@@ -80,6 +91,43 @@ const RevenueCards = ({ branchId }) => {
   }
 
   if (!data) return null;
+
+  if (!isDaily) {
+    return (
+      <div className="bg-white rounded-lg border border-blue-300 ring-1 ring-blue-100 p-3 sm:p-4 lg:p-5">
+        <div className="flex items-center gap-2 mb-2 sm:mb-3">
+          <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+            <Icon name="CalendarRange" size={16} className="text-blue-600" />
+          </div>
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {periodLabel(period)}
+          </span>
+        </div>
+        <p className="text-xl sm:text-2xl font-semibold text-gray-900 mb-2 sm:mb-3">
+          {formatNPR(data.netRevenue)}
+          <span className="text-xs text-gray-400 font-normal ml-2">Net Revenue</span>
+        </p>
+        <div className="grid grid-cols-3 gap-3 pt-2 border-t border-gray-100">
+          <div>
+            <p className="text-xs text-gray-500">Gross</p>
+            <p className="text-sm text-gray-900">{formatNPR(data.grossRevenue)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Discounts</p>
+            <p className={`text-sm ${data.totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+              {data.totalDiscount > 0 ? '-' : ''}{formatNPR(data.totalDiscount)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Paid</p>
+            <p className="text-sm text-gray-900">
+              {data.paidBookings} {data.paidBookings === 1 ? 'booking' : 'bookings'}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Compute deltas: today vs yesterday
   const netDelta = computeDelta(data.today.netRevenue, data.yesterday.netRevenue);

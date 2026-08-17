@@ -13,7 +13,7 @@ function getTier(score) {
 
 const RANK_COLORS = ['text-purple-600', 'text-gray-500', 'text-gray-400'];
 
-const TopPerformersCard = ({ branchId }) => {
+const TopPerformersCard = ({ branchId, period }) => {
   const navigate = useNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
@@ -28,13 +28,13 @@ const TopPerformersCard = ({ branchId }) => {
     if (!branchId) return;
     setLoading(true);
 
-    const result = await getTherapistPerformance({ branchId });
+    const result = await getTherapistPerformance({ branchId, fromDate: period?.from, toDate: period?.to });
 
     if (!result.error && result.data) {
       setTherapists(result.data.therapists.slice(0, 3));
     }
     setLoading(false);
-  }, [branchId]);
+  }, [branchId, period?.from, period?.to]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
