@@ -176,7 +176,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       )}
 
       {!loading && !error && filteredServices.length > 0 && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filteredServices.map((service) => (
             <div
               key={service.id}
@@ -191,71 +191,63 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 <Image
                   src={service.image}
                   alt={service.name}
-                  className="w-full h-48 object-cover"
+                  className="w-full h-28 object-cover"
                 />
-                <div className="absolute top-4 left-4 flex flex-col space-y-2">
+                <div className="absolute top-2 left-2 flex flex-col space-y-1">
                   {service.popularity && (
-                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-accent text-accent-foreground">
                       {service.popularity}
                     </span>
                   )}
                   {service.specialty && (
-                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-primary text-primary-foreground">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-primary text-primary-foreground">
                       {service.specialty}
                     </span>
                   )}
                 </div>
-                <div className="absolute top-4 right-4 bg-surface/90 backdrop-blur-sm rounded-spa px-3 py-1">
-                  <span className="font-heading font-heading-semibold text-lg text-text-primary">
+                <div className="absolute top-2 right-2 bg-surface/90 backdrop-blur-sm rounded-spa px-2 py-0.5">
+                  <span className="font-heading font-heading-semibold text-sm text-text-primary">
                     {formatPrice(service.price)}
                   </span>
                 </div>
               </div>
 
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-1">
-                      {service.name}
-                    </h3>
-                    <div className="flex items-center space-x-4 text-text-secondary mb-2">
-                      <div className="flex items-center space-x-1">
-                        <Icon name="Clock" size={14} />
-                        <span className="font-body font-body-normal text-sm">
-                          {service.duration}
-                        </span>
-                      </div>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-background text-text-secondary">
-                        {service.category}
-                      </span>
-                    </div>
-                  </div>
+              <div className="p-3">
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <h3 className="font-heading font-heading-medium text-sm text-text-primary leading-snug flex-1">
+                    {service.name}
+                  </h3>
                   {selectedService?.id === service.id && (
-                    <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-                      <Icon name="Check" size={14} className="text-primary-foreground" />
+                    <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
+                      <Icon name="Check" size={12} className="text-primary-foreground" />
                     </div>
                   )}
                 </div>
 
-                <p className="font-body font-body-normal text-sm text-text-secondary mb-4 line-clamp-3">
-                  {service.description}
-                </p>
+                <div className="flex items-center space-x-3 text-text-secondary mb-2">
+                  <div className="flex items-center space-x-1">
+                    <Icon name="Clock" size={12} />
+                    <span className="font-body font-body-normal text-xs">
+                      {service.duration}
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-background text-text-secondary">
+                    {service.category}
+                  </span>
+                </div>
 
-                <div>
-                  <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
-                    Benefits
-                  </h4>
+                {service.benefits?.length > 0 && (
                   <div className="flex flex-wrap gap-1">
-                    {service.benefits.map((benefit) => (
+                    {service.benefits.slice(0, 2).map((benefit) => (
                       <span
                         key={benefit}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-normal bg-success/10 text-success"
                       >
                         {benefit}
                       </span>
                     ))}
                   </div>
-                </div>
+                )}
               </div>
             </div>
         ))}
