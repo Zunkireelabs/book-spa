@@ -70,6 +70,7 @@ const WalletUsagePanel = () => {
         return {
           membershipId: m.id,
           memberName: m.customerName || '—',
+          memberPhone: m.customerPhone || '—',
           cardNo: m.membershipNumber || '—',
           tierName: m.tierName || '—',
           deposited,
@@ -85,7 +86,9 @@ const WalletUsagePanel = () => {
     const q = search.trim().toLowerCase();
     if (!q) return memberRows;
     return memberRows.filter((r) =>
-      r.memberName.toLowerCase().includes(q) || r.cardNo.toLowerCase().includes(q)
+      r.memberName.toLowerCase().includes(q) ||
+      r.memberPhone.toLowerCase().includes(q) ||
+      r.cardNo.toLowerCase().includes(q)
     );
   }, [memberRows, search]);
 
@@ -217,7 +220,7 @@ const WalletUsagePanel = () => {
                 <tr className="bg-background border-b border-border">
                   <th className="w-8 px-2 py-2.5" />
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Member</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Card No.</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Phone</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Wallet Amount</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Used</th>
@@ -243,7 +246,7 @@ const WalletUsagePanel = () => {
                           <span className="font-body font-body-medium text-sm text-text-primary">{m.memberName}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="font-data font-data-normal text-xs text-text-secondary tracking-wide">{m.cardNo}</span>
+                          <span className="font-caption font-caption-normal text-sm text-text-secondary">{m.memberPhone}</span>
                         </td>
                         <td className="px-4 py-3">
                           <span className="font-body font-body-normal text-sm text-text-secondary">{m.tierName}</span>
