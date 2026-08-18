@@ -9,7 +9,7 @@ const CustomerHeader = () => {
   const { orgSlug } = useParams();
 
   // Try to get tenant context, but don't fail if not available
-  let tenantData = { orgName: 'Zenly', isCleaning: false, isSalon: false };
+  let tenantData = { orgName: 'Zennly', isCleaning: false, isSalon: false };
   try {
     tenantData = useTenant();
   } catch {
@@ -67,7 +67,7 @@ const CustomerHeader = () => {
             </div>
             <div className="flex flex-col">
               <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                {orgName || 'Zenly'}
+                {orgName || 'Zennly'}
               </span>
               <span className="font-caption font-caption-normal text-xs text-text-secondary -mt-1">
                 {getTagline()}

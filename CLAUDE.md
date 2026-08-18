@@ -79,8 +79,8 @@ Two Supabase projects exist — **staging** (default for local dev) and **produc
 
 | Env | Supabase Project | Domain |
 |-----|-----------------|--------|
-| Staging | `snzcckzfmpboeqkktmwy` | `dev-zenly.zunkireelabs.com` |
-| Production | `pmbvogiphelmpjdalmtv` | `zenly.zunkireelabs.com` |
+| Staging | `snzcckzfmpboeqkktmwy` | `dev-app.zennly.io` / `dev-zenly.zunkireelabs.com` |
+| Production | `pmbvogiphelmpjdalmtv` | `app.zennly.io` / `zenly.zunkireelabs.com` |
 
 **These are two completely separate databases — they share no data.** Git branch → database:
 
@@ -356,8 +356,8 @@ Thin PostHog wrapper — every export (`init / identify / reset / capture / setG
 | Workflow | Trigger | Target |
 |----------|---------|--------|
 | `ci.yml` | PR checks | Lint + build validation |
-| `deploy-staging.yml` | Push to `stage` | `dev-zenly.zunkireelabs.com` |
-| `deploy.yml` | Push to `main` | `zenly.zunkireelabs.com` (production) |
+| `deploy-staging.yml` | Push to `stage` | `dev-app.zennly.io` / `dev-zenly.zunkireelabs.com` |
+| `deploy.yml` | Push to `main` | `app.zennly.io` / `zenly.zunkireelabs.com` (production) |
 | `rollback.yml` | Manual | Rollback production |
 
 Deploy process: CI builds the Docker image and pushes it to GHCR

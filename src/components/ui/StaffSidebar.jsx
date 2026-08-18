@@ -486,7 +486,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                       aria-hidden="true"
                     >
                       <g className="zenly-wc-figure">
-                        {/* Colors come from CSS (currentColor = Zenly green) */}
+                        {/* Colors come from CSS (currentColor = Zennly green) */}
                         <circle cx="16" cy="5.8" r="2.6" />
                         <line x1="16" y1="8.4" x2="16" y2="18.5" strokeWidth="2.4" strokeLinecap="round" />
                         <line x1="13.5" y1="10.5" x2="18.5" y2="10.5" strokeWidth="1.6" strokeLinecap="round" />
@@ -561,7 +561,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 )}
               </div>
               <div>
-                <h1 className="text-sm font-semibold text-gray-900">Zenly</h1>
+                <h1 className="text-sm font-semibold text-gray-900">Zennly</h1>
                 <p className="text-xs text-gray-500">Staff Portal</p>
               </div>
             </Link>

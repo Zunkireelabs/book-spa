@@ -20,8 +20,8 @@ Zenly runs **two completely separate Supabase databases that share no data**:
 
 | Env | Project ref | Domain | How you reach it |
 |-----|-------------|--------|------------------|
-| Staging | `snzcckzfmpboeqkktmwy` | `dev-zenly.zunkireelabs.com` | Supabase **MCP** + dashboard |
-| Production | `pmbvogiphelmpjdalmtv` | `zenly.zunkireelabs.com` | Dashboard SQL editor **only** (MCP does not reach prod) |
+| Staging | `snzcckzfmpboeqkktmwy` | `dev-app.zennly.io` / `dev-zenly.zunkireelabs.com` | Supabase **MCP** + dashboard |
+| Production | `pmbvogiphelmpjdalmtv` | `app.zennly.io` / `zenly.zunkireelabs.com` | Dashboard SQL editor **only** (MCP does not reach prod) |
 
 **App deploys and DB migrations are separate CI jobs against separate databases.** Merging
 `stage → main` does **NOT** copy schema, rows, or migrations between the two databases — each push

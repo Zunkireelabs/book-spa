@@ -79,7 +79,7 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
               </div>
               <div className="flex flex-col">
                 <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                  Zenly
+                  Zennly
                 </span>
                 <span className="font-caption font-caption-normal text-xs text-text-secondary -mt-1">
                   Staff Dashboard
