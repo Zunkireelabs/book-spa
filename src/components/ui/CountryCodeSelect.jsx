@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
 
 // Compact country list: ISO2 (for flag), name, dial code. Nepal first.
@@ -71,21 +72,6 @@ export function parsePhone(raw, fallbackDial = '+977') {
   return { dial: fallbackDial, national: digits };
 }
 
-// Walk up from `el` to find the nearest ancestor that actually clips
-// overflow (a scrollable modal body, most often) — an absolutely-positioned
-// dropdown can extend past that ancestor's edge and get clipped even though
-// it's well within the viewport, since setting overflow-y without overflow-x
-// makes the browser compute overflow-x as 'auto' too (CSS Overflow spec).
-function getClippingAncestor(el) {
-  let node = el?.parentElement;
-  while (node && node !== document.body) {
-    const style = window.getComputedStyle(node);
-    if (/(auto|scroll|hidden)/.test(style.overflowX + style.overflowY)) return node;
-    node = node.parentElement;
-  }
-  return null;
-}
-
 function isoToFlag(iso) {
   return iso
     .toUpperCase()
@@ -95,9 +81,9 @@ function isoToFlag(iso) {
 const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [openUpward, setOpenUpward] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  const [panelPos, setPanelPos] = useState(null);
   const wrapRef = useRef(null);
+  const panelRef = useRef(null);
   const searchRef = useRef(null);
 
   const selected = COUNTRIES.find((c) => c.dial === value) || COUNTRIES[0];
@@ -112,7 +98,9 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
 
   useEffect(() => {
     const onClick = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setIsOpen(false);
+      if (wrapRef.current?.contains(e.target)) return;
+      if (panelRef.current?.contains(e.target)) return;
+      setIsOpen(false);
     };
     if (isOpen) document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
@@ -125,18 +113,25 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
     }
   }, [isOpen]);
 
+  const PANEL_WIDTH = 260;
+
+  // Renders the panel via a portal to document.body (fixed-positioned from
+  // the trigger's own coordinates) instead of as a CSS-absolute sibling, so
+  // it always appears right under "+977 ▾" — a modal body only sets
+  // overflow-y-auto, which per the CSS Overflow spec makes the browser
+  // compute overflow-x as auto too, clipping an absolutely-positioned panel
+  // the moment it's wider than whatever column the trigger sits in.
   const toggle = () => {
     if (disabled) return;
     if (!isOpen && wrapRef.current) {
       const rect = wrapRef.current.getBoundingClientRect();
-      setOpenUpward(window.innerHeight - rect.bottom < 280);
-      // Right-align instead of overflowing off the viewport, or off a
-      // scrollable ancestor's edge (which clips it), when there isn't 260px +
-      // margin of room to the right of the trigger — common when this sits
-      // in the second column of a two-column form row.
-      const clipper = getClippingAncestor(wrapRef.current);
-      const rightBound = clipper ? clipper.getBoundingClientRect().right : window.innerWidth;
-      setAlignRight(rightBound - rect.left < 260 + 12);
+      const openUpward = window.innerHeight - rect.bottom < 280;
+      setPanelPos({
+        left: Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 12),
+        ...(openUpward
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+      });
     }
     setIsOpen((o) => !o);
   };
@@ -163,11 +158,11 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
         />
       </button>
 
-      {isOpen && (
+      {isOpen && panelPos && createPortal(
         <div
-          className={`absolute w-[260px] max-w-[calc(100vw-24px)] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown flex flex-col max-h-[280px] ${
-            alignRight ? 'right-0' : 'left-0'
-          } ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          ref={panelRef}
+          style={{ position: 'fixed', left: panelPos.left, top: panelPos.top, bottom: panelPos.bottom, width: PANEL_WIDTH }}
+          className="max-w-[calc(100vw-24px)] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown flex flex-col max-h-[280px]"
         >
           <div className="p-2 border-b border-border">
             <div className="relative">
@@ -202,7 +197,8 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
