@@ -761,6 +761,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 onSelect={handleCustomerSelect}
                 branchId={branchId}
                 inputRef={nameRef}
+                required
               />
             </div>
 

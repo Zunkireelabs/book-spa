@@ -7,6 +7,7 @@ import {
   fetchVoucher,
   fetchVoucherClaims,
   fetchBranchesByOrgId,
+  fetchServicesByOrgId,
   claimVoucher,
 } from '../../../../services/api';
 
@@ -41,6 +42,7 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
   const [voucher, setVoucher] = useState(null);
   const [claims, setClaims] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -57,10 +59,11 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [voucherRes, claimsRes, branchesRes] = await Promise.all([
+    const [voucherRes, claimsRes, branchesRes, servicesRes] = await Promise.all([
       fetchVoucher(voucherId),
       fetchVoucherClaims(voucherId),
       orgId ? fetchBranchesByOrgId(orgId) : Promise.resolve({ data: [] }),
+      orgId ? fetchServicesByOrgId(orgId) : Promise.resolve({ data: [] }),
     ]);
     if (voucherRes.error) {
       setLoadError(voucherRes.error.message || 'Failed to load voucher.');
@@ -70,6 +73,7 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
     setVoucher(voucherRes.data);
     setClaims(claimsRes.data || []);
     setBranches(branchesRes.data || []);
+    setServices(servicesRes.data || []);
     setGuestNameUsedBy((prev) => prev || voucherRes.data.guestName);
     setAmountClaimed(String(voucherRes.data.remainingBalance));
     setLoading(false);
@@ -183,6 +187,12 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
                   <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Expires</p>
                   <p className="font-body text-sm text-text-secondary">{formatDate(voucher.expiryDate)}</p>
                 </div>
+                {voucher.guestInfo && (
+                  <div className="col-span-2">
+                    <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Guest Info</p>
+                    <p className="font-body text-sm text-text-secondary">{voucher.guestInfo}</p>
+                  </div>
+                )}
                 {voucher.remarks && (
                   <div className="col-span-2">
                     <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Remarks</p>
@@ -285,12 +295,12 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
                     </div>
                     <div>
                       <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Service claimed</label>
-                      <input
-                        type="text"
+                      <CustomSelect
                         value={serviceClaimed}
-                        onChange={(e) => setServiceClaimed(e.target.value)}
-                        placeholder="e.g. Foot Reflexology"
-                        className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                        onChange={setServiceClaimed}
+                        options={services.map((s) => ({ value: s.name, label: s.name }))}
+                        placeholder="Select service"
+                        searchable
                       />
                     </div>
                   </div>

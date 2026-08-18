@@ -20,6 +20,7 @@ const CustomerAutocomplete = ({
   inputClassName,
   inputRef: externalRef,
   onBlur,
+  required = false,
 }) => {
   const [customers, setCustomers] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -124,7 +125,7 @@ const CustomerAutocomplete = ({
         onKeyDown={handleKeyDown}
         onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
         onBlur={onBlur}
-        required
+        required={required}
         placeholder={placeholder}
         className={inputClassName || "w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"}
       />

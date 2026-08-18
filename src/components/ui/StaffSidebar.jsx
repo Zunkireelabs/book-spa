@@ -320,13 +320,6 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=vouchers`,
           roles: ['manager', 'admin'],
         },
-        {
-          id: 'voucher-wallet',
-          label: 'Wallet',
-          icon: 'Wallet',
-          path: `${basePath}?view=voucher-wallet`,
-          roles: ['manager', 'admin'],
-        },
       ],
     }] : []),
     {

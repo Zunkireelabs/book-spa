@@ -57,7 +57,9 @@ function canDragBooking(booking) {
   if (booking.paymentStatus === 'paid') return false;
   // Cannot drag locked bookings (day-closed)
   if (booking.isLocked) return false;
-  // Cannot drag once the booking has started
+  // Cannot drag once the booking has started — status check catches an early
+  // start (before the scheduled slot), isTimeLocked catches an overdue one.
+  if (booking.status === 'In-Progress') return false;
   if (isTimeLocked(booking)) return false;
   return true;
 }
@@ -67,7 +69,9 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);
-  const isLocked = booking.isLocked || isTimeLocked(booking);
+  // status check catches a service started before its scheduled slot, which
+  // isTimeLocked (wall-clock vs. scheduled start) would otherwise miss.
+  const isLocked = booking.isLocked || booking.status === 'In-Progress' || isTimeLocked(booking);
 
   const cardRef = useRef(null);
   const [showPopover, setShowPopover] = useState(false);

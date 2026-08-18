@@ -217,12 +217,14 @@ const MembershipsPanel = () => {
               <thead>
                 <tr className="bg-background border-b border-border">
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Card no.</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Member</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Member Name</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Phone</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Birthdate</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
+                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Deposited</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Expires</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Balance</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary hidden md:table-cell">Deposited</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary hidden lg:table-cell">Expires</th>
                 </tr>
               </thead>
               <tbody>
@@ -238,27 +240,34 @@ const MembershipsPanel = () => {
                         <span className="font-data font-data-medium text-xs text-text-primary tracking-wide">{m.membershipNumber || '—'}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="font-body font-body-medium text-sm text-text-primary">{m.customerName || '—'}</p>
-                        <p className="font-caption font-caption-normal text-xs text-text-tertiary">{m.customerPhone || '—'}</p>
+                        <span className="font-body font-body-medium text-sm text-text-primary">{m.customerName || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-caption font-caption-normal text-sm text-text-secondary">{m.customerPhone || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-caption font-caption-normal text-xs text-text-secondary">
+                          {formatDate(m.customerDateOfBirth)}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-body font-body-medium text-sm text-text-primary">{m.tierName}</span>
                       </td>
                       <td className="px-4 py-3">
+                        <span className="font-body font-body-normal text-sm text-text-secondary">{m.customerBranchName || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.cycleDeposited)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-caption font-caption-normal text-xs text-text-secondary">
+                          {formatDate(m.expiryDate)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
                         <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${cfg.pill}`}>
                           <Icon name={cfg.icon} size={10} />
                           <span>{cfg.label}</span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-data font-data-medium text-sm text-text-primary">{formatNPR(m.balance)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right hidden md:table-cell">
-                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.cycleDeposited)}</span>
-                      </td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        <span className="font-caption font-caption-normal text-xs text-text-secondary">
-                          {formatDate(m.expiryDate)}
                         </span>
                       </td>
                     </tr>

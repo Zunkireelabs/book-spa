@@ -1,7 +1,7 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
-import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED } from '../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -419,9 +419,8 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (mode === 'ReferralVoucher' && !t.referralId) {
         return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing voucher reference for referral voucher tender.' } };
       }
-      if (mode === 'VoucherWallet' && !t.voucherId) {
-        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing voucher reference for voucher wallet tender.' } };
-      }
+      // A VoucherWallet tender with no voucherId is a pooled combined-balance
+      // draw (migration-090) — deliberately allowed, see voucherWalletPooledTenders below.
     }
 
     const tenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
@@ -447,7 +446,12 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     const membershipTenders = tenderList.filter((t) => t.paymentMode === 'Membership');
     const referralWalletTenders = tenderList.filter((t) => t.paymentMode === 'ReferralWallet');
     const referralVoucherTenders = tenderList.filter((t) => t.paymentMode === 'ReferralVoucher');
-    const voucherWalletTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet');
+    // A VoucherWallet tender with a voucherId targets one specific voucher (a
+    // walk-in/gift voucher, redeemed individually); one with no voucherId is a
+    // pooled combined-balance draw against this booking's customer's own linked
+    // vouchers (migration-090) — batched together just like Membership/ReferralWallet.
+    const voucherWalletTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet' && t.voucherId);
+    const voucherWalletPooledTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet' && !t.voucherId);
     const otherTenders = tenderList.filter((t) =>
       !['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet'].includes(t.paymentMode)
     );
@@ -517,6 +521,27 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         p_voucher_id: t.voucherId,
         p_amount: t.amount,
         p_notes: notes || null,
+      });
+      if (rpcError) throw rpcError;
+      if (paymentId) insertedIds.push(paymentId);
+    }
+
+    // Pooled VoucherWallet tenders (no voucherId) draw from every voucher linked
+    // to this booking's customer as one combined balance (migration-090) — same
+    // batching as Membership/ReferralWallet above, since it's a single pooled
+    // balance, not a per-item pick.
+    if (voucherWalletPooledTenders.length > 0) {
+      const voucherPoolTotal = Math.round(
+        voucherWalletPooledTenders.reduce((s, t) => s + t.amount, 0) * 100
+      ) / 100;
+      const noteText = otherTenders.length === 0 && membershipTenders.length === 0
+        && referralWalletTenders.length === 0
+        ? (notes || null)
+        : null;
+      const { data: paymentId, error: rpcError } = await supabase.rpc('record_voucher_wallet_payment_pooled', {
+        p_booking_id: bookingId,
+        p_amount: voucherPoolTotal,
+        p_notes: noteText,
       });
       if (rpcError) throw rpcError;
       if (paymentId) insertedIds.push(paymentId);
@@ -5341,50 +5366,38 @@ export async function fetchCustomersLightweight(branchId) {
       .single();
     if (branchErr) throw branchErr;
 
-    // The embedded `memberships` relation must only be requested when the
-    // feature is enabled — on production the memberships/membership_tiers
-    // tables don't exist, and an embedded-relation select referencing an
-    // unresolvable FK hard-errors the whole query, not just this field.
-    const membershipSelect = MEMBERSHIP_ENABLED
-      ? `,
-        memberships (
-          id, membership_number,
-          total_deposited, balance,
-          activation_date, expiry_date,
-          tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days )
-        )`
-      : '';
-
-    const { data, error } = await supabase
-      .from('customers')
-      .select(`id, full_name, phone, email, gender${membershipSelect}`)
-      .eq('org_id', branch.org_id)
-      .eq('is_active', true)
-      .order('full_name');
+    const [{ data, error }, statusRes] = await Promise.all([
+      supabase
+        .from('customers')
+        .select('id, full_name, phone, email, gender')
+        .eq('org_id', branch.org_id)
+        .eq('is_active', true)
+        .order('full_name'),
+      MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
+    ]);
 
     if (error) throw error;
 
-    // Attach a `primaryMembership` to each customer (their most-recent
-    // membership regardless of status, transformed to include the computed
-    // status). Drives the membership badge in the booking-creation customer
-    // autocomplete AND the "already a member" / "renew instead" hint in the
-    // Enroll Member modal -- depleted/lapsed cards are surfaced too (not
-    // filtered out) so staff sees a returning member's ended card instead of
-    // it looking like they've never had one.
+    // Attach a `primaryMembership` to each customer via the staff-safe status
+    // RPC (migration-087) — status/tier only, no balance, and readable
+    // regardless of role (unlike an embedded `memberships` relation, which
+    // RLS silently empties out for staff). Drives the membership badge in the
+    // booking-creation customer autocomplete AND the "already a member" /
+    // "renew instead" hint in the Enroll Member modal -- depleted/lapsed
+    // cards are surfaced too (not filtered out) so staff sees a returning
+    // member's ended card instead of it looking like they've never had one.
+    const statusByCustomer = new Map((statusRes.data || []).map((r) => [r.customerId, r]));
     const enriched = (data || []).map((c) => {
-      const memberships = MEMBERSHIP_ENABLED
-        ? (c.memberships || [])
-            .map((row) => transformMembership({ ...row, customer_id: c.id, org_id: branch.org_id }))
-            .filter(Boolean)
-            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-        : [];
+      const s = statusByCustomer.get(c.id);
       return {
         id: c.id,
         full_name: c.full_name,
         phone: c.phone,
         email: c.email,
         gender: c.gender,
-        primaryMembership: memberships[0] || null,
+        primaryMembership: s
+          ? { id: s.membershipId, status: s.status, tierName: s.tierName, membershipNumber: s.membershipNumber }
+          : null,
       };
     });
 
@@ -7274,7 +7287,7 @@ export const MEMBERSHIP_DEPOSIT_MODES = ['Cash', 'Card', 'MobileBanking', 'Chequ
 // createBooking() (look up by org+phone first, then org+email; fall back to INSERT;
 // re-fetch on the customers_org_nphone_uniq race per migration-036). Used by walk-in
 // flows such as direct membership enrollment where there is no booking yet.
-export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email, gender }) {
+export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email, gender, dateOfBirth }) {
   try {
     if (!orgId || !branchId || !fullName) {
       return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
@@ -7285,13 +7298,14 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     const normalizedPhone = phone ? String(phone).replace(/\D/g, '').slice(-10) || null : null;
     const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
     const normalizedGender = gender || null;
+    const normalizedDob = dateOfBirth || null;
 
     // 1. Look up an existing customer in the org by phone.
     let existing = null;
     if (normalizedPhone) {
       const { data } = await supabase
         .from('customers')
-        .select('id, full_name, phone, email, gender')
+        .select('id, full_name, phone, email, gender, date_of_birth')
         .eq('org_id', orgId)
         .eq('phone', normalizedPhone)
         .limit(1)
@@ -7301,7 +7315,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     if (!existing && normalizedEmail) {
       const { data } = await supabase
         .from('customers')
-        .select('id, full_name, phone, email, gender')
+        .select('id, full_name, phone, email, gender, date_of_birth')
         .eq('org_id', orgId)
         .eq('email', normalizedEmail)
         .limit(1)
@@ -7318,6 +7332,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
           phone: normalizedPhone || existing.phone,
           email: normalizedEmail || existing.email,
           gender: normalizedGender || existing.gender,
+          date_of_birth: normalizedDob || existing.date_of_birth,
         })
         .eq('id', existing.id);
       return { data: { customerId: existing.id, isNew: false }, error: null };
@@ -7333,6 +7348,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
         phone: normalizedPhone,
         email: normalizedEmail,
         gender: normalizedGender,
+        date_of_birth: normalizedDob,
       })
       .select('id')
       .single();
@@ -7481,7 +7497,7 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth, branch:branches ( id, name ) ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .order('created_at', { ascending: false });
@@ -7528,7 +7544,7 @@ export async function fetchMembership(membershipId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('id', membershipId)
@@ -7670,6 +7686,36 @@ export async function fetchMembershipForBooking(bookingId) {
   }
 }
 
+// Membership status — status/tier/usable only, no balance/deposit figures
+// (migration-087). Used by fetchCustomersLightweight for the booking-creation
+// tier badge (every role — the badge never needed balance in the first place).
+export async function fetchMembershipStatus({ customerId } = {}) {
+  try {
+    if (!MEMBERSHIP_ENABLED) return { data: [], error: null };
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('list_membership_status_for_org', {
+      p_customer_id: customerId || null,
+    });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        customerId: r.customer_id,
+        membershipId: r.membership_id,
+        membershipNumber: r.membership_number,
+        tierName: r.tier_name,
+        status: r.status,
+        usable: r.usable,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchMembershipStatus error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Fetch the active (or pending) membership for a given customer. Returns null
 // in `data` if none exists. Used by Phase 3 at the booking checkout.
 export async function fetchMembershipForCustomer(customerId) {
@@ -7682,7 +7728,7 @@ export async function fetchMembershipForCustomer(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
@@ -7711,7 +7757,7 @@ export async function getCustomerMembership(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
@@ -8129,6 +8175,32 @@ export async function searchVouchersForPayment(query) {
   } catch (error) {
     console.error('[API] searchVouchersForPayment error:', error.message);
     return { data: null, error };
+  }
+}
+
+// This booking's own customer's linked voucher(s) with a remaining balance
+// (migration-084/082) — auto-surfaced at checkout the same way
+// fetchMembershipForBooking/fetchReferralRewardForBooking are, instead of
+// requiring staff to manually search. A voucher only shows up here if it was
+// linked to a customer at issuance (issue_voucher's optional p_customer_id);
+// unlinked gift vouchers still rely on searchVouchersForPayment.
+export async function fetchVouchersForBooking(bookingId) {
+  try {
+    if (!VOUCHER_ENABLED || !bookingId) return { data: [], error: null };
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (bErr) throw bErr;
+    if (!booking?.customer_id) return { data: [], error: null };
+
+    const { data, error } = await supabase.rpc('list_vouchers_for_customer', { p_customer_id: booking.customer_id });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchVouchersForBooking error:', error.message);
+    return { data: [], error };
   }
 }
 

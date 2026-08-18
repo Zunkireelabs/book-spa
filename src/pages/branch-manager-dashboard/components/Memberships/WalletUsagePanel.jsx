@@ -70,6 +70,7 @@ const WalletUsagePanel = () => {
         return {
           membershipId: m.id,
           memberName: m.customerName || '—',
+          memberPhone: m.customerPhone || '—',
           cardNo: m.membershipNumber || '—',
           tierName: m.tierName || '—',
           deposited,
@@ -85,7 +86,9 @@ const WalletUsagePanel = () => {
     const q = search.trim().toLowerCase();
     if (!q) return memberRows;
     return memberRows.filter((r) =>
-      r.memberName.toLowerCase().includes(q) || r.cardNo.toLowerCase().includes(q)
+      r.memberName.toLowerCase().includes(q) ||
+      r.memberPhone.toLowerCase().includes(q) ||
+      r.cardNo.toLowerCase().includes(q)
     );
   }, [memberRows, search]);
 
@@ -218,6 +221,7 @@ const WalletUsagePanel = () => {
                   <th className="w-8 px-2 py-2.5" />
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Member</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Card No.</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Phone</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Wallet Amount</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Used</th>
@@ -246,6 +250,9 @@ const WalletUsagePanel = () => {
                           <span className="font-data font-data-normal text-xs text-text-secondary tracking-wide">{m.cardNo}</span>
                         </td>
                         <td className="px-4 py-3">
+                          <span className="font-caption font-caption-normal text-sm text-text-secondary">{m.memberPhone}</span>
+                        </td>
+                        <td className="px-4 py-3">
                           <span className="font-body font-body-normal text-sm text-text-secondary">{m.tierName}</span>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -262,7 +269,7 @@ const WalletUsagePanel = () => {
                       {isOpen && m.transactions.map((t) => (
                         <tr key={t.id} className="border-b border-border last:border-0 bg-background/30">
                           <td />
-                          <td colSpan={6} className="px-4 py-2.5">
+                          <td colSpan={7} className="px-4 py-2.5">
                             <div className="flex items-center justify-between gap-3 flex-wrap pl-4">
                               <div className="flex items-center gap-2 min-w-0">
                                 <Icon name="Sparkles" size={13} className="text-text-tertiary flex-shrink-0" />
@@ -286,7 +293,7 @@ const WalletUsagePanel = () => {
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
                   <td />
-                  <td colSpan={3} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
+                  <td colSpan={4} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(totals.deposited)}</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-warning">{formatNPR(totals.used)}</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-primary">{formatNPR(totals.balance)}</td>
