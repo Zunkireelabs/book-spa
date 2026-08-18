@@ -176,17 +176,20 @@ const PaymentModal = ({
     ]);
   };
 
-  // --- voucher wallet (migration-075/084) ---
-  // A voucher only auto-loads here if it was linked to this booking's customer
-  // at issuance (migration-082's optional p_customer_id) — most vouchers are
-  // still unlinked gift vouchers, so staff can also pick "Voucher" from the
-  // Payment Method dropdown on a tender row and search inline (guest_name is
-  // free text at issue time). Once a voucher is picked, either way, that row
-  // is capped at its own remaining balance (not pooled with other vouchers,
-  // since they're distinct). See VoucherSearchInline + the tenders.map render
-  // branch below for the manual-search picker UI.
-  const voucherLeaf = VOUCHER_ENABLED ? { value: 'VoucherWallet', label: 'Voucher' } : null;
-
+  // --- voucher wallet (migration-075/084/090) ---
+  // A single "Voucher" payment method — no separate "search" entry, to avoid
+  // two confusingly-similar dropdown options. This booking's own customer's
+  // linked, non-expired vouchers (migration-082's optional p_customer_id at
+  // issuance) are pooled into ONE combined balance — same UX as Membership/
+  // Referral Wallet: staff picks "Voucher", types an amount, done
+  // (record_voucher_wallet_payment_pooled draws it from those vouchers
+  // server-side). A VoucherWallet tender with no voucherId is always treated
+  // as this pooled draw at submit time. Picking a *specific* voucher (a
+  // walk-in/gift voucher not linked to this customer) is still possible via
+  // the "Use a specific voucher code" link inside the row, which reveals the
+  // manual search box (t.manualSearch, a local UI-only flag) — once a voucher
+  // is picked there, that tender carries a voucherId and is redeemed
+  // individually via record_voucher_wallet_payment, same as before.
   const [customerVouchers, setCustomerVouchers] = useState([]);
   useEffect(() => {
     if (!VOUCHER_ENABLED || !bookingId) return;
@@ -197,6 +200,20 @@ const PaymentModal = ({
     })();
     return () => { cancelled = true; };
   }, [bookingId]);
+
+  const voucherPoolBalance = useMemo(
+    () => round2(customerVouchers.reduce((s, v) => s + Number(v.remaining_balance || 0), 0)),
+    [customerVouchers]
+  );
+  const voucherPoolUsable = voucherPoolBalance > 0;
+  const voucherLeaf = VOUCHER_ENABLED ? { value: 'VoucherWallet', label: 'Voucher' } : null;
+
+  const voucherPoolCommitted = useMemo(() => {
+    if (!voucherPoolUsable) return 0;
+    return round2(
+      tenders.reduce((s, t) => s + (t.paymentMode === 'VoucherWallet' && !t.voucherId && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)
+    );
+  }, [tenders, voucherPoolUsable]);
 
   const voucherWalletCommittedByVoucher = useMemo(() => {
     const map = new Map();
@@ -229,29 +246,6 @@ const PaymentModal = ({
       voucherRemainingBalance: Number(v.remaining_balance),
       amount: String(round2(Math.min(Number(v.remaining_balance), Math.max(leftover, 0) || Number(v.remaining_balance)))),
     });
-  };
-
-  // Vouchers already attached to a tender (manual search or a prior Apply
-  // click) shouldn't be offered again in the auto-detected list below.
-  const appliedVoucherWalletIds = useMemo(
-    () => tenders.filter(t => t.paymentMode === 'VoucherWallet' && t.voucherId).map(t => t.voucherId),
-    [tenders]
-  );
-  const availableCustomerVouchers = useMemo(
-    () => customerVouchers.filter(v => !appliedVoucherWalletIds.includes(v.voucher_id)),
-    [customerVouchers, appliedVoucherWalletIds]
-  );
-  const applyCustomerVoucher = (v) => {
-    setTenders(prev => [
-      ...prev,
-      {
-        amount: String(round2(Math.min(Number(v.remaining_balance), Math.max(leftover, 0) || Number(v.remaining_balance)))),
-        paymentMode: 'VoucherWallet',
-        voucherId: v.voucher_id,
-        voucherLabel: v.voucher_code,
-        voucherRemainingBalance: Number(v.remaining_balance),
-      },
-    ]);
   };
 
   // --- pending self-service referral reward this customer earned as a referrer
@@ -392,6 +386,10 @@ const PaymentModal = ({
     }
     if (referralWalletUsable && referralWalletCommitted > referralReward.walletBalance) {
       setError(`Referral wallet tenders total ${formatNPR(referralWalletCommitted)} but the balance is only ${formatNPR(referralReward.walletBalance)}.`);
+      return;
+    }
+    if (voucherPoolUsable && voucherPoolCommitted > voucherPoolBalance) {
+      setError(`Voucher tenders total ${formatNPR(voucherPoolCommitted)} but the voucher balance is only ${formatNPR(voucherPoolBalance)}.`);
       return;
     }
     for (const v of appliedVoucherBalances) {
@@ -547,8 +545,8 @@ const PaymentModal = ({
               balance: v.remainingBalance,
               pendingDeduction: voucherWalletCommittedByVoucher.get(v.voucherId) || 0,
             }))}
-            available={availableCustomerVouchers}
-            onApply={applyCustomerVoucher}
+            poolBalance={voucherPoolBalance}
+            poolPendingDeduction={voucherPoolCommitted}
           />
 
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}
@@ -571,34 +569,106 @@ const PaymentModal = ({
                 const isReferralWallet = t.paymentMode === 'ReferralWallet';
                 const isReferralVoucher = t.paymentMode === 'ReferralVoucher';
                 const isVoucherWallet = t.paymentMode === 'VoucherWallet';
+                const isVoucherPoolRow = isVoucherWallet && !t.voucherId && voucherPoolUsable && !t.manualSearch;
                 const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
                 const overReferralWallet = isReferralWallet && Number(t.amount) > Number(referralReward?.walletBalance || 0);
+                const overVoucherPool = isVoucherPoolRow && voucherPoolCommitted > voucherPoolBalance;
                 const overVoucherWallet = isVoucherWallet && t.voucherId &&
                   (voucherWalletCommittedByVoucher.get(t.voucherId) || 0) > t.voucherRemainingBalance;
 
-                if (isVoucherWallet && !t.voucherId) {
+                // A VoucherWallet tender with no specific voucher picked yet: defaults
+                // to the pooled combined-balance entry (just an amount field, like
+                // Membership) when this customer has one; a small link switches this
+                // one row into the manual search box instead, for a walk-in/gift
+                // voucher not linked to this customer.
+                if (isVoucherPoolRow) {
                   return (
-                    <div key={i} className="flex items-center gap-2">
-                      <div className="w-36 flex-shrink-0">
-                        <PaymentMethodSelector
-                          paymentMethods={paymentMethods}
-                          extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
-                          value={t.paymentMode}
-                          onChange={(v) => updateTender(i, { paymentMode: v })}
-                          size="md"
-                        />
+                    <div key={i} className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-36 flex-shrink-0">
+                          <PaymentMethodSelector
+                            paymentMethods={paymentMethods}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
+                            value={t.paymentMode}
+                            onChange={(v) => updateTender(i, { paymentMode: v })}
+                            size="md"
+                          />
+                        </div>
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={t.amount}
+                            onChange={(e) => updateTender(i, { amount: e.target.value })}
+                            placeholder="0"
+                            className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overVoucherPool ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
+                          />
+                        </div>
+                        {tenders.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeTender(i)}
+                            className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                            aria-label="Remove method"
+                          >
+                            <Icon name="Trash2" size={16} />
+                          </button>
+                        )}
                       </div>
-                      <div className="flex-1">
-                        <VoucherSearchInline onSelect={(v) => selectVoucherForTender(i, v)} />
-                      </div>
-                      {tenders.length > 1 && (
+                      <div className="flex items-center justify-between">
+                        <p className={`text-[11px] font-caption ${overVoucherPool ? 'text-error' : 'text-text-tertiary'}`}>
+                          {overVoucherPool
+                            ? `Exceeds voucher balance (${formatNPR(voucherPoolBalance)}).`
+                            : `Voucher available: ${formatNPR(Math.max(0, round2(voucherPoolBalance - voucherPoolCommitted)))}`}
+                        </p>
                         <button
                           type="button"
-                          onClick={() => removeTender(i)}
-                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                          aria-label="Remove method"
+                          onClick={() => updateTender(i, { manualSearch: true })}
+                          className="text-[11px] font-caption text-primary hover:underline flex-shrink-0"
                         >
-                          <Icon name="Trash2" size={16} />
+                          Use a specific voucher code
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (isVoucherWallet && !t.voucherId) {
+                  return (
+                    <div key={i} className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-36 flex-shrink-0">
+                          <PaymentMethodSelector
+                            paymentMethods={paymentMethods}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
+                            value={t.paymentMode}
+                            onChange={(v) => updateTender(i, { paymentMode: v })}
+                            size="md"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <VoucherSearchInline onSelect={(v) => selectVoucherForTender(i, v)} />
+                        </div>
+                        {tenders.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeTender(i)}
+                            className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                            aria-label="Remove method"
+                          >
+                            <Icon name="Trash2" size={16} />
+                          </button>
+                        )}
+                      </div>
+                      {voucherPoolUsable && (
+                        <button
+                          type="button"
+                          onClick={() => updateTender(i, { manualSearch: false })}
+                          className="text-[11px] font-caption text-primary hover:underline"
+                        >
+                          ← Use combined voucher balance
                         </button>
                       )}
                     </div>
@@ -818,6 +888,7 @@ const VoucherSearchInline = ({ onSelect }) => {
   useEffect(() => {
     if (query.trim().length < 2) {
       setResults([]);
+      setSearching(false);
       return;
     }
     let cancelled = false;

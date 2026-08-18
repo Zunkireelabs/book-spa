@@ -419,9 +419,8 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (mode === 'ReferralVoucher' && !t.referralId) {
         return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing voucher reference for referral voucher tender.' } };
       }
-      if (mode === 'VoucherWallet' && !t.voucherId) {
-        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing voucher reference for voucher wallet tender.' } };
-      }
+      // A VoucherWallet tender with no voucherId is a pooled combined-balance
+      // draw (migration-090) — deliberately allowed, see voucherWalletPooledTenders below.
     }
 
     const tenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
@@ -447,7 +446,12 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     const membershipTenders = tenderList.filter((t) => t.paymentMode === 'Membership');
     const referralWalletTenders = tenderList.filter((t) => t.paymentMode === 'ReferralWallet');
     const referralVoucherTenders = tenderList.filter((t) => t.paymentMode === 'ReferralVoucher');
-    const voucherWalletTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet');
+    // A VoucherWallet tender with a voucherId targets one specific voucher (a
+    // walk-in/gift voucher, redeemed individually); one with no voucherId is a
+    // pooled combined-balance draw against this booking's customer's own linked
+    // vouchers (migration-090) — batched together just like Membership/ReferralWallet.
+    const voucherWalletTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet' && t.voucherId);
+    const voucherWalletPooledTenders = tenderList.filter((t) => t.paymentMode === 'VoucherWallet' && !t.voucherId);
     const otherTenders = tenderList.filter((t) =>
       !['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet'].includes(t.paymentMode)
     );
@@ -517,6 +521,27 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         p_voucher_id: t.voucherId,
         p_amount: t.amount,
         p_notes: notes || null,
+      });
+      if (rpcError) throw rpcError;
+      if (paymentId) insertedIds.push(paymentId);
+    }
+
+    // Pooled VoucherWallet tenders (no voucherId) draw from every voucher linked
+    // to this booking's customer as one combined balance (migration-090) — same
+    // batching as Membership/ReferralWallet above, since it's a single pooled
+    // balance, not a per-item pick.
+    if (voucherWalletPooledTenders.length > 0) {
+      const voucherPoolTotal = Math.round(
+        voucherWalletPooledTenders.reduce((s, t) => s + t.amount, 0) * 100
+      ) / 100;
+      const noteText = otherTenders.length === 0 && membershipTenders.length === 0
+        && referralWalletTenders.length === 0
+        ? (notes || null)
+        : null;
+      const { data: paymentId, error: rpcError } = await supabase.rpc('record_voucher_wallet_payment_pooled', {
+        p_booking_id: bookingId,
+        p_amount: voucherPoolTotal,
+        p_notes: noteText,
       });
       if (rpcError) throw rpcError;
       if (paymentId) insertedIds.push(paymentId);
