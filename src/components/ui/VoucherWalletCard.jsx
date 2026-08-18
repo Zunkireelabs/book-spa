@@ -8,16 +8,38 @@ function formatNPR(amount) {
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
 // Voucher balance banner at checkout (migration-075) — same "balance → balance
-// after this payment" pattern as MembershipWalletCard, for a gift voucher
-// picked via the Voucher payment-method search. Vouchers have no customer_id
-// link, so unlike Membership there's nothing to auto-load; this only ever
-// shows vouchers staff have already searched for and attached to a tender.
-const VoucherWalletCard = ({ vouchers }) => {
+// after this payment" pattern as MembershipWalletCard. `vouchers` are ones
+// already attached to a tender (via manual search or `available`'s Apply
+// button); `available` are this booking's own customer's linked voucher(s)
+// (migration-084) not yet applied — auto-surfaced the same way Membership/
+// Referral Wallet are, one click to apply. A voucher only ever appears in
+// `available` if it was linked to a customer at issuance; unlinked gift
+// vouchers still rely on the manual Voucher payment-method search.
+const VoucherWalletCard = ({ vouchers, available = [], onApply }) => {
   const list = (vouchers || []).filter(v => v.voucherId);
-  if (list.length === 0) return null;
+  if (list.length === 0 && available.length === 0) return null;
 
   return (
     <div className="space-y-2">
+      {available.length > 0 && (
+        <div className="rounded-spa border bg-primary/5 border-primary/20 px-3 py-2.5 space-y-1.5">
+          {available.map((v) => (
+            <div key={v.voucher_id} className="flex items-center justify-between gap-2">
+              <span className="font-body font-body-normal text-xs text-text-secondary truncate">
+                <span className="font-data font-data-medium text-text-primary">{v.voucher_code}</span>
+                {' '}({formatNPR(v.remaining_balance)})
+              </span>
+              <button
+                type="button"
+                onClick={() => onApply(v)}
+                className="flex-shrink-0 px-2 py-0.5 rounded-full text-[11px] font-caption font-caption-medium bg-primary/10 text-primary hover:bg-primary/20 spa-transition-fast"
+              >
+                Apply
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {list.map((v) => {
         const projectedBalance = Math.max(round2(v.balance) - round2(v.pendingDeduction), 0);
         return (

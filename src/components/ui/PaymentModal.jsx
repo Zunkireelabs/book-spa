@@ -11,6 +11,7 @@ import {
   fetchPendingReferralRewardsForBooking,
   resolveCustomerReferralReward,
   searchVouchersForPayment,
+  fetchVouchersForBooking,
 } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { useOrg } from '../../contexts/OrgContext';
@@ -172,15 +173,27 @@ const PaymentModal = ({
     ]);
   };
 
-  // --- voucher wallet (migration-075) ---
-  // Vouchers have no customer_id link (guest_name/guest_info are free text at
-  // issue time), so unlike Membership/ReferralWallet there's nothing to
-  // auto-load for this booking — staff pick "Voucher" from the Payment Method
-  // dropdown on a tender row, search inline, and once picked that row is
-  // capped at its own remaining balance (not pooled with other vouchers,
+  // --- voucher wallet (migration-075/084) ---
+  // A voucher only auto-loads here if it was linked to this booking's customer
+  // at issuance (migration-082's optional p_customer_id) — most vouchers are
+  // still unlinked gift vouchers, so staff can also pick "Voucher" from the
+  // Payment Method dropdown on a tender row and search inline (guest_name is
+  // free text at issue time). Once a voucher is picked, either way, that row
+  // is capped at its own remaining balance (not pooled with other vouchers,
   // since they're distinct). See VoucherSearchInline + the tenders.map render
-  // branch below for the picker UI.
+  // branch below for the manual-search picker UI.
   const voucherLeaf = VOUCHER_ENABLED ? { value: 'VoucherWallet', label: 'Voucher' } : null;
+
+  const [customerVouchers, setCustomerVouchers] = useState([]);
+  useEffect(() => {
+    if (!VOUCHER_ENABLED || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchVouchersForBooking(bookingId);
+      if (!cancelled) setCustomerVouchers(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId]);
 
   const voucherWalletCommittedByVoucher = useMemo(() => {
     const map = new Map();
@@ -213,6 +226,29 @@ const PaymentModal = ({
       voucherRemainingBalance: Number(v.remaining_balance),
       amount: String(round2(Math.min(Number(v.remaining_balance), Math.max(leftover, 0) || Number(v.remaining_balance)))),
     });
+  };
+
+  // Vouchers already attached to a tender (manual search or a prior Apply
+  // click) shouldn't be offered again in the auto-detected list below.
+  const appliedVoucherWalletIds = useMemo(
+    () => tenders.filter(t => t.paymentMode === 'VoucherWallet' && t.voucherId).map(t => t.voucherId),
+    [tenders]
+  );
+  const availableCustomerVouchers = useMemo(
+    () => customerVouchers.filter(v => !appliedVoucherWalletIds.includes(v.voucher_id)),
+    [customerVouchers, appliedVoucherWalletIds]
+  );
+  const applyCustomerVoucher = (v) => {
+    setTenders(prev => [
+      ...prev,
+      {
+        amount: String(round2(Math.min(Number(v.remaining_balance), Math.max(leftover, 0) || Number(v.remaining_balance)))),
+        paymentMode: 'VoucherWallet',
+        voucherId: v.voucher_id,
+        voucherLabel: v.voucher_code,
+        voucherRemainingBalance: Number(v.remaining_balance),
+      },
+    ]);
   };
 
   // --- pending self-service referral reward this customer earned as a referrer
@@ -508,6 +544,8 @@ const PaymentModal = ({
               balance: v.remainingBalance,
               pendingDeduction: voucherWalletCommittedByVoucher.get(v.voucherId) || 0,
             }))}
+            available={availableCustomerVouchers}
+            onApply={applyCustomerVoucher}
           />
 
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}

@@ -1,7 +1,7 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
-import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED } from '../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -8129,6 +8129,32 @@ export async function searchVouchersForPayment(query) {
   } catch (error) {
     console.error('[API] searchVouchersForPayment error:', error.message);
     return { data: null, error };
+  }
+}
+
+// This booking's own customer's linked voucher(s) with a remaining balance
+// (migration-084/082) — auto-surfaced at checkout the same way
+// fetchMembershipForBooking/fetchReferralRewardForBooking are, instead of
+// requiring staff to manually search. A voucher only shows up here if it was
+// linked to a customer at issuance (issue_voucher's optional p_customer_id);
+// unlinked gift vouchers still rely on searchVouchersForPayment.
+export async function fetchVouchersForBooking(bookingId) {
+  try {
+    if (!VOUCHER_ENABLED || !bookingId) return { data: [], error: null };
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (bErr) throw bErr;
+    if (!booking?.customer_id) return { data: [], error: null };
+
+    const { data, error } = await supabase.rpc('list_vouchers_for_customer', { p_customer_id: booking.customer_id });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchVouchersForBooking error:', error.message);
+    return { data: [], error };
   }
 }
 
