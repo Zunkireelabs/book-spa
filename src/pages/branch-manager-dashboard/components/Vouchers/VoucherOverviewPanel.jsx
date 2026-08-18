@@ -69,7 +69,7 @@ const VoucherOverviewPanel = () => {
     );
   }
 
-  const { totals, statusCounts, walletSummary, branches } = overview;
+  const { totals, branches } = overview;
 
   return (
     <div className="space-y-4">
@@ -125,41 +125,6 @@ const VoucherOverviewPanel = () => {
             <span className="font-caption font-caption-normal text-[11px] text-primary uppercase tracking-wide">Outstanding</span>
           </div>
           <p className="font-heading font-heading-semibold text-xl text-primary">{formatNPR(totals.totalRemaining)}</p>
-        </div>
-      </div>
-
-      {/* Status breakdown + wallet summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <Icon name="Circle" size={14} className="text-text-secondary" />
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Not Claimed</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-text-secondary">{statusCounts.unused}</p>
-        </div>
-        <div className="bg-warning/5 rounded-spa-lg border border-warning/20 p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <Icon name="CircleDashed" size={14} className="text-warning" />
-            <span className="font-caption font-caption-normal text-[11px] text-warning uppercase tracking-wide">Partially Used</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-warning">{statusCounts.partially_used}</p>
-        </div>
-        <div className="bg-success/5 rounded-spa-lg border border-success/20 p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <Icon name="CheckCircle2" size={14} className="text-success" />
-            <span className="font-caption font-caption-normal text-[11px] text-success uppercase tracking-wide">Claimed</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-success">{statusCounts.fully_redeemed}</p>
-        </div>
-        <div className="bg-surface rounded-spa-lg border border-border p-4">
-          <div className="flex items-center space-x-2 mb-2">
-            <Icon name="Wallet" size={14} className="text-primary" />
-            <span className="font-caption font-caption-normal text-[11px] text-text-tertiary uppercase tracking-wide">Wallet Vouchers</span>
-          </div>
-          <p className="font-heading font-heading-semibold text-xl text-text-primary">{walletSummary.count}</p>
-          <p className="font-caption text-[11px] text-text-tertiary mt-0.5">
-            {formatNPR(walletSummary.remainingAmount)} remaining
-          </p>
         </div>
       </div>
 
