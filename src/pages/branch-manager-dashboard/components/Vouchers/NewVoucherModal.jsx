@@ -225,7 +225,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                   />
                 </div>
                 <div className="min-w-0">
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest Info — phone number (optional)</label>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Phone number (optional)</label>
                   <div className="flex">
                     <CountryCodeSelect value={guestCountryCode} onChange={setGuestCountryCode} />
                     <input
