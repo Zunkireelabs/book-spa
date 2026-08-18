@@ -19,12 +19,16 @@ function formatNPR(amount) {
 // `pendingDeduction` is optional: when provided (>0) — e.g. a Membership tender
 // currently entered but not yet confirmed — shows a live "after this payment"
 // projection right in the card, instead of only as a small caption elsewhere.
-const MembershipWalletCard = ({ membership, paidThisVisit = 0, pendingDeduction = 0 }) => {
+// `hideBalance`: staff never see the actual NPR balance (RLS blocks it — see
+// migration-087) — suppresses the balance figure, the pending-deduction
+// arrow/projection, and the "left after this payment" line. Everything else
+// (tier, membership number, status pill, non-numeric status captions) stays.
+const MembershipWalletCard = ({ membership, paidThisVisit = 0, pendingDeduction = 0, hideBalance = false }) => {
   if (!membership) return null;
 
   const styleKey = membership.status || 'pending';
   const styles = MEMBERSHIP_STATUS_STYLES[styleKey] || MEMBERSHIP_STATUS_STYLES.pending;
-  const projectedBalance = Math.max(Number(membership.balance) - pendingDeduction, 0);
+  const projectedBalance = hideBalance ? null : Math.max(Number(membership.balance) - pendingDeduction, 0);
 
   return (
     <div className={`rounded-spa border ${styles.container} px-3 py-2.5`}>
@@ -39,19 +43,21 @@ const MembershipWalletCard = ({ membership, paidThisVisit = 0, pendingDeduction 
             {styles.label}
           </span>
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className={`font-data font-data-medium text-sm text-primary ${pendingDeduction > 0 ? 'line-through text-text-tertiary' : ''}`}>
-            {formatNPR(membership.balance)}
-          </span>
-          {pendingDeduction > 0 && (
-            <>
-              <Icon name="ArrowRight" size={12} className="text-text-secondary" />
-              <span className="font-data font-data-medium text-sm text-primary">{formatNPR(projectedBalance)}</span>
-            </>
-          )}
-        </div>
+        {!hideBalance && (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className={`font-data font-data-medium text-sm text-primary ${pendingDeduction > 0 ? 'line-through text-text-tertiary' : ''}`}>
+              {formatNPR(membership.balance)}
+            </span>
+            {pendingDeduction > 0 && (
+              <>
+                <Icon name="ArrowRight" size={12} className="text-text-secondary" />
+                <span className="font-data font-data-medium text-sm text-primary">{formatNPR(projectedBalance)}</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
-      {pendingDeduction > 0 && (
+      {!hideBalance && pendingDeduction > 0 && (
         <p className="mt-1.5 font-caption text-[11px] text-text-secondary">
           Left after this payment: {formatNPR(projectedBalance)}
         </p>

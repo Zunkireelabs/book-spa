@@ -5341,50 +5341,38 @@ export async function fetchCustomersLightweight(branchId) {
       .single();
     if (branchErr) throw branchErr;
 
-    // The embedded `memberships` relation must only be requested when the
-    // feature is enabled — on production the memberships/membership_tiers
-    // tables don't exist, and an embedded-relation select referencing an
-    // unresolvable FK hard-errors the whole query, not just this field.
-    const membershipSelect = MEMBERSHIP_ENABLED
-      ? `,
-        memberships (
-          id, membership_number,
-          total_deposited, balance,
-          activation_date, expiry_date,
-          tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days )
-        )`
-      : '';
-
-    const { data, error } = await supabase
-      .from('customers')
-      .select(`id, full_name, phone, email, gender${membershipSelect}`)
-      .eq('org_id', branch.org_id)
-      .eq('is_active', true)
-      .order('full_name');
+    const [{ data, error }, statusRes] = await Promise.all([
+      supabase
+        .from('customers')
+        .select('id, full_name, phone, email, gender')
+        .eq('org_id', branch.org_id)
+        .eq('is_active', true)
+        .order('full_name'),
+      MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
+    ]);
 
     if (error) throw error;
 
-    // Attach a `primaryMembership` to each customer (their most-recent
-    // membership regardless of status, transformed to include the computed
-    // status). Drives the membership badge in the booking-creation customer
-    // autocomplete AND the "already a member" / "renew instead" hint in the
-    // Enroll Member modal -- depleted/lapsed cards are surfaced too (not
-    // filtered out) so staff sees a returning member's ended card instead of
-    // it looking like they've never had one.
+    // Attach a `primaryMembership` to each customer via the staff-safe status
+    // RPC (migration-087) — status/tier only, no balance, and readable
+    // regardless of role (unlike an embedded `memberships` relation, which
+    // RLS silently empties out for staff). Drives the membership badge in the
+    // booking-creation customer autocomplete AND the "already a member" /
+    // "renew instead" hint in the Enroll Member modal -- depleted/lapsed
+    // cards are surfaced too (not filtered out) so staff sees a returning
+    // member's ended card instead of it looking like they've never had one.
+    const statusByCustomer = new Map((statusRes.data || []).map((r) => [r.customerId, r]));
     const enriched = (data || []).map((c) => {
-      const memberships = MEMBERSHIP_ENABLED
-        ? (c.memberships || [])
-            .map((row) => transformMembership({ ...row, customer_id: c.id, org_id: branch.org_id }))
-            .filter(Boolean)
-            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-        : [];
+      const s = statusByCustomer.get(c.id);
       return {
         id: c.id,
         full_name: c.full_name,
         phone: c.phone,
         email: c.email,
         gender: c.gender,
-        primaryMembership: memberships[0] || null,
+        primaryMembership: s
+          ? { id: s.membershipId, status: s.status, tierName: s.tierName, membershipNumber: s.membershipNumber }
+          : null,
       };
     });
 
@@ -7669,6 +7657,60 @@ export async function fetchMembershipForBooking(bookingId) {
     return fetchMembershipForCustomer(booking.customer_id);
   } catch (error) {
     console.error('[API] fetchMembershipForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-safe membership status — status/tier/usable only, no balance/deposit
+// figures (migration-087). Used by PaymentModal for staff (who can't SELECT
+// `memberships` directly under RLS) and by fetchCustomersLightweight for the
+// booking-creation tier badge (all roles — it never needed balance either).
+export async function fetchMembershipStatus({ customerId } = {}) {
+  try {
+    if (!MEMBERSHIP_ENABLED) return { data: [], error: null };
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('list_membership_status_for_org', {
+      p_customer_id: customerId || null,
+    });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        customerId: r.customer_id,
+        membershipId: r.membership_id,
+        membershipNumber: r.membership_number,
+        tierName: r.tier_name,
+        status: r.status,
+        usable: r.usable,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchMembershipStatus error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-safe equivalent of fetchMembershipForBooking — resolves the booking's
+// customer, then returns that customer's status-only membership row (single
+// object, or null), with no balance/deposit figures.
+export async function fetchMembershipStatusForBooking(bookingId) {
+  try {
+    if (!MEMBERSHIP_ENABLED || !bookingId) return { data: null, error: null };
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id')
+      .eq('id', bookingId)
+      .single();
+    if (bErr) throw bErr;
+    if (!booking?.customer_id) return { data: null, error: null };
+
+    const { data, error } = await fetchMembershipStatus({ customerId: booking.customer_id });
+    if (error) return { data: null, error };
+    return { data: data?.[0] || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchMembershipStatusForBooking error:', error.message);
     return { data: null, error };
   }
 }

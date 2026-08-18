@@ -7,6 +7,7 @@ import ReferralRewardCard from './ReferralRewardCard';
 import VoucherWalletCard from './VoucherWalletCard';
 import {
   fetchMembershipForBooking,
+  fetchMembershipStatusForBooking,
   fetchReferralRewardForBooking,
   fetchPendingReferralRewardsForBooking,
   resolveCustomerReferralReward,
@@ -46,6 +47,7 @@ const PaymentModal = ({
   const { paymentMethods } = useOrg();
   const { profile } = useAuth();
   const userRole = profile?.role || 'staff';
+  const isStaff = userRole === 'staff';
   const canResolveReferralReward = ['manager', 'admin'].includes(userRole);
   const PAYMENT_TREE = useMemo(
     () => buildPaymentMethodTree(paymentMethods),
@@ -83,21 +85,37 @@ const PaymentModal = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   // --- membership wallet (Phase 3) ---
+  // `memberships` SELECT RLS is manager/admin/admin_viewer only (migration-080)
+  // — staff can't read the balance at all. Manager/admin keep the full-balance
+  // fetch (`membership`, unchanged below); staff get a status-only fetch via
+  // list_membership_status_for_org() (migration-087), which never returns a
+  // balance figure. See MembershipWalletCard's `hideBalance` prop for the
+  // staff-safe rendering, and the submit/inline-caption guards further down.
   const [membership, setMembership] = useState(null);
+  const [membershipStatus, setMembershipStatus] = useState(null);
   const bookingId = booking.bookingId || booking.id;
   useEffect(() => {
     if (!MEMBERSHIP_ENABLED || !bookingId) return;
     let cancelled = false;
     (async () => {
-      const { data } = await fetchMembershipForBooking(bookingId);
-      if (!cancelled) setMembership(data || null);
+      if (isStaff) {
+        const { data } = await fetchMembershipStatusForBooking(bookingId);
+        if (!cancelled) setMembershipStatus(data || null);
+      } else {
+        const { data } = await fetchMembershipForBooking(bookingId);
+        if (!cancelled) setMembership(data || null);
+      }
     })();
     return () => { cancelled = true; };
-  }, [bookingId]);
+  }, [bookingId, isStaff]);
 
   // The Membership option is added to the mode selector only when there's a
-  // wallet attached to this booking's customer AND the wallet still has balance.
-  const membershipUsable = membership && membership.balance > 0 && membership.status !== 'depleted';
+  // wallet attached to this booking's customer AND the wallet still has balance
+  // (manager/admin) — or, for staff, when the staff-safe status says it's
+  // usable (active/lapsed; balance is never checked client-side for staff).
+  const membershipUsable = isStaff
+    ? !!membershipStatus?.usable
+    : !!(membership && membership.balance > 0 && membership.status !== 'depleted');
   const membershipLeaf = membershipUsable
     ? { value: 'Membership', label: 'Membership' }
     : null;
@@ -105,8 +123,11 @@ const PaymentModal = ({
   // Once the membership wallet loads, default the tender to it when the balance
   // fully covers the total due — otherwise staff have to notice the wallet card
   // and manually switch off Cash. Only fires while the tender is still untouched
-  // (pristine), so it never overwrites a choice staff already made.
+  // (pristine), so it never overwrites a choice staff already made. Skipped
+  // entirely for staff — they don't know the balance, so can't know it covers
+  // the total; they pick Membership manually and the server validates it.
   useEffect(() => {
+    if (isStaff) return;
     if (!membershipUsable || membership.balance < grandTotal) return;
     const pristine = tenders.length === 1
       && tenders[0].paymentMode === firstLeafValue(PAYMENT_TREE)
@@ -115,7 +136,7 @@ const PaymentModal = ({
       setTenders([{ amount: String(grandTotal || ''), paymentMode: 'Membership' }]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [membershipUsable, membership?.balance, grandTotal]);
+  }, [isStaff, membershipUsable, membership?.balance, grandTotal]);
 
   // How much of the Membership wallet is already committed by other tenders in
   // this submission. Used to cap each Membership tender input.
@@ -125,7 +146,7 @@ const PaymentModal = ({
       tenders.reduce((s, t) => s + (t.paymentMode === 'Membership' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)
     );
   }, [tenders, membershipUsable]);
-  const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
+  const walletRemaining = membershipUsable && !isStaff ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
 
   // --- referral reward wallet + voucher (migration-070) ---
   const [referralReward, setReferralReward] = useState(null);
@@ -383,7 +404,7 @@ const PaymentModal = ({
       setError('Enter who the remaining due is under before leaving a balance unpaid.');
       return;
     }
-    if (membershipUsable && membershipCommitted > membership.balance) {
+    if (!isStaff && membershipUsable && membershipCommitted > membership.balance) {
       setError(`Membership tenders total ${formatNPR(membershipCommitted)} but the wallet balance is only ${formatNPR(membership.balance)}.`);
       return;
     }
@@ -414,7 +435,15 @@ const PaymentModal = ({
       dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
       notes,
     });
-    if (result?.error) setError(result.error.message || 'Failed to record payment.');
+    if (result?.error) {
+      const msg = result.error.message || 'Failed to record payment.';
+      // record_membership_payment's own error text includes the exact balance
+      // (e.g. "have 200, need 500") — staff must never see that number.
+      const isBalanceLeak = isStaff && /insufficient wallet balance/i.test(msg);
+      setError(isBalanceLeak
+        ? "This membership's wallet doesn't have enough balance for that amount — try a smaller amount, or pay the rest with another method."
+        : msg);
+    }
   };
 
   return (
@@ -487,7 +516,17 @@ const PaymentModal = ({
             </div>
           </div>
 
-          <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />
+          <MembershipWalletCard
+            membership={isStaff
+              ? (membershipStatus ? {
+                  tierName: membershipStatus.tierName,
+                  membershipNumber: membershipStatus.membershipNumber,
+                  status: membershipStatus.status,
+                } : null)
+              : membership}
+            pendingDeduction={membershipCommitted}
+            hideBalance={isStaff}
+          />
 
           {activePendingReward && (
             <div className="rounded-spa border border-amber-300 bg-amber-50 p-3 space-y-2.5">
@@ -568,7 +607,7 @@ const PaymentModal = ({
                 const isReferralWallet = t.paymentMode === 'ReferralWallet';
                 const isReferralVoucher = t.paymentMode === 'ReferralVoucher';
                 const isVoucherWallet = t.paymentMode === 'VoucherWallet';
-                const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
+                const overWallet = !isStaff && isMembership && Number(t.amount) > Number(membership?.balance || 0);
                 const overReferralWallet = isReferralWallet && Number(t.amount) > Number(referralReward?.walletBalance || 0);
                 const overVoucherWallet = isVoucherWallet && t.voucherId &&
                   (voucherWalletCommittedByVoucher.get(t.voucherId) || 0) > t.voucherRemainingBalance;
@@ -697,9 +736,11 @@ const PaymentModal = ({
                     </div>
                     {isMembership && (
                       <p className={`text-[11px] font-caption ml-[8.5rem] ${overWallet ? 'text-error' : 'text-text-tertiary'}`}>
-                        {overWallet
-                          ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
-                          : `Wallet available: ${formatNPR(walletRemaining)}`}
+                        {isStaff
+                          ? 'Checked against the wallet balance when you submit.'
+                          : overWallet
+                            ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
+                            : `Wallet available: ${formatNPR(walletRemaining)}`}
                       </p>
                     )}
                     {isReferralWallet && (
