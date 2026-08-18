@@ -221,6 +221,7 @@ const MembershipsPanel = () => {
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Phone</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Birthdate</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Deposited</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Expires</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
@@ -251,6 +252,9 @@ const MembershipsPanel = () => {
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-body font-body-medium text-sm text-text-primary">{m.tierName}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-body font-body-normal text-sm text-text-secondary">{m.customerBranchName || '—'}</span>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.cycleDeposited)}</span>

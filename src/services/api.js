@@ -7484,7 +7484,7 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender, date_of_birth ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth, branch:branches ( id, name ) ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .order('created_at', { ascending: false });

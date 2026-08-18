@@ -137,6 +137,8 @@ export function transformMembership(dbMembership) {
     customerPhone: customer?.phone || null,
     customerGender: customer?.gender || null,
     customerDateOfBirth: customer?.date_of_birth || null,
+    customerBranchId: customer?.branch?.id || null,
+    customerBranchName: customer?.branch?.name || null,
     membershipNumber: dbMembership.membership_number || null,
     tierId: dbMembership.tier_id,
     tierName: tier?.name || null,
