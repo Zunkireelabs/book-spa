@@ -87,10 +87,10 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   // discount field themselves (option A from the voucher-improvements
   // brainstorm: auto-fill + override, matching how discounts work
   // everywhere else in the app rather than a server-enforced ceiling).
-  const applyTierDiscount = (type, m = activeMembership) => {
-    if (discountTouched) return;
+  const applyTierDiscount = (type, m = activeMembership, touched = discountTouched) => {
+    if (touched) return;
     const rate = tierRateForType(type, m);
-    if (typeof rate === 'number') setDiscountPercent(String(rate));
+    setDiscountPercent(typeof rate === 'number' ? String(rate) : '0');
   };
 
   const handleTypeChange = (id) => {
@@ -228,14 +228,29 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                   </label>
                   <CustomerAutocomplete
                     value={guestName}
-                    onChange={(val) => { setGuestName(val); setLinkedCustomerId(null); setMembership(null); }}
+                    onChange={(val) => {
+                      setGuestName(val);
+                      setLinkedCustomerId(null);
+                      setMembership(null);
+                      // Clearing a linked member drops their entitlement — an
+                      // auto-filled discount left behind would look like a
+                      // manual override for whoever the guest turns out to be.
+                      // Only untouched (auto-filled) values are reset; a
+                      // staff-typed discount is left alone.
+                      applyTierDiscount(selectedType, null);
+                    }}
                     onSelect={async (customer) => {
                       setGuestName(customer.full_name);
                       setLinkedCustomerId(customer.id);
                       if (customer.phone) setGuestPhone(customer.phone.replace(/\D/g, '').slice(-10));
+                      // A newly-selected guest is a fresh context — their tier
+                      // discount should apply even if a previous guest's
+                      // discount was manually overridden in this same form.
+                      setDiscountTouched(false);
                       const { data: m } = await fetchMembershipForCustomer(customer.id);
+                      const active = m?.status === 'active' ? m : null;
                       setMembership(m);
-                      if (m?.status === 'active') applyTierDiscount(selectedType, m);
+                      applyTierDiscount(selectedType, active, false);
                     }}
                     branchId={branchId}
                     searchBy="name"
