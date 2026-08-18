@@ -5,7 +5,7 @@ import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
-import { fetchVoucherTypes, issueVoucher } from '../../../../services/api';
+import { fetchVoucherTypes, issueVoucher, fetchMembershipForCustomer } from '../../../../services/api';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -44,6 +44,8 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     return toDateInputValue(d);
   });
   const [remarks, setRemarks] = useState('');
+  const [membership, setMembership] = useState(null);
+  const [discountTouched, setDiscountTouched] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -76,11 +78,26 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   }, [onClose]);
 
   const selectedType = types.find((t) => t.id === voucherTypeId);
+  const activeMembership = membership?.status === 'active' ? membership : null;
+  const tierRateForType = (type, m = activeMembership) =>
+    type && m ? m.tierDiscountRules?.[type.category] : undefined;
+
+  // Auto-fills the discount from the guest's membership tier for the given
+  // voucher type — only while the staff member hasn't typed into the
+  // discount field themselves (option A from the voucher-improvements
+  // brainstorm: auto-fill + override, matching how discounts work
+  // everywhere else in the app rather than a server-enforced ceiling).
+  const applyTierDiscount = (type, m = activeMembership, touched = discountTouched) => {
+    if (touched) return;
+    const rate = tierRateForType(type, m);
+    setDiscountPercent(typeof rate === 'number' ? String(rate) : '0');
+  };
 
   const handleTypeChange = (id) => {
     setVoucherTypeId(id);
     const t = types.find((x) => x.id === id);
     if (t) setActualPrice(String(t.standard_price));
+    applyTierDiscount(t);
   };
 
   const actualPriceNum = Number(actualPrice) || 0;
@@ -211,11 +228,29 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                   </label>
                   <CustomerAutocomplete
                     value={guestName}
-                    onChange={(val) => { setGuestName(val); setLinkedCustomerId(null); }}
-                    onSelect={(customer) => {
+                    onChange={(val) => {
+                      setGuestName(val);
+                      setLinkedCustomerId(null);
+                      setMembership(null);
+                      // Clearing a linked member drops their entitlement — an
+                      // auto-filled discount left behind would look like a
+                      // manual override for whoever the guest turns out to be.
+                      // Only untouched (auto-filled) values are reset; a
+                      // staff-typed discount is left alone.
+                      applyTierDiscount(selectedType, null);
+                    }}
+                    onSelect={async (customer) => {
                       setGuestName(customer.full_name);
                       setLinkedCustomerId(customer.id);
                       if (customer.phone) setGuestPhone(customer.phone.replace(/\D/g, '').slice(-10));
+                      // A newly-selected guest is a fresh context — their tier
+                      // discount should apply even if a previous guest's
+                      // discount was manually overridden in this same form.
+                      setDiscountTouched(false);
+                      const { data: m } = await fetchMembershipForCustomer(customer.id);
+                      const active = m?.status === 'active' ? m : null;
+                      setMembership(m);
+                      applyTierDiscount(selectedType, active, false);
                     }}
                     branchId={branchId}
                     searchBy="name"
@@ -288,11 +323,20 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     max="100"
                     step="any"
                     value={discountPercent}
-                    onChange={(e) => setDiscountPercent(e.target.value)}
+                    onChange={(e) => { setDiscountPercent(e.target.value); setDiscountTouched(true); }}
                     className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
                 </div>
               </div>
+
+              {activeMembership && typeof tierRateForType(selectedType) === 'number' && (
+                <p className="font-caption text-xs text-primary flex items-center space-x-1">
+                  <Icon name="BadgeCheck" size={12} />
+                  <span>
+                    {activeMembership.tierName} member — entitled to {tierRateForType(selectedType)}% off {selectedType?.category?.replace('_', ' ')} vouchers
+                  </span>
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

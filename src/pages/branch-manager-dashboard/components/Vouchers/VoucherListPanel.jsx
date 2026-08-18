@@ -186,21 +186,21 @@ const VoucherListPanel = () => {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={`overflow-x-auto ${filtered.length > 10 ? 'max-h-[640px] overflow-y-auto' : ''}`}>
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 z-sticky-filter">
                 <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Voucher Code</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Guest Name</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Guest Info</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Type</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Issued By</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Expiry</th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Redeem date</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Issued</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Remaining</th>
-                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Voucher Code</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary">Guest Name</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary">Guest Info</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary">Type</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Branch</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Issued By</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Expiry</th>
+                  <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Redeemed</th>
+                  <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Issued</th>
+                  <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Remaining</th>
+                  <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -212,49 +212,49 @@ const VoucherListPanel = () => {
                       onClick={() => setSelectedId(v.id)}
                       className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
                     >
-                      <td className="px-4 py-3">
-                        <span className="font-data font-data-normal text-xs text-text-secondary tracking-wide">{v.voucherCode}</span>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                        <span className="font-data font-data-normal text-[11px] text-text-secondary tracking-wide">{v.voucherCode}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-medium text-sm text-text-primary">{v.guestName}</span>
+                      <td className="px-2.5 py-1.5">
+                        <span className="font-body font-body-medium text-xs text-text-primary">{v.guestName}</span>
                         {v.isWallet && (
-                          <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-primary/10 text-primary">
+                          <span className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-caption font-caption-medium bg-primary/10 text-primary">
                             Wallet
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-normal text-sm text-text-secondary">{v.guestInfo || '—'}</span>
+                      <td className="px-2.5 py-1.5">
+                        <span className="font-body font-body-normal text-xs text-text-secondary">{v.guestInfo || '—'}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-normal text-sm text-text-secondary">{v.voucherTypeName}</span>
+                      <td className="px-2.5 py-1.5">
+                        <span className="font-body font-body-normal text-xs text-text-secondary">{v.voucherTypeName}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-normal text-sm text-text-secondary">{v.branchName}</span>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                        <span className="font-body font-body-normal text-xs text-text-secondary">{v.branchName}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-body font-body-normal text-sm text-text-secondary">{v.issuedByName}</span>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                        <span className="font-body font-body-normal text-xs text-text-secondary">{v.issuedByName}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-caption text-xs text-text-tertiary">{formatDate(v.expiryDate)}</span>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                        <span className="font-caption text-[11px] text-text-tertiary">{formatDate(v.expiryDate)}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-caption text-xs text-text-tertiary">{formatDate(v.lastClaimDate)}</span>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                        <span className="font-caption text-[11px] text-text-tertiary">{formatDate(v.lastClaimDate)}</span>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(v.totalAmountIssued)}</span>
+                      <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
+                        <span className="font-data font-data-normal text-xs text-text-secondary">{formatNPR(v.totalAmountIssued)}</span>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-data font-data-medium text-sm text-primary">{formatNPR(v.remainingBalance)}</span>
+                      <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
+                        <span className="font-data font-data-medium text-xs text-primary">{formatNPR(v.remainingBalance)}</span>
                         {v.totalClaimed > 0 && (
-                          <p className="font-caption text-[10px] text-text-tertiary mt-0.5">
+                          <p className="font-caption text-[9px] text-text-tertiary mt-0.5">
                             Used {formatNPR(v.totalClaimed)}{v.lastClaimDate ? ` · ${formatDate(v.lastClaimDate)}` : ''}
                           </p>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${cfg.pill}`}>
-                          <Icon name={cfg.icon} size={11} />
+                      <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
+                        <span className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[9px] font-caption font-caption-medium ${cfg.pill}`}>
+                          <Icon name={cfg.icon} size={10} />
                           <span>{cfg.label}</span>
                         </span>
                       </td>
@@ -262,11 +262,11 @@ const VoucherListPanel = () => {
                   );
                 })}
               </tbody>
-              <tfoot>
+              <tfoot className="sticky bottom-0 z-sticky-filter">
                 <tr className="bg-background border-t-2 border-border">
-                  <td colSpan={8} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(totals.issued)}</td>
-                  <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-primary">{formatNPR(totals.outstanding)}</td>
+                  <td colSpan={8} className="px-2.5 py-2 font-body font-body-semibold text-xs text-text-primary">Total</td>
+                  <td className="px-2.5 py-2 text-right font-data font-data-semibold text-xs text-text-primary whitespace-nowrap">{formatNPR(totals.issued)}</td>
+                  <td className="px-2.5 py-2 text-right font-data font-data-semibold text-xs text-primary whitespace-nowrap">{formatNPR(totals.outstanding)}</td>
                   <td />
                 </tr>
               </tfoot>
