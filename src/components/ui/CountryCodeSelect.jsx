@@ -148,8 +148,8 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
       setPanelPos({
         left,
         ...(openUpward
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
+          ? { bottom: window.innerHeight - rect.top + 8 }
+          : { top: rect.bottom + 8 }),
       });
     }
     setIsOpen((o) => !o);
