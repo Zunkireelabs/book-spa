@@ -474,8 +474,13 @@ const BookingActionModal = ({
   const isServiceStarted = booking.status === 'in-progress';
   // Clicking Start locks everything except Discount/Payment (still needed to
   // settle the bill); being paid locks Discount/Payment too (via canDiscount/
-  // canPay below) and everything else. Day-close and terminal status always lock.
+  // canPay below). Day-close and terminal status always lock everything.
   const isMutationBlocked = isTerminal || isLocked || isServiceStarted || isSettled;
+  // Assignment (therapist/room) locks once the service has started (or is
+  // terminal/day-closed) — NOT merely because it's been paid. A booking can be
+  // paid before it starts (pay-after-service isn't mandatory) and reassignment
+  // should still be possible right up until the service actually begins.
+  const isAssignmentBlocked = isTerminal || isLocked || isServiceStarted;
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
@@ -1038,7 +1043,7 @@ const BookingActionModal = ({
             {/* Assigned Tab */}
             {activeTab === 'assign' && (
               <div className="space-y-4 sm:space-y-6">
-                {isMutationBlocked && (
+                {isAssignmentBlocked && (
                   <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
                     <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
                     <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
@@ -1082,7 +1087,7 @@ const BookingActionModal = ({
                           <label
                             key={therapist.id}
                             className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[52px] ${
-                              isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                              isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                             } ${
                               isSelected
                                 ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -1092,7 +1097,7 @@ const BookingActionModal = ({
                               type="checkbox"
                               value={therapist.id}
                               checked={isSelected}
-                              disabled={isMutationBlocked}
+                              disabled={isAssignmentBlocked}
                               onChange={(e) => {
                                 if (e.target.checked) {
                                   setSelectedTherapists(prev => [...prev, therapist.id]);
@@ -1145,7 +1150,7 @@ const BookingActionModal = ({
                       {/* Unassign room option */}
                       <label
                         className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                          isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                          isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                         } ${
                           selectedRoom === ''
                             ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -1156,7 +1161,7 @@ const BookingActionModal = ({
                           name="room"
                           value=""
                           checked={selectedRoom === ''}
-                          disabled={isMutationBlocked}
+                          disabled={isAssignmentBlocked}
                           onChange={() => setSelectedRoom('')}
                           className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
                         />
@@ -1166,7 +1171,7 @@ const BookingActionModal = ({
                         <label
                           key={room.id}
                           className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                            isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                            isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                           } ${
                             selectedRoom === room.id
                               ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -1177,7 +1182,7 @@ const BookingActionModal = ({
                             name="room"
                             value={room.id}
                             checked={selectedRoom === room.id}
-                            disabled={isMutationBlocked}
+                            disabled={isAssignmentBlocked}
                             onChange={(e) => setSelectedRoom(e.target.value)}
                             className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
                           />
@@ -1205,7 +1210,7 @@ const BookingActionModal = ({
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Add any special instructions for the therapist..."
                     rows={3}
-                    disabled={isMutationBlocked}
+                    disabled={isAssignmentBlocked}
                     className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
@@ -1960,7 +1965,7 @@ const BookingActionModal = ({
                   <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
                     Close
                   </Button>
-                  {activeTab === 'assign' && !isMutationBlocked && (
+                  {activeTab === 'assign' && !isAssignmentBlocked && (
                     <Button
                       variant="primary"
                       onClick={handleAssignTherapist}
