@@ -7964,7 +7964,7 @@ export async function fetchVoucherTypes() {
   try {
     const { data, error } = await supabase
       .from('voucher_types')
-      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order')
+      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category')
       .eq('is_active', true)
       .order('display_order', { ascending: true });
     if (error) throw error;
