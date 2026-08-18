@@ -424,9 +424,9 @@ const LoginForm = () => {
             <span className="text-sm font-medium text-text-primary">Demo Credentials</span>
           </div>
           <div className="space-y-1.5 text-xs text-text-secondary font-mono">
-            <div><strong>Staff:</strong> staff@zenly.app / Zenly@Staff123</div>
-            <div><strong>Manager:</strong> manager@zenly.app / Zenly@Manager123</div>
-            <div><strong>Admin:</strong> admin@zenly.app / Zenly@Admin123</div>
+            <div><strong>Staff:</strong> staff@zenly.app / Zennly@Staff123</div>
+            <div><strong>Manager:</strong> manager@zenly.app / Zennly@Manager123</div>
+            <div><strong>Admin:</strong> admin@zenly.app / Zennly@Admin123</div>
           </div>
         </div>
       )}

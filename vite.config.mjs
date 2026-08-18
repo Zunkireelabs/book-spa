@@ -12,6 +12,6 @@ export default defineConfig({
     port: 4028,
     host: "0.0.0.0",
     strictPort: true,
-    allowedHosts: ['dev-zenly.zunkireelabs.com', 'zenly.zunkireelabs.com'],
+    allowedHosts: ['dev-app.zennly.io', 'app.zennly.io', 'dev-zenly.zunkireelabs.com', 'zenly.zunkireelabs.com'],
   },
 });
