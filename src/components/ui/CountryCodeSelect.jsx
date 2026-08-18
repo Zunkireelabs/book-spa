@@ -72,6 +72,21 @@ export function parsePhone(raw, fallbackDial = '+977') {
   return { dial: fallbackDial, national: digits };
 }
 
+// Walk up from `el` to find the nearest ancestor that actually clips
+// overflow — almost always the modal card itself (it sets overflow-y-auto
+// directly on the card, not on some separate scroll wrapper). Used to keep
+// the portaled panel visually confined to the card instead of spilling past
+// its edge onto the backdrop behind it.
+function getClippingAncestor(el) {
+  let node = el?.parentElement;
+  while (node && node !== document.body) {
+    const style = window.getComputedStyle(node);
+    if (/(auto|scroll|hidden)/.test(style.overflowX + style.overflowY)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
 function isoToFlag(iso) {
   return iso
     .toUpperCase()
@@ -117,17 +132,21 @@ const CountryCodeSelect = ({ value = '+977', onChange, disabled = false }) => {
 
   // Renders the panel via a portal to document.body (fixed-positioned from
   // the trigger's own coordinates) instead of as a CSS-absolute sibling, so
-  // it always appears right under "+977 ▾" — a modal body only sets
-  // overflow-y-auto, which per the CSS Overflow spec makes the browser
-  // compute overflow-x as auto too, clipping an absolutely-positioned panel
-  // the moment it's wider than whatever column the trigger sits in.
+  // it's never clipped by a modal body's overflow-y-auto (which per the CSS
+  // Overflow spec makes the browser compute overflow-x as auto too). left is
+  // still clamped to the modal card's own bounds (not just the viewport, which
+  // is usually much wider) so the panel stays visually confined to the card
+  // instead of spilling out over the backdrop behind it.
   const toggle = () => {
     if (disabled) return;
     if (!isOpen && wrapRef.current) {
       const rect = wrapRef.current.getBoundingClientRect();
       const openUpward = window.innerHeight - rect.bottom < 280;
+      const clipper = getClippingAncestor(wrapRef.current);
+      const bounds = clipper ? clipper.getBoundingClientRect() : { left: 0, right: window.innerWidth };
+      const left = Math.max(bounds.left + 8, Math.min(rect.left, bounds.right - PANEL_WIDTH - 8));
       setPanelPos({
-        left: Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 12),
+        left,
         ...(openUpward
           ? { bottom: window.innerHeight - rect.top + 4 }
           : { top: rect.bottom + 4 }),
