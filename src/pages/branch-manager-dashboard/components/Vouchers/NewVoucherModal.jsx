@@ -137,7 +137,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     <>
       <div className="fixed inset-0 bg-black/40 z-modal" onClick={onClose} aria-hidden="true" />
       <div
-        className="fixed inset-0 z-modal-overlay flex items-center justify-center p-4"
+        className="fixed inset-0 z-modal-overlay flex items-start justify-center overflow-y-auto p-4 pt-10 sm:pt-16"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-voucher-title"
