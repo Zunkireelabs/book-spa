@@ -7661,10 +7661,9 @@ export async function fetchMembershipForBooking(bookingId) {
   }
 }
 
-// Staff-safe membership status — status/tier/usable only, no balance/deposit
-// figures (migration-087). Used by PaymentModal for staff (who can't SELECT
-// `memberships` directly under RLS) and by fetchCustomersLightweight for the
-// booking-creation tier badge (all roles — it never needed balance either).
+// Membership status — status/tier/usable only, no balance/deposit figures
+// (migration-087). Used by fetchCustomersLightweight for the booking-creation
+// tier badge (every role — the badge never needed balance in the first place).
 export async function fetchMembershipStatus({ customerId } = {}) {
   try {
     if (!MEMBERSHIP_ENABLED) return { data: [], error: null };
@@ -7688,29 +7687,6 @@ export async function fetchMembershipStatus({ customerId } = {}) {
     };
   } catch (error) {
     console.error('[API] fetchMembershipStatus error:', error.message);
-    return { data: null, error };
-  }
-}
-
-// Staff-safe equivalent of fetchMembershipForBooking — resolves the booking's
-// customer, then returns that customer's status-only membership row (single
-// object, or null), with no balance/deposit figures.
-export async function fetchMembershipStatusForBooking(bookingId) {
-  try {
-    if (!MEMBERSHIP_ENABLED || !bookingId) return { data: null, error: null };
-    const { data: booking, error: bErr } = await supabase
-      .from('bookings')
-      .select('customer_id')
-      .eq('id', bookingId)
-      .single();
-    if (bErr) throw bErr;
-    if (!booking?.customer_id) return { data: null, error: null };
-
-    const { data, error } = await fetchMembershipStatus({ customerId: booking.customer_id });
-    if (error) return { data: null, error };
-    return { data: data?.[0] || null, error: null };
-  } catch (error) {
-    console.error('[API] fetchMembershipStatusForBooking error:', error.message);
     return { data: null, error };
   }
 }
