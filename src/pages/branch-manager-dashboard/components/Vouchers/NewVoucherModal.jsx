@@ -34,6 +34,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   const [linkedCustomerId, setLinkedCustomerId] = useState(null);
   const [guestCountryCode, setGuestCountryCode] = useState('+977');
   const [guestPhone, setGuestPhone] = useState('');
+  const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [actualPrice, setActualPrice] = useState('');
   const [discountPercent, setDiscountPercent] = useState('0');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
@@ -102,15 +103,16 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
 
     setSubmitting(true);
-    // A phone number here is what makes the voucher searchable by phone (in
-    // addition to its code) at payment time — see search_vouchers_for_payment
-    // / migration-085.
+    // Guest Info is one column — a phone number takes priority (it's what
+    // makes the voucher searchable by phone at payment time, see
+    // search_vouchers_for_payment/migration-085); the free-text Guest Info
+    // field (company/club name, etc.) is used when there's no phone.
     const guestPhoneDigits = guestPhone.replace(/\D/g, '');
     const { data, error: rpcError } = await issueVoucher({
       branchId,
       voucherTypeId,
       guestName: guestName.trim(),
-      guestInfo: guestPhoneDigits ? `${guestCountryCode}${guestPhoneDigits}` : null,
+      guestInfo: guestPhoneDigits ? `${guestCountryCode}${guestPhoneDigits}` : (guestOtherInfo.trim() || null),
       discountPercent: discountNum,
       actualPrice: actualPriceNum,
       issuedDate,
@@ -220,9 +222,6 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     placeholder="Full name"
                     inputClassName="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
-                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
-                    Pick a suggestion to link this voucher to that customer's account, or type a name for a guest without one.
-                  </p>
                 </div>
                 <div className="min-w-0">
                   <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Phone number (optional)</label>
@@ -237,6 +236,17 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     />
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest Info (optional)</label>
+                <input
+                  type="text"
+                  value={guestOtherInfo}
+                  onChange={(e) => setGuestOtherInfo(e.target.value)}
+                  placeholder="Company or club name..."
+                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
               </div>
 
               <div>
