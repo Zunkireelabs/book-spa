@@ -59,12 +59,6 @@ const VoucherListPanel = () => {
     fully_redeemed: vouchers.filter((v) => v.status === 'fully_redeemed').length,
   }), [vouchers]);
 
-  const totals = useMemo(() => ({
-    issued: vouchers.reduce((sum, v) => sum + v.totalAmountIssued, 0),
-    claimed: vouchers.reduce((sum, v) => sum + v.totalClaimed, 0),
-    outstanding: vouchers.reduce((sum, v) => sum + v.remainingBalance, 0),
-  }), [vouchers]);
-
   const filtered = useMemo(() => {
     let rows = vouchers;
     if (statusFilter !== 'all') rows = rows.filter((v) => v.status === statusFilter);
@@ -80,6 +74,14 @@ const VoucherListPanel = () => {
     }
     return [...rows].sort((a, b) => a.guestName.localeCompare(b.guestName));
   }, [vouchers, search, statusFilter]);
+
+  // Matches whatever's currently visible (search + status filter) — the
+  // Total row would otherwise silently disagree with the rows above it.
+  const totals = useMemo(() => ({
+    issued: filtered.reduce((sum, v) => sum + v.totalAmountIssued, 0),
+    claimed: filtered.reduce((sum, v) => sum + v.totalClaimed, 0),
+    outstanding: filtered.reduce((sum, v) => sum + v.remainingBalance, 0),
+  }), [filtered]);
 
   if (loading) {
     return (
@@ -120,7 +122,7 @@ const VoucherListPanel = () => {
       <div>
         <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Vouchers</h3>
         <p className="font-body text-sm text-text-secondary">
-          {vouchers.length} voucher{vouchers.length !== 1 ? 's' : ''} issued · {formatNPR(totals.issued)} issued · {formatNPR(totals.claimed)} claimed
+          {filtered.length} voucher{filtered.length !== 1 ? 's' : ''} issued · {formatNPR(totals.issued)} issued · {formatNPR(totals.claimed)} claimed
         </p>
       </div>
 
