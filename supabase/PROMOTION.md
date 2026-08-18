@@ -1,4 +1,16 @@
-# Database Promotion Runbook
+# Database Promotion Runbook (DEPRECATED — see LOCAL-DEV-SETUP.md)
+
+**As of 2026-08-13 this manual dashboard-paste flow is retired.** Migrations now apply via
+CI — `deploy-staging.yml` and `deploy.yml` run `scripts/migrate-apply.sh` automatically (the
+prod path is gated behind a required reviewer). See `supabase/LOCAL-DEV-SETUP.md` for the
+current process: writing a migration, testing it locally, and how it reaches staging/prod.
+
+This file is kept for historical context (it explains how the `schema_migrations` ledger
+and the two-database setup came to exist) and for the credential/seed-sync guidance below,
+which is still accurate — that part is **data**, not schema, and isn't part of the automated
+migration flow.
+
+---
 
 How to promote database changes (schema migrations + credential/seed SQL) from **staging** to
 **production**. This is the source of truth — follow it for every DB change.

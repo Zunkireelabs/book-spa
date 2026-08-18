@@ -9,6 +9,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  migration-guard:
+    name: Migration Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Every new migration must self-record in the ledger
+        run: |
+          git fetch origin "${{ github.base_ref }}" --quiet
+          BASE_REF="origin/${{ github.base_ref }}" bash scripts/check-migrations.sh
+
+  promotion-guard:
+    name: Promotion Source Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: PRs to main may only come from stage or promote/*
+        run: |
+          if [ "${{ github.base_ref }}" != "main" ]; then
+            echo "✓ base is '${{ github.base_ref }}', not main — nothing to enforce."
+            exit 0
+          fi
+          HEAD="${{ github.head_ref }}"
+          case "$HEAD" in
+            stage|promote/*)
+              echo "✓ main PR head '$HEAD' is an allowed promotion source." ;;
+            *)
+              echo "✗ PRs to main may only come from 'stage' or a 'promote/*' branch (got '$HEAD')."
+              echo "  main is PRODUCTION. Merge feature branches to stage first, then promote"
+              echo "  stage → main. Direct-to-main merges are how main/stage diverge."
+              exit 1 ;;
+          esac
+
   build:
     name: Build
     runs-on: ubuntu-latest

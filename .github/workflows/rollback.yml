@@ -21,17 +21,40 @@ jobs:
     steps:
       - name: Rollback via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ secrets.GHCR_PULL_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          TARGET_SHA: ${{ inputs.commit_sha }}
+          ROLLBACK_REASON: ${{ inputs.reason }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN,TARGET_SHA,ROLLBACK_REASON
           script: |
+            set -e
+            IMAGE=ghcr.io/zunkireelabs/book-spa
+            echo "=============================================================="
+            echo "ROLLBACK to $TARGET_SHA — reason: $ROLLBACK_REASON"
+            echo "WARNING: this reverts CODE ONLY. The database is NOT rolled back."
+            echo "If the bad deploy included a migration, resolve the DB story first"
+            echo "(scripts/migrate-status.sh prod tells you what's actually applied)."
+            echo "After the incident, roll FORWARD to a real main commit (normal deploy)."
+            echo "=============================================================="
             cd /home/zunkireelabs/devprojects/nuad-thai-web-app-prod
-            echo "Rolling back to ${{ inputs.commit_sha }}"
-            echo "Reason: ${{ inputs.reason }}"
-            git fetch origin
-            git checkout ${{ inputs.commit_sha }}
-            docker compose up -d --build
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            # deploy.yml tags every prod build :prod-<sha>. Roll back by pulling that
+            # pre-built image — no on-box rebuild, no git checkout / detached HEAD.
+            if ! docker manifest inspect "$IMAGE:prod-$TARGET_SHA" > /dev/null 2>&1; then
+              echo "ERROR: image $IMAGE:prod-$TARGET_SHA not found in GHCR."
+              echo "That SHA was not deployed to prod via deploy.yml, so there is no image to roll back to."
+              exit 1
+            fi
+            docker pull "$IMAGE:prod-$TARGET_SHA"
+            # Point the :prod tag (what docker-compose.yml references) at it, then restart.
+            docker tag "$IMAGE:prod-$TARGET_SHA" "$IMAGE:prod"
+            docker compose up -d
+            docker image prune -f
             echo "Waiting for container to be healthy..."
             sleep 10
             for i in $(seq 1 12); do
