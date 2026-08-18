@@ -223,9 +223,6 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     placeholder="Full name"
                     inputClassName="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
-                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
-                    Pick a suggestion to link this voucher to that customer's account, or type a name for a guest without one.
-                  </p>
                 </div>
                 <div className="min-w-0">
                   <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest Info — phone number (optional)</label>
@@ -239,9 +236,6 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                       className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     />
                   </div>
-                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
-                    A phone number here makes this voucher searchable by phone (in addition to its code) when redeeming.
-                  </p>
                 </div>
               </div>
 
@@ -257,9 +251,6 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     placeholder="e.g. a note, company name, or anything else to identify this guest..."
                     className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
-                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
-                    Used only when there's no phone number above — a reference note, not searchable at redemption.
-                  </p>
                 </div>
               )}
 

@@ -56,7 +56,6 @@ import MembershipCollectionPanel from './components/Memberships/MembershipCollec
 import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import VoucherListPanel from './components/Vouchers/VoucherListPanel';
 import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
-import VoucherWalletPanel from './components/Vouchers/VoucherWalletPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
@@ -643,7 +642,6 @@ const BranchManagerDashboard = () => {
               {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
               {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}
               {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin'].includes(profile?.role) && <VoucherListPanel />}
-              {VOUCHER_ENABLED && viewMode === 'voucher-wallet' && ['manager','admin'].includes(profile?.role) && <VoucherWalletPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
