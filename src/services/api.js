@@ -7274,7 +7274,7 @@ export const MEMBERSHIP_DEPOSIT_MODES = ['Cash', 'Card', 'MobileBanking', 'Chequ
 // createBooking() (look up by org+phone first, then org+email; fall back to INSERT;
 // re-fetch on the customers_org_nphone_uniq race per migration-036). Used by walk-in
 // flows such as direct membership enrollment where there is no booking yet.
-export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email, gender }) {
+export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, email, gender, dateOfBirth }) {
   try {
     if (!orgId || !branchId || !fullName) {
       return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
@@ -7285,13 +7285,14 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     const normalizedPhone = phone ? String(phone).replace(/\D/g, '').slice(-10) || null : null;
     const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
     const normalizedGender = gender || null;
+    const normalizedDob = dateOfBirth || null;
 
     // 1. Look up an existing customer in the org by phone.
     let existing = null;
     if (normalizedPhone) {
       const { data } = await supabase
         .from('customers')
-        .select('id, full_name, phone, email, gender')
+        .select('id, full_name, phone, email, gender, date_of_birth')
         .eq('org_id', orgId)
         .eq('phone', normalizedPhone)
         .limit(1)
@@ -7301,7 +7302,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     if (!existing && normalizedEmail) {
       const { data } = await supabase
         .from('customers')
-        .select('id, full_name, phone, email, gender')
+        .select('id, full_name, phone, email, gender, date_of_birth')
         .eq('org_id', orgId)
         .eq('email', normalizedEmail)
         .limit(1)
@@ -7318,6 +7319,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
           phone: normalizedPhone || existing.phone,
           email: normalizedEmail || existing.email,
           gender: normalizedGender || existing.gender,
+          date_of_birth: normalizedDob || existing.date_of_birth,
         })
         .eq('id', existing.id);
       return { data: { customerId: existing.id, isNew: false }, error: null };
@@ -7333,6 +7335,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
         phone: normalizedPhone,
         email: normalizedEmail,
         gender: normalizedGender,
+        date_of_birth: normalizedDob,
       })
       .select('id')
       .single();
@@ -7481,7 +7484,7 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .order('created_at', { ascending: false });
@@ -7528,7 +7531,7 @@ export async function fetchMembership(membershipId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('id', membershipId)
@@ -7682,7 +7685,7 @@ export async function fetchMembershipForCustomer(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
@@ -7711,7 +7714,7 @@ export async function getCustomerMembership(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender ),
+        customer:customers ( id, full_name, phone, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
