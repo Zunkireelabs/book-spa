@@ -12,7 +12,7 @@
 
 export const DEFAULT_PAYMENT_METHODS = [
   'Cash',
-  { name: 'Card', subMethods: ['Mastercard'] },
+  { name: 'Card', subMethods: ['Mastercard', 'Visa'] },
   { name: 'Digital Wallet', subMethods: ['Khalti', 'eSewa', 'IME Pay'] },
   'MobileBanking',
   'Cheque',
