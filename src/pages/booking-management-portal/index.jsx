@@ -119,8 +119,8 @@ const BookingManagementPortal = () => {
   return (
     <>
       <Helmet>
-        <title>Booking Management Portal - Zenly</title>
-        <meta name="description" content="Manage your bookings - reschedule, cancel, or view booking history at Zenly Nepal" />
+        <title>Booking Management Portal - Zennly</title>
+        <meta name="description" content="Manage your bookings - reschedule, cancel, or view booking history at Zennly Nepal" />
       </Helmet>
 
       <div className="min-h-screen bg-background">
@@ -289,14 +289,14 @@ const BookingManagementPortal = () => {
                   </svg>
                 </div>
                 <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                  Zenly
+                  Zennly
                 </span>
               </div>
               <p className="font-caption font-caption-normal text-sm text-text-secondary mb-4">
                 Your wellness journey, simplified and secure.
               </p>
               <p className="font-caption font-caption-normal text-xs text-text-secondary mt-4">
-                &copy; {new Date().getFullYear()} Zenly Nepal. All rights reserved.
+                &copy; {new Date().getFullYear()} Zennly Nepal. All rights reserved.
               </p>
             </div>
           </div>

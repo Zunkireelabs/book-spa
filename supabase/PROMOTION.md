@@ -20,8 +20,8 @@ Zenly runs **two completely separate Supabase databases that share no data**:
 
 | Env | Project ref | Domain | How you reach it |
 |-----|-------------|--------|------------------|
-| Staging | `snzcckzfmpboeqkktmwy` | `dev-zenly.zunkireelabs.com` | Supabase **MCP** + dashboard |
-| Production | `pmbvogiphelmpjdalmtv` | `zenly.zunkireelabs.com` | Dashboard SQL editor **only** (MCP does not reach prod) |
+| Staging | `snzcckzfmpboeqkktmwy` | `dev-app.zennly.io` / `dev-zenly.zunkireelabs.com` | Supabase **MCP** + dashboard |
+| Production | `pmbvogiphelmpjdalmtv` | `app.zennly.io` / `zenly.zunkireelabs.com` | Dashboard SQL editor **only** (MCP does not reach prod) |
 
 **Deploys ship frontend code only.** No CI job runs SQL. Merging `stage → main` deploys the React
 app — it does **NOT** copy schema, rows, or migrations between the two databases. Every DB change
