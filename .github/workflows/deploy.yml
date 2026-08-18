@@ -160,7 +160,7 @@ jobs:
 
       - name: Verify Health
         run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://zenly.zunkireelabs.com)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://${{ vars.PROD_DOMAIN }})
           if [ "$HTTP_CODE" = "200" ]; then
             echo "Health check passed (HTTP $HTTP_CODE)"
           else
