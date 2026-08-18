@@ -72,6 +72,7 @@ const VoucherListPanel = () => {
     if (q) {
       rows = rows.filter((v) =>
         v.guestName.toLowerCase().includes(q) ||
+        (v.guestInfo || '').toLowerCase().includes(q) ||
         v.voucherCode.toLowerCase().includes(q) ||
         v.voucherTypeName.toLowerCase().includes(q) ||
         v.issuedByName.toLowerCase().includes(q)
@@ -149,7 +150,7 @@ const VoucherListPanel = () => {
           <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
           <input
             type="text"
-            placeholder="Search by guest, voucher code, or type..."
+            placeholder="Search by guest, guest info, voucher code, or type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-spa text-sm font-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-primary/30"
@@ -189,8 +190,9 @@ const VoucherListPanel = () => {
             <table className="w-full">
               <thead>
                 <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Guest</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Voucher Code</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Guest Name</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Guest Info</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Type</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Issued By</th>
@@ -211,6 +213,9 @@ const VoucherListPanel = () => {
                       className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
                     >
                       <td className="px-4 py-3">
+                        <span className="font-data font-data-normal text-xs text-text-secondary tracking-wide">{v.voucherCode}</span>
+                      </td>
+                      <td className="px-4 py-3">
                         <span className="font-body font-body-medium text-sm text-text-primary">{v.guestName}</span>
                         {v.isWallet && (
                           <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-primary/10 text-primary">
@@ -219,7 +224,7 @@ const VoucherListPanel = () => {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="font-data font-data-normal text-xs text-text-secondary tracking-wide">{v.voucherCode}</span>
+                        <span className="font-body font-body-normal text-sm text-text-secondary">{v.guestInfo || '—'}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-body font-body-normal text-sm text-text-secondary">{v.voucherTypeName}</span>
@@ -241,6 +246,11 @@ const VoucherListPanel = () => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-data font-data-medium text-sm text-primary">{formatNPR(v.remainingBalance)}</span>
+                        {v.totalClaimed > 0 && (
+                          <p className="font-caption text-[10px] text-text-tertiary mt-0.5">
+                            Used {formatNPR(v.totalClaimed)}{v.lastClaimDate ? ` · ${formatDate(v.lastClaimDate)}` : ''}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${cfg.pill}`}>
@@ -254,7 +264,7 @@ const VoucherListPanel = () => {
               </tbody>
               <tfoot>
                 <tr className="bg-background border-t-2 border-border">
-                  <td colSpan={7} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
+                  <td colSpan={8} className="px-4 py-3 font-body font-body-semibold text-sm text-text-primary">Total</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-text-primary">{formatNPR(totals.issued)}</td>
                   <td className="px-4 py-3 text-right font-data font-data-semibold text-sm text-primary">{formatNPR(totals.outstanding)}</td>
                   <td />
