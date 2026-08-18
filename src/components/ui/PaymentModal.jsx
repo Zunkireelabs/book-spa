@@ -836,7 +836,7 @@ const VoucherSearchInline = ({ onSelect }) => {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by voucher code or guest name..."
+          placeholder="Search by voucher code, guest name, or phone..."
           className="w-full h-10 pl-9 pr-3 rounded-spa border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
         />
       </div>

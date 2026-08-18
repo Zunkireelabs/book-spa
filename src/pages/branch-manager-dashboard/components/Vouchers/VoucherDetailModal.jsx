@@ -183,6 +183,12 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
                   <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Expires</p>
                   <p className="font-body text-sm text-text-secondary">{formatDate(voucher.expiryDate)}</p>
                 </div>
+                {voucher.guestInfo && (
+                  <div className="col-span-2">
+                    <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Guest Info</p>
+                    <p className="font-body text-sm text-text-secondary">{voucher.guestInfo}</p>
+                  </div>
+                )}
                 {voucher.remarks && (
                   <div className="col-span-2">
                     <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Remarks</p>

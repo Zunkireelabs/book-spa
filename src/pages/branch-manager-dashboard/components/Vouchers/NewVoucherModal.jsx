@@ -34,6 +34,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   const [linkedCustomerId, setLinkedCustomerId] = useState(null);
   const [guestCountryCode, setGuestCountryCode] = useState('+977');
   const [guestPhone, setGuestPhone] = useState('');
+  const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [actualPrice, setActualPrice] = useState('');
   const [discountPercent, setDiscountPercent] = useState('0');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
@@ -102,12 +103,17 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
 
     setSubmitting(true);
+    // Guest Info is one column — a phone number takes priority (it's what
+    // makes the voucher searchable by phone at payment time, see
+    // search_vouchers_for_payment/migration-085); the free-text "other info"
+    // field is a fallback for guests with no phone, stored as a plain note
+    // with no special lookup behavior.
     const guestPhoneDigits = guestPhone.replace(/\D/g, '');
     const { data, error: rpcError } = await issueVoucher({
       branchId,
       voucherTypeId,
       guestName: guestName.trim(),
-      guestInfo: guestPhoneDigits ? `${guestCountryCode}${guestPhoneDigits}` : null,
+      guestInfo: guestPhoneDigits ? `${guestCountryCode}${guestPhoneDigits}` : (guestOtherInfo.trim() || null),
       discountPercent: discountNum,
       actualPrice: actualPriceNum,
       issuedDate,
@@ -222,7 +228,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                   </p>
                 </div>
                 <div className="min-w-0">
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Phone number (optional)</label>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Guest Info — phone number (optional)</label>
                   <div className="flex">
                     <CountryCodeSelect value={guestCountryCode} onChange={setGuestCountryCode} />
                     <input
@@ -233,8 +239,29 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                       className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     />
                   </div>
+                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
+                    A phone number here makes this voucher searchable by phone (in addition to its code) when redeeming.
+                  </p>
                 </div>
               </div>
+
+              {!guestPhone.replace(/\D/g, '') && (
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                    Guest Info — other (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={guestOtherInfo}
+                    onChange={(e) => setGuestOtherInfo(e.target.value)}
+                    placeholder="e.g. a note, company name, or anything else to identify this guest..."
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <p className="mt-1 font-caption text-[10px] text-text-tertiary">
+                    Used only when there's no phone number above — a reference note, not searchable at redemption.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Voucher type</label>
