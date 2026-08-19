@@ -595,7 +595,7 @@ const CalendarGrid = ({
         const top = (hour - openHour) * HOUR_HEIGHT + TOP_PAD;
         return (
           <React.Fragment key={`lines-${hour}`}>
-            <div className="absolute left-0 right-0 border-t-2 border-border" style={{ top }} />
+            <div className="absolute left-0 right-0 border-t-[3px] border-black" style={{ top }} />
             <div className="absolute left-0 right-0 border-t border-border/40" style={{ top: top + SLOT_HEIGHT }} />
           </React.Fragment>
         );
