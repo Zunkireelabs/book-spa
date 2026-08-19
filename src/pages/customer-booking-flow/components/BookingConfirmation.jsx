@@ -2,16 +2,18 @@ import React, { useState, useEffect } from 'react';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
-import { createBooking, fetchRooms } from '../../../services/api';
+import { createBooking, fetchRooms, lookupReferrerByPhone } from '../../../services/api';
 
-const BookingConfirmation = ({ 
-  selectedBranch, 
-  selectedService, 
-  selectedDateTime, 
-  customerInfo, 
+const BookingConfirmation = ({
+  orgSlug,
+  selectedBranch,
+  selectedService,
+  selectedDateTime,
+  customerInfo,
   genderPreference,
+  customerAccountId,
   onConfirmBooking,
-  onEditBooking 
+  onEditBooking
 }) => {
   const [isConfirming, setIsConfirming] = useState(false);
   const [bookingError, setBookingError] = useState(null);
@@ -51,6 +53,22 @@ const BookingConfirmation = ({
     return dateStr + ' at ' + timeStr;
   };
 
+  const referralSummary = () => {
+    if (customerInfo.referralSource === 'client') {
+      const name = customerInfo.referralClientName?.trim();
+      const dialCode = customerInfo.referralCountryCode || '+977';
+      const phone = customerInfo.referralPhone ? `${dialCode} ${customerInfo.referralPhone}` : '';
+      return [name, phone].filter(Boolean).join(' · ') || null;
+    }
+    if (customerInfo.referralSource === 'social_media') {
+      return customerInfo.referralSocialPlatform || null;
+    }
+    if (customerInfo.referralSource === 'staff') {
+      return customerInfo.referralStaffName?.trim() || null;
+    }
+    return null;
+  };
+
   const formatPrice = (price) => {
     return new Intl.NumberFormat('ne-NP', {
       style: 'currency',
@@ -63,6 +81,29 @@ const BookingConfirmation = ({
     setIsConfirming(true);
     setBookingError(null);
     try {
+      let referringCustomerId = null;
+      let referralSourceDetail = null;
+
+      if (customerInfo.referralSource === 'client') {
+        const namePart = customerInfo.referralClientName?.trim() || '';
+        const dialCode = customerInfo.referralCountryCode || '+977';
+        const phonePart = customerInfo.referralPhone ? `${dialCode}${customerInfo.referralPhone}` : '';
+        referralSourceDetail = [namePart, phonePart && `(${phonePart})`].filter(Boolean).join(' ') || null;
+
+        if (
+          customerInfo.referralPhone &&
+          customerInfo.referralPhone.length === 10 &&
+          customerInfo.referralPhone !== customerInfo.phone
+        ) {
+          const { data: referrer } = await lookupReferrerByPhone(orgSlug, customerInfo.referralPhone);
+          referringCustomerId = referrer?.id || null;
+        }
+      } else if (customerInfo.referralSource === 'social_media') {
+        referralSourceDetail = customerInfo.referralSocialPlatform || null;
+      } else if (customerInfo.referralSource === 'staff') {
+        referralSourceDetail = customerInfo.referralStaffName?.trim() || null;
+      }
+
       const { data, error } = await createBooking({
         branchId: selectedBranch?.id,
         serviceId: selectedService?.id,
@@ -70,9 +111,14 @@ const BookingConfirmation = ({
         startTime: selectedDateTime?.time,
         customerName: (customerInfo.firstName + ' ' + customerInfo.lastName).trim(),
         customerEmail: customerInfo.email || null,
-        customerPhone: customerInfo.phone ? '+977' + customerInfo.phone : null,
+        customerPhone: customerInfo.phone ? (customerInfo.phoneCountryCode || '+977') + customerInfo.phone : null,
         customerGender: customerInfo.gender || null,
         specialRequests: customerInfo.specialRequests || null,
+        referringCustomerId,
+        orgSlug,
+        referralSource: customerInfo.referralSource || null,
+        referralSourceDetail,
+        customerAccountId,
       });
 
       if (error) {
@@ -112,7 +158,15 @@ const BookingConfirmation = ({
           <h3 className="font-heading font-semibold text-text-primary">Customer Details</h3>
           <div className="space-y-3">
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Name</span><span className="font-medium">{customerInfo.firstName} {customerInfo.lastName}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-text-secondary">Phone</span><span className="font-medium">+977 {customerInfo.phone}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-text-secondary">Phone</span><span className="font-medium">{customerInfo.phoneCountryCode || '+977'} {customerInfo.phone}</span></div>
+            {referralSummary() && (
+              <div className="flex justify-between text-sm gap-3">
+                <span className="text-text-secondary flex-shrink-0">
+                  {customerInfo.referralSource === 'client' ? 'Referred by' : 'Heard about us'}
+                </span>
+                <span className="font-medium text-right">{referralSummary()}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

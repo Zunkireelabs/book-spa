@@ -5,7 +5,7 @@ import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
@@ -97,6 +97,10 @@ const BookingActionModal = ({
 
   // Who created this booking (lazy-loaded on open)
   const [creator, setCreator] = useState(null);
+  const [customerReferral, setCustomerReferral] = useState(null);
+  const [rewardAmount, setRewardAmount] = useState('');
+  const [rewardSubmitting, setRewardSubmitting] = useState(false);
+  const [rewardError, setRewardError] = useState(null);
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
@@ -198,6 +202,47 @@ const BookingActionModal = ({
       setCreator(null);
     }
   }, [isOpen, booking?.bookingId]);
+
+  // Load the customer-to-customer referral attached to this booking (if this is
+  // the referred customer's first booking) — distinct from the legacy free-text
+  // referredBy field below.
+  useEffect(() => {
+    if (isOpen && booking?.bookingId) {
+      fetchCustomerReferralForBooking(booking.bookingId).then(result => setCustomerReferral(result.data || null));
+    } else {
+      setCustomerReferral(null);
+    }
+  }, [isOpen, booking?.bookingId]);
+
+  // Reset the reward picker each time a different booking's pending referral is shown
+  useEffect(() => {
+    setRewardAmount('');
+    setRewardError(null);
+  }, [customerReferral?.referralId]);
+
+  const handleResolveReferralReward = async () => {
+    if (!customerReferral?.referralId) return;
+    setRewardSubmitting(true);
+    setRewardError(null);
+    try {
+      const { error } = await resolveCustomerReferralReward({
+        referralId: customerReferral.referralId,
+        rewardType: 'wallet',
+        rewardAmount: rewardAmount ? Number(rewardAmount) : null,
+        rewardCatalogId: null,
+      });
+      if (error) {
+        setRewardError(error.message || 'Failed to save reward. Please try again.');
+        return;
+      }
+      const refreshed = await fetchCustomerReferralForBooking(booking.bookingId);
+      setCustomerReferral(refreshed.data || null);
+    } catch (err) {
+      setRewardError(err?.message || 'Failed to save reward. Please try again.');
+    } finally {
+      setRewardSubmitting(false);
+    }
+  };
 
   // Load eligible approvers the first time the discount tab is opened
   useEffect(() => {
@@ -429,8 +474,13 @@ const BookingActionModal = ({
   const isServiceStarted = booking.status === 'in-progress';
   // Clicking Start locks everything except Discount/Payment (still needed to
   // settle the bill); being paid locks Discount/Payment too (via canDiscount/
-  // canPay below) and everything else. Day-close and terminal status always lock.
+  // canPay below). Day-close and terminal status always lock everything.
   const isMutationBlocked = isTerminal || isLocked || isServiceStarted || isSettled;
+  // Assignment (therapist/room) locks once the service has started (or is
+  // terminal/day-closed) — NOT merely because it's been paid. A booking can be
+  // paid before it starts (pay-after-service isn't mandatory) and reassignment
+  // should still be possible right up until the service actually begins.
+  const isAssignmentBlocked = isTerminal || isLocked || isServiceStarted;
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
@@ -906,6 +956,60 @@ const BookingActionModal = ({
                   )}
                 </div>
 
+                {/* Customer-to-customer referral reward — separate from the legacy
+                    staff/therapist referredBy field above. Only present when this
+                    booking was the referred customer's first booking. */}
+                {customerReferral && (
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Referred by (customer)</label>
+                    <div className="p-2.5 sm:p-3 bg-background rounded-spa flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-body font-body-normal text-sm text-text-primary truncate">
+                          {customerReferral.referrerName}
+                          {customerReferral.referrerPhone ? ` · ${customerReferral.referrerPhone}` : ''}
+                        </p>
+                        <p className="font-caption text-xs text-text-tertiary">
+                          {customerReferral.rewardType === 'voucher'
+                            ? (customerReferral.rewardLabel || 'Gift Voucher')
+                            : 'Wallet credit'}
+                          {customerReferral.rewardAmount > 0 ? ` — NPR ${customerReferral.rewardAmount.toLocaleString('en-IN')}` : ''}
+                        </p>
+                      </div>
+                      <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[11px] font-caption font-caption-medium ${
+                        customerReferral.rewardStatus === 'credited' ? 'bg-success/10 text-success' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {customerReferral.rewardStatus === 'credited' ? 'Credited' : 'Pending'}
+                      </span>
+                    </div>
+
+                    {customerReferral.rewardStatus === 'pending' && customerReferral.requiresManualReward && ['manager', 'admin'].includes(userRole) && (
+                      <div className="p-2.5 sm:p-3 bg-background rounded-spa space-y-2">
+                        <p className="font-body font-body-medium text-xs sm:text-sm text-text-primary">Wallet credit amount</p>
+                        <input
+                          type="number"
+                          min="0"
+                          value={rewardAmount}
+                          onChange={(e) => setRewardAmount(e.target.value)}
+                          placeholder="e.g. 500 (leave blank for the org default)"
+                          className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                        />
+                        {rewardError && (
+                          <p className="font-caption text-xs text-error">{rewardError}</p>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleResolveReferralReward}
+                          loading={rewardSubmitting}
+                          disabled={rewardSubmitting}
+                        >
+                          Issue Reward
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Created-by audit line — only when a staff creator was recorded */}
                 {!isEditing && creator?.createdByName && (
                   <div className="pt-3 border-t border-border">
@@ -939,7 +1043,7 @@ const BookingActionModal = ({
             {/* Assigned Tab */}
             {activeTab === 'assign' && (
               <div className="space-y-4 sm:space-y-6">
-                {isMutationBlocked && (
+                {isAssignmentBlocked && (
                   <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${isLocked ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
                     <Icon name="Lock" size={16} className={isLocked ? 'text-amber-600' : 'text-gray-500'} />
                     <span className={`font-body font-body-medium text-xs ${isLocked ? 'text-amber-700' : 'text-gray-600'}`}>
@@ -983,7 +1087,7 @@ const BookingActionModal = ({
                           <label
                             key={therapist.id}
                             className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[52px] ${
-                              isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                              isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                             } ${
                               isSelected
                                 ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -993,7 +1097,7 @@ const BookingActionModal = ({
                               type="checkbox"
                               value={therapist.id}
                               checked={isSelected}
-                              disabled={isMutationBlocked}
+                              disabled={isAssignmentBlocked}
                               onChange={(e) => {
                                 if (e.target.checked) {
                                   setSelectedTherapists(prev => [...prev, therapist.id]);
@@ -1046,7 +1150,7 @@ const BookingActionModal = ({
                       {/* Unassign room option */}
                       <label
                         className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                          isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                          isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                         } ${
                           selectedRoom === ''
                             ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -1057,7 +1161,7 @@ const BookingActionModal = ({
                           name="room"
                           value=""
                           checked={selectedRoom === ''}
-                          disabled={isMutationBlocked}
+                          disabled={isAssignmentBlocked}
                           onChange={() => setSelectedRoom('')}
                           className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
                         />
@@ -1067,7 +1171,7 @@ const BookingActionModal = ({
                         <label
                           key={room.id}
                           className={`flex items-center space-x-3 sm:space-x-4 p-3 rounded-spa border-2 spa-transition-fast min-h-[44px] ${
-                            isMutationBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                            isAssignmentBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                           } ${
                             selectedRoom === room.id
                               ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -1078,7 +1182,7 @@ const BookingActionModal = ({
                             name="room"
                             value={room.id}
                             checked={selectedRoom === room.id}
-                            disabled={isMutationBlocked}
+                            disabled={isAssignmentBlocked}
                             onChange={(e) => setSelectedRoom(e.target.value)}
                             className="text-primary focus:ring-primary w-4 h-4 disabled:cursor-not-allowed"
                           />
@@ -1106,7 +1210,7 @@ const BookingActionModal = ({
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Add any special instructions for the therapist..."
                     rows={3}
-                    disabled={isMutationBlocked}
+                    disabled={isAssignmentBlocked}
                     className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
@@ -1861,7 +1965,7 @@ const BookingActionModal = ({
                   <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
                     Close
                   </Button>
-                  {activeTab === 'assign' && !isMutationBlocked && (
+                  {activeTab === 'assign' && !isAssignmentBlocked && (
                     <Button
                       variant="primary"
                       onClick={handleAssignTherapist}

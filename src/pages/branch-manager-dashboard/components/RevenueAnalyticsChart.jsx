@@ -6,7 +6,7 @@ import { transformBookings } from '../../../services/bookingTransformers';
 
 const SERVICE_COLORS = ['#2D5A27', '#8B4513', '#DAA520', '#059669', '#D97706'];
 
-const RevenueAnalyticsChart = ({ branchId }) => {
+const RevenueAnalyticsChart = ({ branchId, period }) => {
   const [activeTab, setActiveTab] = useState('revenue');
   const [revenueData, setRevenueData] = useState([]);
   const [serviceData, setServiceData] = useState([]);
@@ -22,7 +22,7 @@ const RevenueAnalyticsChart = ({ branchId }) => {
     setError(null);
 
     const today = new Date().toISOString().split('T')[0];
-    const result = await fetchBookings(branchId, { date: today });
+    const result = await fetchBookings(branchId, { dateFrom: period?.from || today, dateTo: period?.to || today });
 
     if (result.error) {
       setError(result.error.message || 'Failed to load revenue data.');
@@ -84,7 +84,7 @@ const RevenueAnalyticsChart = ({ branchId }) => {
 
     setServiceData(svcArr);
     setLoading(false);
-  }, [branchId]);
+  }, [branchId, period?.from, period?.to]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

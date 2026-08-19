@@ -52,6 +52,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
   const [email, setEmail] = useState('');
   const [gender, setGender] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
   const [lockedCustomer, setLockedCustomer] = useState(null);
 
   const [deposit, setDeposit] = useState('');
@@ -117,6 +118,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
     setPhone(national);
     setEmail(''); // lightweight payload doesn't include email; leave blank
     setGender(c.gender || '');
+    setDateOfBirth(''); // lightweight payload doesn't include date of birth; leave blank
   };
 
   const handleUnlock = () => {
@@ -146,6 +148,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
         phone: `${customerCountryCode}${normalizePhone(phone)}`,
         email: email.trim() || null,
         gender: gender || null,
+        dateOfBirth: dateOfBirth || null,
       });
       if (custErr) {
         setSubmitting(false);
@@ -302,6 +305,20 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <span className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Date of birth (optional)</span>
+                <input
+                  type="date"
+                  value={dateOfBirth}
+                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  disabled={!!lockedCustomer}
+                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"
+                />
+                <p className="mt-1 font-caption text-[11px] text-text-tertiary">
+                  Used for the birthday perk — leave blank if not given.
+                </p>
               </div>
 
               {!lockedCustomer && exactPhoneMatch && (

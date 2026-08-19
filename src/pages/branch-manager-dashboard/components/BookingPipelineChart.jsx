@@ -4,7 +4,7 @@ import Icon from '../../../components/AppIcon';
 import { fetchBookings } from '../../../services/api';
 import { transformBookings } from '../../../services/bookingTransformers';
 
-const BookingPipelineChart = ({ branchId }) => {
+const BookingPipelineChart = ({ branchId, period }) => {
   const [pipelineData, setPipelineData] = useState([]);
   const [stats, setStats] = useState({ total: 0, completed: 0, completionRate: 0 });
   const [loading, setLoading] = useState(true);
@@ -16,7 +16,7 @@ const BookingPipelineChart = ({ branchId }) => {
     setError(null);
 
     const today = new Date().toISOString().split('T')[0];
-    const result = await fetchBookings(branchId, { date: today });
+    const result = await fetchBookings(branchId, { dateFrom: period?.from || today, dateTo: period?.to || today });
 
     if (result.error) {
       setError(result.error.message || 'Failed to load booking data.');
@@ -62,7 +62,7 @@ const BookingPipelineChart = ({ branchId }) => {
 
     setPipelineData(chartData);
     setLoading(false);
-  }, [branchId]);
+  }, [branchId, period?.from, period?.to]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

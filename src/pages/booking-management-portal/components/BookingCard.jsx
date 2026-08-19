@@ -92,7 +92,7 @@ const BookingCard = ({ booking, onReschedule, onCancel }) => {
                 <div className="flex items-center space-x-2">
                   <Icon name="User" size={16} className="text-text-secondary" />
                   <span className="font-body font-body-normal text-sm text-text-primary">
-                    {booking.therapist || 'To be assigned'}
+                    {booking.therapist?.name || 'To be assigned'}
                   </span>
                 </div>
               </div>

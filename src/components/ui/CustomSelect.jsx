@@ -29,11 +29,17 @@ const CustomSelect = ({
   const selectedOption = options.find((opt) => String(opt.value) === String(value));
   const displayLabel = selectedOption ? selectedOption.label : placeholder;
 
-  // Filter options when searchable
+  // Filter options when searchable. Ranked by match position — an earlier
+  // match in searchLabel outranks a later one (e.g. a phone-first searchLabel
+  // means a phone-digit search surfaces above a same-position name match).
   const filteredOptions = useMemo(() => {
     if (!searchable || !searchTerm.trim()) return options;
     const term = searchTerm.toLowerCase();
-    return options.filter((opt) => (opt.searchLabel || opt.label).toLowerCase().includes(term));
+    return options
+      .map((opt) => ({ opt, idx: (opt.searchLabel || opt.label).toLowerCase().indexOf(term) }))
+      .filter(({ idx }) => idx !== -1)
+      .sort((a, b) => a.idx - b.idx)
+      .map(({ opt }) => opt);
   }, [options, searchTerm, searchable]);
 
   // Close on click outside

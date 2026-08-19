@@ -31,13 +31,13 @@ const PaymentMethodSelector = ({
   const [isOpen, setIsOpen] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState(null);
   const [submenuPos, setSubmenuPos] = useState(null); // { top, left }
-  const [openUpward, setOpenUpward] = useState(false);
   const containerRef = useRef(null);
   const flyoutRef = useRef(null);
 
   const tree = useMemo(() => {
     const base = buildPaymentMethodTree(paymentMethods);
-    return extraLeaf ? [...base, extraLeaf] : base;
+    const extras = Array.isArray(extraLeaf) ? extraLeaf.filter(Boolean) : (extraLeaf ? [extraLeaf] : []);
+    return extras.length > 0 ? [...base, ...extras] : base;
   }, [paymentMethods, extraLeaf]);
 
   const selectedLabel = useMemo(() => {
@@ -69,10 +69,6 @@ const PaymentMethodSelector = ({
 
   const toggleOpen = () => {
     if (disabled) return;
-    if (!isOpen && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setOpenUpward(window.innerHeight - rect.bottom < 300);
-    }
     setIsOpen((prev) => !prev);
   };
 
@@ -130,9 +126,7 @@ const PaymentMethodSelector = ({
 
       {isOpen && (
         <div
-          className={`absolute left-0 w-48 max-w-[80vw] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown max-h-72 overflow-y-auto p-1 ${
-            openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
-          }`}
+          className="absolute left-0 top-full mt-1 w-48 max-w-[80vw] bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown max-h-72 overflow-y-auto p-1"
         >
           {tree.map((item) => {
             const hasSub = (item.subMethods || []).length > 0;

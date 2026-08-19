@@ -12,14 +12,16 @@ import CustomerForm from './components/CustomerForm';
 import BookingConfirmation from './components/BookingConfirmation';
 import BookingSuccess from './components/BookingSuccess';
 import { useTenant } from '../../contexts/TenantContext';
+import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 
 const CustomerBookingFlow = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
+  const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
@@ -31,10 +33,33 @@ const CustomerBookingFlow = () => {
     email: '',
     phone: '',
     gender: '',
+    referralSource: '',
+    referralClientName: '',
+    referralPhone: '',
+    referralCountryCode: '+977',
+    referralSocialPlatform: '',
+    referralStaffName: '',
     specialRequests: '',
     agreeToTerms: false
   });
   const [bookingData, setBookingData] = useState(null);
+  const prefilledFromProfile = useRef(false);
+
+  // Prefill from a logged-in customer's saved details, once, without
+  // overwriting anything the customer has already typed.
+  useEffect(() => {
+    if (!customerProfile || prefilledFromProfile.current) return;
+    prefilledFromProfile.current = true;
+
+    const [firstName, ...rest] = (customerProfile.full_name || '').split(' ');
+    setCustomerInfo((prev) => ({
+      ...prev,
+      firstName: prev.firstName || firstName || '',
+      lastName: prev.lastName || rest.join(' '),
+      email: prev.email || customerProfile.email || '',
+      phone: prev.phone || customerProfile.phone || '',
+    }));
+  }, [customerProfile]);
 
   const totalSteps = 6;
   const stepNames = ['branch_selection', 'service_selection', 'datetime_selection', 'customer_details', 'booking_confirmation', 'booking_success'];
@@ -77,15 +102,18 @@ const CustomerBookingFlow = () => {
           setSelectedService(parsed.selectedService);
           setSelectedDateTime(parsed.selectedDateTime || { date: '', time: '' });
           setGenderPreference(parsed.genderPreference || 'no-preference');
-          setCustomerInfo(parsed.customerInfo || {
-            firstName: '',
-            lastName: '',
-            email: '',
-            phone: '',
-            gender: '',
-            specialRequests: '',
-            agreeToTerms: false
-          });
+          // Merge into prev rather than replacing outright — if the
+          // customer-profile prefill effect already landed (e.g. profile
+          // was already resolved at mount from an in-app navigation), a
+          // stale saved draft must not clobber it.
+          setCustomerInfo((prev) => ({
+            ...prev,
+            ...(parsed.customerInfo || {}),
+            firstName: prev.firstName || parsed.customerInfo?.firstName || '',
+            lastName: prev.lastName || parsed.customerInfo?.lastName || '',
+            email: prev.email || parsed.customerInfo?.email || '',
+            phone: prev.phone || parsed.customerInfo?.phone || '',
+          }));
         }
       } catch (error) {
         console.error('Error loading saved booking state:', error);
@@ -155,7 +183,14 @@ const CustomerBookingFlow = () => {
     // Only customer name is required per US-CUS-003; email, phone, gender are optional
     if (!customerInfo.firstName.trim()) return false;
     if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
-    if (customerInfo.phone.trim() && !/^[0-9]{10}$/.test(customerInfo.phone.replace(/\s+/g, ''))) return false;
+    if (customerInfo.phone.trim()) {
+      // Nepal keeps the strict 10-digit check; other country codes get a loose
+      // sanity-length bound (see CustomerForm.jsx's matching validateField logic).
+      const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
+      const digits = customerInfo.phone.replace(/\D/g, '');
+      const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+      if (!phoneValid) return false;
+    }
     return true;
   };
 
@@ -260,6 +295,7 @@ const CustomerBookingFlow = () => {
             selectedDateTime={selectedDateTime}
             onDateTimeSelect={handleDateTimeSelect}
             selectedService={selectedService}
+            selectedBranch={selectedBranch}
             genderPreference={genderPreference}
             onGenderPreferenceChange={handleGenderPreferenceChange}
           />
@@ -274,17 +310,20 @@ const CustomerBookingFlow = () => {
             selectedService={selectedService}
             selectedDateTime={selectedDateTime}
             genderPreference={genderPreference}
+            orgSlug={orgSlug}
           />
         );
       
       case 5:
         return (
           <BookingConfirmation
+            orgSlug={orgSlug}
             selectedBranch={selectedBranch}
             selectedService={selectedService}
             selectedDateTime={selectedDateTime}
             customerInfo={customerInfo}
             genderPreference={genderPreference}
+            customerAccountId={customerProfile?.id}
             onConfirmBooking={handleConfirmBooking}
             onEditBooking={handleEditBooking}
           />

@@ -171,8 +171,8 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
                 <p className="font-data font-data-medium text-2xl text-primary">{formatNPR(m.balance)}</p>
                 <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-primary/10">
                   <div>
-                    <p className="font-caption text-[10px] uppercase tracking-wide text-text-tertiary">Total deposited</p>
-                    <p className="font-data font-data-medium text-sm text-text-primary">{formatNPR(m.totalDeposited)}</p>
+                    <p className="font-caption text-[10px] uppercase tracking-wide text-text-tertiary">Deposited (this cycle)</p>
+                    <p className="font-data font-data-medium text-sm text-text-primary">{formatNPR(m.cycleDeposited)}</p>
                   </div>
                   <div>
                     <p className="font-caption text-[10px] uppercase tracking-wide text-text-tertiary">Tier threshold</p>

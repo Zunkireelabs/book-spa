@@ -23,9 +23,9 @@ Zenly runs **two completely separate Supabase databases that share no data**:
 | Staging | `snzcckzfmpboeqkktmwy` | `dev-app.zennly.io` / `dev-zenly.zunkireelabs.com` | Supabase **MCP** + dashboard |
 | Production | `pmbvogiphelmpjdalmtv` | `app.zennly.io` / `zenly.zunkireelabs.com` | Dashboard SQL editor **only** (MCP does not reach prod) |
 
-**Deploys ship frontend code only.** No CI job runs SQL. Merging `stage → main` deploys the React
-app — it does **NOT** copy schema, rows, or migrations between the two databases. Every DB change
-must be applied to **each** database by hand.
+**App deploys and DB migrations are separate CI jobs against separate databases.** Merging
+`stage → main` does **NOT** copy schema, rows, or migrations between the two databases — each push
+runs its own `migrate-apply.sh` against that branch's database (see the automation note above).
 
 The `public.schema_migrations` table (added by `migration-027`) records which migrations have run
 in **that** database, so you can always tell what staging vs production is missing.
@@ -40,7 +40,8 @@ in **that** database, so you can always tell what staging vs production is missi
    INSERT INTO public.schema_migrations (version, name)
    VALUES ('NNN','short-name') ON CONFLICT (version) DO NOTHING;
    ```
-4. Add the new version to the **manifest** in the pending-check query below.
+4. That's it — `migrate-status.sh` (below) diffs `schema_migrations` against disk directly, so
+   there's no manifest to keep updated.
 
 ## Promotion order (every migration)
 
@@ -93,6 +94,11 @@ same script in the staging dashboard/MCP and the production dashboard.
 
 ## Bootstrapping a brand-new database
 
-Run in order: `schema.sql` → `rls.sql` → `seed.sql` (or a tenant seed) → then any
-`migration-NNN-*.sql` newer than the schema baseline. `schema.sql` already creates an empty
-`schema_migrations` table; record migrations as you apply them.
+Run in order: `schema.sql` → `rls.sql` → then every `migration-NNN-*.sql` (`002` and `050` can be
+skipped — see `supabase/LOCAL_DEV.md`) → `seed.sql` (or a tenant seed) last. `seed.sql` inserts
+`branches.org_id`/`therapists.org_id`, columns added by the multi-tenancy migrations
+(`009`/`010`/`038`), so it must run after migrations, not before. `schema.sql` already creates an
+empty `schema_migrations` table; record migrations as you apply them.
+
+For a working, scripted example of this exact order, see `scripts/local-db-bootstrap.sh` (used
+for local OrbStack dev — see `supabase/LOCAL_DEV.md`).

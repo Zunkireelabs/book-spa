@@ -18,7 +18,6 @@ import MetricsCard from './components/MetricsCard';
 import TherapistUtilizationChart from './components/TherapistUtilizationChart';
 import BookingPipelineChart from './components/BookingPipelineChart';
 import RealtimeBookingFeed from './components/RealtimeBookingFeed';
-import DateRangePicker from './components/DateRangePicker';
 import RevenueAnalyticsChart from './components/RevenueAnalyticsChart';
 import DailyOperationalReportPanel from './components/DailyOperationalReportPanel';
 import OperationalCalendar from './components/calendar';
@@ -31,6 +30,9 @@ import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
 import RevenueCards from './components/RevenueCards';
+import TodayInsightsPanel from './components/TodayInsightsPanel';
+import PeriodFilter from './components/PeriodFilter';
+import { getTodayISO } from '../../utils/periodPresets';
 import UtilizationPanel from './components/UtilizationPanel';
 import RiskIndicatorsPanel from './components/RiskIndicatorsPanel';
 import AttendancePanel from './components/Operations/AttendancePanel';
@@ -43,13 +45,19 @@ import AttendanceReportPanel from './components/AttendanceReportPanel';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
+import CustomerReferralsReportPanel from './components/Referrals/CustomerReferralsReportPanel';
+import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
+import RewardCatalogPanel from './components/Referrals/RewardCatalogPanel';
 import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPanel from './components/Memberships/MembershipsPanel';
-import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 import MembershipCollectionPanel from './components/Memberships/MembershipCollectionPanel';
 import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
+import VoucherListPanel from './components/Vouchers/VoucherListPanel';
+import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
+import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
@@ -63,6 +71,7 @@ const BranchManagerDashboard = () => {
   const profileDropdownRef = useRef(null);
 
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [period, setPeriod] = useState(() => ({ key: 'daily', from: getTodayISO(), to: getTodayISO() }));
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bookings, setBookings] = useState([]);
@@ -218,7 +227,7 @@ const BranchManagerDashboard = () => {
 
   // Overall is read-only: redirect away from booking-creation / per-branch write views.
   useEffect(() => {
-    const writeOnlyViews = ['new-booking', 'attendance', 'rooms', 'services', 'categories'];
+    const writeOnlyViews = ['new-booking', 'check-booking', 'attendance', 'rooms', 'services', 'categories'];
     if (isOverall && writeOnlyViews.includes(viewMode)) {
       navigate('?view=dashboard', { replace: true });
     }
@@ -274,14 +283,6 @@ const BranchManagerDashboard = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const handleDateRangeChange = (dateRange) => {
-    // Date range filter — handled by individual panels
-  };
-
-  const handleExport = (format) => {
-    // Export handled by DailyOperationalReportPanel
-  };
-
   // Handle viewing a booking from the new booking notification
   const handleViewNewBooking = () => {
     setNewBookingNotification(null);
@@ -326,13 +327,16 @@ const BranchManagerDashboard = () => {
   const renderDashboardView = () => (
     <div className="space-y-3 sm:space-y-4 lg:space-y-6">
       {/* Revenue Intelligence Cards */}
-      <RevenueCards branchId={branchId} />
+      <RevenueCards branchId={branchId} period={period} />
+
+      {/* Today's Insights - sales by payment method, membership/voucher activity, staff utilization */}
+      <TodayInsightsPanel branchId={branchId} period={period} />
 
       {/* Utilization & Capacity Intelligence */}
-      <UtilizationPanel branchId={branchId} />
+      <UtilizationPanel branchId={branchId} period={period} />
 
       {/* Risk Indicators */}
-      <RiskIndicatorsPanel branchId={branchId} />
+      <RiskIndicatorsPanel branchId={branchId} date={period.to} />
 
       {/* Pending Discount Approvals */}
       <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
@@ -366,9 +370,9 @@ const BranchManagerDashboard = () => {
 
       {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
-        <TherapistUtilizationChart branchId={branchId} />
-        <BookingPipelineChart branchId={branchId} />
-        <TopPerformersCard branchId={branchId} />
+        <TherapistUtilizationChart branchId={branchId} period={period} />
+        <BookingPipelineChart branchId={branchId} period={period} />
+        <TopPerformersCard branchId={branchId} period={period} />
         <RealtimeBookingFeed
           bookings={bookings}
           branchId={branchId}
@@ -376,16 +380,8 @@ const BranchManagerDashboard = () => {
         />
       </div>
 
-      {/* Analytics and Controls Row - Stack on mobile, 3 cols on desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-        <DateRangePicker
-          onDateRangeChange={handleDateRangeChange}
-          onExport={handleExport}
-        />
-        <div className="lg:col-span-2">
-          <RevenueAnalyticsChart branchId={branchId} />
-        </div>
-      </div>
+      {/* Revenue Analytics */}
+      <RevenueAnalyticsChart branchId={branchId} period={period} />
     </div>
   );
 
@@ -428,6 +424,9 @@ const BranchManagerDashboard = () => {
                 {/* Left: Branch name + date/time */}
                 <div className="flex items-center space-x-3 min-w-0">
                   <BranchSwitcher />
+                  {viewMode === 'dashboard' && (
+                    <PeriodFilter value={period} onChange={setPeriod} />
+                  )}
                   <div className="hidden sm:block h-5 w-px bg-border"></div>
                   <p className="hidden sm:block font-caption font-caption-normal text-xs text-text-secondary">
                     {currentTime.toLocaleDateString('en-GB', {
@@ -634,11 +633,16 @@ const BranchManagerDashboard = () => {
               {viewMode === 'transfer-report' && <TransferReportPanel />}
               {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
               {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
+              {viewMode === 'customer-referrals' && CUSTOMER_REFERRALS_ENABLED && <CustomerReferralsReportPanel branchId={branchId} />}
+              {viewMode === 'referral-wallet' && CUSTOMER_REFERRALS_ENABLED && <ReferralWalletPanel branchId={branchId} />}
+              {viewMode === 'reward-catalog' && CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) && <RewardCatalogPanel />}
               {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
               {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
+              {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}
+              {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin'].includes(profile?.role) && <VoucherListPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
@@ -647,6 +651,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
+              {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}
             </main>
 
             {/* AI Assistant Panel */}

@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { BrowserRouter, Routes as RouterRoutes, Route, useLocation, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes as RouterRoutes, Route, useLocation, useParams, Navigate } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
@@ -8,11 +8,15 @@ import { useAuth } from "contexts/AuthContext";
 import CustomerBookingFlow from "pages/customer-booking-flow";
 import StaffLoginAuthentication from "pages/login";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
-import BookingManagementPortal from "pages/booking-management-portal";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import AttendanceCalendarPage from "pages/attendance-calendar";
 import OrgFinder from "pages/org-finder";
+import CustomerLoginAuthentication from "pages/customer-login";
+import CustomerSignup from "pages/customer-signup";
+import CustomerAccount from "pages/customer-account";
+import CustomerForgotPassword from "pages/customer-forgot-password";
+import CustomerResetPassword from "pages/customer-reset-password";
 import NotFound from "pages/NotFound";
 
 // External redirect component for root URL
@@ -166,11 +170,18 @@ const AppRoutes = () => {
 
         {/* Customer booking flow */}
         <Route path="/:orgSlug/book" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
-        <Route path="/:orgSlug/manage" element={<TenantWrapper><BookingManagementPortal /></TenantWrapper>} />
+        <Route path="/:orgSlug/manage" element={<ManageRedirect />} />
+
+        {/* Customer login / signup / account */}
+        <Route path="/:orgSlug/customer-login" element={<TenantWrapper><CustomerLoginAuthentication /></TenantWrapper>} />
+        <Route path="/:orgSlug/signup" element={<TenantWrapper><CustomerSignup /></TenantWrapper>} />
+        <Route path="/:orgSlug/account" element={<TenantWrapper><CustomerAccount /></TenantWrapper>} />
+        <Route path="/:orgSlug/forgot-password" element={<TenantWrapper><CustomerForgotPassword /></TenantWrapper>} />
+        <Route path="/:orgSlug/reset-password" element={<TenantWrapper><CustomerResetPassword /></TenantWrapper>} />
 
         {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
         <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
-        <Route path="/booking-management-portal" element={<ExternalRedirect to="/nuad-thai-spa/manage" />} />
+        <Route path="/booking-management-portal" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
 
         {/* ==================== CATCH-ALL ==================== */}
 
@@ -181,6 +192,13 @@ const AppRoutes = () => {
       </RouterRoutes>
       </ErrorBoundary>
   );
+};
+
+// Booking self-service search moved to staff-only "Check Booking" — send anyone
+// still hitting the old public /:orgSlug/manage URL back to the booking flow.
+const ManageRedirect = () => {
+  const { orgSlug } = useParams();
+  return <Navigate to={`/${orgSlug}/book`} replace />;
 };
 
 // Legacy booking redirect - redirects old /booking-details/:bookingId to org-scoped URL
