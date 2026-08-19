@@ -1330,8 +1330,11 @@ const OperationalCalendar = ({ branchId }) => {
     // (not the cursor position which could be anywhere on the card)
     const relativeY = pointerYRef.current - gridRect.top - dragGrabOffset;
 
-    // Calculate hour and minute from Y position
-    const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
+    // Calculate hour and minute from Y position — read the live (possibly
+    // pinch-zoomed) effective hour height off the grid DOM rather than the
+    // static constant, so drag-drop stays accurate at any zoom level.
+    const effectiveHourHeight = parseFloat(gridRef.current.dataset.hourHeight) || HOUR_HEIGHT;
+    const minutesFromTop = (relativeY / effectiveHourHeight) * 60;
     const hour = Math.floor(minutesFromTop / 60) + openHour;
     const rawMinute = minutesFromTop % 60;
     const minute = Math.floor(rawMinute / 5) * 5; // Round to 5-minute intervals
