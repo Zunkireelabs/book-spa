@@ -47,13 +47,17 @@ CREATE POLICY "customer reads own org therapists" ON public.therapists
     AND org_id IN (SELECT org_id FROM public.customer_accounts WHERE auth_user_id = auth.uid())
   );
 
+-- rooms has no org_id column (only branch_id) — resolve org via branches.
 DROP POLICY IF EXISTS "customer reads own org rooms" ON public.rooms;
 CREATE POLICY "customer reads own org rooms" ON public.rooms
   FOR SELECT
   TO authenticated
   USING (
     is_active = true
-    AND org_id IN (SELECT org_id FROM public.customer_accounts WHERE auth_user_id = auth.uid())
+    AND branch_id IN (
+      SELECT b.id FROM public.branches b
+      WHERE b.org_id IN (SELECT org_id FROM public.customer_accounts WHERE auth_user_id = auth.uid())
+    )
   );
 
 INSERT INTO public.schema_migrations (version, name)
