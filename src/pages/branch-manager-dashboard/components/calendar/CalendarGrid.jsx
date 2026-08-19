@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -108,6 +108,12 @@ const SharedBookingLines = ({ containerRef, bookings }) => {
 export const SLOT_HEIGHT = 60; // px per 30-min slot (120px per hour) - for visual grid lines
 export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 120px per hour
 const TIME_COL_WIDTH = 64;
+
+// Pinch-to-zoom bounds (mobile/touch only) — effective hour height 40px–320px
+const MIN_ZOOM = 40 / HOUR_HEIGHT;
+const MAX_ZOOM = 320 / HOUR_HEIGHT;
+const clampZoom = (v) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
+const touchDistance = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
 
 function addDaysToStr(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -269,6 +275,93 @@ const CalendarGrid = ({
   const headerScrollRef = useRef(null);
   const gridBodyRef = useRef(null);
 
+  // ── Pinch-to-zoom (mobile/touch only) ──────────────────────
+  // Relayouts the grid at a scaled HOUR_HEIGHT/column width rather than a CSS
+  // transform, so drag/tap hit-testing (which reads real DOM pixel positions)
+  // stays correct at any zoom level.
+  const [zoomScale, setZoomScaleState] = useState(1);
+  const zoomScaleRef = useRef(1);
+  const setZoomScale = useCallback((v) => {
+    const clamped = clampZoom(v);
+    zoomScaleRef.current = clamped;
+    setZoomScaleState(clamped);
+  }, []);
+  const pinchStateRef = useRef(null); // { startDist, startScale }
+  const pinchAnchorRef = useRef(null); // { viewportX, viewportY, contentX, contentY }
+  const pinchRAFRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handleTouchStart = (e) => {
+      if (e.touches.length !== 2) return;
+      pinchStateRef.current = {
+        startDist: touchDistance(e.touches[0], e.touches[1]),
+        startScale: zoomScaleRef.current,
+      };
+    };
+
+    const handleTouchMove = (e) => {
+      if (e.touches.length !== 2 || !pinchStateRef.current) return;
+      e.preventDefault();
+      if (pinchRAFRef.current) return;
+      const touches = e.touches;
+      pinchRAFRef.current = requestAnimationFrame(() => {
+        pinchRAFRef.current = null;
+        const { startDist, startScale } = pinchStateRef.current || {};
+        if (!startDist) return;
+        const dist = touchDistance(touches[0], touches[1]);
+        const nextScale = clampZoom(startScale * (dist / startDist));
+
+        const midX = (touches[0].clientX + touches[1].clientX) / 2;
+        const midY = (touches[0].clientY + touches[1].clientY) / 2;
+        const rect = el.getBoundingClientRect();
+        const viewportX = midX - rect.left;
+        const viewportY = midY - rect.top;
+        const prevScale = zoomScaleRef.current;
+        pinchAnchorRef.current = {
+          viewportX,
+          viewportY,
+          contentX: (el.scrollLeft + viewportX) / prevScale,
+          contentY: (el.scrollTop + viewportY) / prevScale,
+        };
+        setZoomScale(nextScale);
+      });
+    };
+
+    const handleTouchEnd = (e) => {
+      if (e.touches.length < 2) pinchStateRef.current = null;
+    };
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+      el.removeEventListener('touchcancel', handleTouchEnd);
+      if (pinchRAFRef.current) cancelAnimationFrame(pinchRAFRef.current);
+    };
+  }, [setZoomScale, viewMode]);
+
+  // Re-anchor scroll under the pinch midpoint once the zoomed layout has committed
+  useLayoutEffect(() => {
+    const anchor = pinchAnchorRef.current;
+    const el = scrollRef.current;
+    if (!anchor || !el) return;
+    el.scrollLeft = anchor.contentX * zoomScale - anchor.viewportX;
+    el.scrollTop = anchor.contentY * zoomScale - anchor.viewportY;
+    if (headerScrollRef.current) headerScrollRef.current.scrollLeft = el.scrollLeft;
+    pinchAnchorRef.current = null;
+  }, [zoomScale]);
+
+  const eHH = HOUR_HEIGHT * zoomScale;   // effective hour height at current zoom
+  const eSlot = SLOT_HEIGHT * zoomScale; // effective 30-min slot height at current zoom
+
   // Multi-select for shared booking cards (Cmd/Ctrl + click)
   const [selectedCardIds, setSelectedCardIds] = useState(new Set());
 
@@ -320,7 +413,7 @@ const CalendarGrid = ({
     return result;
   }, []);
 
-  const totalHeight = hours.length * HOUR_HEIGHT + TOP_PAD;
+  const totalHeight = hours.length * eHH + TOP_PAD;
 
   const days = useMemo(() => {
     if (viewMode === '4day') return [0, 1, 2, 3].map(i => addDaysToStr(currentDate, i));
@@ -463,14 +556,14 @@ const CalendarGrid = ({
   const timeToTop = (timeStr) => {
     if (!timeStr) return 0;
     const [h, m] = timeStr.split(':').map(Number);
-    return ((h - openHour) * 60 + m) / 60 * HOUR_HEIGHT + TOP_PAD;
+    return ((h - openHour) * 60 + m) / 60 * eHH + TOP_PAD;
   };
 
   const timeToHeight = (startStr, endStr) => {
-    if (!startStr || !endStr) return SLOT_HEIGHT;
+    if (!startStr || !endStr) return eSlot;
     const [sh, sm] = startStr.split(':').map(Number);
     const [eh, em] = endStr.split(':').map(Number);
-    return Math.max(((eh * 60 + em) - (sh * 60 + sm)) / 60 * HOUR_HEIGHT, 24);
+    return Math.max(((eh * 60 + em) - (sh * 60 + sm)) / 60 * eHH, 24);
   };
 
   // Current time
@@ -509,7 +602,7 @@ const CalendarGrid = ({
     };
   }, [days, todayStr, nowTop]);
 
-  const minColWidth = isMultiDay ? 80 : 120;
+  const minColWidth = Math.round((isMultiDay ? 80 : 120) * zoomScale);
 
   // ── Column header tooltip (fixed-position to escape overflow-hidden) ──
   const [headerTooltip, setHeaderTooltip] = useState(null);
@@ -579,7 +672,7 @@ const CalendarGrid = ({
   const renderTimeLabels = () => (
     <div className="flex-shrink-0 border-r border-border relative bg-surface sticky left-0 z-header" style={{ width: TIME_COL_WIDTH }}>
       {hours.map((hour) => (
-        <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * HOUR_HEIGHT + TOP_PAD }}>
+        <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * eHH + TOP_PAD }}>
           <span className="absolute -top-2.5 right-2 font-data text-[13px] text-text-secondary">
             {hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`}
           </span>
@@ -592,11 +685,11 @@ const CalendarGrid = ({
   const renderGridLines = () => (
     <>
       {hours.map((hour) => {
-        const top = (hour - openHour) * HOUR_HEIGHT + TOP_PAD;
+        const top = (hour - openHour) * eHH + TOP_PAD;
         return (
           <React.Fragment key={`lines-${hour}`}>
-            <div className="absolute left-0 right-0 border-t-2 border-border" style={{ top }} />
-            <div className="absolute left-0 right-0 border-t border-border/40" style={{ top: top + SLOT_HEIGHT }} />
+            <div className="absolute left-0 right-0 border-t-[3px] border-black" style={{ top }} />
+            <div className="absolute left-0 right-0 border-t border-border/40" style={{ top: top + eSlot }} />
           </React.Fragment>
         );
       })}
@@ -605,7 +698,7 @@ const CalendarGrid = ({
 
   // Dashed interval lines with hover tooltips — rendered per-column
   const renderIntervalLines = () => {
-    const TEN_MIN = HOUR_HEIGHT / 6;
+    const TEN_MIN = eHH / 6;
     const renderIntervalLine = (hour, minuteOffset, topPos) => {
       const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
       const ampm = hour < 12 ? 'am' : 'pm';
@@ -624,7 +717,7 @@ const CalendarGrid = ({
     return (
       <>
         {hours.map((hour) => {
-          const top = (hour - openHour) * HOUR_HEIGHT + TOP_PAD;
+          const top = (hour - openHour) * eHH + TOP_PAD;
           return (
             <React.Fragment key={`interval-${hour}`}>
               {renderIntervalLine(hour, 10, top + TEN_MIN)}
@@ -649,16 +742,16 @@ const CalendarGrid = ({
 
   const handleBookingResize = useCallback((booking, pixelDelta, direction) => {
     if (!onBookingResize) return;
-    // Convert pixel delta to minutes (HOUR_HEIGHT px = 60 min)
-    const deltaMinutes = Math.round((pixelDelta / HOUR_HEIGHT) * 60 / 5) * 5; // snap to 5-min
+    // Convert pixel delta to minutes (eHH px = 60 min at current zoom)
+    const deltaMinutes = Math.round((pixelDelta / eHH) * 60 / 5) * 5; // snap to 5-min
     if (deltaMinutes === 0) return;
     onBookingResize(booking, deltaMinutes, direction);
-  }, [onBookingResize]);
+  }, [onBookingResize, eHH]);
 
   const handleColumnClick = (e, day, col) => {
     if (activeDragId || !onEmptySlotClick) return;
     const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top - TOP_PAD;
-    const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
+    const minutesFromTop = (relativeY / eHH) * 60;
     const hour = Math.floor(minutesFromTop / 60) + openHour;
     const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
     if (hour < openHour || hour >= closeHour) return;
@@ -816,7 +909,7 @@ const CalendarGrid = ({
           className="flex relative"
           style={{ height: totalHeight, width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}
           data-open-hour={openHour}
-          data-hour-height={HOUR_HEIGHT}
+          data-hour-height={eHH}
         >
           <SharedBookingLines containerRef={gridBodyRef} bookings={bookings} />
           {renderTimeLabels()}
@@ -938,7 +1031,7 @@ const CalendarGrid = ({
           className="flex relative"
           style={{ height: totalHeight, width: '100%', minWidth: TIME_COL_WIDTH + daysMinWidth }}
           data-open-hour={openHour}
-          data-hour-height={HOUR_HEIGHT}
+          data-hour-height={eHH}
         >
           {renderTimeLabels()}
           <div className="flex flex-1 relative" style={{ minWidth: daysMinWidth }}>
@@ -958,7 +1051,7 @@ const CalendarGrid = ({
                   onClick={(e) => {
                     if (activeDragId || !onEmptySlotClick) return;
                     const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top - TOP_PAD;
-                    const minutesFromTop = (relativeY / HOUR_HEIGHT) * 60;
+                    const minutesFromTop = (relativeY / eHH) * 60;
                     const hour = Math.floor(minutesFromTop / 60) + openHour;
                     const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
                     if (hour < openHour || hour >= closeHour) return;
