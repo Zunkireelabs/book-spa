@@ -68,8 +68,8 @@ jobs:
             VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
             VITE_POSTHOG_KEY=${{ secrets.VITE_POSTHOG_KEY }}
             VITE_POSTHOG_HOST=${{ secrets.VITE_POSTHOG_HOST }}
-            VITE_ENABLE_MEMBERSHIP=false
-            VITE_ENABLE_VOUCHERS=false
+            VITE_ENABLE_MEMBERSHIP=true
+            VITE_ENABLE_VOUCHERS=true
             VITE_ENABLE_CUSTOMER_REFERRALS=false
 
   migrate-check:
