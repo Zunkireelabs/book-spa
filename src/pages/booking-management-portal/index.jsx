@@ -8,7 +8,7 @@ import RescheduleModal from './components/RescheduleModal';
 import CancellationModal from './components/CancellationModal';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
-import { searchBookings, updateBookingStatus, rescheduleBooking } from '../../services/api';
+import { searchBookingPublic, updateBookingStatus, rescheduleBooking } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 
@@ -28,7 +28,7 @@ const BookingManagementPortal = () => {
     setSearchPerformed(true);
 
     try {
-      const result = await searchBookings(branchId, query);
+      const result = await searchBookingPublic(branchId, query);
 
       if (result.error) {
         showNotification('Failed to search bookings. Please try again.', 'error');
@@ -155,7 +155,7 @@ const BookingManagementPortal = () => {
                 Manage Your Booking
               </h1>
               <p className="font-body font-body-normal text-lg text-text-secondary max-w-2xl mx-auto">
-                Search by booking number, customer name, or phone number.
+                Search by booking number or phone number.
               </p>
             </div>
 
