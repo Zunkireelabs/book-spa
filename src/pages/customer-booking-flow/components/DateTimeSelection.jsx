@@ -3,7 +3,7 @@ import Icon from '../../../components/AppIcon';
 import { supabase } from '../../../lib/supabase';
 import { useTenant } from '../../../contexts/TenantContext';
 
-const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService, genderPreference, onGenderPreferenceChange }) => {
+const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) => {
   const { enableStaffGender, staffLabel } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
@@ -41,16 +41,14 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
 
   // Fetch booked therapists for selected date
   useEffect(() => {
-    if (!selectedDate) return;
+    if (!selectedDate || !selectedBranch?.id) return;
 
     async function fetchBookedSlots() {
       setLoadingSlots(true);
-      const { data } = await supabase
-        .from('bookings')
-        .select('start_time, therapist:therapists(gender), service:services(duration_minutes)')
-        .eq('date', selectedDate)
-        .not('status', 'in', '("Cancelled","No Show")')
-        .not('therapist_id', 'is', null);
+      const { data } = await supabase.rpc('public_check_slot_availability', {
+        p_branch_id: selectedBranch.id,
+        p_date: selectedDate,
+      });
 
       if (data) {
         // Build a map of time -> { maleBooked, femaleBooked }
@@ -58,8 +56,8 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
         for (const b of data) {
           const startH = parseInt(b.start_time?.split(':')[0], 10);
           const startM = parseInt(b.start_time?.split(':')[1], 10);
-          const duration = b.service?.duration_minutes || 60;
-          const gender = b.therapist?.gender?.toLowerCase();
+          const duration = b.duration_minutes || 60;
+          const gender = b.therapist_gender?.toLowerCase();
           if (!gender) continue;
 
           // Mark all 30-min slots this booking occupies
@@ -75,7 +73,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
       setLoadingSlots(false);
     }
     fetchBookedSlots();
-  }, [selectedDate]);
+  }, [selectedDate, selectedBranch?.id]);
 
   // Generate next 30 days
   const dates = useMemo(() => {

@@ -3388,6 +3388,61 @@ export async function getUtilizationIntelligence({ branchId, date, from, to }) {
   }
 }
 
+// Anon-safe variant for the public /manage self-service portal — no session exists,
+// so this goes through public_search_booking (SECURITY DEFINER, phone/booking-number
+// match only) instead of a raw table SELECT gated by anon RLS.
+export async function searchBookingPublic(branchId, query) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+    const searchTerm = (query || '').trim();
+    if (!searchTerm) {
+      return { data: [], error: null };
+    }
+
+    const { data, error } = await supabase.rpc('public_search_booking', {
+      p_branch_id: resolvedBranchId,
+      p_query: searchTerm,
+    });
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return { data: [], error: null };
+    }
+
+    const serviceIds = [...new Set(data.map(b => b.service_id).filter(Boolean))];
+    const therapistIds = [...new Set(data.map(b => b.therapist_id).filter(Boolean))];
+    const roomIds = [...new Set(data.map(b => b.room_id).filter(Boolean))];
+
+    const [{ data: services }, { data: therapists }, { data: rooms }] = await Promise.all([
+      serviceIds.length
+        ? supabase.from('services').select('id, name, duration_minutes').in('id', serviceIds)
+        : Promise.resolve({ data: [] }),
+      therapistIds.length
+        ? supabase.from('therapists').select('id, name, gender').in('id', therapistIds)
+        : Promise.resolve({ data: [] }),
+      roomIds.length
+        ? supabase.from('rooms').select('id, name').in('id', roomIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const serviceMap = new Map((services || []).map(s => [s.id, s]));
+    const therapistMap = new Map((therapists || []).map(t => [t.id, t]));
+    const roomMap = new Map((rooms || []).map(r => [r.id, r]));
+
+    const enriched = data.map(b => ({
+      ...b,
+      service: serviceMap.get(b.service_id) || null,
+      therapist: therapistMap.get(b.therapist_id) || null,
+      room: roomMap.get(b.room_id) || null,
+    }));
+
+    return { data: enriched, error: null };
+  } catch (error) {
+    console.error('[API] searchBookingPublic error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function searchBookings(branchId, query) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);

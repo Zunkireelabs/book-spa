@@ -295,6 +295,7 @@ const CustomerBookingFlow = () => {
             selectedDateTime={selectedDateTime}
             onDateTimeSelect={handleDateTimeSelect}
             selectedService={selectedService}
+            selectedBranch={selectedBranch}
             genderPreference={genderPreference}
             onGenderPreferenceChange={handleGenderPreferenceChange}
           />
