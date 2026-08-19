@@ -126,6 +126,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['staff', 'manager', 'admin', 'admin_viewer'],
           overallHidden: true
         },
+        {
+          id: 'check-booking',
+          label: 'Check Booking',
+          icon: 'Search',
+          path: `${basePath}?view=check-booking`,
+          roles: ['staff', 'manager', 'admin', 'admin_viewer'],
+          overallHidden: true
+        },
         ...(MEMBERSHIP_ENABLED ? [{
           id: 'new-membership',
           label: 'New Membership',

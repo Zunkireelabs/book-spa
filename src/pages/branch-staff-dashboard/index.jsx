@@ -7,6 +7,7 @@ import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingLookupPanel from './components/BookingLookupPanel';
 import StaffBookingForm from './components/StaffBookingForm';
+import CheckBookingPanel from './components/CheckBookingPanel';
 import CollectPaymentPanel from './components/CollectPaymentPanel';
 import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
@@ -651,6 +652,8 @@ const BranchStaffDashboard = () => {
             <CollectPaymentPanel onSuccess={showSuccess} />
           ) : viewMode === 'new-booking' ? (
             <StaffBookingForm onBookingCreated={loadData} />
+          ) : viewMode === 'check-booking' ? (
+            <CheckBookingPanel branchId={branchId} />
           ) : viewMode === 'new-membership' && MEMBERSHIP_ENABLED ? (
             <EnrollMemberModal
               onClose={() => setSearchParams({ view: 'dashboard' })}

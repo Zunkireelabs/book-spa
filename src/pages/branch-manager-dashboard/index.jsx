@@ -57,6 +57,7 @@ import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import VoucherListPanel from './components/Vouchers/VoucherListPanel';
 import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
+import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
@@ -226,7 +227,7 @@ const BranchManagerDashboard = () => {
 
   // Overall is read-only: redirect away from booking-creation / per-branch write views.
   useEffect(() => {
-    const writeOnlyViews = ['new-booking', 'attendance', 'rooms', 'services', 'categories'];
+    const writeOnlyViews = ['new-booking', 'check-booking', 'attendance', 'rooms', 'services', 'categories'];
     if (isOverall && writeOnlyViews.includes(viewMode)) {
       navigate('?view=dashboard', { replace: true });
     }
@@ -650,6 +651,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
+              {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}
             </main>
 
             {/* AI Assistant Panel */}

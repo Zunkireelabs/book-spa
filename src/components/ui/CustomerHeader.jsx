@@ -32,10 +32,8 @@ const CustomerHeader = () => {
 
   // Build tenant-aware paths
   const bookingPath = orgSlug ? `/${orgSlug}` : '/';
-  const managePath = orgSlug ? `/${orgSlug}/manage` : '/';
 
   const isBookingFlow = location.pathname === bookingPath || location.pathname === `/${orgSlug}`;
-  const isManagementPortal = location.pathname === managePath || location.pathname === `/${orgSlug}/manage`;
 
   // Industry-specific tagline
   const getTagline = () => {
@@ -84,14 +82,6 @@ const CustomerHeader = () => {
               }`}
             >
               Book Service
-            </Link>
-            <Link
-              to={managePath}
-              className={`font-body font-body-normal text-sm spa-transition-fast hover:text-primary ${
-                isManagementPortal ? 'text-primary' : 'text-text-secondary'
-              }`}
-            >
-              Manage Booking
             </Link>
           </nav>
 
@@ -150,16 +140,7 @@ const CustomerHeader = () => {
               <Icon name="Calendar" size={20} />
               <span className="font-caption font-caption-normal text-xs">Book</span>
             </Link>
-            <Link
-              to={managePath}
-              className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
-                isManagementPortal ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
-              }`}
-            >
-              <Icon name="Settings" size={20} />
-              <span className="font-caption font-caption-normal text-xs">Manage</span>
-            </Link>
-            <a 
+            <a
               href="tel:+977-1-4441234"
               className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
             >
