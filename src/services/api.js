@@ -8096,11 +8096,19 @@ export async function fetchVouchers() {
 export async function issueVoucher({
   branchId, voucherTypeId, guestName, guestInfo = null, discountPercent = 0,
   actualPrice = null, issuedDate = null, expiryDate = null, remarks = null,
-  customerId = null,
+  customerId = null, tenders = [],
 }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+
+    if (!Array.isArray(tenders) || tenders.length === 0) {
+      return { data: null, error: { code: 'TENDERS_REQUIRED', message: 'At least one payment tender is required.' } };
+    }
+
+    const cleanedTenders = tenders
+      .filter((t) => Number(t.amount) > 0 && t.paymentMode)
+      .map((t) => ({ amount: Number(t.amount), payment_mode: t.paymentMode }));
 
     const { data, error } = await supabase.rpc('issue_voucher', {
       p_branch_id: branchId,
@@ -8113,6 +8121,7 @@ export async function issueVoucher({
       p_expiry_date: expiryDate,
       p_remarks: remarks,
       p_customer_id: customerId,
+      p_tenders: cleanedTenders,
     });
     if (error) throw error;
     capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
