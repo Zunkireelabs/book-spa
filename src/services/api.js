@@ -282,6 +282,17 @@ export async function fetchBookingCreator(bookingId) {
 
 export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti', 'Membership'];
 
+// Bucket key ('cash' | 'card' | 'fonepay') for the simple 3-way cash/card/other
+// split used by getDailySummary() and getDailyOperationalReport() (both the
+// booking-payments and voucher-payments loops in each). Not used by
+// getTodayInsights(), which needs a richer wallet/digital breakdown via its own
+// CARD_MODES/WALLET_MODES/DIGITAL_MODES sets further down this file.
+function classifyPaymentMode(mode) {
+  if (mode === 'Cash') return 'cash';
+  if (mode.includes('Card')) return 'card';
+  return 'fonepay'; // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
+}
+
 // Persists the org's admin-configured payment method list (organizations.settings
 // .paymentMethods) via a SECURITY DEFINER RPC scoped to just that key — see
 // migration-052-custom-payment-methods.sql. Each entry is either a plain string
@@ -2447,14 +2458,7 @@ export async function getDailySummary(branchId, date) {
       for (const p of (payments || [])) {
         const amount = Number(p.amount);
         netRevenue += amount;
-        if (p.payment_mode === 'Cash') {
-          paymentBreakdown.cash += amount;
-        } else if (p.payment_mode.includes('Card')) {
-          paymentBreakdown.card += amount;
-        } else {
-          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
-          paymentBreakdown.fonepay += amount;
-        }
+        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
     }
 
@@ -2482,13 +2486,7 @@ export async function getDailySummary(branchId, date) {
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         netRevenue += amount;
-        if (p.payment_mode === 'Cash') {
-          paymentBreakdown.cash += amount;
-        } else if (p.payment_mode.includes('Card')) {
-          paymentBreakdown.card += amount;
-        } else {
-          paymentBreakdown.fonepay += amount;
-        }
+        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
     }
 
@@ -2857,13 +2855,7 @@ export async function getDailyOperationalReport(branchId, date) {
       for (const p of (voucherPayments || [])) {
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
-        if (p.payment_mode === 'Cash') {
-          voucherPaymentBreakdown.cash += amount;
-        } else if (p.payment_mode.includes('Card')) {
-          voucherPaymentBreakdown.card += amount;
-        } else {
-          voucherPaymentBreakdown.fonepay += amount;
-        }
+        voucherPaymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
     }
 
@@ -2937,14 +2929,7 @@ export async function getDailyOperationalReport(branchId, date) {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
       for (const p of paymentRows) {
         const amount = Number(p.amount);
-        if (p.payment_mode === 'Cash') {
-          paymentBreakdown.cash += amount;
-        } else if (p.payment_mode.includes('Card')) {
-          paymentBreakdown.card += amount;
-        } else {
-          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
-          paymentBreakdown.fonepay += amount;
-        }
+        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
       paymentBreakdown.cash += voucherPaymentBreakdown.cash;
       paymentBreakdown.card += voucherPaymentBreakdown.card;

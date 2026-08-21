@@ -8,6 +8,7 @@ import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchVoucherTypes, issueVoucher, fetchMembershipForCustomer } from '../../../../services/api';
+import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -111,9 +112,9 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     [actualPriceNum, discountNum]
   );
 
-  const addTender = () => setTenders((prev) => [...prev, { amount: '', paymentMode: 'Cash' }]);
-  const removeTender = (i) => setTenders((prev) => prev.filter((_, idx) => idx !== i));
-  const updateTender = (i, patch) => setTenders((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  const addTender = () => addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' });
+  const removeTender = (i) => removeTenderRow(setTenders, i);
+  const updateTender = (i, patch) => updateTenderRow(setTenders, i, patch);
 
   // Round each tender to 2dp before summing — matches the RPC's per-tender
   // numeric(10,2) cast (rounds each amount, then sums), so a value like
