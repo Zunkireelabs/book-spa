@@ -8988,18 +8988,13 @@ export async function cancelOutreachMessage(id) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can cancel outreach messages.' } };
     }
 
-    const { data, error } = await supabase
-      .from('outreach_messages')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('org_id', profile.org_id)
-      .in('status', ['queued', 'review', 'approved'])
-      .select('id, status')
-      .single();
+    const { error } = await supabase.rpc('outreach_cancel_message', {
+      p_message_id: id,
+    });
 
     if (error) throw error;
     capture('outreach_message_cancelled', { message_id: id });
-    return { data, error: null };
+    return { data: { id, status: 'cancelled' }, error: null };
   } catch (error) {
     console.error('[API] cancelOutreachMessage error:', error.message);
     return { data: null, error };
@@ -9019,17 +9014,13 @@ export async function bulkApproveOutreach(ids) {
       return { data: null, error: { code: 'VALIDATION', message: 'At least one message id is required.' } };
     }
 
-    const { data, error } = await supabase
-      .from('outreach_messages')
-      .update({ status: 'approved', updated_at: new Date().toISOString() })
-      .in('id', ids)
-      .eq('org_id', profile.org_id)
-      .eq('status', 'review')
-      .select('id, status');
+    const { data: updatedCount, error } = await supabase.rpc('outreach_bulk_approve_messages', {
+      p_message_ids: ids,
+    });
 
     if (error) throw error;
-    capture('outreach_message_bulk_approved', { count: (data || []).length, requested: ids.length });
-    return { data: data || [], error: null };
+    capture('outreach_message_bulk_approved', { count: updatedCount ?? 0, requested: ids.length });
+    return { data: { updatedCount: updatedCount ?? 0, requested: ids.length }, error: null };
   } catch (error) {
     console.error('[API] bulkApproveOutreach error:', error.message);
     return { data: null, error };
