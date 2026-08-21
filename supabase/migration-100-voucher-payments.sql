@@ -55,6 +55,20 @@ CREATE POLICY "Manager/admin can read own org voucher payments"
 
 -- ---- issue_voucher(): accept tenders, write voucher_payments atomically ----
 
+-- Postgres keys functions by name + full argument signature, not name alone.
+-- The 11-arg version below (adds p_tenders jsonb) has a different arity than
+-- any prior issue_voucher signature, so CREATE OR REPLACE FUNCTION does NOT
+-- replace older ones — it creates yet another separate overload alongside
+-- them. Two stale signatures are still live pre-fix:
+--   - 9-arg  (migration-072/075): no p_customer_id, no tender validation
+--   - 10-arg (migration-082/089): has p_customer_id, still no tender validation
+-- Neither writes voucher_payments — silently reintroducing the
+-- paymentless-voucher bug this migration fixes for any caller that resolves
+-- to one of them. Drop both stale signatures explicitly so only the 11-arg
+-- overload survives.
+DROP FUNCTION IF EXISTS public.issue_voucher(uuid, uuid, text, text, numeric, numeric, date, date, text);
+DROP FUNCTION IF EXISTS public.issue_voucher(uuid, uuid, text, text, numeric, numeric, date, date, text, uuid);
+
 CREATE OR REPLACE FUNCTION public.issue_voucher(
   p_branch_id uuid,
   p_voucher_type_id uuid,
