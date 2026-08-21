@@ -335,7 +335,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       label: 'Outreach',
       icon: 'Megaphone',
       path: `${basePath}?view=outreach`,
-      roles: ['manager', 'admin'],
+      roles: ['admin'],
     }] : []),
     {
       id: 'infrastructure',
