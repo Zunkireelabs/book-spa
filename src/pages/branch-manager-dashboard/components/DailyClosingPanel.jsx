@@ -254,6 +254,17 @@ const DailyClosingPanel = ({ branchId }) => {
                     {formatNPR(summary.paymentBreakdown.fonepay)}
                   </span>
                 </div>
+                {summary.voucherSalesTotal > 0 && (
+                  <div className="border-t border-border pt-2 flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Icon name="Ticket" size={14} className="text-text-secondary" />
+                      <span className="font-body font-body-normal text-sm text-text-secondary">of which: Voucher Sales</span>
+                    </div>
+                    <span className="font-body font-body-semibold text-sm text-text-primary">
+                      {formatNPR(summary.voucherSalesTotal)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
