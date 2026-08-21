@@ -2830,6 +2830,43 @@ export async function getDailyOperationalReport(branchId, date) {
       }
     }
 
+    // Voucher sales for this branch + date — same query shape as getDailySummary's
+    // voucher block. Computed unconditionally (closed or not) so the live branch's
+    // totals/paymentBreakdown can fold it in the same way the closed snapshot already
+    // does (closeDay persists getDailySummary()'s voucher-inclusive totals) — without
+    // this, the live branch would show lower cash/card/fonepay totals than the same
+    // report shows once the day is closed, purely from a voucher sale.
+    let voucherSalesTotal = 0;
+    const voucherPaymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
+    let vouchersQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .eq('issued_date', date);
+    vouchersQuery = withBranch(vouchersQuery, branchId);
+    const { data: vouchersToday, error: vouchersError } = await vouchersQuery;
+    if (vouchersError) throw vouchersError;
+
+    const voucherIds = (vouchersToday || []).map(v => v.id);
+    if (voucherIds.length > 0) {
+      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
+        .from('voucher_payments')
+        .select('amount, payment_mode')
+        .in('voucher_id', voucherIds);
+      if (voucherPaymentsError) throw voucherPaymentsError;
+
+      for (const p of (voucherPayments || [])) {
+        const amount = Number(p.amount);
+        voucherSalesTotal += amount;
+        if (p.payment_mode === 'Cash') {
+          voucherPaymentBreakdown.cash += amount;
+        } else if (p.payment_mode.includes('Card')) {
+          voucherPaymentBreakdown.card += amount;
+        } else {
+          voucherPaymentBreakdown.fonepay += amount;
+        }
+      }
+    }
+
     // Build bookings list — Phase 9A: use snapshot fields for display
     const bookingsList = all.map(b => {
       const payment = paymentsMap[b.id];
@@ -2880,7 +2917,10 @@ export async function getDailyOperationalReport(branchId, date) {
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
         // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections
-        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0),
+        // Folds in voucherSalesTotal so the live branch matches what the closed
+        // snapshot already includes (closeDay persists getDailySummary()'s
+        // voucher-inclusive netRevenue).
+        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
       };
     }
 
@@ -2906,6 +2946,9 @@ export async function getDailyOperationalReport(branchId, date) {
           paymentBreakdown.fonepay += amount;
         }
       }
+      paymentBreakdown.cash += voucherPaymentBreakdown.cash;
+      paymentBreakdown.card += voucherPaymentBreakdown.card;
+      paymentBreakdown.fonepay += voucherPaymentBreakdown.fonepay;
     }
 
     // Step 5 — Staff discount summary
@@ -2987,6 +3030,7 @@ export async function getDailyOperationalReport(branchId, date) {
         bookings: bookingsList,
         totals,
         paymentBreakdown,
+        voucherSalesTotal,
         staffDiscountSummary,
         therapistRevenueSummary,
         unpaidBookings,

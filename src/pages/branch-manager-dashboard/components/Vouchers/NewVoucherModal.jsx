@@ -115,8 +115,15 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   const removeTender = (i) => setTenders((prev) => prev.filter((_, idx) => idx !== i));
   const updateTender = (i, patch) => setTenders((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
 
+  // Round each tender to 2dp before summing — matches the RPC's per-tender
+  // numeric(10,2) cast (rounds each amount, then sums), so a value like
+  // 33.333 can't sum-then-round to a "Fully collected" state client-side
+  // while the server's round-then-sum rejects the same tenders.
   const tenderTotal = useMemo(
-    () => tenders.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0),
+    () => tenders.reduce((s, t) => {
+      const amount = Math.round((Number(t.amount) || 0) * 100) / 100;
+      return s + (amount > 0 ? amount : 0);
+    }, 0),
     [tenders]
   );
   const tenderRemaining = useMemo(() => Math.round((totalAmount - tenderTotal) * 100) / 100, [totalAmount, tenderTotal]);
@@ -151,7 +158,9 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
       expiryDate,
       remarks: remarks.trim() || null,
       customerId: linkedCustomerId,
-      tenders: tenders.filter((t) => Number(t.amount) > 0).map((t) => ({ amount: Number(t.amount), paymentMode: t.paymentMode })),
+      tenders: tenders
+        .map((t) => ({ amount: Math.round((Number(t.amount) || 0) * 100) / 100, paymentMode: t.paymentMode }))
+        .filter((t) => t.amount > 0),
     });
     setSubmitting(false);
 
