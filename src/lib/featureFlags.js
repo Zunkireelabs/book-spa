@@ -18,3 +18,9 @@ export const CUSTOMER_REFERRALS_ENABLED = import.meta.env.VITE_ENABLE_CUSTOMER_R
 // Excel workbook. Independent of the other flags. Gate on this before every
 // voucher entry point until the migration has been promoted to production.
 export const VOUCHER_ENABLED = import.meta.env.VITE_ENABLE_VOUCHERS === 'true';
+
+// Automated customer outreach (win-back / review-request / etc, migrations
+// 102-110) — rules, templates, review queue, message log, provider config.
+// Not yet launched anywhere; gate every outreach entry point behind this
+// until the schema has been promoted to production.
+export const OUTREACH_ENABLED = import.meta.env.VITE_ENABLE_OUTREACH === 'true';
