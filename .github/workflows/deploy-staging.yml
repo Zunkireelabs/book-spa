@@ -71,6 +71,7 @@ jobs:
             VITE_ENABLE_MEMBERSHIP=true
             VITE_ENABLE_VOUCHERS=true
             VITE_ENABLE_CUSTOMER_REFERRALS=true
+            VITE_ENABLE_OUTREACH=true
 
   migrate:
     name: Apply Migrations
