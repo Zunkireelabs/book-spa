@@ -2458,6 +2458,40 @@ export async function getDailySummary(branchId, date) {
       }
     }
 
+    // 4b. Voucher sales collected today — same cash-in-drawer money as booking
+    // payments, so it folds into the same paymentBreakdown buckets (that's the
+    // whole point: voucher cash was previously invisible to reconciliation).
+    let voucherSalesTotal = 0;
+    let vouchersQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .eq('issued_date', date);
+    vouchersQuery = withBranch(vouchersQuery, branchId);
+    const { data: vouchersToday, error: vouchersError } = await vouchersQuery;
+    if (vouchersError) throw vouchersError;
+
+    const voucherIds = (vouchersToday || []).map((v) => v.id);
+    if (voucherIds.length > 0) {
+      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
+        .from('voucher_payments')
+        .select('amount, payment_mode')
+        .in('voucher_id', voucherIds);
+      if (voucherPaymentsError) throw voucherPaymentsError;
+
+      for (const p of (voucherPayments || [])) {
+        const amount = Number(p.amount);
+        voucherSalesTotal += amount;
+        netRevenue += amount;
+        if (p.payment_mode === 'Cash') {
+          paymentBreakdown.cash += amount;
+        } else if (p.payment_mode.includes('Card')) {
+          paymentBreakdown.card += amount;
+        } else {
+          paymentBreakdown.fonepay += amount;
+        }
+      }
+    }
+
     // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
     let existingReport = null;
     if (!overall) {
@@ -2479,6 +2513,7 @@ export async function getDailySummary(branchId, date) {
         totalDiscounts,
         netRevenue,
         paymentBreakdown,
+        voucherSalesTotal,
         unpaidCount,
         isClosed: !!existingReport,
         closedAt: existingReport?.closed_at || null,
