@@ -54,19 +54,24 @@ BEGIN
   ),
   last_completed AS (
     -- Most recent Completed booking per customer, restricted to customers
-    -- whose org has an enabled win_back rule.
+    -- whose org has an enabled win_back rule. bookings has no org_id column
+    -- (only branch_id) so org_id is resolved via branches, same as
+    -- outreach_enqueue_for_completed() does below.
     SELECT DISTINCT ON (b.customer_id)
+      b.id AS booking_id,
       b.customer_id,
-      b.org_id,
+      br.org_id,
       b.updated_at AS completed_at
     FROM public.bookings b
-    JOIN win_back_rules wr ON wr.org_id = b.org_id
+    JOIN public.branches br ON br.id = b.branch_id
+    JOIN win_back_rules wr ON wr.org_id = br.org_id
     WHERE b.status = 'Completed'
       AND b.customer_id IS NOT NULL
     ORDER BY b.customer_id, b.updated_at DESC
   ),
   candidates AS (
     SELECT
+      lc.booking_id,
       lc.customer_id,
       lc.org_id,
       lc.completed_at,
@@ -105,7 +110,7 @@ BEGIN
       tp.org_id,
       tp.rule_id,
       tp.customer_id,
-      NULL,
+      tp.booking_id,
       tp.channel,
       tp.customer_email,
       replace(tp.template_subject, '{{customer_name}}', tp.customer_name),
