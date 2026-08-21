@@ -12,13 +12,6 @@ function formatDateTime(d) {
   return new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// Note: this panel edits the message text (subject/body) locally before
-// Approve, but approveOutreachMessage() only flips status — Phase 1's
-// outreach_messages RLS has no client UPDATE-of-content policy (write path
-// is SECURITY DEFINER-only per migration-104), so edits here are display-
-// only unless/until a dedicated edit RPC exists. Kept as inline-editable UI
-// per the brief so the affordance is in place; Approve sends the message
-// as it was queued.
 const ReviewQueuePanel = () => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +55,11 @@ const ReviewQueuePanel = () => {
   const handleApprove = async (id) => {
     setActionError(null);
     setActionId(id);
-    const { error: approveError } = await approveOutreachMessage(id);
+    // If this row is currently being edited, pass the draft subject/body
+    // through so the edited content is what actually gets sent, not the
+    // original queued content.
+    const overrides = editingId === id ? { subject: editDraft.subject, body: editDraft.body } : {};
+    const { error: approveError } = await approveOutreachMessage(id, overrides);
     setActionId(null);
     if (approveError) {
       setActionError(approveError.message || 'Failed to approve message.');

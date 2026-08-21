@@ -8950,7 +8950,12 @@ export async function fetchOutreachReviewQueue() {
   return fetchOutreachMessages({ status: 'review' });
 }
 
-export async function approveOutreachMessage(id) {
+// overrides: { subject, body } — optional. When provided (e.g. the operator
+// edited the message in ReviewQueuePanel before approving), they're
+// persisted onto the row via the outreach_approve_message SECURITY DEFINER
+// RPC (migration-111) so the edited content is what actually gets sent.
+// Omitting overrides approves the message as queued, unchanged.
+export async function approveOutreachMessage(id, overrides = {}) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8959,18 +8964,15 @@ export async function approveOutreachMessage(id) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can approve outreach messages.' } };
     }
 
-    const { data, error } = await supabase
-      .from('outreach_messages')
-      .update({ status: 'approved', updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('org_id', profile.org_id)
-      .eq('status', 'review')
-      .select('id, status')
-      .single();
+    const { error } = await supabase.rpc('outreach_approve_message', {
+      p_message_id: id,
+      p_subject: overrides.subject ?? null,
+      p_body: overrides.body ?? null,
+    });
 
     if (error) throw error;
-    capture('outreach_message_approved', { message_id: id });
-    return { data, error: null };
+    capture('outreach_message_approved', { message_id: id, edited: Boolean(overrides.subject || overrides.body) });
+    return { data: { id, status: 'approved' }, error: null };
   } catch (error) {
     console.error('[API] approveOutreachMessage error:', error.message);
     return { data: null, error };
