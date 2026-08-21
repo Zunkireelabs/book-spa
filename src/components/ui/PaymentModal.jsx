@@ -14,6 +14,7 @@ import {
   fetchVouchersForBooking,
 } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
+import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
 import { useOrg } from '../../contexts/OrgContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
@@ -316,11 +317,9 @@ const PaymentModal = ({
       .slice(0, 6);
   }, [dueHolderName, dueHolderSuggestions]);
 
-  const updateTender = (i, patch) => {
-    setTenders(prev => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
-  };
-  const addTender = () => setTenders(prev => [...prev, { amount: '', paymentMode: firstLeafValue(PAYMENT_TREE) }]);
-  const removeTender = (i) => setTenders(prev => prev.filter((_, idx) => idx !== i));
+  const updateTender = (i, patch) => updateTenderRow(setTenders, i, patch);
+  const addTender = () => addTenderRow(setTenders, { amount: '', paymentMode: firstLeafValue(PAYMENT_TREE) });
+  const removeTender = (i) => removeTenderRow(setTenders, i);
 
   // Waterfall-allocate the entered tenders: the primary booking first (up to its
   // own remaining — this is the only place a partial "leave as due" applies), then
