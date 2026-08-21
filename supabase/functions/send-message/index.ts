@@ -148,7 +148,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
       RESEND_FROM_ADDRESS: Deno.env.get('RESEND_FROM_ADDRESS') || '',
     };
 
-    const provider = resolveProvider(msg.channel, config, secretsMap);
+    const { data: orgData } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', msg.org_id)
+      .single();
+
+    const provider = resolveProvider(
+      msg.channel,
+      config,
+      secretsMap,
+      orgData?.name
+    );
 
     const result = await provider.send({
       to: msg.to_address,

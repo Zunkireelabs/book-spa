@@ -19,8 +19,18 @@ export class ResendEmailProvider implements ChannelProvider {
 
   constructor(
     private apiKey: string,
-    private fromAddress: string
+    private fromAddress: string,
+    private fromName?: string
   ) {}
+
+  private buildFrom(): string {
+    if (!this.fromName) return this.fromAddress;
+    const needsQuoting = /[",()<>:;\\]/.test(this.fromName);
+    const name = needsQuoting
+      ? `"${this.fromName.replace(/"/g, '\\"')}"`
+      : this.fromName;
+    return `${name} <${this.fromAddress}>`;
+  }
 
   async send({
     to,
@@ -34,7 +44,7 @@ export class ResendEmailProvider implements ChannelProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: this.fromAddress,
+        from: this.buildFrom(),
         to,
         subject,
         html: body,
@@ -55,12 +65,14 @@ export class ResendEmailProvider implements ChannelProvider {
 export function resolveProvider(
   channel: string,
   config: { provider: string; from_address?: string },
-  secrets: Record<string, string>
+  secrets: Record<string, string>,
+  fromName?: string
 ): ChannelProvider {
   if (channel === 'email' && config.provider === 'resend') {
     return new ResendEmailProvider(
       secrets.RESEND_API_KEY,
-      config.from_address ?? secrets.RESEND_FROM_ADDRESS
+      config.from_address ?? secrets.RESEND_FROM_ADDRESS,
+      fromName
     );
   }
   throw new Error(
