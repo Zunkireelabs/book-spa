@@ -282,6 +282,17 @@ export async function fetchBookingCreator(bookingId) {
 
 export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti', 'Membership'];
 
+// Bucket key ('cash' | 'card' | 'fonepay') for the simple 3-way cash/card/other
+// split used by getDailySummary() and getDailyOperationalReport() (both the
+// booking-payments and voucher-payments loops in each). Not used by
+// getTodayInsights(), which needs a richer wallet/digital breakdown via its own
+// CARD_MODES/WALLET_MODES/DIGITAL_MODES sets further down this file.
+function classifyPaymentMode(mode) {
+  if (mode === 'Cash') return 'cash';
+  if (mode.includes('Card')) return 'card';
+  return 'fonepay'; // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
+}
+
 // Persists the org's admin-configured payment method list (organizations.settings
 // .paymentMethods) via a SECURITY DEFINER RPC scoped to just that key — see
 // migration-052-custom-payment-methods.sql. Each entry is either a plain string
@@ -2447,14 +2458,35 @@ export async function getDailySummary(branchId, date) {
       for (const p of (payments || [])) {
         const amount = Number(p.amount);
         netRevenue += amount;
-        if (p.payment_mode === 'Cash') {
-          paymentBreakdown.cash += amount;
-        } else if (p.payment_mode.includes('Card')) {
-          paymentBreakdown.card += amount;
-        } else {
-          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
-          paymentBreakdown.fonepay += amount;
-        }
+        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
+      }
+    }
+
+    // 4b. Voucher sales collected today — same cash-in-drawer money as booking
+    // payments, so it folds into the same paymentBreakdown buckets (that's the
+    // whole point: voucher cash was previously invisible to reconciliation).
+    let voucherSalesTotal = 0;
+    let vouchersQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .eq('issued_date', date);
+    vouchersQuery = withBranch(vouchersQuery, branchId);
+    const { data: vouchersToday, error: vouchersError } = await vouchersQuery;
+    if (vouchersError) throw vouchersError;
+
+    const voucherIds = (vouchersToday || []).map((v) => v.id);
+    if (voucherIds.length > 0) {
+      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
+        .from('voucher_payments')
+        .select('amount, payment_mode')
+        .in('voucher_id', voucherIds);
+      if (voucherPaymentsError) throw voucherPaymentsError;
+
+      for (const p of (voucherPayments || [])) {
+        const amount = Number(p.amount);
+        voucherSalesTotal += amount;
+        netRevenue += amount;
+        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
     }
 
@@ -2479,6 +2511,7 @@ export async function getDailySummary(branchId, date) {
         totalDiscounts,
         netRevenue,
         paymentBreakdown,
+        voucherSalesTotal,
         unpaidCount,
         isClosed: !!existingReport,
         closedAt: existingReport?.closed_at || null,
@@ -2795,6 +2828,37 @@ export async function getDailyOperationalReport(branchId, date) {
       }
     }
 
+    // Voucher sales for this branch + date — same query shape as getDailySummary's
+    // voucher block. Computed unconditionally (closed or not) so the live branch's
+    // totals/paymentBreakdown can fold it in the same way the closed snapshot already
+    // does (closeDay persists getDailySummary()'s voucher-inclusive totals) — without
+    // this, the live branch would show lower cash/card/fonepay totals than the same
+    // report shows once the day is closed, purely from a voucher sale.
+    let voucherSalesTotal = 0;
+    const voucherPaymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
+    let vouchersQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .eq('issued_date', date);
+    vouchersQuery = withBranch(vouchersQuery, branchId);
+    const { data: vouchersToday, error: vouchersError } = await vouchersQuery;
+    if (vouchersError) throw vouchersError;
+
+    const voucherIds = (vouchersToday || []).map(v => v.id);
+    if (voucherIds.length > 0) {
+      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
+        .from('voucher_payments')
+        .select('amount, payment_mode')
+        .in('voucher_id', voucherIds);
+      if (voucherPaymentsError) throw voucherPaymentsError;
+
+      for (const p of (voucherPayments || [])) {
+        const amount = Number(p.amount);
+        voucherSalesTotal += amount;
+        voucherPaymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
+      }
+    }
+
     // Build bookings list — Phase 9A: use snapshot fields for display
     const bookingsList = all.map(b => {
       const payment = paymentsMap[b.id];
@@ -2845,7 +2909,10 @@ export async function getDailyOperationalReport(branchId, date) {
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
         // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections
-        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0),
+        // Folds in voucherSalesTotal so the live branch matches what the closed
+        // snapshot already includes (closeDay persists getDailySummary()'s
+        // voucher-inclusive netRevenue).
+        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
       };
     }
 
@@ -2862,15 +2929,11 @@ export async function getDailyOperationalReport(branchId, date) {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
       for (const p of paymentRows) {
         const amount = Number(p.amount);
-        if (p.payment_mode === 'Cash') {
-          paymentBreakdown.cash += amount;
-        } else if (p.payment_mode.includes('Card')) {
-          paymentBreakdown.card += amount;
-        } else {
-          // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
-          paymentBreakdown.fonepay += amount;
-        }
+        paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
+      paymentBreakdown.cash += voucherPaymentBreakdown.cash;
+      paymentBreakdown.card += voucherPaymentBreakdown.card;
+      paymentBreakdown.fonepay += voucherPaymentBreakdown.fonepay;
     }
 
     // Step 5 — Staff discount summary
@@ -2952,6 +3015,7 @@ export async function getDailyOperationalReport(branchId, date) {
         bookings: bookingsList,
         totals,
         paymentBreakdown,
+        voucherSalesTotal,
         staffDiscountSummary,
         therapistRevenueSummary,
         unpaidBookings,
@@ -8096,11 +8160,19 @@ export async function fetchVouchers() {
 export async function issueVoucher({
   branchId, voucherTypeId, guestName, guestInfo = null, discountPercent = 0,
   actualPrice = null, issuedDate = null, expiryDate = null, remarks = null,
-  customerId = null,
+  customerId = null, tenders = [],
 }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+
+    if (!Array.isArray(tenders) || tenders.length === 0) {
+      return { data: null, error: { code: 'TENDERS_REQUIRED', message: 'At least one payment tender is required.' } };
+    }
+
+    const cleanedTenders = tenders
+      .filter((t) => Number(t.amount) > 0 && t.paymentMode)
+      .map((t) => ({ amount: Number(t.amount), payment_mode: t.paymentMode }));
 
     const { data, error } = await supabase.rpc('issue_voucher', {
       p_branch_id: branchId,
@@ -8113,6 +8185,7 @@ export async function issueVoucher({
       p_expiry_date: expiryDate,
       p_remarks: remarks,
       p_customer_id: customerId,
+      p_tenders: cleanedTenders,
     });
     if (error) throw error;
     capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
