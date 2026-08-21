@@ -5,7 +5,7 @@ import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { fetchPendingApprovalCount } from 'services/api';
-import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from 'lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from 'lib/featureFlags';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
@@ -329,6 +329,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['manager', 'admin'],
         },
       ],
+    }] : []),
+    ...(OUTREACH_ENABLED ? [{
+      id: 'outreach',
+      label: 'Outreach',
+      icon: 'Megaphone',
+      path: `${basePath}?view=outreach`,
+      roles: ['manager', 'admin'],
     }] : []),
     {
       id: 'infrastructure',
