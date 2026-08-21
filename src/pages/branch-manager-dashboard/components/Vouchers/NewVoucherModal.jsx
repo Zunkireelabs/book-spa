@@ -3,9 +3,12 @@ import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
+import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchVoucherTypes, issueVoucher, fetchMembershipForCustomer } from '../../../../services/api';
+import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -24,6 +27,7 @@ const DEFAULT_VALIDITY_DAYS = 90;
 const NewVoucherModal = ({ onClose, onIssued }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
+  const { paymentMethods } = useOrg();
 
   const [types, setTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
@@ -46,6 +50,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   const [remarks, setRemarks] = useState('');
   const [membership, setMembership] = useState(null);
   const [discountTouched, setDiscountTouched] = useState(false);
+  const [tenders, setTenders] = useState([{ amount: '', paymentMode: 'Cash' }]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -107,6 +112,23 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     [actualPriceNum, discountNum]
   );
 
+  const addTender = () => addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' });
+  const removeTender = (i) => removeTenderRow(setTenders, i);
+  const updateTender = (i, patch) => updateTenderRow(setTenders, i, patch);
+
+  // Round each tender to 2dp before summing — matches the RPC's per-tender
+  // numeric(10,2) cast (rounds each amount, then sums), so a value like
+  // 33.333 can't sum-then-round to a "Fully collected" state client-side
+  // while the server's round-then-sum rejects the same tenders.
+  const tenderTotal = useMemo(
+    () => tenders.reduce((s, t) => {
+      const amount = Math.round((Number(t.amount) || 0) * 100) / 100;
+      return s + (amount > 0 ? amount : 0);
+    }, 0),
+    [tenders]
+  );
+  const tenderRemaining = useMemo(() => Math.round((totalAmount - tenderTotal) * 100) / 100, [totalAmount, tenderTotal]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -118,6 +140,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     if (discountNum < 0 || discountNum > 100) { setError('Discount must be between 0 and 100.'); return; }
     if (!issuedDate || !expiryDate) { setError('Issued and expiry dates are required.'); return; }
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
+    if (tenderRemaining !== 0) { setError('Payment amount must equal the voucher total.'); return; }
 
     setSubmitting(true);
     // Guest Info is one column — a phone number takes priority (it's what
@@ -136,6 +159,9 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
       expiryDate,
       remarks: remarks.trim() || null,
       customerId: linkedCustomerId,
+      tenders: tenders
+        .map((t) => ({ amount: Math.round((Number(t.amount) || 0) * 100) / 100, paymentMode: t.paymentMode }))
+        .filter((t) => t.amount > 0),
     });
     setSubmitting(false);
 
@@ -364,6 +390,54 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                 <span className="font-data font-data-semibold text-sm text-primary">{formatNPR(totalAmount)}</span>
               </div>
 
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-body font-body-medium text-xs text-text-secondary">
+                    Payment{tenders.length > 1 ? 's' : ''} collected
+                  </label>
+                  <button type="button" onClick={addTender} className="flex items-center gap-1 text-xs font-body font-body-medium text-primary hover:underline">
+                    + Add method
+                  </button>
+                </div>
+                {tenders.map((t, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="w-36 flex-shrink-0">
+                      <PaymentMethodSelector
+                        paymentMethods={paymentMethods}
+                        value={t.paymentMode}
+                        onChange={(v) => updateTender(i, { paymentMode: v })}
+                        size="md"
+                      />
+                    </div>
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={t.amount}
+                        onChange={(e) => updateTender(i, { amount: e.target.value })}
+                        placeholder="0"
+                        className="w-full h-10 pl-11 pr-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                      />
+                    </div>
+                    {tenders.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeTender(i)}
+                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                        aria-label="Remove method"
+                      >
+                        <Icon name="X" size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <p className={`font-caption text-xs ${tenderRemaining === 0 ? 'text-success' : 'text-warning'}`}>
+                  {tenderRemaining === 0 ? 'Fully collected.' : `Remaining to collect: ${formatNPR(tenderRemaining)}`}
+                </p>
+              </div>
+
               <div>
                 <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Remarks (optional)</label>
                 <textarea
@@ -393,7 +467,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
               </button>
               <button
                 type="submit"
-                disabled={submitting || loadingTypes || isOverall}
+                disabled={submitting || loadingTypes || isOverall || tenderRemaining !== 0}
                 className="px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 disabled:opacity-50 spa-transition-fast inline-flex items-center space-x-1.5"
               >
                 {submitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
