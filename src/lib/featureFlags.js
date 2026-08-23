@@ -24,3 +24,8 @@ export const VOUCHER_ENABLED = import.meta.env.VITE_ENABLE_VOUCHERS === 'true';
 // Not yet launched anywhere; gate every outreach entry point behind this
 // until the schema has been promoted to production.
 export const OUTREACH_ENABLED = import.meta.env.VITE_ENABLE_OUTREACH === 'true';
+
+// Platform super-admin area for cross-tenant commission/revenue-share
+// configuration (migrations 113-117). Gate all platform-admin routes and
+// components behind this flag until schema is promoted to production.
+export const PLATFORM_ADMIN_ENABLED = import.meta.env.VITE_ENABLE_PLATFORM_ADMIN === 'true';
