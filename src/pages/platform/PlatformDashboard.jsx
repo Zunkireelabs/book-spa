@@ -38,6 +38,10 @@ const PlatformDashboard = () => {
           </div>
         </div>
         <p className="font-body text-sm text-text-secondary">{range.startDate} → {range.endDate}</p>
+        <p className="font-body text-xs text-text-secondary">
+          Sales are counted once (non-wallet bookings + voucher &amp; membership top-ups). Post-hoc voucher
+          voids and membership-deposit refunds are not netted out.
+        </p>
 
         {error && <p className="font-body text-sm text-error">{error}</p>}
         {loading ? (

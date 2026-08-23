@@ -160,6 +160,11 @@ const PlatformOrgDetail = () => {
                 options={PERIOD_PRESETS.map((p) => ({ value: p.id, label: p.label }))} />
             </div>
           </div>
+          <p className="font-body text-xs text-text-secondary">
+            Audit view — includes unpaid and refunded bookings. These booking amounts are not the
+            commission sales base (which is payment-based and adds voucher/membership top-ups), so they
+            will not sum to the dashboard total.
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm font-data">
               <thead className="text-text-secondary border-b border-border">
