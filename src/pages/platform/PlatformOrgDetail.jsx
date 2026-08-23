@@ -35,6 +35,12 @@ const PlatformOrgDetail = () => {
   const [colAt, setColAt] = useState(getTodayISO());
   const [colNotes, setColNotes] = useState('');
 
+  // Keep the "record collection" period in step with the selected preset.
+  useEffect(() => {
+    setColFrom(range.startDate);
+    setColTo(range.endDate);
+  }, [range.startDate, range.endDate]);
+
   const reload = useCallback(() => {
     setError('');
     Promise.all([listRates(orgId), listCollections(orgId), getOrgBookings(orgId, range.startDate, range.endDate)])
