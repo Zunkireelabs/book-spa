@@ -20,8 +20,8 @@ BEGIN
    ORDER BY effective_from DESC LIMIT 1;
 
   IF FOUND THEN
-    IF p_effective_from <= v_open.effective_from THEN
-      RAISE EXCEPTION 'new effective_from (%) must be after the current rate''s effective_from (%)',
+    IF p_effective_from <= v_open.effective_from + 1 THEN
+      RAISE EXCEPTION 'new effective_from (%) must be at least 2 days after the current rate''s effective_from (%) — a rate period must span at least 1 day',
         p_effective_from, v_open.effective_from USING ERRCODE = '22007';
     END IF;
     UPDATE public.org_commission_rates
