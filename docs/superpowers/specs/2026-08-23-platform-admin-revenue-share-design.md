@@ -64,10 +64,14 @@ On success, lands on `/platform/dashboard`.
 ## Commission schema
 
 ```sql
+CREATE TYPE public.commission_basis AS ENUM ('vat_inclusive', 'vat_exclusive');
+
 CREATE TABLE public.org_commission_rates (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id         uuid NOT NULL REFERENCES public.organizations(id),
   rate_percent   numeric(5,2) NOT NULL CHECK (rate_percent >= 0 AND rate_percent <= 100),
+  commission_basis public.commission_basis NOT NULL,
+  vat_rate_percent numeric(5,2) NOT NULL DEFAULT 13.00 CHECK (vat_rate_percent >= 0),
   effective_from date NOT NULL,
   effective_to   date,                    -- NULL = currently active
   created_at     timestamptz NOT NULL DEFAULT now(),
@@ -89,6 +93,13 @@ CREATE TABLE public.org_commission_collections (
 );
 ```
 
+- `commission_basis` is per rate-period, not a global org setting — Nuad Thai's deal is "commission on
+  VAT-inclusive sales" while another client might be "VAT-exclusive," and a renegotiation could change
+  the basis alongside the rate. `final_amount` in `bookings` is always what the customer actually paid
+  (VAT already baked in, per current schema — there is no separate VAT column anywhere). `vat_rate_percent`
+  (default 13%, Nepal's standard rate) is only used when `commission_basis = 'vat_exclusive'`, to back
+  VAT out of `final_amount` before applying `rate_percent`; when `commission_basis = 'vat_inclusive'`,
+  `rate_percent` applies to `final_amount` directly and `vat_rate_percent` is unused.
 - `org_commission_rates` rows are immutable history, same posture as `payments`: no UPDATE/DELETE
   policy. Renegotiating a rate = an RPC that closes the current open row (`effective_to = new rate's
   effective_from - 1`) and inserts a new one in the same transaction — never edits a past row.
@@ -111,6 +122,7 @@ platform_get_revenue_rollup(p_from date, p_to date)
                revenue_by_branch:   [{branch_id, branch_name, gross}],
                gross_total,
                active_rate_percent,          -- null if none configured
+               active_commission_basis,      -- 'vat_inclusive' | 'vat_exclusive' | null
                commission_for_range,         -- null if no rate active for any part of range
                commission_owed_to_date,      -- sum over full rate history, effective_from → today
                collected_to_date,            -- sum(org_commission_collections.amount_collected)
@@ -123,9 +135,11 @@ platform_get_revenue_rollup(p_from date, p_to date)
   rule) — same semantics as `getRevenueForPeriod()` / `computeRevenueForRange()` in `services/api.js`,
   just aggregated across every org in one query instead of one org at a time.
 - Commission math handles rate changes mid-range correctly: for each rate-history row that overlaps
-  `[p_from, p_to]`, compute `revenue(overlap) * rate_percent`, then sum. `commission_owed_to_date` runs
-  the same logic over `[effective_from of first rate row, today]`, independent of the dashboard's
-  selected range.
+  `[p_from, p_to]`, compute the commission base for that overlap —
+  `revenue(overlap)` if `commission_basis = 'vat_inclusive'`, or
+  `revenue(overlap) / (1 + vat_rate_percent / 100)` if `'vat_exclusive'` — multiply by `rate_percent`,
+  then sum across overlapping rows. `commission_owed_to_date` runs the same logic over
+  `[effective_from of first rate row, today]`, independent of the dashboard's selected range.
 - If an org has no commission rate row at all, `active_rate_percent`/`commission_for_range`/
   `commission_owed_to_date` are `null` (not `0`) — the UI must render "not configured", never a bare
   $0, so it's never misread as "deal exists, currently zero."
@@ -151,7 +165,8 @@ a booking, see staff records, or touch settings for any tenant.
   toggle, active rate %, commission for range, commission owed to date, collected to date, net owed.
   Global date-range picker at top (defaults to current month).
 - `/platform/dashboard/:orgId` — drill-in:
-  - Rate history list + "new rate" action (invokes the close-old/open-new RPC).
+  - Rate history list (rate %, VAT-inclusive/exclusive basis, VAT rate used if exclusive, effective
+    dates) + "new rate" action (invokes the close-old/open-new RPC; form includes the basis choice).
   - Collection log + "record collection" action (insert into `org_commission_collections`).
   - Read-only booking/payment table for the selected range (via the drill-in RLS exception) — same
     data shape as an org's own reports, no edit affordances.
@@ -180,7 +195,8 @@ walkthrough:
    ordinary staging staff/admin login.
 2. Create two overlapping `org_commission_rates` periods for a test org via direct SQL — confirm the
    RPC path (not raw insert) rejects it; confirm two *non*-overlapping periods compute correctly against
-   a hand-calculated number.
+   a hand-calculated number, for both a `vat_inclusive` rate row and a `vat_exclusive` one (verify the
+   VAT-exclusive figure is lower than the inclusive one by the expected backed-out VAT amount).
 3. Record a collection larger than owed-to-date; confirm `net_owed` goes negative and renders without
    erroring.
 4. As an org-scoped admin (not platform admin), confirm `org_commission_rates` /
