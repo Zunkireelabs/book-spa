@@ -55,8 +55,6 @@ BEGIN
   SELECT COALESCE(jsonb_agg(org_obj ORDER BY org_name), '[]'::jsonb) INTO v_result
   FROM (
     SELECT
-      o.id AS org_id,
-      o.name AS org_name,
       jsonb_build_object(
         'org_id', o.id,
         'org_name', o.name,
@@ -66,11 +64,11 @@ BEGIN
         'active_rate_percent',     ar.rate_percent,
         'active_commission_basis', ar.commission_basis,
         'commission_for_range',    public.platform_commission_for_range(o.id, p_from, p_to),
-        'commission_owed_to_date', CASE WHEN first_from IS NULL THEN NULL
-                                        ELSE public.platform_commission_for_range(o.id, first_from, v_today) END,
+        'commission_owed_to_date', CASE WHEN fr.first_from IS NULL THEN NULL
+                                        ELSE public.platform_commission_for_range(o.id, fr.first_from, v_today) END,
         'collected_to_date',       COALESCE(coll.total, 0),
-        'net_owed',                CASE WHEN first_from IS NULL THEN NULL
-                                        ELSE public.platform_commission_for_range(o.id, first_from, v_today)
+        'net_owed',                CASE WHEN fr.first_from IS NULL THEN NULL
+                                        ELSE public.platform_commission_for_range(o.id, fr.first_from, v_today)
                                              - COALESCE(coll.total, 0) END
       ) AS org_obj,
       o.name AS org_name
@@ -88,8 +86,7 @@ BEGIN
     LEFT JOIN LATERAL (
       SELECT SUM(amount_collected) AS total
       FROM public.org_commission_collections WHERE org_id = o.id
-    ) coll ON true,
-    LATERAL (SELECT fr.first_from AS first_from) fx
+    ) coll ON true
     WHERE o.is_active
   ) sub;
 
