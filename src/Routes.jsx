@@ -18,6 +18,12 @@ import CustomerAccount from "pages/customer-account";
 import CustomerForgotPassword from "pages/customer-forgot-password";
 import CustomerResetPassword from "pages/customer-reset-password";
 import NotFound from "pages/NotFound";
+import { PlatformAuthProvider } from 'contexts/PlatformAuthContext';
+import ProtectedPlatformRoute from 'components/ProtectedPlatformRoute';
+import PlatformLogin from 'pages/platform/PlatformLogin';
+import PlatformDashboard from 'pages/platform/PlatformDashboard';
+import PlatformOrgDetail from 'pages/platform/PlatformOrgDetail';
+import { PLATFORM_ADMIN_ENABLED } from 'lib/featureFlags';
 
 // External redirect component for root URL
 const ExternalRedirect = ({ to }) => {
@@ -148,6 +154,25 @@ const AppRoutes = () => {
             </ProtectedRoute>
           </TenantWrapper>
         } />
+
+        {/* ==================== PLATFORM ADMIN ROUTES (flag-gated) ==================== */}
+        {PLATFORM_ADMIN_ENABLED && (
+          <>
+            <Route path="/platform/login" element={
+              <PlatformAuthProvider><PlatformLogin /></PlatformAuthProvider>
+            } />
+            <Route path="/platform/dashboard" element={
+              <PlatformAuthProvider>
+                <ProtectedPlatformRoute><PlatformDashboard /></ProtectedPlatformRoute>
+              </PlatformAuthProvider>
+            } />
+            <Route path="/platform/dashboard/:orgId" element={
+              <PlatformAuthProvider>
+                <ProtectedPlatformRoute><PlatformOrgDetail /></ProtectedPlatformRoute>
+              </PlatformAuthProvider>
+            } />
+          </>
+        )}
 
         {/* ==================== LEGACY STAFF ROUTES (REDIRECTS) ==================== */}
 
