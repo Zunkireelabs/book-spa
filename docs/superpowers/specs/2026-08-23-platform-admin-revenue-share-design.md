@@ -1,7 +1,7 @@
 # Platform Admin & Cross-Tenant Revenue Share — Design Spec
 
 **Date:** 2026-08-23
-**Status:** Approved, pending implementation plan
+**Status:** Revised after gap review (drawer-basis sales, session isolation, VAT basis) — pending re-approval before implementation plan
 
 ## Problem
 
@@ -50,14 +50,33 @@ later is one more row; no schema change.
 
 ## Login
 
-New route `/platform/login`, plain email+password (no PIN, no org slug — there is no org). New
-`PlatformAuthContext`, entirely separate from `AuthContext` → `OrgContext` → `BranchContext` — a
-platform-admin session never enters the org-scoped provider tree, and an org-scoped session never sees
-`/platform/*`.
+New route `/platform/login`, plain email+password (no PIN, no org slug — there is no org).
 
-After Supabase auth succeeds, the frontend calls `is_platform_admin()` (RPC) before treating the
-session as valid for `/platform/*`; a non-platform-admin who somehow has valid Supabase credentials
-still gets rejected. This is defense in depth on top of RLS, not a replacement for it.
+**Session isolation is mandatory, not cosmetic.** There is one Supabase project (one URL + anon key),
+and `AuthContext`'s `supabase.auth.onAuthStateChange` listener is mounted at the app root for *every*
+route (`App.jsx` → `AuthProvider`). If a platform admin signs in on the shared default client, that
+listener fires, tries to fetch a `public.users` profile row for the admin's uid (which does not exist —
+a platform admin has no org row), sets `profile = null`, and `ProtectedRoute` bounces to `/login` — a
+guaranteed login-loop. The codebase already solves exactly this for the customer portal:
+`src/lib/supabase.js` runs a **second isolated client** `supabaseCustomer` with its own
+`storageKey: 'zenly-customer-auth'`. Platform admin gets a **third** client:
+
+```js
+// src/lib/supabase.js
+export const supabasePlatform = createClient(URL, ANON_KEY, {
+  auth: { storageKey: 'zenly-platform-auth', persistSession: true, autoRefreshToken: true },
+});
+```
+
+`PlatformAuthContext` uses **only** `supabasePlatform` — its session lives under a separate storage key,
+so signing in as a platform admin never triggers the staff `AuthContext` listener, and vice versa. The
+two contexts cannot see each other's sessions. `/platform/*` routes are guarded by a dedicated
+`ProtectedPlatformRoute` (checks `PlatformAuthContext`, not the org `ProtectedRoute`), and the staff
+`/login` / OrgFinder routes must not match `/platform/login`.
+
+After `supabasePlatform` auth succeeds, the frontend calls `is_platform_admin()` (RPC, via the platform
+client) before treating the session as valid; a non-platform-admin who somehow has valid Supabase
+credentials still gets rejected. Defense in depth on top of RLS, not a replacement for it.
 
 On success, lands on `/platform/dashboard`.
 
@@ -95,11 +114,13 @@ CREATE TABLE public.org_commission_collections (
 
 - `commission_basis` is per rate-period, not a global org setting — Nuad Thai's deal is "commission on
   VAT-inclusive sales" while another client might be "VAT-exclusive," and a renegotiation could change
-  the basis alongside the rate. `final_amount` in `bookings` is always what the customer actually paid
-  (VAT already baked in, per current schema — there is no separate VAT column anywhere). `vat_rate_percent`
-  (default 13%, Nepal's standard rate) is only used when `commission_basis = 'vat_exclusive'`, to back
-  VAT out of `final_amount` before applying `rate_percent`; when `commission_basis = 'vat_inclusive'`,
-  `rate_percent` applies to `final_amount` directly and `vat_rate_percent` is unused.
+  the basis alongside the rate. All recorded amounts (booking `final_amount`, voucher `actual_price`,
+  membership deposit `amount`) are what the customer actually paid, VAT already baked in — there is no
+  separate VAT column anywhere in the schema. `vat_rate_percent` (default 13%, Nepal's standard rate) is
+  only used when `commission_basis = 'vat_exclusive'`, to back VAT out of the **entire sales base**
+  (defined in "Commission base" below) before applying `rate_percent`: `base / (1 + vat_rate_percent/100)`.
+  When `commission_basis = 'vat_inclusive'`, `rate_percent` applies to the sales base directly and
+  `vat_rate_percent` is unused.
 - `org_commission_rates` rows are immutable history, same posture as `payments`: no UPDATE/DELETE
   policy. Renegotiating a rate = an RPC that closes the current open row (`effective_to = new rate's
   effective_from - 1`) and inserts a new one in the same transaction — never edits a past row.
@@ -113,14 +134,52 @@ CREATE TABLE public.org_commission_collections (
   access** — clients must not see the cut being taken from them. All reads/writes go through
   `SECURITY DEFINER` RPCs gated on `is_platform_admin()`.
 
+## Commission base — "total sales, counted once" (drawer basis)
+
+"Sales" for commission is **every rupee of real customer money the org took in, counted exactly once**.
+Because voucher and membership wallets decouple *when cash arrives* (top-up) from *when a service is
+delivered* (a wallet-funded booking), a naive `SUM(bookings.final_amount)` both misses the top-up cash
+and double-counts the wallet redemption. The base is therefore the sum of three non-overlapping
+components, each bucketed by its own Nepal-local calendar date (no timezone conversion — these are all
+`date` columns or `::date` casts):
+
+1. **Non-wallet booking payments** — real cash/card/eSewa/Khalti/etc. collected against services.
+   Computed at the **`payments` grain, not booking grain**, because a booking can be split-tendered
+   (e.g. part `VoucherWallet`, part `Cash`) and only the non-wallet part is new money:
+   `SUM(payments.amount)` for payments whose `payment_mode NOT IN
+   ('Membership','ReferralWallet','VoucherWallet','ReferralVoucher')`, joined to a booking whose
+   `payment_status = 'paid'` (excludes refunded — refunds flip status, giving the "current truth,
+   refunds excluded" basis you chose) and whose `date` falls in the range. Attributed to the booking's
+   single `service.category` and its `branch_id`.
+2. **Voucher sales** — `SUM(vouchers.actual_price)` (the money paid to buy the voucher, already net of
+   any issue discount) for vouchers whose `issued_date` is in range, excluding cancelled/voided
+   vouchers. Has `branch_id`. Bucketed under a synthetic category `"Voucher sales"`.
+   *Interim source:* `voucher_payments` (from the 2026-08-20 voucher-payment spec) does **not exist
+   yet** — `vouchers.actual_price`/`issued_date` is the correct money+date source today. If/when
+   `voucher_payments` ships, switch this component to `SUM(voucher_payments.amount)` for exact tender
+   fidelity; the rollup total is unaffected in the common single-tender case.
+3. **Membership deposits** — `SUM(membership_transactions.amount)` where `kind = 'deposit'` (positive
+   cash top-ups only; `deduction`/`birthday_perk`/`adjustment` are excluded — perks are 0 and non-cash,
+   adjustments are ambiguous corrections), bucketed by `created_at::date`. Bucketed under synthetic
+   category `"Membership deposits"`. **No `branch_id` on this table** → membership income is org-level
+   only and appears under a `"— (org-level)"` bucket in the branch breakdown, never attributed to a
+   branch.
+
+The wallet redemption bookings that fund a voucher/membership visit are excluded by the
+`payment_mode NOT IN (...wallet modes...)` filter in component 1, so their rupees are counted once —
+at top-up, in component 2 or 3. `ReferralWallet`/`ReferralVoucher` are internal credits, not customer
+cash, and are correctly excluded entirely.
+
+`sales_base(org, from, to)` = component 1 + component 2 + component 3, over `[from, to]`.
+
 ## Revenue rollup (RPC, `SECURITY DEFINER`)
 
 ```
 platform_get_revenue_rollup(p_from date, p_to date)
   → per org: { org_id, org_name,
-               revenue_by_category: [{category, gross}],
-               revenue_by_branch:   [{branch_id, branch_name, gross}],
-               gross_total,
+               revenue_by_category: [{category, gross}],   -- incl. "Voucher sales", "Membership deposits"
+               revenue_by_branch:   [{branch_id, branch_name, gross}],  -- incl. "— (org-level)" for memberships
+               gross_total,                  -- = sales_base for the selected range
                active_rate_percent,          -- null if none configured
                active_commission_basis,      -- 'vat_inclusive' | 'vat_exclusive' | null
                commission_for_range,         -- null if no rate active for any part of range
@@ -130,20 +189,22 @@ platform_get_revenue_rollup(p_from date, p_to date)
 ```
 
 - Raises an exception if `is_platform_admin()` is false — checked first, before touching any tenant
-  table.
-- Reuses the existing cash-basis definition (`payment_status = 'paid'`, per CLAUDE.md's reconciliation
-  rule) — same semantics as `getRevenueForPeriod()` / `computeRevenueForRange()` in `services/api.js`,
-  just aggregated across every org in one query instead of one org at a time.
+  table. Being `SECURITY DEFINER`, it reads `bookings`/`payments`/`vouchers`/`membership_transactions`/
+  `services`/`branches`/`organizations` across all orgs internally, so the rollup needs **no** RLS
+  change (only the separate drill-in feature does).
+- `gross_total` = `sales_base` (the three-component drawer basis above), aggregated across every org in
+  one query — no N+1 looping per org from the frontend. This intentionally differs from
+  `getRevenueForPeriod()` (which is booking-only and uses frozen `daily_reports` snapshots for closed
+  days): the commission basis is current-truth and includes voucher/membership top-ups, per the product
+  decisions for this feature.
 - Commission math handles rate changes mid-range correctly: for each rate-history row that overlaps
-  `[p_from, p_to]`, compute the commission base for that overlap —
-  `revenue(overlap)` if `commission_basis = 'vat_inclusive'`, or
-  `revenue(overlap) / (1 + vat_rate_percent / 100)` if `'vat_exclusive'` — multiply by `rate_percent`,
-  then sum across overlapping rows. `commission_owed_to_date` runs the same logic over
+  `[p_from, p_to]`, take that overlap's `sales_base`, apply the VAT back-out if the row's
+  `commission_basis = 'vat_exclusive'` (`sales_base / (1 + vat_rate_percent/100)`), multiply by
+  `rate_percent`, then sum across overlapping rows. `commission_owed_to_date` runs the same logic over
   `[effective_from of first rate row, today]`, independent of the dashboard's selected range.
-- If an org has no commission rate row at all, `active_rate_percent`/`commission_for_range`/
-  `commission_owed_to_date` are `null` (not `0`) — the UI must render "not configured", never a bare
-  $0, so it's never misread as "deal exists, currently zero."
-- One RPC call powers the whole dashboard table — no N+1 looping per org from the frontend.
+- If an org has no commission rate row at all, `active_rate_percent`/`active_commission_basis`/
+  `commission_for_range`/`commission_owed_to_date` are `null` (not `0`) — the UI must render "not
+  configured", never a bare $0, so it's never misread as "deal exists, currently zero."
 
 ## Drill-in (narrow RLS exception)
 
@@ -161,9 +222,9 @@ a booking, see staff records, or touch settings for any tenant.
 ## UI / pages
 
 - `/platform/login` — plain login form.
-- `/platform/dashboard` — one row per org: gross revenue (selected range), category/branch breakdown
-  toggle, active rate %, commission for range, commission owed to date, collected to date, net owed.
-  Global date-range picker at top (defaults to current month).
+- `/platform/dashboard` — one row per org: total sales (selected range, drawer basis), category/branch
+  breakdown toggle, active rate %, commission for range, commission owed to date, collected to date,
+  net owed. Global date-range picker at top (defaults to current month).
 - `/platform/dashboard/:orgId` — drill-in:
   - Rate history list (rate %, VAT-inclusive/exclusive basis, VAT rate used if exclusive, effective
     dates) + "new rate" action (invokes the close-old/open-new RPC; form includes the basis choice).
@@ -185,6 +246,18 @@ a booking, see staff records, or touch settings for any tenant.
 - Non-platform-admin hitting `/platform/login` with valid Supabase credentials → rejected client-side
   after auth (via `is_platform_admin()` check) in addition to being unable to read anything server-side
   (no RLS grants for a non-platform-admin on the new tables or the RPCs).
+- **Split-tender bookings** (part wallet, part cash) → only the non-wallet payment rows count, at the
+  `payments` grain — the wallet portion was already counted at top-up. Handled by component 1's
+  `payment_mode` filter, not a booking-level flag.
+- **Membership income has no branch** → surfaced under a `"— (org-level)"` branch bucket, never dropped
+  silently, so `revenue_by_branch` still sums to `gross_total`.
+- **Refunded membership deposit** → a deposit later refunded is typically recorded as a negative
+  `adjustment`, which component 3 excludes, so the original `deposit` is **not** netted back out. Known
+  v1 limitation — membership deposit refunds are rare; revisit if they become material. (Booking refunds
+  and voucher cancellations *are* handled, via `payment_status` and voucher status respectively.)
+- **Voucher `actual_price` is recorded at issue**, before the interim `voucher_payments` ledger exists —
+  so voucher income is "value of vouchers sold in the period," which is the intended commission basis.
+  This component does not depend on the 2026-08-20 voucher-payment work shipping first.
 
 ## Testing
 
@@ -203,6 +276,20 @@ walkthrough:
    `org_commission_collections` are unreadable, and confirm another org's `bookings`/`payments` are
    still unreadable (the drill-in RLS exception must not leak between ordinary org sessions — it only
    fires for `is_platform_admin()`).
-5. Spot-check `platform_get_revenue_rollup()` totals against the existing per-org `getRevenueForPeriod()`
-   output for one known org/date-range, to confirm the aggregation didn't drift from the cash-basis
-   definition already in use.
+5. **Session isolation:** log in as a platform admin at `/platform/login`, then in another tab confirm
+   the staff `/:orgSlug/login` still works independently and neither session's `onAuthStateChange`
+   disturbs the other (no login-loop, no cross-eviction). Log out of one; confirm the other survives.
+6. **Drawer-basis correctness** — build a fixture org with all three income types in one period and
+   verify `gross_total` counts each rupee once:
+   - a normal Cash booking (counts, component 1),
+   - a **split-tender** booking `VoucherWallet` + `Cash` (only the Cash payment row counts),
+   - a booking fully paid by `Membership` / `VoucherWallet` / `ReferralWallet` (counts **0** in
+     component 1 — the money was/was-not real cash at top-up),
+   - a voucher issued for cash in-period (`actual_price` counts, component 2) and later a booking that
+     redeems it via `VoucherWallet` (must **not** double-count),
+   - a `membership_transactions` `deposit`, plus a `birthday_perk` (amount 0) and an `adjustment` that
+     must **not** count (component 3).
+   Hand-total the expected `gross_total` and match it; confirm `revenue_by_category` includes
+   `"Voucher sales"`/`"Membership deposits"` and `revenue_by_branch` sums to `gross_total` with
+   membership income under `"— (org-level)"`.
+7. Refund a paid booking after the fact; confirm it drops out of `gross_total` (current-truth basis).
