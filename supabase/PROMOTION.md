@@ -118,21 +118,16 @@ following manual steps cannot be automated:
   - Confirm the user is created; copy their UUID for verification.
 
 - [ ] **Run the seed script against production**:
-  - Create `supabase/seed-prod-platform-admin.sql` (template: same shape as `seed-prod-nuad-credentials.sql`):
+  - Create `supabase/seed-prod-platform-admin.sql` (template: same shape as `seed-stage-platform-admin.sql`):
     ```sql
-    -- Seed platform admin profile and grant is_platform_admin() = true
-    WITH user_id AS (
-      SELECT auth.users.id FROM auth.users WHERE email = 'ops@zunkireelabs.com'
-    )
-    INSERT INTO public.profiles (id, email, is_platform_admin)
-    SELECT user_id.id, 'ops@zunkireelabs.com', true FROM user_id
-    ON CONFLICT (id) DO UPDATE SET is_platform_admin = true;
-
-    SELECT id, email, is_platform_admin FROM public.profiles
-    WHERE email = 'ops@zunkireelabs.com';
+    -- supabase/seed-prod-platform-admin.sql
+    -- Grants platform-admin to an existing auth user, by email. Idempotent.
+    INSERT INTO public.platform_admins (user_id)
+    SELECT id FROM auth.users WHERE email = 'ops@zunkireelabs.com'
+    ON CONFLICT (user_id) DO NOTHING;
     ```
   - Paste and run in the prod Supabase dashboard SQL editor.
-  - Verify the `SELECT` confirms `is_platform_admin = true`.
+  - Verify the user is now in `public.platform_admins` (query: `SELECT user_id FROM public.platform_admins WHERE user_id = (SELECT id FROM auth.users WHERE email = 'ops@zunkireelabs.com');`).
 
 ### 2. Enable the feature flag in production
 
@@ -148,15 +143,17 @@ following manual steps cannot be automated:
 
 ### 3. Configure commission rates per client
 
-- [ ] **Log in to the platform admin UI** (`app.zennly.io/admin`):
+- [ ] **Log in to the platform admin UI**:
+  - Navigate to `app.zennly.io/platform/login`.
   - Use the email/password from step 1.
-  - Navigate to **Clients** and select a client.
-  - Click **Commission Settings** and fill in:
-    - **Commission basis**: VAT-inclusive or exclusive (per client negotiation).
-    - **Rate (%)**: commission percentage (e.g., 10.0).
-    - **VAT rate (%)**: if applicable (e.g., 13.0 in Nepal).
+  - You are redirected to `/platform/dashboard` (lists all clients/orgs in a table).
+  - Click a client row to open `/platform/dashboard/:orgId`.
+  - In the **Commission rate history** section, click **Add rate** and fill in:
+    - **Rate %**: commission percentage (e.g., 10.0).
+    - **Basis**: VAT-inclusive or exclusive (per client negotiation).
+    - **VAT %**: if applicable (e.g., 13.0 in Nepal).
     - **Effective from**: date the rate takes effect.
-  - Click **Save**.
+  - In the **Collections** section, click **Record** to log a payment received.
   - Repeat for each client.
 
 ### 4. Rotate and secure the password
