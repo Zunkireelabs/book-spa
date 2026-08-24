@@ -48,20 +48,32 @@ export const PlatformAuthProvider = ({ children }) => {
 
   useEffect(() => {
     const { data: { subscription } } = supabasePlatform.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         if (signInActiveRef.current) return;
         if (session?.user) {
           setUser(session.user);
-          setIsPlatformAdmin(await checkAdmin());
         } else {
           setUser(null);
           setIsPlatformAdmin(false);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    checkAdmin().then((ok) => {
+      if (cancelled) return;
+      setIsPlatformAdmin(ok);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   return (
     <PlatformAuthContext.Provider value={{ user, isPlatformAdmin, loading, signIn, signOut }}>
