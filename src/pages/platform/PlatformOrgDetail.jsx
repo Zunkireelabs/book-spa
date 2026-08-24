@@ -303,19 +303,47 @@ const PlatformOrgDetail = () => {
         {/* Collection history */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
           <h3 className="font-heading font-heading-semibold text-text-primary">Collection history</h3>
-          <ul className="space-y-1 font-data text-sm">
-            {collections.map((c) => (
-              <li key={c.id} className="text-text-primary">
-                {formatNPR(c.amount_collected)} · {c.period_start} → {c.period_end} ·
-                {' '}{c.rate_percent != null
-                  ? `${c.rate_percent}% · ${c.commission_basis === 'vat_exclusive' ? `VAT-excl @ ${c.vat_rate_percent}%` : 'VAT-incl'}`
-                  : '—'} ·
-                {' '}collected {c.collected_at}
-                {c.notes ? ` · ${c.notes}` : ''}
-              </li>
-            ))}
-            {collections.length === 0 && <li className="text-text-secondary font-body">Nothing collected yet.</li>}
-          </ul>
+          {collections.length === 0 ? (
+            <p className="text-text-secondary font-body text-sm">Nothing collected yet.</p>
+          ) : (
+            <div className="overflow-x-auto border border-border rounded-spa">
+              <table className="w-full text-sm font-data">
+                <thead className="text-text-secondary border-b border-border bg-background">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-body">Period</th>
+                    <th className="text-right px-3 py-2 font-body">Sales</th>
+                    <th className="text-right px-3 py-2 font-body">VAT-excl. base</th>
+                    <th className="text-right px-3 py-2 font-body">Cut %</th>
+                    <th className="text-right px-3 py-2 font-body">Commission</th>
+                    <th className="text-left px-3 py-2 font-body">Collected</th>
+                    <th className="text-left px-3 py-2 font-body">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collections.map((c) => {
+                    const vatExclBase = c.gross_sales == null ? null
+                      : c.commission_basis === 'vat_exclusive' ? c.gross_sales / (1 + Number(c.vat_rate_percent || 0) / 100)
+                      : c.gross_sales;
+                    return (
+                      <tr key={c.id} className="border-b border-border last:border-0 whitespace-nowrap">
+                        <td className="px-3 py-2 text-text-primary">{c.period_start} → {c.period_end}</td>
+                        <td className="px-3 py-2 text-right text-text-primary">{c.gross_sales == null ? '—' : formatNPR(c.gross_sales)}</td>
+                        <td className="px-3 py-2 text-right text-text-secondary">{vatExclBase == null ? '—' : formatNPR(vatExclBase)}</td>
+                        <td className="px-3 py-2 text-right text-text-primary">
+                          {c.rate_percent != null
+                            ? `${c.rate_percent}% (${c.commission_basis === 'vat_exclusive' ? `excl. @ ${c.vat_rate_percent}%` : 'incl.'})`
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-text-primary font-heading-semibold">{formatNPR(c.amount_collected)}</td>
+                        <td className="px-3 py-2 text-text-secondary">{c.collected_at}</td>
+                        <td className="px-3 py-2 text-text-secondary">{c.notes || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         {/* Itemized paid drill-in */}
