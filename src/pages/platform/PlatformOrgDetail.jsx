@@ -30,6 +30,8 @@ const dayAfter = (isoDate) => {
   return toISO(d);
 };
 
+const ALL_TIME_FROM = '2000-01-01';
+
 const PlatformOrgDetail = () => {
   const { orgId } = useParams();
   const [preset, setPreset] = useState('monthly');
@@ -58,7 +60,7 @@ const PlatformOrgDetail = () => {
     if (rates.length > 0) {
       return rates.reduce((min, r) => (r.effective_from < min ? r.effective_from : min), rates[0].effective_from);
     }
-    return getTodayISO();
+    return ALL_TIME_FROM;
   }, [collections, rates]);
 
   // Collect-commission wizard — period always defaults to "last collection's end
@@ -276,7 +278,8 @@ const PlatformOrgDetail = () => {
                   <p className="font-data text-lg font-heading-semibold text-text-primary">{formatNPR(computedCommission)}</p>
                 </div>
                 {!confirming ? (
-                  <button type="button" onClick={() => setConfirming(true)} disabled={!wizRateNum}
+                  <button type="button" onClick={() => setConfirming(true)}
+                    disabled={!wizRateNum || Number.isNaN(wizVatNum) || wizRateNum < 0 || wizVatNum < 0}
                     className="bg-primary text-white rounded-spa px-4 py-2 font-body text-sm disabled:opacity-40">
                     Collect Commission
                   </button>
@@ -364,7 +367,7 @@ const PlatformOrgDetail = () => {
             Paid only. Unpaid/refunded bookings are excluded (not new money, or not money yet), and
             wallet-funded portions of a booking (membership/referral/voucher redemption) are excluded
             here since they're already counted in Paid Memberships/Vouchers. Totals here only match
-            the "Sales (range)" figure above when this preset's range equals the calculator's
+            the "Sales (period)" figure above when this preset's range equals the calculator's
             selected range — the two are controlled independently.
           </p>
 
@@ -379,7 +382,7 @@ const PlatformOrgDetail = () => {
 
           <div className="overflow-x-auto overflow-y-auto max-h-[28rem] border border-border rounded-spa">
             <table className="w-full text-sm font-data">
-              <thead className="text-text-secondary border-b border-border sticky top-0 bg-surface z-10">
+              <thead className="text-text-secondary border-b border-border sticky top-0 bg-surface z-sticky-filter">
                 <tr>
                   <th className="text-left px-3 py-2 font-body">Date</th>
                   <th className="text-left px-3 py-2 font-body">Type</th>
