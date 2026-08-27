@@ -1402,6 +1402,9 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
     if (authError) return { data: null, error: authError };
 
     // 5. Update
+    if ((newStatus === 'Cancelled' || newStatus === 'No Show') && (!reason || !reason.trim())) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: 'A reason is required when cancelling or marking a booking as no-show.' } };
+    }
     const updatePayload = { status: newStatus };
     if (newStatus === 'Cancelled' || newStatus === 'No Show') {
       updatePayload.cancellation_reason = reason;
