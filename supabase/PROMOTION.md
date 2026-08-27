@@ -102,3 +102,74 @@ empty `schema_migrations` table; record migrations as you apply them.
 
 For a working, scripted example of this exact order, see `scripts/local-db-bootstrap.sh` (used
 for local OrbStack dev — see `supabase/LOCAL_DEV.md`).
+
+## Platform Admin (cross-tenant revenue share)
+
+Implements commission tracking and multi-tenant dashboard access for platform admins. Migrations
+`113–117` auto-apply via CI when merging to `main` (behind the `production-db` reviewer). The
+following manual steps cannot be automated:
+
+### 1. Create prod auth user and seed credentials
+
+- [ ] **Create the auth user in the prod Supabase dashboard** (`pmbvogiphelmpjdalmtv`):
+  - Open **Auth** → **Users**, click **Add user**.
+  - Email: the platform admin's email (e.g., `ops@zunkireelabs.com`)
+  - Password: strong/random (see step 4 below)
+  - Confirm the user is created; copy their UUID for verification.
+
+- [ ] **Run the seed script against production**:
+  - Create `supabase/seed-prod-platform-admin.sql` (template: same shape as `seed-stage-platform-admin.sql`):
+    ```sql
+    -- supabase/seed-prod-platform-admin.sql
+    -- Grants platform-admin to an existing auth user, by email. Idempotent.
+    INSERT INTO public.platform_admins (user_id)
+    SELECT id FROM auth.users WHERE email = 'ops@zunkireelabs.com'
+    ON CONFLICT (user_id) DO NOTHING;
+    ```
+  - Paste and run in the prod Supabase dashboard SQL editor.
+  - Verify the user is now in `public.platform_admins` (query: `SELECT user_id FROM public.platform_admins WHERE user_id = (SELECT id FROM auth.users WHERE email = 'ops@zunkireelabs.com');`).
+
+### 2. Enable the feature flag in production
+
+- [ ] **Update `.github/workflows/deploy.yml`**:
+  - Locate the `build-push` job's Docker build-args.
+  - Add (or update):
+    ```yaml
+    build-args: |
+      VITE_ENABLE_PLATFORM_ADMIN=true
+    ```
+  - **Only add this when ready to go live.** Until enabled, production deploys with routes dark
+    and the platform admin UI is unreachable.
+
+### 3. Configure commission rates per client
+
+- [ ] **Log in to the platform admin UI**:
+  - Navigate to `app.zennly.io/platform/login`.
+  - Use the email/password from step 1.
+  - You are redirected to `/platform/dashboard` (lists all clients/orgs in a table).
+  - Click a client row to open `/platform/dashboard/:orgId`.
+  - In the **Commission rate history** section, click **Add rate** and fill in:
+    - **Rate %**: commission percentage (e.g., 10.0).
+    - **Basis**: VAT-inclusive or exclusive (per client negotiation).
+    - **VAT %**: if applicable (e.g., 13.0 in Nepal).
+    - **Effective from**: date the rate takes effect.
+  - In the **Collections** section, click **Record** to log a payment received.
+  - Repeat for each client.
+
+### 4. Rotate and secure the password
+
+- [ ] **Change the temporary password** (created in step 1):
+  - Log out and use "Forgot password" in the app, or reset via the Supabase dashboard.
+  - Choose a strong, unique password (minimum 16 characters, mixed case + digits + symbols).
+
+- [ ] **Store credentials securely**:
+  - Add the email and **new** password to your team secret manager (e.g., 1Password, LastPass).
+  - **Never** commit credentials to the repository.
+  - Rotate at least quarterly and after any team member departure.
+
+### Known Limitations
+
+- **Collection amount cap**: `org_commission_collections.amount_collected` is `numeric(10,2)`,
+  limiting collection amounts to approximately 99,999,999.99 NPR per collection. Extremely
+  unlikely to be hit in practice, but worth noting if a very large client's collections exceed
+  this threshold (would require manual escalation/splitting).
