@@ -106,13 +106,13 @@ const BookingDetailsAssignmentModal = () => {
     setTimeout(() => setActionError(null), 5000);
   };
 
-  const handleStatusUpdate = async (newStatus) => {
+  const handleStatusUpdate = async (newStatus, reason) => {
     if (!booking) return;
     setIsLoading(true);
     setActionError(null);
 
     const dbStatus = toDbStatus(newStatus);
-    const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus });
+    const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
       showActionError(result.error.message || 'Failed to update status.');
