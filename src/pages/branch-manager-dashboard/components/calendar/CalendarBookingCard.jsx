@@ -9,7 +9,7 @@ const STATUS_COLORS = {
   'Confirmed':   { bg: '#3b82f6', text: '#fff', light: '#dbeafe' },
   'In-Progress': { bg: '#6366f1', text: '#fff', light: '#e0e7ff' },
   'Completed':   { bg: '#22c55e', text: '#fff', light: '#dcfce7' },
-  'No Show':     { bg: '#991b1b', text: '#fff', light: '#fee2e2' },
+  'No Show':     { bg: '#6b7280', text: '#fff', light: '#f3f4f6' },
 };
 
 const UNPAID_BORDER = '#facc15';
