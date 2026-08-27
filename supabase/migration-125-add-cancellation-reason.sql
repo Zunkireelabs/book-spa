@@ -2,4 +2,4 @@
 ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS cancellation_reason text;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('116', 'add-cancellation-reason') ON CONFLICT (version) DO NOTHING;
+VALUES ('125', 'add-cancellation-reason') ON CONFLICT (version) DO NOTHING;
