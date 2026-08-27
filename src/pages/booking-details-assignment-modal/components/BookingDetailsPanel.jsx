@@ -1,15 +1,30 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { to12h } from '../../../services/bookingTransformers';
 import { useAuth } from '../../../contexts/AuthContext';
+
+function getNepalNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+}
+
+// "No Show" only becomes selectable once the booking's scheduled start time
+// has passed — otherwise staff could mark a client a no-show before they were
+// even due.
+function hasBookingStarted(booking) {
+  const startTime = booking?.startTime || booking?.time;
+  if (!booking?.date || !startTime) return false;
+  const start = new Date(`${booking.date}T${startTime}`);
+  return getNepalNow() >= start;
+}
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
 
 const VALID_TRANSITIONS = {
-  'pending':      ['confirmed'],
+  'pending':      ['confirmed', 'no show'],
   'confirmed':    ['in-progress', 'cancelled', 'no show'],
   'in-progress':  ['completed'],
 };
@@ -42,6 +57,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
   const navigate = useNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
+  const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
 
   // Get org slug from URL or profile
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
@@ -164,12 +180,15 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
         <div className="grid grid-cols-2 gap-2">
           {nextStatuses.map((statusValue) => {
             const config = getStatusConfig(statusValue);
+            const needsConfirm = statusValue === 'cancelled' || statusValue === 'no show';
+            const noShowGated = statusValue === 'no show' && !hasBookingStarted(booking);
             return (
               <button
                 key={statusValue}
-                onClick={() => onStatusUpdate(statusValue)}
-                disabled={isLoading}
-                className={`flex items-center justify-center space-x-2 px-3 py-2 rounded-spa border spa-transition-fast spa-touch-target border-border hover:border-primary/50 text-text-secondary hover:text-text-primary ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => needsConfirm ? setPendingStatus(statusValue) : onStatusUpdate(statusValue)}
+                disabled={isLoading || noShowGated}
+                title={noShowGated ? "Available after the booking's scheduled time" : undefined}
+                className={`flex items-center justify-center space-x-2 px-3 py-2 rounded-spa border spa-transition-fast spa-touch-target border-border hover:border-primary/50 text-text-secondary hover:text-text-primary ${isLoading || noShowGated ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Icon name={config.icon} size={16} />
                 <span className="font-body font-body-medium text-xs capitalize">{statusValue.replace('-', ' ')}</span>
@@ -478,6 +497,25 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
             ))}
           </div>
         </div>
+      )}
+
+      {/* Cancel / No Show confirmation */}
+      {pendingStatus && (
+        <ConfirmDialog
+          title={pendingStatus === 'no show' ? 'Mark as No Show' : 'Cancel Booking'}
+          message={
+            pendingStatus === 'no show'
+              ? 'This will mark the booking as a no-show. This cannot be undone.'
+              : 'This will cancel the booking. This cannot be undone.'
+          }
+          confirmLabel={pendingStatus === 'no show' ? 'Mark No Show' : 'Cancel Booking'}
+          isSubmitting={isLoading}
+          onClose={() => setPendingStatus(null)}
+          onConfirm={(reason) => {
+            onStatusUpdate(pendingStatus, reason);
+            setPendingStatus(null);
+          }}
+        />
       )}
     </div>
   );
