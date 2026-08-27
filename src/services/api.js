@@ -37,7 +37,7 @@ function addMinutesToTime(timeStr, minutes) {
 // ============================================================
 
 const VALID_TRANSITIONS = {
-  'Pending':      ['Confirmed', 'Cancelled'],
+  'Pending':      ['Confirmed', 'Cancelled', 'No Show'],
   'Confirmed':    ['In-Progress', 'Cancelled', 'No Show'],
   'In-Progress':  ['Completed'],
   'Completed':    [],
@@ -1362,7 +1362,7 @@ export async function fetchPendingReferralRewardsForBooking(bookingId) {
   }
 }
 
-export async function updateBookingStatus({ bookingId, newStatus }) {
+export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
@@ -1391,9 +1391,13 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
     if (authError) return { data: null, error: authError };
 
     // 5. Update
+    const updatePayload = { status: newStatus };
+    if (newStatus === 'Cancelled' || newStatus === 'No Show') {
+      updatePayload.cancellation_reason = reason;
+    }
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
-      .update({ status: newStatus })
+      .update(updatePayload)
       .eq('id', bookingId)
       .select('id, status')
       .single();
