@@ -11,11 +11,12 @@ export const listRates = (orgId) =>
 export const listCollections = (orgId) =>
   supabasePlatform.rpc('platform_list_collections', { p_org_id: orgId }).then(unwrap);
 
-export const collectCommission = ({ orgId, periodStart, periodEnd, ratePercent, basis, vatRatePercent, collectedAt, notes }) =>
+export const collectCommission = ({ orgId, periodStart, periodEnd, ratePercent, basis, vatRatePercent, collectedAt, notes, actualAmount }) =>
   supabasePlatform.rpc('platform_collect_commission', {
     p_org_id: orgId, p_period_start: periodStart, p_period_end: periodEnd,
     p_rate: ratePercent, p_basis: basis, p_vat_rate: vatRatePercent,
     p_collected_at: collectedAt, p_notes: notes || null,
+    p_actual_amount: actualAmount === '' || actualAmount == null ? null : Number(actualAmount),
   }).then(unwrap);
 
 export const getOrgBookings = (orgId, from, to) =>
