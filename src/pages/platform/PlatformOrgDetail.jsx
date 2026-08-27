@@ -32,6 +32,11 @@ const dayAfter = (isoDate) => {
 
 const ALL_TIME_FROM = '2000-01-01';
 
+// Hard mathematical ceiling — matches the chk_vat_rate_sane DB constraint
+// (migration-126). VAT backs out of gross sales as 1 + rate/100, so anything
+// above 100 has no sane interpretation.
+const VAT_RATE_MAX = 100;
+
 const PlatformOrgDetail = () => {
   const { orgId } = useParams();
   const [preset, setPreset] = useState('monthly');
@@ -77,6 +82,7 @@ const PlatformOrgDetail = () => {
   const [wizVat, setWizVat] = useState('13');
   const [wizRate, setWizRate] = useState('');
   const [wizNotes, setWizNotes] = useState('');
+  const [wizActualAmount, setWizActualAmount] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [collecting, setCollecting] = useState(false);
 
@@ -199,9 +205,10 @@ const PlatformOrgDetail = () => {
       await collectCommission({
         orgId, periodStart: wizFrom, periodEnd: wizTo,
         ratePercent: wizRateNum, basis: wizBasis, vatRatePercent: wizVatNum,
-        collectedAt: getTodayISO(), notes: wizNotes,
+        collectedAt: getTodayISO(), notes: wizNotes, actualAmount: wizActualAmount,
       });
       setWizNotes('');
+      setWizActualAmount('');
       setConfirming(false);
       reload();
     } catch (err) { setError(err.message); }
@@ -260,11 +267,19 @@ const PlatformOrgDetail = () => {
                 </div>
                 <label className="font-body text-sm text-text-secondary">VAT %
                   <input type="number" step="0.01" value={wizVat} onChange={(e) => setWizVat(e.target.value)}
-                    className="block border border-border rounded-spa px-2 py-1 w-20" />
+                    className={`block border rounded-spa px-2 py-1 w-20 ${wizVatNum > VAT_RATE_MAX ? 'border-error' : 'border-border'}`} />
+                  {wizVatNum > VAT_RATE_MAX && (
+                    <span className="block text-xs text-error mt-0.5">Max {VAT_RATE_MAX}%</span>
+                  )}
                 </label>
                 <label className="font-body text-sm text-text-secondary">Cut %
                   <input type="number" step="0.01" value={wizRate} onChange={(e) => setWizRate(e.target.value)}
                     className="block border border-border rounded-spa px-2 py-1 w-24" />
+                </label>
+                <label className="font-body text-sm text-text-secondary">Actual amount collected (if different)
+                  <input type="number" step="0.01" placeholder="Use computed" value={wizActualAmount}
+                    onChange={(e) => setWizActualAmount(e.target.value)}
+                    className="block border border-border rounded-spa px-2 py-1 w-40" />
                 </label>
                 <label className="font-body text-sm text-text-secondary flex-1 min-w-[10rem]">Notes
                   <input value={wizNotes} onChange={(e) => setWizNotes(e.target.value)}
@@ -276,17 +291,20 @@ const PlatformOrgDetail = () => {
                 <div>
                   <p className="font-body text-xs text-text-secondary">Commission ({wizFrom} → {wizTo})</p>
                   <p className="font-data text-lg font-heading-semibold text-text-primary">{formatNPR(computedCommission)}</p>
+                  {wizActualAmount !== '' && (
+                    <p className="font-body text-xs text-text-secondary">Will record actual: {formatNPR(Number(wizActualAmount))}</p>
+                  )}
                 </div>
                 {!confirming ? (
                   <button type="button" onClick={() => setConfirming(true)}
-                    disabled={!wizRateNum || Number.isNaN(wizVatNum) || wizRateNum < 0 || wizVatNum < 0}
+                    disabled={!wizRateNum || Number.isNaN(wizVatNum) || wizRateNum < 0 || wizVatNum < 0 || wizVatNum > VAT_RATE_MAX}
                     className="bg-primary text-white rounded-spa px-4 py-2 font-body text-sm disabled:opacity-40">
                     Collect Commission
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
                     <span className="font-body text-sm text-text-secondary">
-                      Record {formatNPR(computedCommission)} at {wizRateNum}% · {wizBasis === 'vat_exclusive' ? `VAT-excl @ ${wizVatNum}%` : 'VAT-incl'}?
+                      Record {wizActualAmount !== '' ? formatNPR(Number(wizActualAmount)) : formatNPR(computedCommission)} at {wizRateNum}% · {wizBasis === 'vat_exclusive' ? `VAT-excl @ ${wizVatNum}%` : 'VAT-incl'}?
                     </span>
                     <button type="button" onClick={() => setConfirming(false)} disabled={collecting}
                       className="rounded-spa px-3 py-1.5 border border-border font-body text-sm text-text-secondary">
@@ -317,7 +335,8 @@ const PlatformOrgDetail = () => {
                     <th className="text-right px-3 py-2 font-body">Sales</th>
                     <th className="text-right px-3 py-2 font-body">VAT-excl. base</th>
                     <th className="text-right px-3 py-2 font-body">Cut %</th>
-                    <th className="text-right px-3 py-2 font-body">Commission</th>
+                    <th className="text-right px-3 py-2 font-body">Expected</th>
+                    <th className="text-right px-3 py-2 font-body">Collected</th>
                     <th className="text-left px-3 py-2 font-body">Collected</th>
                     <th className="text-left px-3 py-2 font-body">Notes</th>
                   </tr>
@@ -337,7 +356,15 @@ const PlatformOrgDetail = () => {
                             ? `${c.rate_percent}% (${c.commission_basis === 'vat_exclusive' ? `excl. @ ${c.vat_rate_percent}%` : 'incl.'})`
                             : '—'}
                         </td>
-                        <td className="px-3 py-2 text-right text-text-primary font-heading-semibold">{formatNPR(c.amount_collected)}</td>
+                        <td className="px-3 py-2 text-right text-text-secondary">
+                          {c.expected_amount == null ? '—' : formatNPR(c.expected_amount)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-text-primary font-heading-semibold">
+                          {formatNPR(c.amount_collected)}
+                          {c.expected_amount != null && Number(c.expected_amount) !== Number(c.amount_collected) && (
+                            <span className="block text-xs font-body font-body-normal text-warning">adjusted</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-text-secondary">{c.collected_at}</td>
                         <td className="px-3 py-2 text-text-secondary">{c.notes || '—'}</td>
                       </tr>
