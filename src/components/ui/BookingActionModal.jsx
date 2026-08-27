@@ -3,11 +3,25 @@ import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
+import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
+
+function getNepalNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+}
+
+// "No Show" only becomes selectable once the booking's scheduled start time
+// has passed — otherwise staff could mark a client a no-show before they were
+// even due.
+function hasBookingStarted(booking) {
+  if (!booking?.date || !booking?.startTime) return false;
+  const start = new Date(`${booking.date}T${booking.startTime}`);
+  return getNepalNow() >= start;
+}
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -70,6 +84,7 @@ const BookingActionModal = ({
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -269,7 +284,7 @@ const BookingActionModal = ({
   // Valid next-status transitions (lowercase UI values)
   const getNextStatuses = (currentStatus) => {
     const transitions = {
-      'pending': ['confirmed', 'cancelled'],
+      'pending': ['confirmed', 'cancelled', 'no show'],
       'confirmed': ['in-progress', 'cancelled', 'no show'],
       'in-progress': ['completed'],
     };
@@ -477,14 +492,15 @@ const BookingActionModal = ({
     }
   };
 
-  const handleStatusUpdate = async (newStatus) => {
+  const handleStatusUpdate = async (newStatus, reason) => {
     if (!booking) return;
     setIsLoading(true);
     setActionError(null);
     try {
       if (onUpdateStatus) {
-        await onUpdateStatus(booking.bookingId, newStatus);
+        await onUpdateStatus(booking.bookingId, newStatus, reason);
       }
+      setPendingStatus(null);
       onClose();
     } catch (error) {
       setActionError(error?.message || 'Status update failed. Please try again.');
@@ -784,18 +800,24 @@ const BookingActionModal = ({
                   </div>
                   {!isTerminal && !isLocked && nextStatuses.length > 0 && (
                     <div className="flex flex-wrap gap-2">
-                      {nextStatuses.map((status) => (
-                        <Button
-                          key={status}
-                          variant={status === 'cancelled' || status === 'no show' ? 'outline' : 'primary'}
-                          size="sm"
-                          className="min-h-[40px] sm:min-h-0 sm:h-auto"
-                          onClick={() => handleStatusUpdate(status)}
-                          loading={isLoading}
-                        >
-                          {status === 'in-progress' ? 'Start' : status === 'no show' ? 'No Show' : status.charAt(0).toUpperCase() + status.slice(1)}
-                        </Button>
-                      ))}
+                      {nextStatuses.map((status) => {
+                        const needsConfirm = status === 'cancelled' || status === 'no show';
+                        const noShowGated = status === 'no show' && !hasBookingStarted(booking);
+                        return (
+                          <Button
+                            key={status}
+                            variant={needsConfirm ? 'outline' : 'primary'}
+                            size="sm"
+                            className="min-h-[40px] sm:min-h-0 sm:h-auto"
+                            onClick={() => needsConfirm ? setPendingStatus(status) : handleStatusUpdate(status)}
+                            loading={isLoading}
+                            disabled={noShowGated}
+                            title={noShowGated ? "Available after the booking's scheduled time" : undefined}
+                          >
+                            {status === 'in-progress' ? 'Start' : status === 'no show' ? 'No Show' : status.charAt(0).toUpperCase() + status.slice(1)}
+                          </Button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -2119,6 +2141,22 @@ const BookingActionModal = ({
           </div>
         </div>
       </div>
+
+      {/* Cancel / No Show confirmation */}
+      {pendingStatus && (
+        <ConfirmDialog
+          title={pendingStatus === 'no show' ? 'Mark as No Show' : 'Cancel Booking'}
+          message={
+            pendingStatus === 'no show'
+              ? 'This will mark the booking as a no-show. This cannot be undone.'
+              : 'This will cancel the booking. This cannot be undone.'
+          }
+          confirmLabel={pendingStatus === 'no show' ? 'Mark No Show' : 'Cancel Booking'}
+          isSubmitting={isLoading}
+          onClose={() => setPendingStatus(null)}
+          onConfirm={(reason) => handleStatusUpdate(pendingStatus, reason)}
+        />
+      )}
 
       {/* Payment Modal */}
       {showPaymentModal && (

@@ -37,7 +37,7 @@ function addMinutesToTime(timeStr, minutes) {
 // ============================================================
 
 const VALID_TRANSITIONS = {
-  'Pending':      ['Confirmed', 'Cancelled'],
+  'Pending':      ['Confirmed', 'Cancelled', 'No Show'],
   'Confirmed':    ['In-Progress', 'Cancelled', 'No Show'],
   'In-Progress':  ['Completed'],
   'Completed':    [],
@@ -1373,7 +1373,7 @@ export async function fetchPendingReferralRewardsForBooking(bookingId) {
   }
 }
 
-export async function updateBookingStatus({ bookingId, newStatus }) {
+export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
@@ -1402,9 +1402,16 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
     if (authError) return { data: null, error: authError };
 
     // 5. Update
+    if ((newStatus === 'Cancelled' || newStatus === 'No Show') && (!reason || !reason.trim())) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: 'A reason is required when cancelling or marking a booking as no-show.' } };
+    }
+    const updatePayload = { status: newStatus };
+    if (newStatus === 'Cancelled' || newStatus === 'No Show') {
+      updatePayload.cancellation_reason = reason;
+    }
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
-      .update({ status: newStatus })
+      .update(updatePayload)
       .eq('id', bookingId)
       .select('id, status')
       .single();
@@ -3708,7 +3715,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (therapistsResult.error) throw therapistsResult.error;
     if (roomsResult.error) throw roomsResult.error;
 
-    // 3. Fetch bookings in date range, excluding Cancelled
+    // 3. Fetch bookings in date range, excluding Cancelled and No Show
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
@@ -3726,7 +3733,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
       .lte('date', endDate)
-      .neq('status', 'Cancelled')
+      .not('status', 'in', '("Cancelled","No Show")')
       .order('start_time');
 
     if (bookingsError) throw bookingsError;

@@ -2,13 +2,14 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import Icon from '../../../../components/AppIcon';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
   'Confirmed':   { bg: '#3b82f6', text: '#fff', light: '#dbeafe' },
   'In-Progress': { bg: '#6366f1', text: '#fff', light: '#e0e7ff' },
   'Completed':   { bg: '#22c55e', text: '#fff', light: '#dcfce7' },
-  'No Show':     { bg: '#991b1b', text: '#fff', light: '#fee2e2' },
+  'No Show':     { bg: '#6b7280', text: '#fff', light: '#f3f4f6' },
 };
 
 const UNPAID_BORDER = '#facc15';
@@ -257,8 +258,11 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {durationMins} mins
           </div>
         )}
-        {(isUnpaid || isLocked || isPaid) && (
+        {(isUnpaid || isLocked || isPaid || booking.specialRequests) && (
           <div className="flex items-center gap-1 mt-0.5 flex-shrink-0">
+            {booking.specialRequests && (
+              <Icon name="AlertTriangle" size={14} className="text-warning" title="Special request" />
+            )}
             {isUnpaid && (
               <span className="inline-flex items-center gap-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
@@ -382,7 +386,10 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {/* Special requests */}
             {booking.specialRequests && (
               <div className="px-3 py-2 border-b border-border">
-                <div className="font-caption text-[10px] text-text-secondary uppercase tracking-wider mb-0.5">Notes</div>
+                <div className="font-caption text-[10px] text-text-secondary uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                  <Icon name="AlertTriangle" size={10} className="text-warning" />
+                  Notes
+                </div>
                 <div className="font-body text-xs text-text-primary italic leading-snug">
                   "{booking.specialRequests}"
                 </div>

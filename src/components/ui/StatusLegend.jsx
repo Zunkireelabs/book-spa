@@ -6,6 +6,7 @@ const STATUS_ITEMS = [
   { key: 'in-progress', label: 'In Progress', color: '#6366f1' },
   { key: 'completed', label: 'Completed', color: '#22c55e' },
   { key: 'cancelled', label: 'Cancelled', color: '#991b1b' },
+  { key: 'no show', label: 'No Show', color: '#6b7280' },
 ];
 
 const PAYMENT_ITEMS = [
