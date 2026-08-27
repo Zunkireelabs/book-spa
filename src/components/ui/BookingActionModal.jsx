@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -284,6 +284,7 @@ const BookingActionModal = ({
 
   // Extend-duration options (same service, category, longer duration)
   const [showExtendPanel, setShowExtendPanel] = useState(false);
+  const extendPanelRef = useRef(null);
   const [extendError, setExtendError] = useState(null);
   const [extendSubmitting, setExtendSubmitting] = useState(false);
 
@@ -296,6 +297,22 @@ const BookingActionModal = ({
     () => getExtendOptions(currentServiceObj, services),
     [currentServiceObj, services]
   );
+
+  // Auto-scroll to the extend panel once it renders, so the option list is
+  // immediately visible instead of hidden below the fold.
+  useEffect(() => {
+    if (showExtendPanel && extendPanelRef.current) {
+      extendPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showExtendPanel]);
+
+  // Same auto-scroll for the Add another service / Rebook panel.
+  const newBookingPanelRef = useRef(null);
+  useEffect(() => {
+    if (newBookingMode && newBookingPanelRef.current) {
+      newBookingPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [newBookingMode]);
 
   const handleExtendService = async (option) => {
     if (!booking || !onEditBooking) return;
@@ -904,7 +921,7 @@ const BookingActionModal = ({
                       <div>
                         <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Payment</label>
                         <p className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
-                          {booking.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+                          {booking.paymentStatus === 'paid' ? 'Paid' : booking.paymentStatus === 'partial' ? 'Partial' : 'Unpaid'}
                         </p>
                       </div>
                     </div>
@@ -1024,6 +1041,7 @@ const BookingActionModal = ({
                           type="number"
                           min="0"
                           value={rewardAmount}
+                          onWheel={(e) => e.target.blur()}
                           onChange={(e) => setRewardAmount(e.target.value)}
                           placeholder="e.g. 500 (leave blank for the org default)"
                           className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
@@ -1306,6 +1324,7 @@ const BookingActionModal = ({
                               type="number"
                               min="0"
                               value={rowDiscountOverrides[id] ?? ''}
+                              onWheel={(e) => e.target.blur()}
                               onChange={(e) => setRowOverride(id, e.target.value)}
                               placeholder={discountType === 'percentage' ? 'Same %' : 'Same NPR'}
                               title={discountType === 'percentage' ? 'Same as shared %' : 'Same as shared NPR'}
@@ -1369,6 +1388,20 @@ const BookingActionModal = ({
                                 NPR {previewFinal.toLocaleString('en-IN')}
                               </span>
                             </div>
+                            {booking.paymentStatus === 'partial' && (
+                              <>
+                                <div className="flex items-center justify-between">
+                                  <span className="font-body font-body-normal text-xs text-text-secondary">Paid Amount</span>
+                                  <span className="font-data text-sm text-success">- NPR {Number(booking.amountPaid || 0).toLocaleString('en-IN')}</span>
+                                </div>
+                                <div className="flex items-center justify-between border-t border-border pt-2">
+                                  <span className="font-body font-body-medium text-xs text-text-primary">Final Amount</span>
+                                  <span className="font-data font-data-medium text-sm text-text-primary">
+                                    NPR {Math.max(previewFinal - Number(booking.amountPaid || 0), 0).toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+                              </>
+                            )}
 
                             {/* Related bookings */}
                             {multiRow && (
@@ -1439,8 +1472,9 @@ const BookingActionModal = ({
                             )}
 
                             {/* Overall total — reuses resolveRowDiscount so this can never disagree
-                                with each related row's own displayed Subtotal above. */}
-                            {(() => {
+                                with each related row's own displayed Subtotal above. Skipped when
+                                partial-payment already showed its own Final Amount (balance due) above. */}
+                            {booking.paymentStatus !== 'partial' && (() => {
                               let total = primaryLive ? previewFinal : (booking.finalAmount || base);
                               let anyLive = primaryLive;
                               relatedBookings.forEach(rb => {
@@ -1537,6 +1571,7 @@ const BookingActionModal = ({
                         max={discountType === 'percentage' ? 100 : Math.floor(booking.baseAmount || 0)}
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
+                        onWheel={(e) => e.target.blur()}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
                         placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.15))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
@@ -1717,6 +1752,18 @@ const BookingActionModal = ({
                     <span className="font-body font-body-medium text-xs text-text-primary">{(previousDueBookings.length > 0 || relatedBookings.length > 0) ? 'Subtotal' : 'Final Amount'}</span>
                     <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
                   </div>
+                  {booking.paymentStatus === 'partial' && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="font-body font-body-normal text-xs text-text-secondary">Already Paid</span>
+                        <span className="font-data text-sm text-success">- NPR {Number(booking.amountPaid || 0).toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-border pt-2">
+                        <span className="font-body font-body-medium text-xs text-text-primary">Balance Due</span>
+                        <span className="font-data font-data-medium text-sm text-warning">NPR {Number(booking.amountDue || 0).toLocaleString('en-IN')}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Related services — same-session bookings discounted together on the
@@ -1811,8 +1858,8 @@ const BookingActionModal = ({
                 {/* Payment status */}
                 <div className="flex items-center justify-between px-1">
                   <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
-                  <span className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : 'text-warning'}`}>
-                    {booking.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+                  <span className={`font-body font-body-medium text-sm ${booking.paymentStatus === 'paid' ? 'text-success' : booking.paymentStatus === 'partial' ? 'text-warning' : 'text-warning'}`}>
+                    {booking.paymentStatus === 'paid' ? 'Paid' : booking.paymentStatus === 'partial' ? 'Partial' : 'Unpaid'}
                   </span>
                 </div>
 
@@ -1839,7 +1886,7 @@ const BookingActionModal = ({
 
             {/* Extend Service — longer-duration variant panel */}
             {showExtendPanel && (
-              <div className="space-y-4">
+              <div ref={extendPanelRef} className="space-y-4 scroll-mt-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Icon name="Clock" size={18} className="text-primary" />
@@ -1882,7 +1929,7 @@ const BookingActionModal = ({
 
             {/* Add Another Service / Rebook Form */}
             {!showExtendPanel && newBookingMode && (
-              <div className="space-y-4">
+              <div ref={newBookingPanelRef} className="space-y-4 scroll-mt-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Icon name={newBookingMode === 'rebook' ? 'CalendarClock' : 'PlusCircle'} size={18} className="text-primary" />
