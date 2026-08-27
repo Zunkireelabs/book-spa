@@ -1659,6 +1659,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
 
     // 5. If service changed, recalculate financials and duration
     const effectiveServiceId = serviceId !== undefined ? serviceId : booking.service_id;
+    let newServiceDurationMinutes = null;
     if (serviceId && serviceId !== booking.service_id) {
       const { data: newService, error: svcError } = await supabase
         .from('services')
@@ -1670,6 +1671,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
         return { data: null, error: { code: 'SERVICE_NOT_FOUND', message: 'Selected service not found.' } };
       }
 
+      newServiceDurationMinutes = newService.duration_minutes;
       updatePayload.service_id = serviceId;
       updatePayload.service_name_snapshot = newService.name;
       updatePayload.base_amount = newService.price_npr;
@@ -1680,6 +1682,16 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       // Recalculate end_time based on new duration
       const effectiveStartTime = startTime || booking.start_time;
       updatePayload.end_time = addMinutesToTime(effectiveStartTime.slice(0, 5), newService.duration_minutes);
+
+      // Recompute payment_status — price change can leave a stale 'paid' status
+      const { data: paymentsRows } = await supabase
+        .from('payments')
+        .select('amount')
+        .eq('booking_id', bookingId);
+      const amountPaid = (paymentsRows || []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const newFinalAmount = updatePayload.final_amount;
+      updatePayload.payment_status =
+        amountPaid <= 0 ? 'unpaid' : amountPaid >= newFinalAmount ? 'paid' : 'partial';
     }
 
     // 6. If date or time changed, recalculate end_time and check conflicts
@@ -1723,6 +1735,26 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       throw updateError;
     }
 
+    // 10. Extending the service changes duration — keep any co-assigned
+    // therapist's booking_therapists row in sync, since getCalendarBookings
+    // reads end_time from this junction row, not just bookings.end_time.
+    if (newServiceDurationMinutes) {
+      const { data: btRows } = await supabase
+        .from('booking_therapists')
+        .select('therapist_id, start_time')
+        .eq('booking_id', bookingId);
+      for (const row of (btRows || [])) {
+        if (!row.start_time) continue;
+        const newEndTime = addMinutesToTime(row.start_time.slice(0, 5), newServiceDurationMinutes);
+        const { error: btUpdateError } = await supabase
+          .from('booking_therapists')
+          .update({ end_time: newEndTime })
+          .eq('booking_id', bookingId)
+          .eq('therapist_id', row.therapist_id);
+        if (btUpdateError) console.warn('[API] booking_therapists end_time sync warning:', btUpdateError.message);
+      }
+    }
+
     return { data: { success: true, bookingId }, error: null };
   } catch (error) {
     console.error('[API] updateBookingDetails error:', error.message);
@@ -1745,6 +1777,12 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       }
       throw fetchError;
     }
+
+    const { data: paymentsRows } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('booking_id', bookingId);
+    const amountPaid = (paymentsRows || []).reduce((sum, p) => sum + Number(p.amount), 0);
 
     // 2. Lifecycle checks — allow discounts on completed-but-unpaid (standard cash-spa flow)
     if (booking.is_locked) {
@@ -1780,6 +1818,20 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       return { data: null, error: { code: 'INVALID_DISCOUNT_VALUE', message: 'Discount cannot be negative or exceed base amount.' } };
     }
 
+    // A discount can't push final_amount below what's already been collected —
+    // that would silently hide an overpayment (amountDue clamps to 0 in the UI).
+    if (amountPaid > 0 && (baseAmount - discountAmount) < amountPaid) {
+      const maxDiscountAmount = baseAmount - amountPaid;
+      const maxPercentCap = Math.round((maxDiscountAmount / baseAmount) * 100);
+      return {
+        data: null,
+        error: {
+          code: 'DISCOUNT_BELOW_PAID',
+          message: `Discount cannot reduce the total below the amount already paid (NPR ${amountPaid}). Maximum discount: ${maxPercentCap}%.`,
+        },
+      };
+    }
+
     // Hard ceiling: staff request can't exceed 50%; manager/admin can go to 100%.
     const hardCeiling = profile.role === 'staff' ? STAFF_REQUEST_CEILING : DISCOUNT_LIMITS[profile.role];
     if (effectivePercent > hardCeiling + 1e-9) {
@@ -1810,6 +1862,16 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       discount_requested_by: isWithinLimit ? null : user.id,
       discount_requested_to: isWithinLimit ? null : requestedTo,
     };
+
+    // A discount applied while already-collected — reflect the new balance
+    // immediately (e.g. discounting a 'partial' booking down to exactly
+    // amountPaid should flip it to 'paid') rather than waiting on a payments
+    // INSERT trigger that won't fire here.
+    if (isWithinLimit) {
+      const newFinalAmount = baseAmount - discountAmount;
+      updatePayload.payment_status =
+        amountPaid <= 0 ? 'unpaid' : amountPaid >= newFinalAmount ? 'paid' : 'partial';
+    }
 
     // 9. Update booking — trigger recomputes final_amount
     const { data: updated, error: updateError } = await supabase
@@ -3658,7 +3720,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         therapist:therapists(id, name),
         room:rooms(id, name),
         creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name))
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name)),
+        payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
