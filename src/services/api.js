@@ -1680,6 +1680,16 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       // Recalculate end_time based on new duration
       const effectiveStartTime = startTime || booking.start_time;
       updatePayload.end_time = addMinutesToTime(effectiveStartTime.slice(0, 5), newService.duration_minutes);
+
+      // Recompute payment_status — price change can leave a stale 'paid' status
+      const { data: paymentsRows } = await supabase
+        .from('payments')
+        .select('amount')
+        .eq('booking_id', bookingId);
+      const amountPaid = (paymentsRows || []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const newFinalAmount = updatePayload.final_amount;
+      updatePayload.payment_status =
+        amountPaid <= 0 ? 'unpaid' : amountPaid >= newFinalAmount ? 'paid' : 'partial';
     }
 
     // 6. If date or time changed, recalculate end_time and check conflicts

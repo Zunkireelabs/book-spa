@@ -7,6 +7,7 @@ import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
 import { useBranch } from '../../contexts/BranchContext';
+import { getExtendOptions } from '../../utils/serviceVariants';
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -281,6 +282,39 @@ const BookingActionModal = ({
     return services.find(s => s.id === editForm.serviceId);
   }, [isEditing, editForm.serviceId, services]);
 
+  // Extend-duration options (same service, category, longer duration)
+  const [showExtendPanel, setShowExtendPanel] = useState(false);
+  const [extendError, setExtendError] = useState(null);
+  const [extendSubmitting, setExtendSubmitting] = useState(false);
+
+  const currentServiceObj = useMemo(() => {
+    if (!booking?.serviceId || !services?.length) return null;
+    return services.find(s => s.id === booking.serviceId) || null;
+  }, [booking?.serviceId, services]);
+
+  const extendOptions = useMemo(
+    () => getExtendOptions(currentServiceObj, services),
+    [currentServiceObj, services]
+  );
+
+  const handleExtendService = async (option) => {
+    if (!booking || !onEditBooking) return;
+    setExtendError(null);
+    setExtendSubmitting(true);
+    try {
+      const result = await onEditBooking(booking.bookingId, { serviceId: option.id });
+      if (result?.error) {
+        setExtendError(result.error.message || 'Failed to extend service.');
+      } else {
+        setShowExtendPanel(false);
+      }
+    } catch (error) {
+      setExtendError('An unexpected error occurred.');
+    } finally {
+      setExtendSubmitting(false);
+    }
+  };
+
   const startEditing = () => {
     setEditForm({
       customerName: booking.customerName || '',
@@ -494,9 +528,10 @@ const BookingActionModal = ({
   // Only day-lock and already-paid block it — not terminal status.
   const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay).
-  // Once ANY payment has been recorded (partial or full), the price is locked — the discount can no longer
-  // move retroactively against money already collected.
-  const canDiscount = booking.paymentStatus === 'unpaid' && !isLocked
+  // Once the booking is fully paid, the price is locked — the discount can no longer move retroactively
+  // against money already collected. 'partial' stays discountable so a discount can still be applied
+  // against the still-owed remainder (e.g. after extending a booking that already had a payment).
+  const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
   const discountLimitLabel = userRole === 'admin' ? '100%' : userRole === 'manager' ? '100%' : '15%';
 
@@ -1802,8 +1837,51 @@ const BookingActionModal = ({
               );
             })()}
 
+            {/* Extend Service — longer-duration variant panel */}
+            {showExtendPanel && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Icon name="Clock" size={18} className="text-primary" />
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                      Extend Service
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setShowExtendPanel(false)}
+                    className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+                  >
+                    <Icon name="X" size={16} />
+                  </button>
+                </div>
+
+                {extendError && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body text-xs text-error">{extendError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {extendOptions.map(option => (
+                    <button
+                      key={option.id}
+                      onClick={() => handleExtendService(option)}
+                      disabled={extendSubmitting}
+                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-spa border border-border hover:border-primary/50 hover:bg-primary/5 spa-transition-fast text-left disabled:opacity-50"
+                    >
+                      <span className="font-body font-body-medium text-sm text-text-primary">
+                        {option.name} — {option.duration_minutes}min
+                      </span>
+                      <span className="font-data text-sm text-primary">NPR {option.price_npr}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Add Another Service / Rebook Form */}
-            {newBookingMode && (
+            {!showExtendPanel && newBookingMode && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1925,7 +2003,7 @@ const BookingActionModal = ({
           {/* Footer - Responsive with safe area padding for iOS */}
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
             {/* Left side — Add another service / Rebook */}
-            {!isEditing && !newBookingMode && onCreateBooking ? (
+            {!isEditing && !newBookingMode && !showExtendPanel && onCreateBooking ? (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => openNewBookingForm('add-service')}
@@ -1939,6 +2017,14 @@ const BookingActionModal = ({
                 >
                   {rebookLabel}
                 </button>
+                {!isTerminal && !isLocked && extendOptions.length > 0 && (
+                  <button
+                    onClick={() => setShowExtendPanel(true)}
+                    className="px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
+                  >
+                    Extend Service
+                  </button>
+                )}
               </div>
             ) : (
               <div />
