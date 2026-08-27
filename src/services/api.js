@@ -37,7 +37,7 @@ function addMinutesToTime(timeStr, minutes) {
 // ============================================================
 
 const VALID_TRANSITIONS = {
-  'Pending':      ['Confirmed', 'Cancelled'],
+  'Pending':      ['Confirmed', 'Cancelled', 'No Show'],
   'Confirmed':    ['In-Progress', 'Cancelled', 'No Show'],
   'In-Progress':  ['Completed'],
   'Completed':    [],
@@ -1373,7 +1373,7 @@ export async function fetchPendingReferralRewardsForBooking(bookingId) {
   }
 }
 
-export async function updateBookingStatus({ bookingId, newStatus }) {
+export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
@@ -1402,9 +1402,16 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
     if (authError) return { data: null, error: authError };
 
     // 5. Update
+    if ((newStatus === 'Cancelled' || newStatus === 'No Show') && (!reason || !reason.trim())) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: 'A reason is required when cancelling or marking a booking as no-show.' } };
+    }
+    const updatePayload = { status: newStatus };
+    if (newStatus === 'Cancelled' || newStatus === 'No Show') {
+      updatePayload.cancellation_reason = reason;
+    }
     const { data: updated, error: updateError } = await supabase
       .from('bookings')
-      .update({ status: newStatus })
+      .update(updatePayload)
       .eq('id', bookingId)
       .select('id, status')
       .single();
@@ -1423,6 +1430,18 @@ export async function updateBookingStatus({ bookingId, newStatus }) {
         if (creditError) console.warn('[API] credit_pending_referral_for_booking failed:', creditError.message);
       } catch (creditErr) {
         console.warn('[API] credit_pending_referral_for_booking failed:', creditErr.message);
+      }
+
+      // Non-blocking, same reasoning as the referral credit above: enqueue
+      // any review_request outreach for this booking, but never let a
+      // failure here prevent marking the booking Completed.
+      try {
+        const { error: outreachError } = await supabase.rpc('outreach_enqueue_for_completed', {
+          p_booking_id: bookingId,
+        });
+        if (outreachError) console.warn('[API] outreach_enqueue_for_completed failed:', outreachError.message);
+      } catch (outreachErr) {
+        console.warn('[API] outreach_enqueue_for_completed failed:', outreachErr.message);
       }
     }
 
@@ -1647,6 +1666,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
 
     // 5. If service changed, recalculate financials and duration
     const effectiveServiceId = serviceId !== undefined ? serviceId : booking.service_id;
+    let newServiceDurationMinutes = null;
     if (serviceId && serviceId !== booking.service_id) {
       const { data: newService, error: svcError } = await supabase
         .from('services')
@@ -1658,6 +1678,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
         return { data: null, error: { code: 'SERVICE_NOT_FOUND', message: 'Selected service not found.' } };
       }
 
+      newServiceDurationMinutes = newService.duration_minutes;
       updatePayload.service_id = serviceId;
       updatePayload.service_name_snapshot = newService.name;
       updatePayload.base_amount = newService.price_npr;
@@ -1668,6 +1689,16 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       // Recalculate end_time based on new duration
       const effectiveStartTime = startTime || booking.start_time;
       updatePayload.end_time = addMinutesToTime(effectiveStartTime.slice(0, 5), newService.duration_minutes);
+
+      // Recompute payment_status — price change can leave a stale 'paid' status
+      const { data: paymentsRows } = await supabase
+        .from('payments')
+        .select('amount')
+        .eq('booking_id', bookingId);
+      const amountPaid = (paymentsRows || []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const newFinalAmount = updatePayload.final_amount;
+      updatePayload.payment_status =
+        amountPaid <= 0 ? 'unpaid' : amountPaid >= newFinalAmount ? 'paid' : 'partial';
     }
 
     // 6. If date or time changed, recalculate end_time and check conflicts
@@ -1711,6 +1742,26 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       throw updateError;
     }
 
+    // 10. Extending the service changes duration — keep any co-assigned
+    // therapist's booking_therapists row in sync, since getCalendarBookings
+    // reads end_time from this junction row, not just bookings.end_time.
+    if (newServiceDurationMinutes) {
+      const { data: btRows } = await supabase
+        .from('booking_therapists')
+        .select('therapist_id, start_time')
+        .eq('booking_id', bookingId);
+      for (const row of (btRows || [])) {
+        if (!row.start_time) continue;
+        const newEndTime = addMinutesToTime(row.start_time.slice(0, 5), newServiceDurationMinutes);
+        const { error: btUpdateError } = await supabase
+          .from('booking_therapists')
+          .update({ end_time: newEndTime })
+          .eq('booking_id', bookingId)
+          .eq('therapist_id', row.therapist_id);
+        if (btUpdateError) console.warn('[API] booking_therapists end_time sync warning:', btUpdateError.message);
+      }
+    }
+
     return { data: { success: true, bookingId }, error: null };
   } catch (error) {
     console.error('[API] updateBookingDetails error:', error.message);
@@ -1733,6 +1784,12 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       }
       throw fetchError;
     }
+
+    const { data: paymentsRows } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('booking_id', bookingId);
+    const amountPaid = (paymentsRows || []).reduce((sum, p) => sum + Number(p.amount), 0);
 
     // 2. Lifecycle checks — allow discounts on completed-but-unpaid (standard cash-spa flow)
     if (booking.is_locked) {
@@ -1768,6 +1825,20 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       return { data: null, error: { code: 'INVALID_DISCOUNT_VALUE', message: 'Discount cannot be negative or exceed base amount.' } };
     }
 
+    // A discount can't push final_amount below what's already been collected —
+    // that would silently hide an overpayment (amountDue clamps to 0 in the UI).
+    if (amountPaid > 0 && (baseAmount - discountAmount) < amountPaid) {
+      const maxDiscountAmount = baseAmount - amountPaid;
+      const maxPercentCap = Math.round((maxDiscountAmount / baseAmount) * 100);
+      return {
+        data: null,
+        error: {
+          code: 'DISCOUNT_BELOW_PAID',
+          message: `Discount cannot reduce the total below the amount already paid (NPR ${amountPaid}). Maximum discount: ${maxPercentCap}%.`,
+        },
+      };
+    }
+
     // Hard ceiling: staff request can't exceed 50%; manager/admin can go to 100%.
     const hardCeiling = profile.role === 'staff' ? STAFF_REQUEST_CEILING : DISCOUNT_LIMITS[profile.role];
     if (effectivePercent > hardCeiling + 1e-9) {
@@ -1798,6 +1869,16 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       discount_requested_by: isWithinLimit ? null : user.id,
       discount_requested_to: isWithinLimit ? null : requestedTo,
     };
+
+    // A discount applied while already-collected — reflect the new balance
+    // immediately (e.g. discounting a 'partial' booking down to exactly
+    // amountPaid should flip it to 'paid') rather than waiting on a payments
+    // INSERT trigger that won't fire here.
+    if (isWithinLimit) {
+      const newFinalAmount = baseAmount - discountAmount;
+      updatePayload.payment_status =
+        amountPaid <= 0 ? 'unpaid' : amountPaid >= newFinalAmount ? 'paid' : 'partial';
+    }
 
     // 9. Update booking — trigger recomputes final_amount
     const { data: updated, error: updateError } = await supabase
@@ -3634,7 +3715,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (therapistsResult.error) throw therapistsResult.error;
     if (roomsResult.error) throw roomsResult.error;
 
-    // 3. Fetch bookings in date range, excluding Cancelled
+    // 3. Fetch bookings in date range, excluding Cancelled and No Show
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
@@ -3646,12 +3727,13 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         therapist:therapists(id, name),
         room:rooms(id, name),
         creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name))
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name)),
+        payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
       .lte('date', endDate)
-      .neq('status', 'Cancelled')
+      .not('status', 'in', '("Cancelled","No Show")')
       .order('start_time');
 
     if (bookingsError) throw bookingsError;
@@ -8592,6 +8674,628 @@ export async function fetchVoucherWallets() {
     return { data: rows, error: null };
   } catch (error) {
     console.error('[API] fetchVoucherWallets error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Outreach (Phase 1) — rules, templates, message outbox/log, provider +
+// AI config. Writes to outreach_messages always go through SECURITY
+// DEFINER RPCs (outreach_enqueue_for_completed / outreach_scan_winback,
+// both migration-108; outreach_send_manual, migration-110) — the table has
+// no broad client INSERT policy by design (migration-104). Reads on
+// outreach_messages/outreach_drafts/outreach_provider_config/
+// outreach_ai_config are manager/admin only at the RLS layer; the writes
+// below are additionally gated client-side for a clean error message
+// before the DB rejects them.
+// ============================================================
+
+// ---- Rules ----------------------------------------------------------------
+
+export async function fetchOutreachRules() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('outreach_rules')
+      .select(`
+        id, org_id, trigger_type, enabled, channel, template_id, send_mode, use_ai,
+        lapsed_days, review_delay_hours, renewal_days_before, rebooking_interval_days,
+        birthday_lead_days, quiet_hours, created_at, updated_at,
+        template:outreach_templates ( id, key, channel, subject )
+      `)
+      .eq('org_id', profile.org_id)
+      .order('trigger_type', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachRules error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createOutreachRule(payload) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create outreach rules.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_rules')
+      .insert({
+        org_id: profile.org_id,
+        trigger_type: payload.triggerType,
+        enabled: payload.enabled ?? false,
+        channel: payload.channel,
+        template_id: payload.templateId,
+        send_mode: payload.sendMode || 'review',
+        use_ai: payload.useAi ?? false,
+        lapsed_days: payload.lapsedDays ?? null,
+        review_delay_hours: payload.reviewDelayHours ?? 24,
+        renewal_days_before: payload.renewalDaysBefore ?? null,
+        rebooking_interval_days: payload.rebookingIntervalDays ?? null,
+        birthday_lead_days: payload.birthdayLeadDays ?? null,
+        quiet_hours: payload.quietHours || {},
+      })
+      .select('id, trigger_type, enabled, channel, template_id, send_mode')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_rule_created', { trigger_type: payload.triggerType, channel: payload.channel, send_mode: payload.sendMode || 'review' });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createOutreachRule error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateOutreachRule(id, payload) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update outreach rules.' } };
+    }
+
+    const updates = {};
+    if (payload.channel !== undefined) updates.channel = payload.channel;
+    if (payload.templateId !== undefined) updates.template_id = payload.templateId;
+    if (payload.sendMode !== undefined) updates.send_mode = payload.sendMode;
+    if (payload.useAi !== undefined) updates.use_ai = payload.useAi;
+    if (payload.enabled !== undefined) updates.enabled = payload.enabled;
+    if (payload.lapsedDays !== undefined) updates.lapsed_days = payload.lapsedDays;
+    if (payload.reviewDelayHours !== undefined) updates.review_delay_hours = payload.reviewDelayHours;
+    if (payload.renewalDaysBefore !== undefined) updates.renewal_days_before = payload.renewalDaysBefore;
+    if (payload.rebookingIntervalDays !== undefined) updates.rebooking_interval_days = payload.rebookingIntervalDays;
+    if (payload.birthdayLeadDays !== undefined) updates.birthday_lead_days = payload.birthdayLeadDays;
+    if (payload.quietHours !== undefined) updates.quiet_hours = payload.quietHours;
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('outreach_rules')
+      .update(updates)
+      .eq('id', id)
+      .eq('org_id', profile.org_id)
+      .select('id, trigger_type, enabled, channel, template_id, send_mode')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_rule_updated', { rule_id: id, trigger_type: data.trigger_type });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateOutreachRule error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteOutreachRule(id) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete outreach rules.' } };
+    }
+
+    const { error } = await supabase
+      .from('outreach_rules')
+      .delete()
+      .eq('id', id)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    capture('outreach_rule_deleted', { rule_id: id });
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteOutreachRule error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function toggleOutreachRule(id, enabled) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can enable/disable outreach rules.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_rules')
+      .update({ enabled: !!enabled, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('org_id', profile.org_id)
+      .select('id, trigger_type, enabled')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_rule_toggled', { rule_id: id, enabled: !!enabled, trigger_type: data.trigger_type });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleOutreachRule error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function setOutreachRuleSendMode(id, sendMode) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can change the send mode.' } };
+    }
+
+    if (!['auto', 'review'].includes(sendMode)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'sendMode must be "auto" or "review".' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_rules')
+      .update({ send_mode: sendMode, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('org_id', profile.org_id)
+      .select('id, trigger_type, send_mode')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_rule_send_mode_changed', { rule_id: id, send_mode: sendMode, trigger_type: data.trigger_type });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setOutreachRuleSendMode error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ---- Templates --------------------------------------------------------------
+
+export async function fetchOutreachTemplates() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('outreach_templates')
+      .select('id, org_id, branch_id, key, channel, subject, body, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
+      .eq('org_id', profile.org_id)
+      .order('key', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachTemplates error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function upsertOutreachTemplate(payload) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage outreach templates.' } };
+    }
+
+    if (!payload.key || !payload.key.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Template key is required.' } };
+    }
+    if (!payload.body || !payload.body.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Template body is required.' } };
+    }
+
+    const row = {
+      org_id: profile.org_id,
+      branch_id: payload.branchId ?? null,
+      key: payload.key.trim(),
+      channel: payload.channel,
+      subject: payload.subject ?? null,
+      body: payload.body,
+      whatsapp_template_name: payload.whatsappTemplateName ?? null,
+      whatsapp_template_lang: payload.whatsappTemplateLang ?? null,
+      is_active: payload.isActive ?? true,
+      updated_at: new Date().toISOString(),
+    };
+    if (payload.id) row.id = payload.id;
+
+    const { data, error } = await supabase
+      .from('outreach_templates')
+      .upsert(row, { onConflict: payload.id ? 'id' : 'org_id,key' })
+      .select('id, key, channel, subject, body, is_active')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_template_saved', { template_id: data.id, key: data.key, channel: data.channel, is_new: !payload.id });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertOutreachTemplate error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteOutreachTemplate(id) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete outreach templates.' } };
+    }
+
+    const { error } = await supabase
+      .from('outreach_templates')
+      .delete()
+      .eq('id', id)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    capture('outreach_template_deleted', { template_id: id });
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteOutreachTemplate error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Preview-only, client-side string replace — mirrors the server-side
+// `replace(body, '{{customer_name}}', ...)` calls in outreach_scan_winback /
+// outreach_enqueue_for_completed (migration-108/109). Not used to generate
+// what actually gets sent — those RPCs render server-side at insert time.
+export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe') {
+  if (!template) return { subject: '', body: '' };
+  const name = sampleCustomerName || 'Jane Doe';
+  return {
+    subject: (template.subject || '').split('{{customer_name}}').join(name),
+    body: (template.body || '').split('{{customer_name}}').join(name),
+  };
+}
+
+// ---- Messages (outbox / send log) --------------------------------------------
+
+// filters: { status, channel, dateFrom, dateTo, customerId } — all optional.
+// Manager/admin only (RLS-enforced on outreach_messages; see migration-104).
+export async function fetchOutreachMessages(filters = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can view outreach messages.' } };
+    }
+
+    let query = supabase
+      .from('outreach_messages')
+      .select(`
+        id, org_id, rule_id, customer_id, booking_id, channel, to_address, subject, body,
+        status, source, provider, provider_message_id, error, dedupe_key, scheduled_for,
+        sent_at, created_at, updated_at,
+        customer:customers ( id, full_name, email, phone ),
+        rule:outreach_rules ( id, trigger_type )
+      `)
+      .eq('org_id', profile.org_id)
+      .order('created_at', { ascending: false });
+
+    if (filters.status) query = query.eq('status', filters.status);
+    if (filters.channel) query = query.eq('channel', filters.channel);
+    if (filters.customerId) query = query.eq('customer_id', filters.customerId);
+    if (filters.dateFrom) query = query.gte('created_at', filters.dateFrom);
+    if (filters.dateTo) query = query.lte('created_at', filters.dateTo);
+    if (filters.limit) query = query.limit(filters.limit);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachMessages error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchOutreachReviewQueue() {
+  return fetchOutreachMessages({ status: 'review' });
+}
+
+// overrides: { subject, body } — optional. When provided (e.g. the operator
+// edited the message in ReviewQueuePanel before approving), they're
+// persisted onto the row via the outreach_approve_message SECURITY DEFINER
+// RPC (migration-111) so the edited content is what actually gets sent.
+// Omitting overrides approves the message as queued, unchanged.
+export async function approveOutreachMessage(id, overrides = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can approve outreach messages.' } };
+    }
+
+    const { error } = await supabase.rpc('outreach_approve_message', {
+      p_message_id: id,
+      p_subject: overrides.subject ?? null,
+      p_body: overrides.body ?? null,
+    });
+
+    if (error) throw error;
+    capture('outreach_message_approved', { message_id: id, edited: Boolean(overrides.subject || overrides.body) });
+    return { data: { id, status: 'approved' }, error: null };
+  } catch (error) {
+    console.error('[API] approveOutreachMessage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function cancelOutreachMessage(id) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can cancel outreach messages.' } };
+    }
+
+    const { error } = await supabase.rpc('outreach_cancel_message', {
+      p_message_id: id,
+    });
+
+    if (error) throw error;
+    capture('outreach_message_cancelled', { message_id: id });
+    return { data: { id, status: 'cancelled' }, error: null };
+  } catch (error) {
+    console.error('[API] cancelOutreachMessage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function bulkApproveOutreach(ids) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can approve outreach messages.' } };
+    }
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'At least one message id is required.' } };
+    }
+
+    const { data: updatedCount, error } = await supabase.rpc('outreach_bulk_approve_messages', {
+      p_message_ids: ids,
+    });
+
+    if (error) throw error;
+    capture('outreach_message_bulk_approved', { count: updatedCount ?? 0, requested: ids.length });
+    return { data: { updatedCount: updatedCount ?? 0, requested: ids.length }, error: null };
+  } catch (error) {
+    console.error('[API] bulkApproveOutreach error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Status counts for the current org, last 30 days — powers a lightweight
+// outreach dashboard summary card.
+export async function fetchOutreachAnalytics() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can view outreach analytics.' } };
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from('outreach_messages')
+      .select('status')
+      .eq('org_id', profile.org_id)
+      .gte('created_at', since);
+
+    if (error) throw error;
+
+    const counts = { queued: 0, review: 0, approved: 0, sending: 0, sent: 0, delivered: 0, failed: 0, cancelled: 0 };
+    (data || []).forEach((row) => {
+      if (counts[row.status] !== undefined) counts[row.status] += 1;
+    });
+
+    return { data: { total: (data || []).length, byStatus: counts, sinceDate: since }, error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachAnalytics error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ---- Provider config (non-secret settings only — no API keys) ---------------
+
+export async function fetchOutreachProviderConfig() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can view provider configuration.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_provider_config')
+      .select('id, channel, provider, from_address, settings, created_at, updated_at')
+      .eq('org_id', profile.org_id)
+      .order('channel', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachProviderConfig error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// No API key / secret field is ever accepted here by design — the
+// outreach_provider_config table has no column for one (migration-106).
+// Secrets live only in Edge Function environment variables. This guard
+// throws a clear client-side error if a caller mistakenly tries to pass a
+// key-shaped field, rather than silently dropping it.
+const PROVIDER_CONFIG_SECRET_KEY_PATTERN = /(api[_-]?key|secret|token|password|credential)/i;
+
+export async function upsertOutreachProviderConfig(payload) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update provider configuration.' } };
+    }
+
+    const suspectKey = Object.keys(payload || {}).find((k) => PROVIDER_CONFIG_SECRET_KEY_PATTERN.test(k));
+    if (suspectKey) {
+      return { data: null, error: { code: 'VALIDATION', message: `Refusing to store key-shaped field "${suspectKey}" — provider secrets must never be sent from the client. Configure them as Edge Function environment variables instead.` } };
+    }
+    const settingsSuspectKey = payload?.settings && typeof payload.settings === 'object'
+      ? Object.keys(payload.settings).find((k) => PROVIDER_CONFIG_SECRET_KEY_PATTERN.test(k))
+      : null;
+    if (settingsSuspectKey) {
+      return { data: null, error: { code: 'VALIDATION', message: `Refusing to store key-shaped field "${settingsSuspectKey}" in settings — provider secrets must never be sent from the client.` } };
+    }
+
+    const row = {
+      org_id: profile.org_id,
+      channel: payload.channel,
+      provider: payload.provider,
+      from_address: payload.fromAddress ?? null,
+      settings: payload.settings || {},
+      updated_at: new Date().toISOString(),
+    };
+    if (payload.id) row.id = payload.id;
+
+    const { data, error } = await supabase
+      .from('outreach_provider_config')
+      .upsert(row, { onConflict: payload.id ? 'id' : 'org_id,channel' })
+      .select('id, channel, provider, from_address, settings')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_provider_config_saved', { channel: data.channel, provider: data.provider });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertOutreachProviderConfig error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ---- AI config (ships now; nothing calls AI yet in Phase 1) -----------------
+
+export async function fetchOutreachAiConfig() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can view AI configuration.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_ai_config')
+      .select('id, org_id, ai_enabled, chatbot_enabled, monthly_token_budget, tokens_used_this_period, period_started_at, model, created_at, updated_at')
+      .eq('org_id', profile.org_id)
+      .maybeSingle();
+    if (error) throw error;
+    return { data: data || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachAiConfig error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateOutreachAiConfig(payload) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update AI configuration.' } };
+    }
+
+    const row = {
+      org_id: profile.org_id,
+      updated_at: new Date().toISOString(),
+    };
+    if (payload.aiEnabled !== undefined) row.ai_enabled = payload.aiEnabled;
+    if (payload.chatbotEnabled !== undefined) row.chatbot_enabled = payload.chatbotEnabled;
+    if (payload.monthlyTokenBudget !== undefined) row.monthly_token_budget = payload.monthlyTokenBudget;
+    if (payload.model !== undefined) row.model = payload.model;
+
+    const { data, error } = await supabase
+      .from('outreach_ai_config')
+      .upsert(row, { onConflict: 'org_id' })
+      .select('id, ai_enabled, chatbot_enabled, monthly_token_budget, model')
+      .single();
+
+    if (error) throw error;
+    capture('outreach_ai_config_updated', { ai_enabled: data.ai_enabled, chatbot_enabled: data.chatbot_enabled });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateOutreachAiConfig error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ---- Manual one-off send ------------------------------------------------------
+
+// Inserts one outreach_messages row via the outreach_send_manual SECURITY
+// DEFINER RPC (migration-110) — outreach_messages has no client INSERT
+// policy by design (migration-104), so this cannot be a raw .insert().
+export async function sendCustomerMessage({ customerId, bookingId = null, channel, toAddress, subject = null, body }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!customerId || !channel || !toAddress || !body) {
+      return { data: null, error: { code: 'VALIDATION', message: 'customerId, channel, toAddress, and body are required.' } };
+    }
+
+    const dedupeKey = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? `manual:${crypto.randomUUID()}`
+      : `manual:${customerId}:${Date.now()}`;
+
+    const { data: messageId, error } = await supabase.rpc('outreach_send_manual', {
+      p_customer_id: customerId,
+      p_booking_id: bookingId,
+      p_channel: channel,
+      p_to_address: toAddress,
+      p_subject: subject,
+      p_body: body,
+      p_dedupe_key: dedupeKey,
+    });
+
+    if (error) throw error;
+    capture('outreach_manual_message_sent', { customer_id: customerId, channel, has_booking: !!bookingId, sender_role: profile.role });
+    return { data: { id: messageId }, error: null };
+  } catch (error) {
+    console.error('[API] sendCustomerMessage error:', error.message);
     return { data: null, error };
   }
 }

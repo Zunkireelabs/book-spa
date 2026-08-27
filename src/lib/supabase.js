@@ -15,3 +15,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export const supabaseCustomer = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { storageKey: 'zenly-customer-auth' },
 });
+
+// Isolated client for the platform super-admin area (own storage key) so a
+// platform login never triggers the staff AuthContext listener (which would
+// look up a non-existent org profile and bounce to /login). Mirrors
+// supabaseCustomer's isolation.
+export const supabasePlatform = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { storageKey: 'zenly-platform-auth' },
+});

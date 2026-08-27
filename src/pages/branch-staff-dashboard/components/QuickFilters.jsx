@@ -31,7 +31,8 @@ const QuickFilters = ({ onFiltersChange, bookingCounts }) => {
     { value: 'confirmed', label: 'Confirmed' },
     { value: 'in-progress', label: 'In Progress' },
     { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' }
+    { value: 'cancelled', label: 'Cancelled' },
+    { value: 'no show', label: 'No Show' }
   ];
 
   const handleFilterChange = (key, value) => {
