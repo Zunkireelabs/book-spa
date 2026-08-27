@@ -1568,7 +1568,11 @@ const BookingActionModal = ({
                       <input
                         type="number"
                         min="0"
-                        max={discountType === 'percentage' ? 100 : Math.floor(booking.baseAmount || 0)}
+                        max={
+                          discountType === 'percentage'
+                            ? Math.min(100, Math.floor(((booking.baseAmount - (booking.amountPaid || 0)) / booking.baseAmount) * 100))
+                            : Math.floor((booking.baseAmount || 0) - (booking.amountPaid || 0))
+                        }
                         step={discountType === 'percentage' ? 1 : 10}
                         value={discountValue}
                         onWheel={(e) => e.target.blur()}
