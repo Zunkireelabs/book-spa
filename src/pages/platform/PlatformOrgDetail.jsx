@@ -337,7 +337,7 @@ const PlatformOrgDetail = () => {
                     <th className="text-right px-3 py-2 font-body">Cut %</th>
                     <th className="text-right px-3 py-2 font-body">Expected</th>
                     <th className="text-right px-3 py-2 font-body">Collected</th>
-                    <th className="text-left px-3 py-2 font-body">Collected</th>
+                    <th className="text-left px-3 py-2 font-body">Collected On</th>
                     <th className="text-left px-3 py-2 font-body">Notes</th>
                   </tr>
                 </thead>
