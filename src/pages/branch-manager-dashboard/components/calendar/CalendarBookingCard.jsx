@@ -213,6 +213,9 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       onClick={(e) => {
         if (!isDragging && !isResizing) {
           e.stopPropagation();
+          clearTimeout(hoverTimer.current);
+          setShowPopover(false);
+          setPopoverPos(null);
           if (onSelect && (e.metaKey || e.ctrlKey)) {
             onSelect(booking, e);
           } else {
@@ -291,7 +294,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       {/* Rich hover popover — rendered via portal to escape overflow clipping */}
       {showPopover && !isDragging && popoverPos && createPortal(
         <div
-          className="fixed z-[9999] pointer-events-none"
+          className="fixed z-dropdown pointer-events-none"
           style={{
             top: popoverPos.top,
             left: popoverPos.left,
