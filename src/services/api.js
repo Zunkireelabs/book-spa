@@ -3592,7 +3592,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         therapist:therapists(id, name),
         room:rooms(id, name),
         creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name))
+        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name)),
+        payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
