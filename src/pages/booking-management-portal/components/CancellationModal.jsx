@@ -47,6 +47,7 @@ const CancellationModal = ({ isOpen, onClose, booking, onConfirm }) => {
       const { data, error } = await updateBookingStatus({
         bookingId: booking.bookingId,
         newStatus: 'Cancelled',
+        reason,
       });
 
       if (error) {

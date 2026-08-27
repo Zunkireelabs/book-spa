@@ -4,7 +4,7 @@ import BookingSearch from '../../booking-management-portal/components/BookingSea
 import BookingCard from '../../booking-management-portal/components/BookingCard';
 import BookingHistory from '../../booking-management-portal/components/BookingHistory';
 import RescheduleModal from '../../booking-management-portal/components/RescheduleModal';
-import CancellationModal from '../../booking-management-portal/components/CancellationModal';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { searchBookings, updateBookingStatus, rescheduleBooking } from '../../../services/api';
 import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
 
@@ -14,8 +14,8 @@ const CheckBookingPanel = ({ branchId }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
-  const [showCancellationModal, setShowCancellationModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [pendingCancel, setPendingCancel] = useState(null);
   const [notification, setNotification] = useState(null);
 
   const showNotification = (message, type) => {
@@ -54,9 +54,9 @@ const CheckBookingPanel = ({ branchId }) => {
     setShowRescheduleModal(true);
   };
 
-  const handleCancel = async (booking) => {
+  const handleCancel = async (booking, reason) => {
     const dbStatus = toDbStatus('cancelled');
-    const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus });
+    const result = await updateBookingStatus({ bookingId: booking.bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
       showNotification(result.error.message || 'Failed to cancel booking.', 'error');
@@ -64,6 +64,7 @@ const CheckBookingPanel = ({ branchId }) => {
       showNotification('Booking cancelled successfully.', 'success');
       setCurrentBooking(prev => prev ? { ...prev, status: 'cancelled' } : null);
     }
+    setPendingCancel(null);
   };
 
   const handleRescheduleConfirm = async ({ bookingId, newDate, newStartTime }) => {
@@ -81,11 +82,6 @@ const CheckBookingPanel = ({ branchId }) => {
     }
     showNotification('Booking rescheduled successfully!', 'success');
     return result;
-  };
-
-  const handleCancellationConfirm = (cancelledBooking) => {
-    setCurrentBooking({ ...cancelledBooking, status: 'cancelled' });
-    showNotification('Booking cancelled successfully.', 'success');
   };
 
   const getNotificationIcon = (type) => {
@@ -144,7 +140,7 @@ const CheckBookingPanel = ({ branchId }) => {
                 <BookingCard
                   booking={currentBooking}
                   onReschedule={handleReschedule}
-                  onCancel={handleCancel}
+                  onCancel={() => setPendingCancel(currentBooking)}
                 />
               </div>
 
@@ -177,12 +173,15 @@ const CheckBookingPanel = ({ branchId }) => {
         onConfirm={handleRescheduleConfirm}
       />
 
-      <CancellationModal
-        isOpen={showCancellationModal}
-        onClose={() => setShowCancellationModal(false)}
-        booking={selectedBooking}
-        onConfirm={handleCancellationConfirm}
-      />
+      {pendingCancel && (
+        <ConfirmDialog
+          title="Cancel Booking"
+          message="This will cancel the booking. This cannot be undone."
+          confirmLabel="Cancel Booking"
+          onClose={() => setPendingCancel(null)}
+          onConfirm={(reason) => handleCancel(pendingCancel, reason)}
+        />
+      )}
     </div>
   );
 };

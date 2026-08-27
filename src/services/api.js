@@ -3660,7 +3660,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (therapistsResult.error) throw therapistsResult.error;
     if (roomsResult.error) throw roomsResult.error;
 
-    // 3. Fetch bookings in date range, excluding Cancelled
+    // 3. Fetch bookings in date range, excluding Cancelled and No Show
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
@@ -3678,7 +3678,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       .eq('branch_id', resolvedBranchId)
       .gte('date', startDate)
       .lte('date', endDate)
-      .neq('status', 'Cancelled')
+      .not('status', 'in', '("Cancelled","No Show")')
       .order('start_time');
 
     if (bookingsError) throw bookingsError;
