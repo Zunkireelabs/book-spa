@@ -51,7 +51,7 @@ function isTimeLocked(booking) {
 }
 
 // Check if booking can be dragged
-function canDragBooking(booking) {
+export function canDragBooking(booking) {
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
   // Cannot drag paid bookings
@@ -296,117 +296,140 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       )}
 
       {/* Rich hover popover — rendered via portal to escape overflow clipping */}
-      {showPopover && !isDragging && popoverPos && createPortal(
-        <div
-          className="fixed z-dropdown pointer-events-none"
-          style={{
-            top: popoverPos.top,
-            left: popoverPos.left,
-            width: 280,
-          }}
-        >
-          <div className="bg-surface rounded-lg border border-border spa-shadow-elevated overflow-hidden animate-fade-in">
-            {/* Status banner */}
-            <div
-              className="px-3 py-1.5 text-center text-xs font-body font-semibold"
-              style={{ backgroundColor: colors.bg, color: colors.text }}
-            >
-              {booking.status}
-            </div>
-
-            {/* Customer info */}
-            <div className="px-3 pt-2.5 pb-2 border-b border-border">
-              <div className="flex items-start justify-between">
-                <div className="font-body font-semibold text-sm text-text-primary">
-                  {booking.customerName}
-                </div>
-                {booking.bookingNumber && (
-                  <span className="font-data text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded">
-                    #{booking.bookingNumber}
-                  </span>
-                )}
-              </div>
-              {booking.customerPhone && (
-                <div className="font-caption text-xs text-text-secondary mt-0.5">
-                  📞 {booking.customerPhone}
-                </div>
-              )}
-            </div>
-
-            {/* Booking details table */}
-            <div className="px-3 py-2 space-y-1.5 border-b border-border">
-              <DetailRow label="Service" value={booking.serviceName} />
-              <DetailRow
-                label="Date"
-                value={`${formatDateLabel(booking.date)}, ${timeLabel}`}
-              />
-              <DetailRow
-                label="Duration"
-                value={durationMins ? `${durationMins} mins` : (booking.serviceDuration ? `${booking.serviceDuration} mins` : null)}
-              />
-              <DetailRow label="Therapist" value={booking.therapistName || '—'} />
-              <DetailRow label="Room" value={booking.roomName || '—'} />
-              <DetailRow label="Created by" value={booking.createdByName || 'Online booking'} />
-            </div>
-
-            {/* Financial info */}
-            <div className="px-3 py-2 border-b border-border">
-              <div className="flex items-center justify-between">
-                <div className="flex items-baseline gap-1">
-                  <span className="font-caption text-[10px] text-text-secondary uppercase tracking-wider">Amount</span>
-                  {booking.finalAmount != null ? (
-                    <span className="font-data text-sm text-text-primary font-semibold">
-                      NPR {formatAmount(booking.finalAmount)}
-                    </span>
-                  ) : booking.baseAmount != null ? (
-                    <span className="font-data text-sm text-text-primary font-semibold">
-                      NPR {formatAmount(booking.baseAmount)}
-                    </span>
-                  ) : (
-                    <span className="font-body text-xs text-text-secondary">—</span>
-                  )}
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                    isUnpaid
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : 'bg-green-100 text-green-700'
-                  }`}
-                >
-                  {isUnpaid ? 'Unpaid' : 'Paid'}
-                </span>
-              </div>
-              {booking.discountAmount > 0 && (
-                <div className="font-caption text-[10px] text-text-secondary mt-0.5">
-                  Discount: NPR {formatAmount(booking.discountAmount)}
-                </div>
-              )}
-            </div>
-
-            {/* Special requests */}
-            {booking.specialRequests && (
-              <div className="px-3 py-2 border-b border-border">
-                <div className="font-caption text-[10px] text-text-secondary uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                  <Icon name="AlertTriangle" size={10} className="text-warning" />
-                  Notes
-                </div>
-                <div className="font-body text-xs text-text-primary italic leading-snug">
-                  "{booking.specialRequests}"
-                </div>
-              </div>
-            )}
-
-            {/* CTA hint */}
-            <div className="px-3 py-1.5 bg-background/50">
-              <div className="font-caption text-[10px] text-text-secondary text-center">
-                {isDraggable ? 'Drag to reschedule • Click for details →' : 'Click for full details →'}
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
+      {showPopover && !isDragging && popoverPos && (
+        <BookingHoverPreview booking={booking} position={popoverPos} draggable={isDraggable} />
       )}
     </div>
+  );
+};
+
+// Rich hover-preview card (status, service, date/duration, therapist/room,
+// amount, notes) shown via portal on hover — shared by CalendarBookingCard
+// itself and by OverflowPopoverRow (the "+N" hidden-bookings list) so both
+// give the same detail preview instead of just a native title tooltip.
+export const BookingHoverPreview = ({ booking, position, draggable }) => {
+  const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
+  const isUnpaid = booking.paymentStatus === 'unpaid';
+
+  const durationMins = (() => {
+    if (!booking.startTime || !booking.endTime) return null;
+    const [sh, sm] = booking.startTime.split(':').map(Number);
+    const [eh, em] = booking.endTime.split(':').map(Number);
+    return (eh * 60 + em) - (sh * 60 + sm);
+  })();
+
+  const timeLabel = booking.startTime && booking.endTime
+    ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
+    : '';
+
+  if (!position) return null;
+
+  return createPortal(
+    <div
+      className="fixed z-dropdown pointer-events-none"
+      style={{
+        top: position.top,
+        left: position.left,
+        width: 280,
+      }}
+    >
+      <div className="bg-surface rounded-lg border border-border spa-shadow-elevated overflow-hidden animate-fade-in">
+        {/* Status banner */}
+        <div
+          className="px-3 py-1.5 text-center text-xs font-body font-semibold"
+          style={{ backgroundColor: colors.bg, color: colors.text }}
+        >
+          {booking.status}
+        </div>
+
+        {/* Customer info */}
+        <div className="px-3 pt-2.5 pb-2 border-b border-border">
+          <div className="flex items-start justify-between">
+            <div className="font-body font-semibold text-sm text-text-primary">
+              {booking.customerName}
+            </div>
+            {booking.bookingNumber && (
+              <span className="font-data text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded">
+                #{booking.bookingNumber}
+              </span>
+            )}
+          </div>
+          {booking.customerPhone && (
+            <div className="font-caption text-xs text-text-secondary mt-0.5">
+              📞 {booking.customerPhone}
+            </div>
+          )}
+        </div>
+
+        {/* Booking details table */}
+        <div className="px-3 py-2 space-y-1.5 border-b border-border">
+          <DetailRow label="Service" value={booking.serviceName} />
+          <DetailRow
+            label="Date"
+            value={`${formatDateLabel(booking.date)}, ${timeLabel}`}
+          />
+          <DetailRow
+            label="Duration"
+            value={durationMins ? `${durationMins} mins` : (booking.serviceDuration ? `${booking.serviceDuration} mins` : null)}
+          />
+          <DetailRow label="Therapist" value={booking.therapistName || '—'} />
+          <DetailRow label="Room" value={booking.roomName || '—'} />
+          <DetailRow label="Created by" value={booking.createdByName || 'Online booking'} />
+        </div>
+
+        {/* Financial info */}
+        <div className="px-3 py-2 border-b border-border">
+          <div className="flex items-center justify-between">
+            <div className="flex items-baseline gap-1">
+              <span className="font-caption text-[10px] text-text-secondary uppercase tracking-wider">Amount</span>
+              {booking.finalAmount != null ? (
+                <span className="font-data text-sm text-text-primary font-semibold">
+                  NPR {formatAmount(booking.finalAmount)}
+                </span>
+              ) : booking.baseAmount != null ? (
+                <span className="font-data text-sm text-text-primary font-semibold">
+                  NPR {formatAmount(booking.baseAmount)}
+                </span>
+              ) : (
+                <span className="font-body text-xs text-text-secondary">—</span>
+              )}
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                isUnpaid
+                  ? 'bg-yellow-100 text-yellow-700'
+                  : 'bg-green-100 text-green-700'
+              }`}
+            >
+              {isUnpaid ? 'Unpaid' : 'Paid'}
+            </span>
+          </div>
+          {booking.discountAmount > 0 && (
+            <div className="font-caption text-[10px] text-text-secondary mt-0.5">
+              Discount: NPR {formatAmount(booking.discountAmount)}
+            </div>
+          )}
+        </div>
+
+        {/* Special requests */}
+        {booking.specialRequests && (
+          <div className="px-3 py-2 border-b border-border">
+            <div className="font-caption text-[10px] text-text-secondary uppercase tracking-wider mb-0.5">Notes</div>
+            <div className="font-body text-xs text-text-primary italic leading-snug">
+              "{booking.specialRequests}"
+            </div>
+          </div>
+        )}
+
+        {/* CTA hint */}
+        <div className="px-3 py-1.5 bg-background/50">
+          <div className="font-caption text-[10px] text-text-secondary text-center">
+            {draggable ? 'Drag to reschedule • Click for details →' : 'Click for full details →'}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 };
 

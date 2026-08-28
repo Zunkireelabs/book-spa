@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
+import { toE164, samePhone } from '../../../utils/phone';
 import CustomerAutocomplete from '../../../components/ui/CustomerAutocomplete';
 import { fetchServices, createBooking, getCustomerOutstandingBalance, fetchCustomersLightweight } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
@@ -215,14 +216,14 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   // are filled in, matching CustomerForm.jsx's public-flow gating — the "Referred by"
   // picker stays hidden until this resolves to 'new'.
   const checkExistingCustomer = async () => {
-    const last10 = customerPhone.replace(/\D/g, '').slice(-10);
-    if (!customerName.trim() || last10.length < 10 || !branchId) {
+    const e164 = toE164(customerPhone, customerCountryCode);
+    if (!customerName.trim() || !e164 || e164.length < 11 || !branchId) {
       setCustomerCheckStatus('idle');
       return;
     }
     setCustomerCheckStatus('checking');
     const { data } = await fetchCustomersLightweight(branchId);
-    const match = (data || []).some((c) => (c.phone || '').replace(/\D/g, '').slice(-10) === last10);
+    const match = (data || []).some((c) => samePhone(c.phone, e164));
     setCustomerCheckStatus(match ? 'existing' : 'new');
   };
 
@@ -464,12 +465,14 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Email
                 </label>
-                <input
-                  type="email"
+                <CustomerAutocomplete
                   value={customerEmail}
-                  onChange={(e) => setCustomerEmail(e.target.value)}
+                  onChange={setCustomerEmail}
+                  onSelect={handleCustomerSelect}
+                  branchId={branchId}
+                  searchBy="email"
                   placeholder="email@example.com"
-                  className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  inputClassName="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
             </div>

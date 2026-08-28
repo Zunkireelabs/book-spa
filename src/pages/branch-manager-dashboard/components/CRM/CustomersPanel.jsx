@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { getCustomerIntelligence } from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
 import CustomerProfileModal from './CustomerProfileModal';
+import DuplicateCustomersPanel from './DuplicateCustomersPanel';
 
 const LOYALTY_CONFIG = {
   VIP:        { color: 'bg-amber-100 text-amber-800', icon: 'Crown' },
@@ -27,6 +29,8 @@ function formatNPR(amount) {
 
 // readOnly accepted for the Overall view; this panel has no write affordances, so it is unused.
 const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-line no-unused-vars
+  const { profile } = useAuth();
+  const [activeTab, setActiveTab] = useState('customers');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -53,9 +57,40 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const tabs = (
+    <div className="flex items-center gap-1 border-b border-border">
+      {[
+        { key: 'customers', label: 'Customers' },
+        { key: 'duplicates', label: 'Potential Duplicates' },
+      ].map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => setActiveTab(tab.key)}
+          className={`px-3 py-2 font-body font-body-medium text-sm spa-transition-fast border-b-2 -mb-px ${
+            activeTab === tab.key
+              ? 'border-primary text-primary'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (activeTab === 'duplicates') {
+    return (
+      <div className="space-y-4">
+        {tabs}
+        <DuplicateCustomersPanel orgId={profile?.org_id} role={profile?.role} branchId={profile?.branch_id} />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
+        {tabs}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[0, 1, 2, 3, 4, 5].map(i => (
             <div key={i} className="bg-surface rounded-spa-lg border border-border p-4 animate-pulse">
@@ -76,12 +111,15 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
 
   if (error) {
     return (
-      <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
-        <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
-        <p className="font-body text-sm text-error">{error}</p>
-        <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
-          Retry
-        </button>
+      <div className="space-y-4">
+        {tabs}
+        <div className="bg-error/5 border border-error/20 rounded-spa p-4 flex items-center space-x-3">
+          <Icon name="AlertCircle" size={18} className="text-error flex-shrink-0" />
+          <p className="font-body text-sm text-error">{error}</p>
+          <button onClick={loadData} className="ml-auto font-body font-body-medium text-sm text-error underline">
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -106,6 +144,7 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
 
   return (
     <div className="space-y-4">
+      {tabs}
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {SUMMARY_CARDS.map(card => (

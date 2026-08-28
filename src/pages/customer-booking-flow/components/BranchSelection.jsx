@@ -10,7 +10,7 @@ const INDUSTRY_IMAGES = {
   salon: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop',
 };
 const DEFAULT_IMAGE = INDUSTRY_IMAGES.spa;
-const DEFAULT_OPEN_HOURS = '9:00 AM - 9:00 PM';
+const DEFAULT_OPEN_HOURS = '10:00 AM - 8:00 PM';
 
 const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   const { orgId, industryType, loading: tenantLoading, error: tenantError } = useTenant();
