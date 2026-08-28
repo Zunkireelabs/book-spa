@@ -16,7 +16,7 @@ const CustomerAutocomplete = ({
   onSelect,
   branchId,
   searchBy = 'name',
-  placeholder = searchBy === 'phone' ? '98XXXXXXXX' : 'Enter customer name',
+  placeholder = searchBy === 'phone' ? '98XXXXXXXX' : searchBy === 'email' ? 'Enter customer email' : 'Enter customer name',
   inputClassName,
   inputRef: externalRef,
   onBlur,
@@ -52,6 +52,7 @@ const CustomerAutocomplete = ({
     return customers
       .filter((c) => {
         if (searchBy === 'phone') return c.phone && c.phone.includes(term);
+        if (searchBy === 'email') return c.email && c.email.toLowerCase().includes(term);
         return c.full_name.toLowerCase().includes(term);
       })
       .slice(0, 8);
