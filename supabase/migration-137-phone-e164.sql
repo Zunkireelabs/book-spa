@@ -1,4 +1,4 @@
--- Migration 133: canonical E.164 phone storage (data backfill + self-healing triggers)
+-- Migration 137: canonical E.164 phone storage (data backfill + self-healing triggers)
 --
 -- Until now every phone number was normalised in JS to "last 10 digits"
 -- (`.replace(/\D/g,'').slice(-10)`). That is correct only for Nepal (+977 plus a
@@ -47,6 +47,9 @@
 -- ============================================================
 -- 1. Shared normaliser
 -- ============================================================
+-- Intentionally duplicated in migration-133 (customer-duplicate-merge), which now runs
+-- before this one and depends on this function. CREATE OR REPLACE makes this copy a no-op
+-- when 133 has already run — do not remove either copy.
 
 CREATE OR REPLACE FUNCTION public.normalize_phone_e164(p_raw text)
 RETURNS text
@@ -93,7 +96,7 @@ BEGIN
 
   IF v_org IS NOT NULL THEN
     RAISE EXCEPTION
-      'migration-133: normalising customers.phone would merge % rows in org % onto % — merge/clean these duplicates first: %',
+      'migration-137: normalising customers.phone would merge % rows in org % onto % — merge/clean these duplicates first: %',
       array_length(v_ids, 1), v_org, v_nphone, v_ids;
   END IF;
 END $$;
@@ -162,4 +165,4 @@ CREATE TRIGGER bookings_normalize_phone
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('133', 'phone-e164') ON CONFLICT (version) DO NOTHING;
+VALUES ('137', 'phone-e164') ON CONFLICT (version) DO NOTHING;
