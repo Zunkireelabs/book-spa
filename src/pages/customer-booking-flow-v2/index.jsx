@@ -4,24 +4,36 @@ import { capture } from '../../lib/analytics';
 import CustomerHeader from '../../components/ui/CustomerHeader';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
-import ProgressIndicator from './components/ProgressIndicator';
-import BranchSelection from './components/BranchSelection';
-import ServiceSelection from './components/ServiceSelection';
-import DateTimeSelection from './components/DateTimeSelection';
-import CustomerForm from './components/CustomerForm';
-import BookingConfirmation from './components/BookingConfirmation';
-import BookingSuccess from './components/BookingSuccess';
+import ProgressIndicatorV2 from './components/ProgressIndicatorV2';
+import ServiceBookingPanel from './components/ServiceBookingPanel';
+import BranchSelection from '../customer-booking-flow/components/BranchSelection';
+import CustomerForm from '../customer-booking-flow/components/CustomerForm';
+import BookingConfirmation from '../customer-booking-flow/components/BookingConfirmation';
+import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { splitE164 } from '../../utils/phone';
 
-const CustomerBookingFlow = () => {
+// v2 of the customer booking flow: identical business logic and steps to
+// pages/customer-booking-flow, except Service Selection + Date & Time are collapsed into a
+// single side-by-side step (ServiceBookingPanel) instead of two sequential pages. Reuses the
+// v1 BranchSelection / CustomerForm / BookingConfirmation / BookingSuccess components and the
+// v1 ServiceSelection / DateTimeSelection components unchanged — no parallel booking system.
+const CustomerBookingFlowV2 = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
   const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+  // Step 2's floating "Previous" button only appears once the customer has
+  // scrolled past the top of the service list (at the top it would just
+  // duplicate a control that's already in reach) AND the real Previous button
+  // — rendered in its normal spot right after the service grid, see prevBtnRef
+  // — has scrolled out of view. That way it never doubles up with, or floats
+  // on top of, the real one once the customer reaches the bottom of the page.
+  const [showFloatingPrev, setShowFloatingPrev] = useState(false);
+  const prevBtnRef = useRef(null);
 
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);
@@ -47,15 +59,14 @@ const CustomerBookingFlow = () => {
   const [bookingData, setBookingData] = useState(null);
   const prefilledFromProfile = useRef(false);
 
-  // Prefill from a logged-in customer's saved details, once, without
-  // overwriting anything the customer has already typed.
   useEffect(() => {
     if (!customerProfile || prefilledFromProfile.current) return;
     prefilledFromProfile.current = true;
 
     const [firstName, ...rest] = (customerProfile.full_name || '').split(' ');
-    // Saved profile phone is canonical E.164 — split so the number box never
-    // shows the dial code (that lives in the country-code picker).
+    // The saved profile phone is canonical E.164 ("+9779841234567") — split it so
+    // the country-code picker and the national-number box each show their own part
+    // (the number box must never contain the dial code).
     const savedPhone = splitE164(customerProfile.phone || '');
     setCustomerInfo((prev) => ({
       ...prev,
@@ -67,23 +78,22 @@ const CustomerBookingFlow = () => {
     }));
   }, [customerProfile]);
 
-  const totalSteps = 6;
-  const stepNames = ['branch_selection', 'service_selection', 'datetime_selection', 'customer_details', 'booking_confirmation', 'booking_success'];
+  const totalSteps = 5;
+  const stepNames = ['branch_selection', 'service_datetime_selection', 'customer_details', 'booking_confirmation', 'booking_success'];
   const stepEnteredAt = useRef(Date.now());
 
-  // Track step views and time-on-step
   useEffect(() => {
-    if (currentStep >= 6) return;
+    if (currentStep >= 5) return;
     stepEnteredAt.current = Date.now();
     capture('customer_booking_step_viewed', {
       step_index: currentStep,
       step_name: stepNames[currentStep - 1],
       org_slug: orgSlug,
       branch_id: selectedBranch?.id,
+      flow_variant: 'v2',
     });
   }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save to localStorage
   useEffect(() => {
     const bookingState = {
       currentStep,
@@ -93,25 +103,23 @@ const CustomerBookingFlow = () => {
       genderPreference,
       customerInfo
     };
-    localStorage.setItem('bookingFlow', JSON.stringify(bookingState));
+    localStorage.setItem('bookingFlowV2', JSON.stringify(bookingState));
   }, [currentStep, selectedBranch, selectedService, selectedDateTime, genderPreference, customerInfo]);
 
-  // Load from localStorage on mount
   useEffect(() => {
-    const savedState = localStorage.getItem('bookingFlow');
+    const savedState = localStorage.getItem('bookingFlowV2');
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState);
-        if (parsed.currentStep && parsed.currentStep < 6) { // Don't restore success step
+        if (parsed.currentStep && parsed.currentStep < 5) { // Don't restore success step
           setCurrentStep(parsed.currentStep);
           setSelectedBranch(parsed.selectedBranch);
           setSelectedService(parsed.selectedService);
           setSelectedDateTime(parsed.selectedDateTime || { date: '', time: '' });
           setGenderPreference(parsed.genderPreference || 'no-preference');
-          // Merge into prev rather than replacing outright — if the
-          // customer-profile prefill effect already landed (e.g. profile
-          // was already resolved at mount from an in-app navigation), a
-          // stale saved draft must not clobber it.
+          // A draft's saved phone may be a bare national number or (from an older
+          // build) a full E.164 string — split defensively so the number box only
+          // ever holds the national part.
           const draftPhone = splitE164(parsed.customerInfo?.phone || '', parsed.customerInfo?.phoneCountryCode || '+977');
           setCustomerInfo((prev) => ({
             ...prev,
@@ -129,6 +137,26 @@ const CustomerBookingFlow = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (currentStep !== 2) {
+      setShowFloatingPrev(false);
+      return;
+    }
+    const onScroll = () => {
+      const pastTop = window.scrollY > 280;
+      const realBtnRect = prevBtnRef.current?.getBoundingClientRect();
+      const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
+      setShowFloatingPrev(pastTop && !realBtnVisible);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [currentStep, selectedService]);
+
   const handleNext = async () => {
     if (!canProceed()) return;
 
@@ -143,6 +171,7 @@ const CustomerBookingFlow = () => {
           branch_id: selectedBranch?.id,
           service_id: selectedService?.id,
           time_on_step_ms: Date.now() - stepEnteredAt.current,
+          flow_variant: 'v2',
         });
         setCurrentStep(currentStep + 1);
       }
@@ -159,41 +188,20 @@ const CustomerBookingFlow = () => {
     }
   };
 
-  const handleStepJump = (step) => {
-    if (step <= currentStep || canJumpToStep(step)) {
-      setCurrentStep(step);
-    }
-  };
-
-  const canJumpToStep = (step) => {
-    switch (step) {
-      case 1: return true;
-      case 2: return selectedBranch !== null;
-      case 3: return selectedBranch !== null && selectedService !== null;
-      case 4: return selectedBranch !== null && selectedService !== null && selectedDateTime.date && selectedDateTime.time;
-      case 5: return selectedBranch !== null && selectedService !== null && selectedDateTime.date && selectedDateTime.time && isCustomerInfoValid();
-      default: return false;
-    }
-  };
-
   const canProceed = () => {
     switch (currentStep) {
       case 1: return selectedBranch !== null;
-      case 2: return selectedService !== null;
-      case 3: return selectedDateTime.date && selectedDateTime.time;
-      case 4: return isCustomerInfoValid();
-      case 5: return customerInfo.agreeToTerms;
+      case 2: return selectedService !== null && !!selectedDateTime.date && !!selectedDateTime.time;
+      case 3: return isCustomerInfoValid();
+      case 4: return customerInfo.agreeToTerms;
       default: return false;
     }
   };
 
   const isCustomerInfoValid = () => {
-    // Only customer name is required per US-CUS-003; email, phone, gender are optional
     if (!customerInfo.firstName.trim()) return false;
     if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
     if (customerInfo.phone.trim()) {
-      // Nepal keeps the strict 10-digit check; other country codes get a loose
-      // sanity-length bound (see CustomerForm.jsx's matching validateField logic).
       const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
       const digits = customerInfo.phone.replace(/\D/g, '');
       const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
@@ -204,9 +212,7 @@ const CustomerBookingFlow = () => {
 
   const handleBranchSelect = (branch) => {
     setSelectedBranch(branch);
-    if (branch?.id !== selectedBranch?.id) {
-      setSelectedService(null); // Reset service only when branch actually changes
-    }
+    setSelectedService(null); // Reset service when branch changes
   };
 
   const handleServiceSelect = (service) => {
@@ -240,8 +246,8 @@ const CustomerBookingFlow = () => {
     };
 
     setBookingData(finalBookingData);
-    setCurrentStep(6);
-    localStorage.removeItem('bookingFlow');
+    setCurrentStep(5);
+    localStorage.removeItem('bookingFlowV2');
 
     capture('customer_booking_submitted', {
       org_slug: orgSlug,
@@ -251,33 +257,24 @@ const CustomerBookingFlow = () => {
       service_name: selectedService?.name,
       service_price_npr: selectedService?.price_npr,
       customer_gender: customerInfo.gender || null,
+      flow_variant: 'v2',
     });
   };
 
-  const handleEditBooking = (step) => {
-    setCurrentStep(step + 1); // Convert to 1-based indexing
+  const handleEditBooking = () => {
+    // BookingConfirmation only ever calls onEditBooking(1) ("Edit Booking" -> back to
+    // service selection); v2's equivalent is the combined service+time step.
+    setCurrentStep(2);
   };
 
   const getStepTitle = () => {
     switch (currentStep) {
       case 1: return 'Select Branch';
-      case 2: return 'Choose Service';
-      case 3: return 'Pick Date & Time';
-      case 4: return 'Your Information';
-      case 5: return 'Confirm Booking';
-      case 6: return 'Booking Confirmed';
+      case 2: return 'Choose Service & Time';
+      case 3: return 'Your Information';
+      case 4: return 'Confirm Booking';
+      case 5: return 'Booking Confirmed';
       default: return 'Booking Flow';
-    }
-  };
-
-  const getNextButtonText = () => {
-    switch (currentStep) {
-      case 1: return 'Continue to Services';
-      case 2: return 'Select Date & Time';
-      case 3: return 'Enter Details';
-      case 4: return 'Review Booking';
-      case 5: return 'Confirm Booking';
-      default: return 'Next';
     }
   };
 
@@ -290,29 +287,23 @@ const CustomerBookingFlow = () => {
             onBranchSelect={handleBranchSelect}
           />
         );
-      
+
       case 2:
         return (
-          <ServiceSelection
+          <ServiceBookingPanel
+            selectedBranch={selectedBranch}
             selectedService={selectedService}
             onServiceSelect={handleServiceSelect}
-            selectedBranch={selectedBranch}
-          />
-        );
-      
-      case 3:
-        return (
-          <DateTimeSelection
             selectedDateTime={selectedDateTime}
             onDateTimeSelect={handleDateTimeSelect}
-            selectedService={selectedService}
-            selectedBranch={selectedBranch}
             genderPreference={genderPreference}
             onGenderPreferenceChange={handleGenderPreferenceChange}
+            onContinue={handleNext}
+            canContinue={!!selectedDateTime.date && !!selectedDateTime.time}
           />
         );
-      
-      case 4:
+
+      case 3:
         return (
           <CustomerForm
             customerInfo={customerInfo}
@@ -324,8 +315,8 @@ const CustomerBookingFlow = () => {
             orgSlug={orgSlug}
           />
         );
-      
-      case 5:
+
+      case 4:
         return (
           <BookingConfirmation
             orgSlug={orgSlug}
@@ -339,20 +330,19 @@ const CustomerBookingFlow = () => {
             onEditBooking={handleEditBooking}
           />
         );
-      
-      case 6:
+
+      case 5:
         return (
           <BookingSuccess
             bookingData={bookingData}
           />
         );
-      
+
       default:
         return null;
     }
   };
 
-  // Show error if tenant not found
   if (tenantError) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -375,7 +365,6 @@ const CustomerBookingFlow = () => {
     );
   }
 
-  // Show loading while tenant is being fetched
   if (tenantLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -387,21 +376,30 @@ const CustomerBookingFlow = () => {
     );
   }
 
+  // When the drawer is open, main's left edge is pinned with the exact same formula that
+  // `mx-auto max-w-4xl` already produces (viewport width minus 56rem, halved) — so the box
+  // grows to the right only. Never switch to `mx-auto` here: auto margins recompute on both
+  // sides when width changes, which is what caused the grid to recenter/shift before.
+  const wideOpen = currentStep === 2 && selectedService !== null;
+
   return (
-    <div className="min-h-screen bg-background pt-32">
+    <div className="min-h-screen bg-background pt-16">
       <CustomerHeader />
 
-      {/* Progress Indicator */}
-      {currentStep < 6 && (
-        <ProgressIndicator
+      {currentStep < 5 && (
+        <ProgressIndicatorV2
           currentStep={currentStep}
-          totalSteps={5} // Don't count success step
+          totalSteps={4}
         />
       )}
 
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 py-4 lg:py-6">
-        {/* Step Header — Step 2 renders its own header inside ServiceSelection */}
+      <main
+        className={
+          wideOpen
+            ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:ml-[calc((100vw-56rem)/2)] lg:mr-3 lg:max-w-[1600px]'
+            : 'mx-auto px-4 py-4 lg:py-6 max-w-4xl'
+        }
+      >
         {currentStep !== 2 && (
           <div className="text-center mb-4">
             <div className="flex items-center justify-center space-x-2 mb-2">
@@ -410,21 +408,20 @@ const CustomerBookingFlow = () => {
                 {getStepTitle()}
               </h1>
             </div>
-            {currentStep < 6 && (
+            {currentStep < 5 && (
               <p className="font-body font-body-normal text-text-secondary">
-                Step {currentStep} of 5 - {getBookingJourneyText()}
+                Step {currentStep} of 4 - {getBookingJourneyText()}
               </p>
             )}
           </div>
         )}
 
-        {/* Step Content */}
         <div className="mb-8">
           {renderStepContent()}
         </div>
 
-        {/* Navigation Buttons */}
-        {currentStep < 6 && (
+        {/* Navigation — step 2 has its own Continue button inside the booking panel */}
+        {currentStep < 5 && currentStep !== 2 && (
           <div className="flex flex-col sm:flex-row gap-4 justify-between">
             <div className="flex space-x-4">
               {currentStep > 1 && (
@@ -438,7 +435,7 @@ const CustomerBookingFlow = () => {
                   Previous
                 </Button>
               )}
-              
+
               <Button
                 variant="text"
                 onClick={() => navigate('/booking-management-portal')}
@@ -451,7 +448,7 @@ const CustomerBookingFlow = () => {
             </div>
 
             <div className="flex space-x-4">
-              {currentStep === 5 ? (
+              {currentStep === 4 ? (
                 <div className="text-center">
                   <p className="font-caption font-caption-normal text-xs text-text-secondary mb-2">
                     By confirming, you agree to our terms and conditions
@@ -468,68 +465,60 @@ const CustomerBookingFlow = () => {
                   loading={isLoading}
                   className="spa-touch-target"
                 >
-                  {getNextButtonText()}
+                  Enter Details
                 </Button>
               )}
             </div>
           </div>
         )}
 
-        {/* Help Section */}
-        {currentStep < 6 && (
-          <div className="mt-12 text-center">
-            <div className="bg-surface rounded-spa-lg border border-border p-6">
-              <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
-                Need Help?
-              </h3>
-              <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6">
-                <a 
-                  href="tel:+977-1-4441234"
-                  className="flex items-center space-x-2 text-primary hover:text-primary/80 spa-transition-fast"
-                >
-                  <Icon name="Phone" size={16} />
-                  <span className="font-body font-body-medium text-sm">
-                    Call: +977-1-4441234
-                  </span>
-                </a>
-                
-                <a 
-                  href="mailto:support@bookspa.com"
-                  className="flex items-center space-x-2 text-primary hover:text-primary/80 spa-transition-fast"
-                >
-                  <Icon name="Mail" size={16} />
-                  <span className="font-body font-body-medium text-sm">
-                    Email: support@bookspa.com
-                  </span>
-                </a>
-                
-                <button className="flex items-center space-x-2 text-primary hover:text-primary/80 spa-transition-fast">
-                  <Icon name="MessageCircle" size={16} />
-                  <span className="font-body font-body-medium text-sm">
-                    Live Chat
-                  </span>
-                </button>
-              </div>
-            </div>
+        {/* Step 2's own back control — lives in its normal spot right after the
+            service grid. The service grid is long, so a floating copy (below)
+            keeps it reachable while scrolling; it hides once this real one
+            scrolls into view, so at the bottom of the page it's exactly here —
+            never stacked on top of the footer. */}
+        {currentStep === 2 && (
+          <div ref={prevBtnRef} className="mt-4">
+            <Button
+              variant="outline"
+              onClick={handlePrevious}
+              iconName="ChevronLeft"
+              iconSize={16}
+            >
+              Previous
+            </Button>
+          </div>
+        )}
+
+        {currentStep === 2 && showFloatingPrev && (
+          <div className={`fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 lg:bottom-6 lg:left-[max(1rem,calc((100vw-56rem)/2-8.5rem))] z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}>
+            <Button
+              variant="outline"
+              onClick={handlePrevious}
+              iconName="ChevronLeft"
+              iconSize={16}
+              className="bg-surface shadow-spa-elevated"
+            >
+              Previous
+            </Button>
           </div>
         )}
       </main>
 
-      {/* Footer */}
       <footer className="bg-surface border-t border-border mt-16">
         <div className="max-w-4xl mx-auto px-4 py-8">
           <div className="text-center">
             <div className="flex items-center justify-center space-x-2 mb-4">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <svg 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
                   className="text-primary-foreground"
                 >
-                  <path 
-                    d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" 
+                  <path
+                    d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
                     fill="currentColor"
                   />
                   <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
@@ -566,4 +555,4 @@ const CustomerBookingFlow = () => {
   );
 };
 
-export default CustomerBookingFlow;
+export default CustomerBookingFlowV2;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useTenant } from 'contexts/TenantContext';
@@ -7,6 +7,7 @@ import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 const CustomerHeader = () => {
   const location = useLocation();
   const { orgSlug } = useParams();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Try to get tenant context, but don't fail if not available
   let tenantData = { orgName: 'Zennly', isCleaning: false, isSalon: false };
@@ -44,10 +45,10 @@ const CustomerHeader = () => {
 
   return (
     <header className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to={bookingPath} className="flex items-center space-x-2 group">
+          <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0">
             <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center spa-transition-fast group-hover:bg-primary/90">
               <svg
                 width="24"
@@ -64,7 +65,7 @@ const CustomerHeader = () => {
               </svg>
             </div>
             <div className="flex flex-col">
-              <span className="font-heading font-heading-semibold text-lg text-text-primary">
+              <span className="font-heading font-heading-semibold text-lg text-text-primary truncate max-w-[140px] sm:max-w-none">
                 {orgName || 'Zennly'}
               </span>
               <span className="font-caption font-caption-normal text-xs text-text-secondary -mt-1">
@@ -114,41 +115,51 @@ const CustomerHeader = () => {
             </Link>
 
             {/* Support Button */}
-            <button className="flex items-center space-x-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target">
+            <button className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target">
               <Icon name="MessageCircle" size={16} />
-              <span className="font-body font-body-medium text-sm">Support</span>
+              <span className="hidden sm:inline font-body font-body-medium text-sm">Support</span>
             </button>
 
             {/* Mobile Menu */}
             <div className="md:hidden">
-              <button className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target">
-                <Icon name="Menu" size={20} className="text-text-primary" />
+              <button
+                onClick={() => setMobileMenuOpen((open) => !open)}
+                aria-label="Menu"
+                aria-expanded={mobileMenuOpen}
+                className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target"
+              >
+                <Icon name={mobileMenuOpen ? 'X' : 'Menu'} size={20} className="text-text-primary" />
               </button>
             </div>
           </div>
         </div>
 
-        {/* Mobile Navigation */}
-        <div className="md:hidden border-t border-border bg-surface">
-          <nav className="flex items-center justify-around py-3">
-            <Link
-              to={bookingPath}
-              className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
-                isBookingFlow ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
-              }`}
-            >
-              <Icon name="Calendar" size={20} />
-              <span className="font-caption font-caption-normal text-xs">Book</span>
-            </Link>
-            <a
-              href="tel:+977-1-4441234"
-              className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
-            >
-              <Icon name="Phone" size={20} />
-              <span className="font-caption font-caption-normal text-xs">Call</span>
-            </a>
-          </nav>
-        </div>
+        {/* Mobile Navigation — collapsed under the menu button so the header stays a
+            stable 64px on every breakpoint (the booking flow's fixed progress bar sits
+            directly under it). Absolutely positioned so opening it never changes header height. */}
+        {mobileMenuOpen && (
+          <div className="md:hidden absolute left-0 right-0 top-full border-b border-border bg-surface shadow-spa-elevated">
+            <nav className="flex items-center justify-around py-3">
+              <Link
+                to={bookingPath}
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
+                  isBookingFlow ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
+                }`}
+              >
+                <Icon name="Calendar" size={20} />
+                <span className="font-caption font-caption-normal text-xs">Book</span>
+              </Link>
+              <a
+                href="tel:+977-1-4441234"
+                className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
+              >
+                <Icon name="Phone" size={20} />
+                <span className="font-caption font-caption-normal text-xs">Call</span>
+              </a>
+            </nav>
+          </div>
+        )}
       </div>
     </header>
   );

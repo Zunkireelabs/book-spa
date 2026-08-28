@@ -127,7 +127,11 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       return;
     }
     setCustomerCheckStatus('checking');
-    const { data } = await checkExistingCustomerByPhone(orgSlug, phoneValue);
+    const { data } = await checkExistingCustomerByPhone(
+      orgSlug,
+      phoneValue,
+      customerInfo.phoneCountryCode || '+977'
+    );
     setCustomerCheckStatus(data ? 'existing' : 'new');
   };
 
@@ -343,7 +347,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               ].map((option) => (
                 <label
                   key={option.value}
-                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast spa-touch-target ${
                     customerInfo.gender === option.value
                       ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
                   }`}
@@ -389,7 +393,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               ].map((option) => (
                 <label
                   key={option.value}
-                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast spa-touch-target ${
                     customerInfo.referralSource === option.value
                       ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
                   }`}
