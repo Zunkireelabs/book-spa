@@ -197,7 +197,7 @@ const BookingConfirmation = ({
         </div>
       )}
 
-      <div className="flex gap-4">
+      <div className="flex flex-col sm:flex-row gap-4">
         <Button variant="outline" onClick={() => onEditBooking(1)} iconName="Edit" className="flex-1">Edit Booking</Button>
         <Button variant="primary" onClick={handleConfirmBooking} loading={isConfirming} iconName="Check" className="flex-1">
           {isConfirming ? 'Confirming...' : 'Confirm Booking'}
