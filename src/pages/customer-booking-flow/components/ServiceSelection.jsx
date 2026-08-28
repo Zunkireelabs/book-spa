@@ -115,7 +115,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          <div className="text-center mb-3 pt-2">
+          <div className="text-center pt-2">
             <div className="flex items-center justify-center space-x-2 mb-1">
               <Icon name="Sparkles" size={20} className="text-primary" />
               <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
@@ -146,7 +146,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
               )}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 mb-3">
+          <div className="flex flex-wrap gap-2">
             {categories.map((category) => (
               <button
                 key={category}
