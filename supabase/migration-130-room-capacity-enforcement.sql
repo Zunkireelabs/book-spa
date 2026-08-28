@@ -66,4 +66,4 @@ CREATE TRIGGER trg_room_capacity_check
   EXECUTE FUNCTION check_room_capacity();
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('125', 'room-capacity-enforcement') ON CONFLICT (version) DO NOTHING;
+VALUES ('130', 'room-capacity-enforcement') ON CONFLICT (version) DO NOTHING;

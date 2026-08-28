@@ -49,4 +49,4 @@ REVOKE ALL ON FUNCTION public.public_check_branch_bookings_range(uuid, date, dat
 GRANT EXECUTE ON FUNCTION public.public_check_branch_bookings_range(uuid, date, date) TO anon, authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('126', 'branch-range-availability') ON CONFLICT (version) DO NOTHING;
+VALUES ('131', 'branch-range-availability') ON CONFLICT (version) DO NOTHING;

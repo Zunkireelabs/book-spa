@@ -12,7 +12,7 @@
 --
 -- This adds a per-branch "how many therapists do we have for online scheduling" cap
 -- (branches.online_booking_capacity, unset/NULL = no cap, unchanged behavior) and a trigger
--- — modeled directly on check_room_capacity() from migration-125 — that only looks at
+-- — modeled directly on check_room_capacity() from migration-130 — that only looks at
 -- therapist-less (online) bookings and rejects one past that cap. Like the room-capacity
 -- trigger, it uses pg_advisory_xact_lock to serialize concurrent writers for the same
 -- branch/date, which is what actually resolves "two people booked at the same instant":
@@ -34,7 +34,7 @@ UPDATE branches SET online_booking_capacity = 5 WHERE name ILIKE '%lazimpat%' AN
 
 -- 3. Race-safe capacity check for therapist-less (online) bookings only. Trigger name is
 -- alphabetically after 'trg_compute_datetimes' so NEW.start_datetime/end_datetime are already
--- populated when this runs (same reasoning as trg_room_capacity_check in migration-125).
+-- populated when this runs (same reasoning as trg_room_capacity_check in migration-130).
 CREATE OR REPLACE FUNCTION check_branch_online_capacity()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -81,4 +81,4 @@ CREATE TRIGGER trg_online_capacity_check
   EXECUTE FUNCTION check_branch_online_capacity();
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('129', 'branch-online-capacity') ON CONFLICT (version) DO NOTHING;
+VALUES ('134', 'branch-online-capacity') ON CONFLICT (version) DO NOTHING;

@@ -15,4 +15,4 @@ CREATE POLICY "Anonymous can read active organizations"
   USING (is_active = true);
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('127', 'anon-read-organizations') ON CONFLICT (version) DO NOTHING;
+VALUES ('132', 'anon-read-organizations') ON CONFLICT (version) DO NOTHING;
