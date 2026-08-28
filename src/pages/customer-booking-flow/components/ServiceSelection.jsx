@@ -28,12 +28,10 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     let cancelled = false;
 
     async function loadServices() {
-      // Wait for tenant to finish loading
       if (tenantLoading) {
         return;
       }
 
-      // If no orgId after tenant loaded, something went wrong
       if (!orgId) {
         setLoading(false);
         setError('Unable to load organization data.');
@@ -80,7 +78,6 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
   return (
     <div className="space-y-4">
-      {/* Static heading for loading/error/empty states */}
       {!showStickyBlock && (
         <div className="text-center mb-4">
           <div className="flex items-center justify-center space-x-2 mb-2">
@@ -118,19 +115,18 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          {/* Unified sticky block: heading + search + category pills */}
-          <div className="sticky top-[116px] z-sticky-filter bg-background pt-7 pb-2">
-            <div className="text-center mb-3">
-              <div className="flex items-center justify-center space-x-2 mb-1">
-                <Icon name="Sparkles" size={20} className="text-primary" />
-                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                  Choose Service
-                </h1>
-              </div>
-              <p className="font-body font-body-normal text-text-secondary">
-                Step 2 of 5 - Complete your spa booking journey
-              </p>
+          <div className="text-center pt-2">
+            <div className="flex items-center justify-center space-x-2 mb-1">
+              <Icon name="Sparkles" size={20} className="text-primary" />
+              <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                Choose Service
+              </h1>
             </div>
+            <p className="font-body font-body-normal text-text-secondary">
+              Step 2 of 5 - Complete your spa booking journey
+            </p>
+          </div>
+          <div className="sticky top-[141px] sm:top-[131px] z-sticky-filter bg-background pt-2 pb-2">
             <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input
@@ -149,21 +145,21 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => setSelectedCategory(category)}
-                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
-                    selectedCategory === category
-                      ? 'bg-primary text-white'
-                      : 'bg-background text-text-secondary hover:bg-primary/10'
-                  }`}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {categories.map((category) => (
+              <button
+                key={category}
+                onClick={() => setSelectedCategory(category)}
+                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                  selectedCategory === category
+                    ? 'bg-primary text-white'
+                    : 'bg-background text-text-secondary hover:bg-primary/10'
+                }`}
+              >
+                {category}
+              </button>
+            ))}
           </div>
         </>
       )}
@@ -181,9 +177,9 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
             <div
               key={service.id}
               onClick={() => onServiceSelect(service)}
-              className={`bg-surface rounded-spa-lg border-2 spa-transition-fast cursor-pointer hover:spa-shadow-elevated ${
+              className={`group bg-surface rounded-spa-lg border-2 spa-transition-fast cursor-pointer hover:spa-shadow-elevated hover:-translate-y-0.5 ${
                 selectedService?.id === service.id
-                  ? 'border-primary bg-primary/5'
+                  ? 'border-primary bg-primary/5 spa-shadow-elevated -translate-y-1'
                   : 'border-border hover:border-primary/50'
               }`}
             >
@@ -193,6 +189,11 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                   alt={service.name}
                   className="w-full h-48 object-cover"
                 />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 group-hover:bg-black/30 group-hover:opacity-100 spa-transition-fast pointer-events-none">
+                  <span className="px-4 py-1.5 rounded-full bg-surface text-text-primary font-body font-body-medium text-sm shadow-spa-elevated">
+                    Select Service
+                  </span>
+                </div>
                 <div className="absolute top-4 left-4 flex flex-col space-y-2">
                   {service.popularity && (
                     <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
@@ -212,13 +213,13 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </div>
               </div>
 
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
+              <div className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
                     <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-1">
                       {service.name}
                     </h3>
-                    <div className="flex items-center space-x-4 text-text-secondary mb-2">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-secondary mb-2">
                       <div className="flex items-center space-x-1">
                         <Icon name="Clock" size={14} />
                         <span className="font-body font-body-normal text-sm">
@@ -237,9 +238,11 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                   )}
                 </div>
 
-                <p className="font-body font-body-normal text-sm text-text-secondary mb-4 line-clamp-3">
-                  {service.description}
-                </p>
+                {service.description && (
+                  <p className="font-body font-body-normal text-sm text-text-secondary mb-3 line-clamp-3">
+                    {service.description}
+                  </p>
+                )}
 
                 <div>
                   <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
@@ -264,7 +267,6 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
     </div>
   );
 };
-
 
 
 export default ServiceSelection;

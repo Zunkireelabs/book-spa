@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import Icon from 'components/AppIcon';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
+import { useTenant } from 'contexts/TenantContext';
+import OtpCodeStep from './OtpCodeStep';
 
 const CustomerLoginForm = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
-  const { signIn, customer, customerProfile } = useCustomerAuth();
+  const { orgId } = useTenant();
+  const { requestOtp, customer, customerProfile } = useCustomerAuth();
+  const [step, setStep] = useState('email'); // 'email' | 'code'
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const hasRedirected = useRef(false);
 
@@ -24,57 +25,63 @@ const CustomerLoginForm = () => {
     }
   }, [customer, customerProfile, orgSlug, navigate]);
 
-  const validateForm = () => {
-    const newErrors = {};
-
-    if (!email) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Please enter a valid email';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Must be at least 6 characters';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!validateForm()) return;
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      setError('Please enter a valid email');
+      return;
+    }
 
     setIsLoading(true);
-    setErrors({});
+    setError('');
 
     try {
-      await signIn(email, password);
-      // Redirect happens via the effect above once customer/customerProfile land.
-    } catch (error) {
-      setErrors({
-        submit: error.message === 'Invalid login credentials'
-          ? 'Invalid email or password. Please try again.'
-          : error.message || 'An unexpected error occurred. Please try again.'
-      });
+      await requestOtp(email, { shouldCreateUser: false });
+      setStep('code');
+    } catch (err) {
+      setError(
+        err.message?.toLowerCase().includes('signup')
+          ? 'No account found for this email. Please sign up.'
+          : err.message || 'An unexpected error occurred. Please try again.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
+  if (step === 'code') {
+    return (
+      <OtpCodeStep
+        email={email}
+        orgId={orgId}
+        resendPayload={{ shouldCreateUser: false }}
+        onVerified={() => {
+          // Redirect happens via the effect above once customer/customerProfile land.
+        }}
+        onBack={() => setStep('email')}
+      />
+    );
+  }
+
   return (
     <div className="w-full">
-      {errors.submit && (
+      {error && (
         <div className="mb-4 p-3 bg-error/10 text-error rounded-[10px] text-sm font-medium">
-          {errors.submit}
+          {error}
+          {error.includes('sign up') && (
+            <>
+              {' '}
+              <Link to={`/${orgSlug}/signup`} className="underline underline-offset-2">
+                Sign up
+              </Link>
+            </>
+          )}
         </div>
       )}
 
       <form onSubmit={handleSubmit} autoComplete="off">
-        <div className="mb-3">
+        <div className="mb-4">
           <input
             type="text"
             autoComplete="off"
@@ -82,55 +89,14 @@ const CustomerLoginForm = () => {
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
-              if (errors.email) setErrors(prev => ({ ...prev, email: '' }));
+              if (error) setError('');
             }}
             placeholder="Enter your email address"
             disabled={isLoading}
             className={`w-full px-3.5 py-3 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-              errors.email ? 'border-error' : 'border-border'
+              error ? 'border-error' : 'border-border'
             }`}
           />
-          {errors.email && (
-            <p className="mt-1.5 text-xs text-error">{errors.email}</p>
-          )}
-        </div>
-
-        <div className="mb-4">
-          <div className="relative">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
-              }}
-              placeholder="Enter your password"
-              disabled={isLoading}
-              className={`w-full px-3.5 py-3 pr-11 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-                errors.password ? 'border-error' : 'border-border'
-              }`}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              disabled={isLoading}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-            >
-              <Icon name={showPassword ? 'EyeOff' : 'Eye'} size={18} />
-            </button>
-          </div>
-          {errors.password && (
-            <p className="mt-1.5 text-xs text-error">{errors.password}</p>
-          )}
-          <p className="mt-2 text-right">
-            <Link
-              to={`/${orgSlug}/forgot-password`}
-              className="text-xs text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors"
-            >
-              Forgot password?
-            </Link>
-          </p>
         </div>
 
         <button
@@ -138,7 +104,7 @@ const CustomerLoginForm = () => {
           disabled={isLoading}
           className="w-full py-3 px-5 bg-primary text-primary-foreground rounded-[10px] text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isLoading ? 'Signing in...' : 'Sign In'}
+          {isLoading ? 'Sending code...' : 'Send code'}
         </button>
       </form>
 
