@@ -38,7 +38,7 @@ const ServiceBookingPanel = ({
       </div>
 
       {selectedService && (
-        <div className="fixed inset-0 z-modal bg-background flex flex-col lg:static lg:z-auto lg:flex-none lg:w-[520px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-28 lg:max-h-[calc(100vh-8rem)]">
+        <div className="fixed inset-0 z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[520px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[136px] lg:max-h-[calc(100dvh-152px)]">
           <button
             type="button"
             onClick={() => onServiceSelect(null)}
@@ -49,8 +49,11 @@ const ServiceBookingPanel = ({
           </button>
 
           {/* Scrollable content — the footer below is a separate flex sibling, never a
-              sticky overlay, so it can never overlap this area no matter how tall it gets. */}
-          <div className="flex-1 overflow-y-auto p-4 lg:p-6">
+              sticky overlay, so it can never overlap this area no matter how tall it gets.
+              `min-h-0` is required for this to actually scroll inside the flex column
+              (without it the flex item refuses to shrink below its content height, so the
+              panel overflows the viewport and the footer button drops below the fold). */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
             <h2 className="font-heading font-heading-semibold text-xl text-text-primary mb-3">
               Book Your Visit
             </h2>

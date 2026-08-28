@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -131,16 +132,35 @@ const MAX_VISIBLE_OVERLAP = 2;
 const OVERLAP_GAP = 2;       // px between side-by-side cards
 const OVERLAP_PADDING = 4;   // px from column edges
 
+// Convert "HH:MM" or "HH:MM:SS" to 12h format (used in the overflow popover)
+function toTime12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')}${period}`;
+}
+
 /**
  * Group overlapping bookings into clusters.
  * Sweep algorithm: sort by startTime, extend running max endTime.
  * Strict overlap (startTime < clusterEnd), back-to-back are separate clusters.
+ * Ties on startTime (e.g. simultaneous online bookings) break by createdAt so
+ * whichever booking was actually placed first (down to the millisecond) lands
+ * in the leftmost card slot.
  */
 function clusterOverlapping(bookings) {
   const valid = bookings.filter(b => b.startTime && b.endTime);
   if (valid.length === 0) return [];
 
-  const sorted = [...valid].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const sorted = [...valid].sort((a, b) => {
+    const byStart = a.startTime.localeCompare(b.startTime);
+    if (byStart !== 0) return byStart;
+    if (a.createdAt && b.createdAt) return new Date(a.createdAt) - new Date(b.createdAt);
+    if (a.createdAt) return -1;
+    if (b.createdAt) return 1;
+    return 0;
+  });
   const clusters = [[sorted[0]]];
   let clusterEnd = sorted[0].endTime;
 
@@ -158,6 +178,9 @@ function clusterOverlapping(bookings) {
 
 /**
  * Calculate positioning for cards within an overlap cluster.
+ * Shows up to MAX_VISIBLE_OVERLAP full-size cards side by side; any extra
+ * bookings collapse into a "+N more" badge (see OverflowBadge) instead of
+ * being squeezed into ever-thinner slivers.
  * Returns { cards: [{left, width}|null], badge: {left, width, count}|null }
  */
 function getOverlapLayout(clusterSize, columnWidth) {
@@ -214,18 +237,95 @@ const DroppableColumn = ({ id, data, height, isActive }) => {
   );
 };
 
-// Badge showing "+N more" for overflow in compact overlap layout
-const OverflowBadge = ({ count, style }) => (
-  <div
-    className="absolute border-2 border-dashed border-text-secondary/40 bg-background/80 rounded flex items-center justify-center cursor-pointer z-[1]"
-    style={style}
-    onClick={(e) => e.stopPropagation()}
-  >
-    <span className="font-data text-[10px] text-text-secondary whitespace-nowrap">
-      +{count} more
-    </span>
-  </div>
-);
+// Badge showing "+N more" for overflow in compact overlap layout.
+// Clicking it opens a small portal popover listing the hidden bookings
+// (compact rows, not the full detail card) so they stay reachable without
+// needing to drag/reposition the cluster.
+const OverflowBadge = ({ count, bookings, style, onBookingClick }) => {
+  const badgeRef = useRef(null);
+  const [popoverPos, setPopoverPos] = useState(null);
+
+  const togglePopover = useCallback(() => {
+    setPopoverPos((prev) => {
+      if (prev) return null;
+      if (!badgeRef.current) return null;
+      const rect = badgeRef.current.getBoundingClientRect();
+      // Anchor directly over the badge's own column instead of off to the side —
+      // taller (not wider) so it never spills into a neighboring therapist's column.
+      const popoverWidth = Math.max(140, Math.round(rect.width));
+      const popoverHeight = Math.min(360, 44 + (bookings?.length || 0) * 56);
+      const maxLeft = window.innerWidth - popoverWidth - 10;
+      const maxTop = window.innerHeight - popoverHeight - 10;
+      return {
+        top: Math.max(10, Math.min(rect.top, maxTop)),
+        left: Math.max(10, Math.min(rect.left, maxLeft)),
+        width: popoverWidth,
+      };
+    });
+  }, [bookings]);
+
+  useEffect(() => {
+    if (!popoverPos) return undefined;
+    const close = () => setPopoverPos(null);
+    // Delay so the opening click itself doesn't immediately close it
+    const id = setTimeout(() => {
+      document.addEventListener('mousedown', close);
+      document.addEventListener('keydown', close);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [popoverPos]);
+
+  return (
+    <>
+      <div
+        ref={badgeRef}
+        className="absolute border-2 border-dashed border-text-secondary/40 bg-background/80 rounded flex items-center justify-center cursor-pointer z-dropdown hover:bg-background"
+        style={style}
+        onClick={(e) => {
+          e.stopPropagation();
+          togglePopover();
+        }}
+      >
+        <span className="font-data text-[10px] text-text-secondary whitespace-nowrap">
+          +{count} more
+        </span>
+      </div>
+      {popoverPos && createPortal(
+        <div
+          className="fixed z-modal bg-surface border border-border rounded-spa shadow-spa-elevated overflow-hidden"
+          style={{ top: popoverPos.top, left: popoverPos.left, width: popoverPos.width }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-2.5 py-1.5 border-b border-border bg-background/60">
+            <span className="text-[11px] font-semibold text-text-primary">{bookings?.length || 0} more booking{(bookings?.length || 0) === 1 ? '' : 's'}</span>
+          </div>
+          <div className="max-h-[340px] overflow-y-auto">
+            {(bookings || []).map((booking) => (
+              <button
+                key={booking.id}
+                type="button"
+                className="w-full text-left px-2.5 py-1.5 border-b border-border/50 last:border-b-0 hover:bg-background/80 transition-colors"
+                onClick={() => {
+                  setPopoverPos(null);
+                  onBookingClick?.(booking);
+                }}
+              >
+                <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
+                <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
+                <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+};
 
 // Sortable wrapper for draggable column headers
 const SortableColumnHeader = ({ id, children, minWidth }) => {
@@ -487,6 +587,7 @@ const CalendarGrid = ({
         isLocked: b.is_locked || false,
         startTime,
         endTime,
+        createdAt: b.created_at || null,
         date: bookingDate,
         therapistId: b.therapist_id,
         roomId: b.room_id,
@@ -809,6 +910,8 @@ const CalendarGrid = ({
                 <OverflowBadge
                   key={`badge-${cluster[0].id}`}
                   count={layout.badge.count}
+                  bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                  onBookingClick={onBookingClick}
                   style={{
                     top: timeToTop(cluster[0].startTime),
                     height: timeToHeight(cluster[0].startTime, cluster[0].endTime),
@@ -961,6 +1064,8 @@ const CalendarGrid = ({
                         <OverflowBadge
                           key={`badge-${cluster[0].id}`}
                           count={layout.badge.count}
+                          bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                          onBookingClick={onBookingClick}
                           style={{
                             top: timeToTop(cluster[0].startTime),
                             height: timeToHeight(cluster[0].startTime, cluster[0].endTime),

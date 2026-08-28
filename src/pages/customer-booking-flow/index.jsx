@@ -13,6 +13,7 @@ import BookingConfirmation from './components/BookingConfirmation';
 import BookingSuccess from './components/BookingSuccess';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
+import { splitE164 } from '../../utils/phone';
 
 const CustomerBookingFlow = () => {
   const navigate = useNavigate();
@@ -32,6 +33,7 @@ const CustomerBookingFlow = () => {
     lastName: '',
     email: '',
     phone: '',
+    phoneCountryCode: '+977',
     gender: '',
     referralSource: '',
     referralClientName: '',
@@ -52,12 +54,16 @@ const CustomerBookingFlow = () => {
     prefilledFromProfile.current = true;
 
     const [firstName, ...rest] = (customerProfile.full_name || '').split(' ');
+    // Saved profile phone is canonical E.164 — split so the number box never
+    // shows the dial code (that lives in the country-code picker).
+    const savedPhone = splitE164(customerProfile.phone || '');
     setCustomerInfo((prev) => ({
       ...prev,
       firstName: prev.firstName || firstName || '',
       lastName: prev.lastName || rest.join(' '),
       email: prev.email || customerProfile.email || '',
-      phone: prev.phone || customerProfile.phone || '',
+      phone: prev.phone || savedPhone.national,
+      phoneCountryCode: prev.phone ? prev.phoneCountryCode : (savedPhone.national ? savedPhone.dial : prev.phoneCountryCode),
     }));
   }, [customerProfile]);
 
@@ -106,13 +112,15 @@ const CustomerBookingFlow = () => {
           // customer-profile prefill effect already landed (e.g. profile
           // was already resolved at mount from an in-app navigation), a
           // stale saved draft must not clobber it.
+          const draftPhone = splitE164(parsed.customerInfo?.phone || '', parsed.customerInfo?.phoneCountryCode || '+977');
           setCustomerInfo((prev) => ({
             ...prev,
             ...(parsed.customerInfo || {}),
             firstName: prev.firstName || parsed.customerInfo?.firstName || '',
             lastName: prev.lastName || parsed.customerInfo?.lastName || '',
             email: prev.email || parsed.customerInfo?.email || '',
-            phone: prev.phone || parsed.customerInfo?.phone || '',
+            phone: prev.phone || draftPhone.national,
+            phoneCountryCode: prev.phone ? prev.phoneCountryCode : (draftPhone.national ? draftPhone.dial : (parsed.customerInfo?.phoneCountryCode || prev.phoneCountryCode)),
           }));
         }
       } catch (error) {
@@ -196,11 +204,14 @@ const CustomerBookingFlow = () => {
 
   const handleBranchSelect = (branch) => {
     setSelectedBranch(branch);
-    setSelectedService(null); // Reset service when branch changes
+    if (branch?.id !== selectedBranch?.id) {
+      setSelectedService(null); // Reset service only when branch actually changes
+    }
   };
 
   const handleServiceSelect = (service) => {
     setSelectedService(service);
+    setSelectedDateTime({ date: '', time: '' }); // Duration differs per service — a stale slot may no longer fit
   };
 
   const handleDateTimeSelect = (dateTime) => {

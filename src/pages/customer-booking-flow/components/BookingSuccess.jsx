@@ -315,7 +315,6 @@ const BookingSuccess = ({ bookingData }) => {
               Important Reminders
             </h4>
             <ul className="space-y-1 font-caption font-caption-normal text-xs text-text-secondary">
-              <li>• Arrive 15 minutes before your appointment</li>
               <li>• Bring a valid ID for verification</li>
               <li>• Wear comfortable, loose-fitting clothing</li>
               <li>• Inform us of any health conditions or allergies</li>

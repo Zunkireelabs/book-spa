@@ -12,6 +12,7 @@ import BookingConfirmation from '../customer-booking-flow/components/BookingConf
 import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
+import { splitE164 } from '../../utils/phone';
 
 // v2 of the customer booking flow: identical business logic and steps to
 // pages/customer-booking-flow, except Service Selection + Date & Time are collapsed into a
@@ -25,6 +26,14 @@ const CustomerBookingFlowV2 = () => {
   const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+  // Step 2's floating "Previous" button only appears once the customer has
+  // scrolled past the top of the service list (at the top it would just
+  // duplicate a control that's already in reach) AND the real Previous button
+  // — rendered in its normal spot right after the service grid, see prevBtnRef
+  // — has scrolled out of view. That way it never doubles up with, or floats
+  // on top of, the real one once the customer reaches the bottom of the page.
+  const [showFloatingPrev, setShowFloatingPrev] = useState(false);
+  const prevBtnRef = useRef(null);
 
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);
@@ -36,6 +45,7 @@ const CustomerBookingFlowV2 = () => {
     lastName: '',
     email: '',
     phone: '',
+    phoneCountryCode: '+977',
     gender: '',
     referralSource: '',
     referralClientName: '',
@@ -54,12 +64,17 @@ const CustomerBookingFlowV2 = () => {
     prefilledFromProfile.current = true;
 
     const [firstName, ...rest] = (customerProfile.full_name || '').split(' ');
+    // The saved profile phone is canonical E.164 ("+9779841234567") — split it so
+    // the country-code picker and the national-number box each show their own part
+    // (the number box must never contain the dial code).
+    const savedPhone = splitE164(customerProfile.phone || '');
     setCustomerInfo((prev) => ({
       ...prev,
       firstName: prev.firstName || firstName || '',
       lastName: prev.lastName || rest.join(' '),
       email: prev.email || customerProfile.email || '',
-      phone: prev.phone || customerProfile.phone || '',
+      phone: prev.phone || savedPhone.national,
+      phoneCountryCode: prev.phone ? prev.phoneCountryCode : (savedPhone.national ? savedPhone.dial : prev.phoneCountryCode),
     }));
   }, [customerProfile]);
 
@@ -102,13 +117,18 @@ const CustomerBookingFlowV2 = () => {
           setSelectedService(parsed.selectedService);
           setSelectedDateTime(parsed.selectedDateTime || { date: '', time: '' });
           setGenderPreference(parsed.genderPreference || 'no-preference');
+          // A draft's saved phone may be a bare national number or (from an older
+          // build) a full E.164 string — split defensively so the number box only
+          // ever holds the national part.
+          const draftPhone = splitE164(parsed.customerInfo?.phone || '', parsed.customerInfo?.phoneCountryCode || '+977');
           setCustomerInfo((prev) => ({
             ...prev,
             ...(parsed.customerInfo || {}),
             firstName: prev.firstName || parsed.customerInfo?.firstName || '',
             lastName: prev.lastName || parsed.customerInfo?.lastName || '',
             email: prev.email || parsed.customerInfo?.email || '',
-            phone: prev.phone || parsed.customerInfo?.phone || '',
+            phone: prev.phone || draftPhone.national,
+            phoneCountryCode: prev.phone ? prev.phoneCountryCode : (draftPhone.national ? draftPhone.dial : (parsed.customerInfo?.phoneCountryCode || prev.phoneCountryCode)),
           }));
         }
       } catch (error) {
@@ -116,6 +136,26 @@ const CustomerBookingFlowV2 = () => {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (currentStep !== 2) {
+      setShowFloatingPrev(false);
+      return;
+    }
+    const onScroll = () => {
+      const pastTop = window.scrollY > 280;
+      const realBtnRect = prevBtnRef.current?.getBoundingClientRect();
+      const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
+      setShowFloatingPrev(pastTop && !realBtnVisible);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [currentStep, selectedService]);
 
   const handleNext = async () => {
     if (!canProceed()) return;
@@ -343,7 +383,7 @@ const CustomerBookingFlowV2 = () => {
   const wideOpen = currentStep === 2 && selectedService !== null;
 
   return (
-    <div className="min-h-screen bg-background pt-32">
+    <div className="min-h-screen bg-background pt-16">
       <CustomerHeader />
 
       {currentStep < 5 && (
@@ -356,7 +396,7 @@ const CustomerBookingFlowV2 = () => {
       <main
         className={
           wideOpen
-            ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:ml-[calc((100vw-56rem)/2)] lg:mr-6 lg:max-w-[1600px]'
+            ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:ml-[calc((100vw-56rem)/2)] lg:mr-3 lg:max-w-[1600px]'
             : 'mx-auto px-4 py-4 lg:py-6 max-w-4xl'
         }
       >
@@ -432,14 +472,32 @@ const CustomerBookingFlowV2 = () => {
           </div>
         )}
 
-        {/* Step 2's own back link (its Continue button lives in the panel) */}
+        {/* Step 2's own back control — lives in its normal spot right after the
+            service grid. The service grid is long, so a floating copy (below)
+            keeps it reachable while scrolling; it hides once this real one
+            scrolls into view, so at the bottom of the page it's exactly here —
+            never stacked on top of the footer. */}
         {currentStep === 2 && (
-          <div className="mt-4">
+          <div ref={prevBtnRef} className="mt-4">
             <Button
               variant="outline"
               onClick={handlePrevious}
               iconName="ChevronLeft"
               iconSize={16}
+            >
+              Previous
+            </Button>
+          </div>
+        )}
+
+        {currentStep === 2 && showFloatingPrev && (
+          <div className={`fixed bottom-4 left-4 lg:bottom-6 lg:left-[max(1rem,calc((100vw-56rem)/2-8.5rem))] z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}>
+            <Button
+              variant="outline"
+              onClick={handlePrevious}
+              iconName="ChevronLeft"
+              iconSize={16}
+              className="bg-surface shadow-spa-elevated"
             >
               Previous
             </Button>

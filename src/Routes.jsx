@@ -15,8 +15,6 @@ import OrgFinder from "pages/org-finder";
 import CustomerLoginAuthentication from "pages/customer-login";
 import CustomerSignup from "pages/customer-signup";
 import CustomerAccount from "pages/customer-account";
-import CustomerForgotPassword from "pages/customer-forgot-password";
-import CustomerResetPassword from "pages/customer-reset-password";
 import NotFound from "pages/NotFound";
 import { PlatformAuthProvider } from 'contexts/PlatformAuthContext';
 import ProtectedPlatformRoute from 'components/ProtectedPlatformRoute';
@@ -203,8 +201,6 @@ const AppRoutes = () => {
         <Route path="/:orgSlug/customer-login" element={<TenantWrapper><CustomerLoginAuthentication /></TenantWrapper>} />
         <Route path="/:orgSlug/signup" element={<TenantWrapper><CustomerSignup /></TenantWrapper>} />
         <Route path="/:orgSlug/account" element={<TenantWrapper><CustomerAccount /></TenantWrapper>} />
-        <Route path="/:orgSlug/forgot-password" element={<TenantWrapper><CustomerForgotPassword /></TenantWrapper>} />
-        <Route path="/:orgSlug/reset-password" element={<TenantWrapper><CustomerResetPassword /></TenantWrapper>} />
 
         {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
         <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />

@@ -3,6 +3,7 @@ import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { createBooking, fetchRooms, lookupReferrerByPhone } from '../../../services/api';
+import { toE164 } from '../../../utils/phone';
 
 const BookingConfirmation = ({
   orgSlug,
@@ -87,15 +88,15 @@ const BookingConfirmation = ({
       if (customerInfo.referralSource === 'client') {
         const namePart = customerInfo.referralClientName?.trim() || '';
         const dialCode = customerInfo.referralCountryCode || '+977';
-        const phonePart = customerInfo.referralPhone ? `${dialCode}${customerInfo.referralPhone}` : '';
-        referralSourceDetail = [namePart, phonePart && `(${phonePart})`].filter(Boolean).join(' ') || null;
+        const referralE164 = toE164(customerInfo.referralPhone, dialCode);
+        const phonePart = referralE164 ? `(${referralE164})` : '';
+        referralSourceDetail = [namePart, phonePart].filter(Boolean).join(' ') || null;
 
         if (
-          customerInfo.referralPhone &&
-          customerInfo.referralPhone.length === 10 &&
-          customerInfo.referralPhone !== customerInfo.phone
+          referralE164 &&
+          referralE164 !== toE164(customerInfo.phone, customerInfo.phoneCountryCode || '+977')
         ) {
-          const { data: referrer } = await lookupReferrerByPhone(orgSlug, customerInfo.referralPhone);
+          const { data: referrer } = await lookupReferrerByPhone(orgSlug, customerInfo.referralPhone, dialCode);
           referringCustomerId = referrer?.id || null;
         }
       } else if (customerInfo.referralSource === 'social_media') {
@@ -111,7 +112,7 @@ const BookingConfirmation = ({
         startTime: selectedDateTime?.time,
         customerName: (customerInfo.firstName + ' ' + customerInfo.lastName).trim(),
         customerEmail: customerInfo.email || null,
-        customerPhone: customerInfo.phone ? (customerInfo.phoneCountryCode || '+977') + customerInfo.phone : null,
+        customerPhone: toE164(customerInfo.phone, customerInfo.phoneCountryCode || '+977'),
         customerGender: customerInfo.gender || null,
         specialRequests: customerInfo.specialRequests || null,
         referringCustomerId,
@@ -122,7 +123,9 @@ const BookingConfirmation = ({
       });
 
       if (error) {
-        setBookingError(error.code === 'ROOMS_FULL' ? error.message : 'Something went wrong. Please try again.');
+        setBookingError(
+          ['ROOMS_FULL', 'BRANCH_ONLINE_CAPACITY'].includes(error.code) ? error.message : 'Something went wrong. Please try again.'
+        );
         return;
       }
       onConfirmBooking({ bookingId: data.booking_number });

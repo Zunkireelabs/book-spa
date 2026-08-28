@@ -115,7 +115,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          <div className="sticky top-[116px] z-sticky-filter bg-background pt-7 pb-2">
+          <div className="sticky top-[141px] sm:top-[131px] z-sticky-filter bg-background pt-7 pb-2">
             <div className="text-center mb-3">
               <div className="flex items-center justify-center space-x-2 mb-1">
                 <Icon name="Sparkles" size={20} className="text-primary" />
@@ -213,8 +213,8 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </div>
               </div>
 
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-3">
+              <div className="p-4">
+                <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-1">
                       {service.name}
@@ -238,9 +238,11 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                   )}
                 </div>
 
-                <p className="font-body font-body-normal text-sm text-text-secondary mb-4 line-clamp-3">
-                  {service.description}
-                </p>
+                {service.description && (
+                  <p className="font-body font-body-normal text-sm text-text-secondary mb-3 line-clamp-3">
+                    {service.description}
+                  </p>
+                )}
 
                 <div>
                   <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">

@@ -127,7 +127,11 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       return;
     }
     setCustomerCheckStatus('checking');
-    const { data } = await checkExistingCustomerByPhone(orgSlug, phoneValue);
+    const { data } = await checkExistingCustomerByPhone(
+      orgSlug,
+      phoneValue,
+      customerInfo.phoneCountryCode || '+977'
+    );
     setCustomerCheckStatus(data ? 'existing' : 'new');
   };
 
