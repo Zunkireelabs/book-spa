@@ -5,7 +5,7 @@ import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
 import { TenantProvider } from "contexts/TenantContext";
 import { useAuth } from "contexts/AuthContext";
-import CustomerBookingFlow from "pages/customer-booking-flow";
+import CustomerBookingFlowV2 from "pages/customer-booking-flow-v2";
 import StaffLoginAuthentication from "pages/login";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
@@ -15,8 +15,6 @@ import OrgFinder from "pages/org-finder";
 import CustomerLoginAuthentication from "pages/customer-login";
 import CustomerSignup from "pages/customer-signup";
 import CustomerAccount from "pages/customer-account";
-import CustomerForgotPassword from "pages/customer-forgot-password";
-import CustomerResetPassword from "pages/customer-reset-password";
 import NotFound from "pages/NotFound";
 import { PlatformAuthProvider } from 'contexts/PlatformAuthContext';
 import ProtectedPlatformRoute from 'components/ProtectedPlatformRoute';
@@ -193,16 +191,16 @@ const AppRoutes = () => {
 
         {/* ==================== CUSTOMER-FACING ROUTES ==================== */}
 
-        {/* Customer booking flow */}
-        <Route path="/:orgSlug/book" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
+        {/* Customer booking flow — v2 (side-by-side service + booking panel) is now the
+            live default; v1 (pages/customer-booking-flow) stays in the repo, unrouted, in
+            case of a fast rollback. */}
+        <Route path="/:orgSlug/book" element={<TenantWrapper><CustomerBookingFlowV2 /></TenantWrapper>} />
         <Route path="/:orgSlug/manage" element={<ManageRedirect />} />
 
         {/* Customer login / signup / account */}
         <Route path="/:orgSlug/customer-login" element={<TenantWrapper><CustomerLoginAuthentication /></TenantWrapper>} />
         <Route path="/:orgSlug/signup" element={<TenantWrapper><CustomerSignup /></TenantWrapper>} />
         <Route path="/:orgSlug/account" element={<TenantWrapper><CustomerAccount /></TenantWrapper>} />
-        <Route path="/:orgSlug/forgot-password" element={<TenantWrapper><CustomerForgotPassword /></TenantWrapper>} />
-        <Route path="/:orgSlug/reset-password" element={<TenantWrapper><CustomerResetPassword /></TenantWrapper>} />
 
         {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
         <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
@@ -211,7 +209,7 @@ const AppRoutes = () => {
         {/* ==================== CATCH-ALL ==================== */}
 
         {/* Org slug without explicit path - treat as customer booking (existing behavior) */}
-        <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlow /></TenantWrapper>} />
+        <Route path="/:orgSlug" element={<TenantWrapper><CustomerBookingFlowV2 /></TenantWrapper>} />
 
         <Route path="*" element={<NotFound />} />
       </RouterRoutes>
