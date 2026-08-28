@@ -35,47 +35,84 @@ export const CustomerAuthProvider = ({ children }) => {
   const [customerProfile, setCustomerProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Guard: signUp/signIn already resolve user + profile themselves, so the
-  // onAuthStateChange listener must not race them with a duplicate fetch.
+  // Guard: verifyOtp/finalizeCustomerAccount already resolve user + profile
+  // themselves, so the onAuthStateChange listener must not race them with a
+  // duplicate fetch while the customer_accounts row is still being created.
   const authActiveRef = useRef(false);
 
-  const signUp = async (orgId, email, password, fullName, phone) => {
+  // Creates the customer_accounts row using the full_name/phone stashed as
+  // user metadata at signup time (or read live off the confirmed user, for
+  // an existing customer signing in again). If the row already exists
+  // (returning customer, or this ran twice), falls back to reading it
+  // instead of surfacing an error. Called internally by verifyOtp() once a
+  // session exists — not exposed on the context, nothing external calls it.
+  const finalizeCustomerAccount = async (orgId) => {
     authActiveRef.current = true;
 
     try {
-      const { data, error } = await supabaseCustomer.auth.signUp({ email, password });
-      if (error) throw error;
+      const { data: { user }, error: userError } = await supabaseCustomer.auth.getUser();
+      if (userError) throw userError;
+      if (!user) throw new Error('No active session to verify.');
+
+      const fullName = user.user_metadata?.full_name || '';
+      const phone = user.user_metadata?.phone || '';
 
       const { data: account, error: rpcError } = await supabaseCustomer.rpc(
         'create_customer_account',
-        { p_org_id: orgId, p_email: email, p_phone: phone, p_full_name: fullName }
+        { p_org_id: orgId, p_email: user.email, p_phone: phone, p_full_name: fullName }
       );
-      if (rpcError) throw rpcError;
 
-      setCustomer(data.user);
-      setCustomerProfile(account);
-      setLoading(false);
+      if (!rpcError) {
+        setCustomer(user);
+        setCustomerProfile(account);
+        setLoading(false);
+        return account;
+      }
 
-      return { customer: data.user, customerProfile: account };
+      if (rpcError.code === '23505') {
+        const existing = await fetchCustomerProfile(user.id);
+        if (existing) {
+          setCustomer(user);
+          setCustomerProfile(existing);
+          setLoading(false);
+          return existing;
+        }
+      }
+
+      throw rpcError;
     } finally {
       authActiveRef.current = false;
     }
   };
 
-  const signIn = async (email, password) => {
+  // Sends a 6-digit code by email. shouldCreateUser=true for signup (also
+  // stashes full_name/phone as user metadata, read back by
+  // finalizeCustomerAccount once the code is verified); false for login,
+  // which errors cleanly if no account exists yet for this email.
+  const requestOtp = async (email, { fullName, phone, shouldCreateUser } = {}) => {
+    const { error } = await supabaseCustomer.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: !!shouldCreateUser,
+        data: shouldCreateUser ? { full_name: fullName, phone } : undefined,
+      },
+    });
+    if (error) throw error;
+  };
+
+  // Verifies the 6-digit code, establishing a session, then reuses
+  // finalizeCustomerAccount to create-or-fetch the customer_accounts row —
+  // it already handles both the new-signup and returning-customer cases.
+  const verifyOtp = async (email, token, orgId) => {
     authActiveRef.current = true;
 
     try {
-      const { data, error } = await supabaseCustomer.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabaseCustomer.auth.verifyOtp({ email, token, type: 'email' });
       if (error) throw error;
+      if (!data.session) throw new Error('Verification did not return a session.');
 
-      const profile = await fetchCustomerProfile(data.user.id);
-
-      setCustomer(data.user);
-      setCustomerProfile(profile);
-      setLoading(false);
-
-      return { customer: data.user, customerProfile: profile };
+      const account = await finalizeCustomerAccount(orgId);
+      return { customer: data.user, customerProfile: account };
     } finally {
       authActiveRef.current = false;
     }
@@ -86,16 +123,6 @@ export const CustomerAuthProvider = ({ children }) => {
     setCustomer(null);
     const { error } = await supabaseCustomer.auth.signOut();
     if (error) console.error('[CustomerAuth] Sign out error:', error.message);
-  };
-
-  const resetPassword = async (email, redirectTo) => {
-    const { error } = await supabaseCustomer.auth.resetPasswordForEmail(email, { redirectTo });
-    if (error) throw error;
-  };
-
-  const updatePassword = async (newPassword) => {
-    const { error } = await supabaseCustomer.auth.updateUser({ password: newPassword });
-    if (error) throw error;
   };
 
   useEffect(() => {
@@ -144,7 +171,7 @@ export const CustomerAuthProvider = ({ children }) => {
   }, [customer?.id]);
 
   return (
-    <CustomerAuthContext.Provider value={{ customer, customerProfile, loading, signUp, signIn, signOut, resetPassword, updatePassword }}>
+    <CustomerAuthContext.Provider value={{ customer, customerProfile, loading, requestOtp, verifyOtp, signOut }}>
       {children}
     </CustomerAuthContext.Provider>
   );

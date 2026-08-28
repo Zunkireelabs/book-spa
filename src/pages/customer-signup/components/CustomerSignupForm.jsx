@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import Icon from 'components/AppIcon';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 import { useTenant } from 'contexts/TenantContext';
+import CountryCodeSelect from 'components/ui/CountryCodeSelect';
+import { toE164 } from 'utils/phone';
+import OtpCodeStep from 'pages/customer-login/components/OtpCodeStep';
 
 const CustomerSignupForm = () => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { orgId } = useTenant();
-  const { signUp, customer, customerProfile } = useCustomerAuth();
+  const { requestOtp, customer, customerProfile } = useCustomerAuth();
+  const [step, setStep] = useState('details'); // 'details' | 'code'
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [phoneCountryCode, setPhoneCountryCode] = useState('+977');
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const hasRedirected = useRef(false);
@@ -44,12 +46,6 @@ const CustomerSignupForm = () => {
       newErrors.phone = 'Phone is required';
     }
 
-    if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Must be at least 6 characters';
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -62,9 +58,11 @@ const CustomerSignupForm = () => {
     setIsLoading(true);
     setErrors({});
 
+    const fullPhone = toE164(phone.trim(), phoneCountryCode);
+
     try {
-      await signUp(orgId, email, password, fullName.trim(), phone.trim());
-      // Redirect happens via the effect above once customer/customerProfile land.
+      await requestOtp(email, { fullName: fullName.trim(), phone: fullPhone, shouldCreateUser: true });
+      setStep('code');
     } catch (error) {
       setErrors({
         submit: error.message || 'An unexpected error occurred. Please try again.'
@@ -73,6 +71,20 @@ const CustomerSignupForm = () => {
       setIsLoading(false);
     }
   };
+
+  if (step === 'code') {
+    return (
+      <OtpCodeStep
+        email={email}
+        orgId={orgId}
+        resendPayload={{ fullName: fullName.trim(), phone: toE164(phone.trim(), phoneCountryCode), shouldCreateUser: true }}
+        onVerified={() => {
+          // Redirect happens via the effect above once customer/customerProfile land.
+        }}
+        onBack={() => setStep('details')}
+      />
+    );
+  }
 
   return (
     <div className="w-full">
@@ -122,52 +134,29 @@ const CustomerSignupForm = () => {
           )}
         </div>
 
-        <div className="mb-3">
-          <input
-            type="tel"
-            value={phone}
-            onChange={(e) => {
-              setPhone(e.target.value);
-              if (errors.phone) setErrors(prev => ({ ...prev, phone: '' }));
-            }}
-            placeholder="Phone number"
-            disabled={isLoading}
-            className={`w-full px-3.5 py-3 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-              errors.phone ? 'border-error' : 'border-border'
-            }`}
-          />
-          {errors.phone && (
-            <p className="mt-1.5 text-xs text-error">{errors.phone}</p>
-          )}
-        </div>
-
         <div className="mb-4">
-          <div className="relative">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
-              }}
-              placeholder="Create a password"
+          <div className="flex">
+            <CountryCodeSelect
+              value={phoneCountryCode}
+              onChange={setPhoneCountryCode}
               disabled={isLoading}
-              className={`w-full px-3.5 py-3 pr-11 text-sm bg-surface border rounded-[10px] text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
-                errors.password ? 'border-error' : 'border-border'
+            />
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                if (errors.phone) setErrors(prev => ({ ...prev, phone: '' }));
+              }}
+              placeholder="9841234567"
+              disabled={isLoading}
+              className={`flex-1 min-w-0 px-3.5 py-3 text-sm bg-surface border rounded-r-[10px] rounded-l-none text-text-primary placeholder:text-text-secondary outline-none transition-all duration-150 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-background disabled:cursor-not-allowed ${
+                errors.phone ? 'border-error' : 'border-border'
               }`}
             />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              disabled={isLoading}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-            >
-              <Icon name={showPassword ? 'EyeOff' : 'Eye'} size={18} />
-            </button>
           </div>
-          {errors.password && (
-            <p className="mt-1.5 text-xs text-error">{errors.password}</p>
+          {errors.phone && (
+            <p className="mt-1.5 text-xs text-error">{errors.phone}</p>
           )}
         </div>
 
@@ -176,7 +165,7 @@ const CustomerSignupForm = () => {
           disabled={isLoading}
           className="w-full py-3 px-5 bg-primary text-primary-foreground rounded-[10px] text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isLoading ? 'Creating account...' : 'Create Account'}
+          {isLoading ? 'Sending code...' : 'Create Account'}
         </button>
       </form>
 

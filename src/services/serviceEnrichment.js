@@ -82,6 +82,7 @@ export function enrichService(dbService) {
     name: dbService.name,
     description: dbService.description,
     duration: `${dbService.duration_minutes} minutes`,
+    durationMinutes: dbService.duration_minutes,
     price: Number(dbService.price_npr),
     // Prefer database image_url over hardcoded fallback
     image: dbService.image_url || uiData.image,
