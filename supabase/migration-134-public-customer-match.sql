@@ -1,6 +1,6 @@
--- Migration 136: public customer-match lookup (name + phone/email), gated by name match
+-- Migration 134: public customer-match lookup (name + phone/email), gated by name match
 --
--- Root cause of the 171 duplicate-customer pairs found on production (migration-135): the
+-- Root cause of the 171 duplicate-customer pairs found on production (migration-133): the
 -- public booking flow's checkExistingCustomerByPhone (migration-074) only ever returns a
 -- boolean, never the actual matching record, so a returning customer typing their phone in
 -- slightly different formats each visit silently creates a new row instead of being offered
@@ -59,5 +59,5 @@ REVOKE ALL ON FUNCTION public.public_find_customer_match(text, text, text, text)
 GRANT EXECUTE ON FUNCTION public.public_find_customer_match(text, text, text, text) TO anon;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('136', 'public-customer-match')
+VALUES ('134', 'public-customer-match')
 ON CONFLICT (version) DO NOTHING;

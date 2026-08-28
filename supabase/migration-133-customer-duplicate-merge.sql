@@ -1,7 +1,7 @@
--- Migration 135: duplicate-customer review — dismissals table, candidate view, merge RPC
+-- Migration 133: duplicate-customer review — dismissals table, candidate view, merge RPC
 --
 -- Production has 171 phone-normalization collision groups (342 of 1506 nuad-thai-spa
--- customers) discovered while validating migration-133's pre-flight guard. Unlike
+-- customers) discovered while validating migration-137's pre-flight guard. Unlike
 -- migration-034/035 (one-off dry-run + destructive migration, bookings-only repoint),
 -- these merges must be human-triggered one pair at a time via a review UI — no migration
 -- merges anything here. This migration only ships the building blocks:
@@ -47,6 +47,36 @@ CREATE POLICY "Manager/admin can dismiss within own org"
   ON public.customer_duplicate_dismissals FOR INSERT
   TO authenticated
   WITH CHECK (org_id = get_user_org_id() AND get_user_role() IN ('manager', 'admin'));
+
+-- normalize_phone_e164 is intentionally duplicated here AND in migration-137 (phone-e164).
+-- This migration runs before 137 (so the Duplicates UI can go live even while 137 keeps
+-- failing at its collision guard), but customer_duplicate_candidates() below depends on
+-- this function. CREATE OR REPLACE is idempotent, so 137's copy becomes a no-op once this
+-- one has run — do not remove either copy, that would reintroduce the ordering dependency.
+CREATE OR REPLACE FUNCTION public.normalize_phone_e164(p_raw text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_trim   text := btrim(coalesce(p_raw, ''));
+  v_plus   boolean := left(v_trim, 1) = '+';
+  v_digits text := regexp_replace(v_trim, '\D', '', 'g');
+BEGIN
+  IF v_digits = '' THEN
+    RETURN NULL;
+  END IF;
+  IF v_plus THEN
+    RETURN '+' || v_digits;
+  END IF;
+  -- No explicit "+": 10 digits or fewer is a bare Nepal national number.
+  IF length(v_digits) <= 10 THEN
+    RETURN '+977' || v_digits;
+  END IF;
+  -- Longer values already carry a country code (either +977… or a real one).
+  RETURN '+' || v_digits;
+END;
+$$;
 
 -- 2. Dynamic duplicate-candidate query ----------------------------------------
 -- Branch-scoping note: customers.branch_id is a "home branch" and duplicates can span
@@ -223,5 +253,5 @@ GRANT EXECUTE ON FUNCTION public.merge_customers(uuid, uuid) TO authenticated;
 
 -- 4. Record migration -----------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('135', 'customer-duplicate-merge')
+VALUES ('133', 'customer-duplicate-merge')
 ON CONFLICT (version) DO NOTHING;
