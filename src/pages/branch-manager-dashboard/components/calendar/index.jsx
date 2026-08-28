@@ -2010,9 +2010,9 @@ const OperationalCalendar = ({ branchId }) => {
     setTimeout(() => setActionToast(null), 3000);
   };
 
-  const handleStatusUpdate = async (bookingId, newStatus) => {
+  const handleStatusUpdate = async (bookingId, newStatus, reason) => {
     const dbStatus = toDbStatus(newStatus);
-    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus });
+    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
     if (result.error) {
       showToast(result.error.message || 'Failed to update status.', 'error');
       return;

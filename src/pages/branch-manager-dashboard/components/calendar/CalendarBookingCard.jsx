@@ -2,13 +2,14 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import Icon from '../../../../components/AppIcon';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
   'Confirmed':   { bg: '#3b82f6', text: '#fff', light: '#dbeafe' },
   'In-Progress': { bg: '#6366f1', text: '#fff', light: '#e0e7ff' },
   'Completed':   { bg: '#22c55e', text: '#fff', light: '#dcfce7' },
-  'No Show':     { bg: '#991b1b', text: '#fff', light: '#fee2e2' },
+  'No Show':     { bg: '#6b7280', text: '#fff', light: '#f3f4f6' },
 };
 
 const UNPAID_BORDER = '#facc15';
@@ -213,6 +214,9 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       onClick={(e) => {
         if (!isDragging && !isResizing) {
           e.stopPropagation();
+          clearTimeout(hoverTimer.current);
+          setShowPopover(false);
+          setPopoverPos(null);
           if (onSelect && (e.metaKey || e.ctrlKey)) {
             onSelect(booking, e);
           } else {
@@ -254,8 +258,11 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {durationMins} mins
           </div>
         )}
-        {(isUnpaid || isLocked || isPaid) && (
+        {(isUnpaid || isLocked || isPaid || booking.specialRequests) && (
           <div className="flex items-center gap-1 mt-0.5 flex-shrink-0">
+            {booking.specialRequests && (
+              <Icon name="AlertTriangle" size={14} className="text-warning" title="Special request" />
+            )}
             {isUnpaid && (
               <span className="inline-flex items-center gap-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
@@ -319,7 +326,7 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
 
   return createPortal(
     <div
-      className="fixed z-[9999] pointer-events-none"
+      className="fixed z-dropdown pointer-events-none"
       style={{
         top: position.top,
         left: position.left,

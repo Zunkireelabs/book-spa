@@ -347,10 +347,10 @@ const BranchStaffDashboard = () => {
   };
 
   // Wire to real API: updateBookingStatus
-  const handleStatusUpdate = async (bookingId, newStatus) => {
+  const handleStatusUpdate = async (bookingId, newStatus, reason) => {
     setActionError(null);
     const dbStatus = toDbStatus(newStatus);
-    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus });
+    const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
 
     if (result.error) {
       showError(result.error.message || 'Failed to update status.');
