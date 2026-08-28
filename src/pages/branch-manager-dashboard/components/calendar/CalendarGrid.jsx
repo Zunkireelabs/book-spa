@@ -1,11 +1,10 @@
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
-import CalendarBookingCard, { canDragBooking } from './CalendarBookingCard';
+import CalendarBookingCard, { canDragBooking, BookingHoverPreview } from './CalendarBookingCard';
 
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
@@ -180,8 +179,8 @@ function clusterOverlapping(bookings) {
 // slot (the old behavior) squeezed the two real cards into equal thirds. It
 // gets a fixed narrow width instead (clamped so it stays legible in very
 // narrow/zoomed-out columns); cards keep the rest of the space.
-const BADGE_MIN_WIDTH = 22;
-const BADGE_MAX_WIDTH = 32;
+const BADGE_MIN_WIDTH = 34;
+const BADGE_MAX_WIDTH = 56;
 const BADGE_MIN_HEIGHT = 64; // px — keeps wrapped "+N" text readable on short clusters
 
 /**
@@ -202,7 +201,7 @@ function getOverlapLayout(clusterSize, columnWidth) {
 
   const totalGap = (visibleCount + (hasBadge ? 1 : 0) - 1) * OVERLAP_GAP;
   const badgeWidth = hasBadge
-    ? Math.min(BADGE_MAX_WIDTH, Math.max(BADGE_MIN_WIDTH, Math.round(availableWidth * 0.25)))
+    ? Math.min(BADGE_MAX_WIDTH, Math.max(BADGE_MIN_WIDTH, Math.round(availableWidth * 0.38)))
     : 0;
   const cardWidth = Math.floor((availableWidth - totalGap - badgeWidth) / visibleCount);
 
@@ -278,59 +277,89 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
     }
   }, [isDragging, onDragChange]);
 
+  // Same rich hover-preview as a regular card — hovering one row shows its
+  // details (no click needed); moving to the next row swaps the preview to
+  // that booking; leaving hides it.
+  const rowRef = useRef(null);
+  const hoverTimer = useRef(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewPos, setPreviewPos] = useState(null);
+
+  const handleMouseEnter = useCallback(() => {
+    hoverTimer.current = setTimeout(() => {
+      if (rowRef.current) {
+        const rect = rowRef.current.getBoundingClientRect();
+        const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
+        const popoverHeight = 280;
+        const maxTop = window.innerHeight - popoverHeight - 10;
+        setPreviewPos({
+          top: Math.max(10, Math.min(rect.top, maxTop)),
+          left: side === 'right' ? rect.right + 8 : rect.left - 288,
+        });
+      }
+      setShowPreview(true);
+    }, 200);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    setShowPreview(false);
+    setPreviewPos(null);
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      clearTimeout(hoverTimer.current);
+      setShowPreview(false);
+    }
+  }, [isDragging]);
+
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      className={`w-full text-left px-2.5 py-1.5 border-b border-border/50 last:border-b-0 hover:bg-background/80 transition-colors ${
-        isDraggable ? 'cursor-grab active:cursor-grabbing' : ''
-      }`}
-      onClick={() => {
-        if (!isDragging) onClick(booking);
-      }}
-      {...(isDraggable ? { ...listeners, ...attributes } : {})}
-    >
-      <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
-      <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
-      <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
-    </button>
+    <>
+      <button
+        ref={(node) => { rowRef.current = node; setNodeRef(node); }}
+        type="button"
+        className={`w-full text-left px-2.5 py-1.5 border-b border-border/50 last:border-b-0 hover:bg-background/80 transition-colors ${
+          isDraggable ? 'cursor-grab active:cursor-grabbing' : ''
+        }`}
+        onClick={() => {
+          if (!isDragging) onClick(booking);
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        {...(isDraggable ? { ...listeners, ...attributes } : {})}
+      >
+        <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
+        <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
+        <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
+      </button>
+      {showPreview && !isDragging && previewPos && (
+        <BookingHoverPreview booking={booking} position={previewPos} draggable={isDraggable} />
+      )}
+    </>
   );
 };
 
 // Badge showing "+N" for overflow in compact overlap layout. Split into two
 // stacked regions: a small "+" strip on top (add a new booking at this same
-// time — onAdd) and the count below (opens a portal popover listing the
-// hidden bookings, compact rows not the full detail card) so both stay
-// reachable without needing to drag/reposition the cluster.
-const OverflowBadge = ({ count, bookings, style, onBookingClick, onAdd }) => {
-  const badgeRef = useRef(null);
-  const [popoverPos, setPopoverPos] = useState(null);
+// time — onAdd) and the count below. Clicking the count expands — but not
+// into the badge's own narrow sliver, which is too thin to show a readable
+// list. Instead it takes over the FULL cluster area (`expandedStyle`, same
+// top/height/left/width the two cards + badge together already occupy) —
+// still the same time slot, same therapist column, nothing floats outside
+// it — and lists every booking in the cluster (`allBookings`) with a scroll.
+const OverflowBadge = ({ count, bookings, allBookings, style, expandedStyle, onBookingClick, onAdd }) => {
+  const [expanded, setExpanded] = useState(false);
   const [rowDragging, setRowDragging] = useState(false);
-
-  const togglePopover = useCallback(() => {
-    setPopoverPos((prev) => {
-      if (prev) return null;
-      if (!badgeRef.current) return null;
-      const rect = badgeRef.current.getBoundingClientRect();
-      // Clamp horizontally to this booking's own column (never spill into a
-      // neighboring therapist's column) and drop the list below the cluster
-      // instead of over it, so it doesn't cover the two visible cards either.
-      const colEl = badgeRef.current.closest('[data-cal-column]');
-      const colRect = colEl ? colEl.getBoundingClientRect() : rect;
-      const popoverWidth = Math.max(100, Math.round(colRect.width) - 4);
-      const popoverHeight = Math.min(360, 44 + (bookings?.length || 0) * 56);
-      const maxTop = window.innerHeight - popoverHeight - 10;
-      return {
-        top: Math.max(10, Math.min(rect.bottom + 4, maxTop)),
-        left: Math.max(10, Math.round(colRect.left) + 2),
-        width: popoverWidth,
-      };
-    });
-  }, [bookings]);
+  const wrapRef = useRef(null);
 
   useEffect(() => {
-    if (!popoverPos) return undefined;
-    const close = () => setPopoverPos(null);
+    if (!expanded) return undefined;
+    const close = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setExpanded(false);
+    };
     // Delay so the opening click itself doesn't immediately close it
     const id = setTimeout(() => {
       document.addEventListener('mousedown', close);
@@ -341,78 +370,80 @@ const OverflowBadge = ({ count, bookings, style, onBookingClick, onAdd }) => {
       document.removeEventListener('mousedown', close);
       document.removeEventListener('keydown', close);
     };
-  }, [popoverPos]);
+  }, [expanded]);
 
-  return (
-    <>
+  if (expanded) {
+    return (
       <div
-        ref={badgeRef}
-        className="absolute overflow-hidden border-2 border-dashed border-text-secondary/40 bg-background/80 rounded flex flex-col z-dropdown"
-        style={style}
+        ref={wrapRef}
+        className="absolute overflow-hidden border-2 border-primary/50 bg-surface rounded flex flex-col z-dropdown shadow-spa-elevated"
+        style={{ ...(expandedStyle || style), opacity: rowDragging ? 0 : 1, pointerEvents: rowDragging ? 'none' : 'auto' }}
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        {!!onAdd && (
+        <div className="flex-shrink-0 flex items-center justify-between px-1.5 py-0.5 border-b border-border bg-background/60" style={{ height: 20 }}>
+          <span className="text-[10px] font-semibold text-text-primary truncate">{(allBookings || bookings)?.length || count} booking{((allBookings || bookings)?.length || count) === 1 ? '' : 's'}</span>
           <button
             type="button"
-            title="Add booking at this time"
-            className="flex-shrink-0 flex items-center justify-center border-b border-dashed border-text-secondary/40 text-text-secondary hover:bg-primary hover:text-white spa-transition-fast"
-            style={{ height: 18 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onAdd();
-            }}
+            title="Collapse"
+            className="flex-shrink-0 text-text-secondary hover:text-text-primary"
+            onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
           >
-            <Icon name="Plus" size={11} />
+            <Icon name="X" size={11} />
           </button>
-        )}
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {(allBookings || bookings || []).map((booking) => (
+            <OverflowPopoverRow
+              key={booking.id}
+              booking={booking}
+              onClick={(b) => {
+                setExpanded(false);
+                onBookingClick?.(b);
+              }}
+              onDragChange={(dragging) => {
+                setRowDragging(dragging);
+                if (!dragging) setExpanded(false);
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="absolute overflow-hidden border-2 border-primary/40 bg-background/80 rounded flex flex-col z-dropdown"
+      style={style}
+    >
+      {!!onAdd && (
         <button
           type="button"
-          title={`${count} more booking${count === 1 ? '' : 's'}`}
-          className="flex-1 min-h-0 flex items-center justify-center cursor-pointer hover:bg-background"
+          title="Add booking at this time"
+          className="flex-shrink-0 flex items-center justify-center border-b border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-white spa-transition-fast"
+          style={{ height: 18 }}
           onClick={(e) => {
             e.stopPropagation();
-            togglePopover();
+            onAdd();
           }}
         >
-          <span className="font-data text-[10px] leading-tight text-text-secondary px-0.5 whitespace-nowrap">
-            +{count}
-          </span>
+          <Icon name="Plus" size={12} strokeWidth={3} />
         </button>
-      </div>
-      {popoverPos && createPortal(
-        <div
-          className="fixed z-modal bg-surface border border-border rounded-spa shadow-spa-elevated overflow-hidden spa-transition-fast"
-          style={{
-            top: popoverPos.top,
-            left: popoverPos.left,
-            width: popoverPos.width,
-            opacity: rowDragging ? 0 : 1,
-            pointerEvents: rowDragging ? 'none' : 'auto',
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="px-2.5 py-1.5 border-b border-border bg-background/60">
-            <span className="text-[11px] font-semibold text-text-primary">{bookings?.length || 0} more booking{(bookings?.length || 0) === 1 ? '' : 's'}</span>
-          </div>
-          <div className="max-h-[340px] overflow-y-auto">
-            {(bookings || []).map((booking) => (
-              <OverflowPopoverRow
-                key={booking.id}
-                booking={booking}
-                onClick={(b) => {
-                  setPopoverPos(null);
-                  onBookingClick?.(b);
-                }}
-                onDragChange={(dragging) => {
-                  setRowDragging(dragging);
-                  if (!dragging) setPopoverPos(null);
-                }}
-              />
-            ))}
-          </div>
-        </div>,
-        document.body
       )}
-    </>
+      <button
+        type="button"
+        title={`${count} more booking${count === 1 ? '' : 's'} — click to view`}
+        className="flex-1 min-h-0 flex items-center justify-center cursor-pointer hover:bg-background"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(true);
+        }}
+      >
+        <span className="font-data text-[10px] leading-tight text-text-secondary px-0.5 whitespace-nowrap">
+          +{count}
+        </span>
+      </button>
+    </div>
   );
 };
 
@@ -1012,6 +1043,7 @@ const CalendarGrid = ({
                     key={`badge-${cluster[0].id}`}
                     count={layout.badge.count}
                     bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                    allBookings={cluster}
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? () => {
                       if (activeDragId) return;
@@ -1023,6 +1055,13 @@ const CalendarGrid = ({
                       height: clusterHeight,
                       left: layout.badge.left,
                       width: layout.badge.width,
+                      right: 'auto',
+                    }}
+                    expandedStyle={{
+                      top: 0,
+                      height: clusterHeight,
+                      left: OVERLAP_PADDING,
+                      width: minColWidth - OVERLAP_PADDING * 2,
                       right: 'auto',
                     }}
                   />
@@ -1199,6 +1238,7 @@ const CalendarGrid = ({
                             key={`badge-${cluster[0].id}`}
                             count={layout.badge.count}
                             bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                            allBookings={cluster}
                             onBookingClick={onBookingClick}
                             onAdd={onEmptySlotClick ? () => {
                               if (activeDragId) return;
@@ -1210,6 +1250,13 @@ const CalendarGrid = ({
                               height: clusterHeight,
                               left: layout.badge.left,
                               width: layout.badge.width,
+                              right: 'auto',
+                            }}
+                            expandedStyle={{
+                              top: 0,
+                              height: clusterHeight,
+                              left: OVERLAP_PADDING,
+                              width: minColWidth - OVERLAP_PADDING * 2,
                               right: 'auto',
                             }}
                           />
