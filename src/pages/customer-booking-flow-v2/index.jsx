@@ -491,7 +491,7 @@ const CustomerBookingFlowV2 = () => {
         )}
 
         {currentStep === 2 && showFloatingPrev && (
-          <div className={`fixed bottom-4 left-4 lg:bottom-6 lg:left-[max(1rem,calc((100vw-56rem)/2-8.5rem))] z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}>
+          <div className={`fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 lg:bottom-6 lg:left-[max(1rem,calc((100vw-56rem)/2-8.5rem))] z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}>
             <Button
               variant="outline"
               onClick={handlePrevious}

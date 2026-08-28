@@ -48,7 +48,7 @@ const CustomerHeader = () => {
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to={bookingPath} className="flex items-center space-x-2 group">
+          <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0">
             <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center spa-transition-fast group-hover:bg-primary/90">
               <svg
                 width="24"
@@ -65,7 +65,7 @@ const CustomerHeader = () => {
               </svg>
             </div>
             <div className="flex flex-col">
-              <span className="font-heading font-heading-semibold text-lg text-text-primary">
+              <span className="font-heading font-heading-semibold text-lg text-text-primary truncate max-w-[140px] sm:max-w-none">
                 {orgName || 'Zennly'}
               </span>
               <span className="font-caption font-caption-normal text-xs text-text-secondary -mt-1">
