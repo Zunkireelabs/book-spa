@@ -50,7 +50,7 @@ function isTimeLocked(booking) {
 }
 
 // Check if booking can be dragged
-function canDragBooking(booking) {
+export function canDragBooking(booking) {
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
   // Cannot drag paid bookings

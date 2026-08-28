@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useDroppable } from '@dnd-kit/core';
+import { useDroppable, useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
-import CalendarBookingCard from './CalendarBookingCard';
+import CalendarBookingCard, { canDragBooking } from './CalendarBookingCard';
 
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
@@ -249,6 +249,54 @@ const DroppableColumn = ({ id, data, height, isActive }) => {
   );
 };
 
+// One row in the overflow popover's hidden-bookings list. Draggable exactly
+// like CalendarBookingCard (same activation constraint tells clicks from
+// drags apart) so staff can reassign a hidden booking to another therapist
+// without first opening it. Reports its dragging state up so the popover can
+// fade out (not unmount — unmounting mid-drag would tear down dnd-kit's
+// active drag) while it's in flight, then close once the drag ends.
+const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
+  const isDraggable = canDragBooking(booking);
+  const dragId = booking._colTherapistId
+    ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
+    : (booking.bookingId || booking.id);
+
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: dragId,
+    data: { booking, type: 'booking' },
+    disabled: !isDraggable,
+  });
+
+  // Only report actual true<->false transitions, not the initial mount
+  // (isDragging starts false) — otherwise the popover would close itself
+  // the instant it opens.
+  const prevDragging = useRef(false);
+  useEffect(() => {
+    if (prevDragging.current !== isDragging) {
+      prevDragging.current = isDragging;
+      onDragChange(isDragging);
+    }
+  }, [isDragging, onDragChange]);
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      className={`w-full text-left px-2.5 py-1.5 border-b border-border/50 last:border-b-0 hover:bg-background/80 transition-colors ${
+        isDraggable ? 'cursor-grab active:cursor-grabbing' : ''
+      }`}
+      onClick={() => {
+        if (!isDragging) onClick(booking);
+      }}
+      {...(isDraggable ? { ...listeners, ...attributes } : {})}
+    >
+      <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
+      <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
+      <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
+    </button>
+  );
+};
+
 // Badge showing "+N" for overflow in compact overlap layout. Split into two
 // stacked regions: a small "+" strip on top (add a new booking at this same
 // time — onAdd) and the count below (opens a portal popover listing the
@@ -257,23 +305,24 @@ const DroppableColumn = ({ id, data, height, isActive }) => {
 const OverflowBadge = ({ count, bookings, style, onBookingClick, onAdd }) => {
   const badgeRef = useRef(null);
   const [popoverPos, setPopoverPos] = useState(null);
+  const [rowDragging, setRowDragging] = useState(false);
 
   const togglePopover = useCallback(() => {
     setPopoverPos((prev) => {
       if (prev) return null;
       if (!badgeRef.current) return null;
       const rect = badgeRef.current.getBoundingClientRect();
-      // Anchor to the badge's RIGHT edge and grow leftward (taller, not wider)
-      // so the popover stays over the badge's own column instead of spilling
-      // into the neighboring therapist's column — the badge itself is now
-      // narrow, so growing from its left edge would overshoot past it.
-      const popoverWidth = Math.max(140, Math.round(rect.width));
+      // Clamp horizontally to this booking's own column (never spill into a
+      // neighboring therapist's column) and drop the list below the cluster
+      // instead of over it, so it doesn't cover the two visible cards either.
+      const colEl = badgeRef.current.closest('[data-cal-column]');
+      const colRect = colEl ? colEl.getBoundingClientRect() : rect;
+      const popoverWidth = Math.max(100, Math.round(colRect.width) - 4);
       const popoverHeight = Math.min(360, 44 + (bookings?.length || 0) * 56);
-      const maxLeft = window.innerWidth - popoverWidth - 10;
       const maxTop = window.innerHeight - popoverHeight - 10;
       return {
-        top: Math.max(10, Math.min(rect.top, maxTop)),
-        left: Math.max(10, Math.min(rect.right - popoverWidth, maxLeft)),
+        top: Math.max(10, Math.min(rect.bottom + 4, maxTop)),
+        left: Math.max(10, Math.round(colRect.left) + 2),
         width: popoverWidth,
       };
     });
@@ -331,8 +380,14 @@ const OverflowBadge = ({ count, bookings, style, onBookingClick, onAdd }) => {
       </div>
       {popoverPos && createPortal(
         <div
-          className="fixed z-modal bg-surface border border-border rounded-spa shadow-spa-elevated overflow-hidden"
-          style={{ top: popoverPos.top, left: popoverPos.left, width: popoverPos.width }}
+          className="fixed z-modal bg-surface border border-border rounded-spa shadow-spa-elevated overflow-hidden spa-transition-fast"
+          style={{
+            top: popoverPos.top,
+            left: popoverPos.left,
+            width: popoverPos.width,
+            opacity: rowDragging ? 0 : 1,
+            pointerEvents: rowDragging ? 'none' : 'auto',
+          }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="px-2.5 py-1.5 border-b border-border bg-background/60">
@@ -340,19 +395,18 @@ const OverflowBadge = ({ count, bookings, style, onBookingClick, onAdd }) => {
           </div>
           <div className="max-h-[340px] overflow-y-auto">
             {(bookings || []).map((booking) => (
-              <button
+              <OverflowPopoverRow
                 key={booking.id}
-                type="button"
-                className="w-full text-left px-2.5 py-1.5 border-b border-border/50 last:border-b-0 hover:bg-background/80 transition-colors"
-                onClick={() => {
+                booking={booking}
+                onClick={(b) => {
                   setPopoverPos(null);
-                  onBookingClick?.(booking);
+                  onBookingClick?.(b);
                 }}
-              >
-                <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
-                <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
-                <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
-              </button>
+                onDragChange={(dragging) => {
+                  setRowDragging(dragging);
+                  if (!dragging) setPopoverPos(null);
+                }}
+              />
             ))}
           </div>
         </div>,
@@ -903,6 +957,7 @@ const CalendarGrid = ({
         key={col.id}
         className="flex-1 relative border-r border-border/50 last:border-r-0 cursor-pointer"
         style={{ minWidth: minColWidth, height: totalHeight }}
+        data-cal-column="true"
         onClick={(e) => handleColumnClick(e, day, col)}
       >
         {/* Dashed interval lines with hover tooltips — per-column so hover works */}
@@ -1095,6 +1150,7 @@ const CalendarGrid = ({
                   ? { left: TIME_COL_WIDTH, width: minColWidth, height: totalHeight }
                   : { minWidth: minColWidth, height: totalHeight }
                 }
+                data-cal-column="true"
                 onClick={(e) => handleColumnClick(e, currentDate, unassignedCol)}
               >
                 {renderGridLines()}
