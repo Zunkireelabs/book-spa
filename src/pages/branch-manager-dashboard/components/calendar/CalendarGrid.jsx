@@ -198,12 +198,20 @@ function getOverlapLayout(clusterSize, columnWidth) {
   const availableWidth = columnWidth - OVERLAP_PADDING * 2;
   const visibleCount = Math.min(clusterSize, MAX_VISIBLE_OVERLAP);
   const hasBadge = clusterSize > MAX_VISIBLE_OVERLAP;
+  const MIN_CARD_WIDTH = 10; // px — floor so cards never go negative-width in a very narrow/zoomed-out column
 
   const totalGap = (visibleCount + (hasBadge ? 1 : 0) - 1) * OVERLAP_GAP;
-  const badgeWidth = hasBadge
+  let badgeWidth = hasBadge
     ? Math.min(BADGE_MAX_WIDTH, Math.max(BADGE_MIN_WIDTH, Math.round(availableWidth * 0.38)))
     : 0;
-  const cardWidth = Math.floor((availableWidth - totalGap - badgeWidth) / visibleCount);
+  // The badge's own min-width can exceed what's left for cards in a very
+  // narrow column — shrink it (even below BADGE_MIN_WIDTH) rather than let
+  // the cards go negative-width.
+  if (hasBadge) {
+    const maxBadgeWidth = availableWidth - totalGap - MIN_CARD_WIDTH * visibleCount;
+    badgeWidth = Math.max(0, Math.min(badgeWidth, maxBadgeWidth));
+  }
+  const cardWidth = Math.max(MIN_CARD_WIDTH, Math.floor((availableWidth - totalGap - badgeWidth) / visibleCount));
 
   const cards = [];
   for (let i = 0; i < visibleCount; i++) {
@@ -349,8 +357,11 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
 // list. Instead it takes over the FULL cluster area (`expandedStyle`, same
 // top/height/left/width the two cards + badge together already occupy) —
 // still the same time slot, same therapist column, nothing floats outside
-// it — and lists every booking in the cluster (`allBookings`) with a scroll.
-const OverflowBadge = ({ count, bookings, allBookings, style, expandedStyle, onBookingClick, onAdd }) => {
+// it — and lists the hidden bookings (`bookings`) with a scroll. Deliberately
+// NOT the 2 already-visible ones too: they're already rendered as their own
+// draggable CalendarBookingCard, and dnd-kit doesn't allow two draggable
+// elements sharing the same id in one DndContext.
+const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, onAdd }) => {
   const [expanded, setExpanded] = useState(false);
   const [rowDragging, setRowDragging] = useState(false);
   const wrapRef = useRef(null);
@@ -381,7 +392,7 @@ const OverflowBadge = ({ count, bookings, allBookings, style, expandedStyle, onB
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex-shrink-0 flex items-center justify-between px-1.5 py-0.5 border-b border-border bg-background/60" style={{ height: 20 }}>
-          <span className="text-[10px] font-semibold text-text-primary truncate">{(allBookings || bookings)?.length || count} booking{((allBookings || bookings)?.length || count) === 1 ? '' : 's'}</span>
+          <span className="text-[10px] font-semibold text-text-primary truncate">+{count} more</span>
           <button
             type="button"
             title="Collapse"
@@ -392,7 +403,7 @@ const OverflowBadge = ({ count, bookings, allBookings, style, expandedStyle, onB
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {(allBookings || bookings || []).map((booking) => (
+          {(bookings || []).map((booking) => (
             <OverflowPopoverRow
               key={booking.id}
               booking={booking}
@@ -1043,7 +1054,6 @@ const CalendarGrid = ({
                     key={`badge-${cluster[0].id}`}
                     count={layout.badge.count}
                     bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
-                    allBookings={cluster}
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? () => {
                       if (activeDragId) return;
@@ -1238,7 +1248,6 @@ const CalendarGrid = ({
                             key={`badge-${cluster[0].id}`}
                             count={layout.badge.count}
                             bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
-                            allBookings={cluster}
                             onBookingClick={onBookingClick}
                             onAdd={onEmptySlotClick ? () => {
                               if (activeDragId) return;
