@@ -23,6 +23,7 @@ const RoomManagementPanel = ({ branchId }) => {
   const [formName, setFormName] = useState('');
   const [formAmenities, setFormAmenities] = useState('');
   const [formFloor, setFormFloor] = useState('');
+  const [formCapacity, setFormCapacity] = useState('1');
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -69,6 +70,7 @@ const RoomManagementPanel = ({ branchId }) => {
     setFormName('');
     setFormAmenities('');
     setFormFloor('');
+    setFormCapacity('1');
     setFormError(null);
     setShowModal(true);
   };
@@ -78,6 +80,7 @@ const RoomManagementPanel = ({ branchId }) => {
     setFormName(room.name);
     setFormAmenities(room.amenities ? room.amenities.join(', ') : '');
     setFormFloor(room.floor || '');
+    setFormCapacity(String(room.capacity ?? 1));
     setFormError(null);
     setShowModal(true);
   };
@@ -87,15 +90,20 @@ const RoomManagementPanel = ({ branchId }) => {
       setFormError('Room name is required.');
       return;
     }
+    const capacityValue = parseInt(formCapacity, 10);
+    if (!capacityValue || capacityValue < 1) {
+      setFormError('Capacity must be at least 1.');
+      return;
+    }
     setSaving(true);
     setFormError(null);
     const amenitiesArray = formAmenities.split(',').map(s => s.trim()).filter(Boolean);
     const floorValue = formFloor.trim() || null;
     let result;
     if (editingRoom) {
-      result = await updateRoom({ roomId: editingRoom.id, name: formName.trim(), amenities: amenitiesArray, floor: floorValue });
+      result = await updateRoom({ roomId: editingRoom.id, name: formName.trim(), amenities: amenitiesArray, floor: floorValue, capacity: capacityValue });
     } else {
-      result = await createRoom({ name: formName.trim(), branchId, amenities: amenitiesArray, floor: floorValue });
+      result = await createRoom({ name: formName.trim(), branchId, amenities: amenitiesArray, floor: floorValue, capacity: capacityValue });
     }
     if (result.error) {
       setFormError(result.error.message || 'Operation failed.');
@@ -185,6 +193,7 @@ const RoomManagementPanel = ({ branchId }) => {
               <th className="text-left px-4 py-3 text-sm text-text-secondary">{locationLabel} Name</th>
               <th className="text-left px-4 py-3 text-sm text-text-secondary">Floor</th>
               <th className="text-left px-4 py-3 text-sm text-text-secondary">Amenities</th>
+              <th className="text-left px-4 py-3 text-sm text-text-secondary">Capacity</th>
               <th className="text-left px-4 py-3 text-sm text-text-secondary">Status</th>
               <th className="text-right px-4 py-3 text-sm text-text-secondary">Actions</th>
             </tr>
@@ -192,7 +201,7 @@ const RoomManagementPanel = ({ branchId }) => {
           <tbody>
             {filteredRooms.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-text-secondary text-sm">
+                <td colSpan={6} className="px-4 py-8 text-center text-text-secondary text-sm">
                   No {locationLabelPlural} found.
                 </td>
               </tr>
@@ -208,6 +217,7 @@ const RoomManagementPanel = ({ branchId }) => {
                       )) || <span className="text-text-tertiary italic text-[10px]">No features added</span>}
                     </div>
                   </td>
+                  <td className="px-4 py-3 text-sm text-text-secondary">{room.capacity ?? 1}</td>
                   <td className="px-4 py-3">
                     <span className={"px-2 py-0.5 rounded text-xs " + (room.is_active ? 'bg-success/10 text-success' : 'bg-gray-100 text-gray-500')}>
                       {room.is_active ? 'Active' : 'Inactive'}
@@ -242,6 +252,10 @@ const RoomManagementPanel = ({ branchId }) => {
               <div>
                 <label className="block text-sm font-medium mb-1">Amenities (comma separated)</label>
                 <Input value={formAmenities} onChange={e => setFormAmenities(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Capacity (concurrent bookings)</label>
+                <Input type="number" min="1" value={formCapacity} onChange={e => setFormCapacity(e.target.value)} />
               </div>
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="ghost" onClick={() => setShowModal(false)}>Cancel</Button>

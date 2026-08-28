@@ -2,6 +2,7 @@ import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships } from './bookingTransformers';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
+import { toE164, samePhone } from '../utils/phone';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -84,11 +85,8 @@ async function getAuthenticatedUser() {
  * Checks: lock, completed immutability, terminal status.
  * Returns null if valid, or a structured error object.
  */
-// Parse room capacity from amenities (e.g., "3 Chair" → 3, "2 Bed" → 2)
-function getRoomCapacity(room) {
-  if (!room.amenities || room.amenities.length === 0) return 1;
-  const match = room.amenities[0].match(/^(\d+)/);
-  return match ? parseInt(match[1], 10) : 1;
+export function getRoomCapacity(room) {
+  return room?.capacity ?? 1;
 }
 
 function validateBookingMutation(booking) {
@@ -158,7 +156,7 @@ export async function fetchRooms(branchId) {
   try {
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name, amenities, floor')
+      .select('id, name, amenities, floor, capacity')
       .eq('branch_id', branchId)
       .eq('is_active', true)
       .order('name');
@@ -169,6 +167,26 @@ export async function fetchRooms(branchId) {
     console.error('[API] fetchRooms error:', error.message);
     return { data: null, error };
   }
+}
+
+// Real, room-capacity-aware availability for the customer booking flow — fetches active rooms
+// (with capacity) plus every non-cancelled booking in the branch across a date range in one call,
+// so the client can compute per-service, duration-aware slot availability without a fetch per date.
+export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate) {
+  const [{ data: rooms, error: roomsError }, { data: bookings, error: bookingsError }] =
+    await Promise.all([
+      fetchRooms(branchId),
+      supabase.rpc('public_check_branch_bookings_range', {
+        p_branch_id: branchId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+      }),
+    ]);
+
+  if (roomsError) throw roomsError;
+  if (bookingsError) throw bookingsError;
+
+  return { rooms: rooms || [], bookings: bookings || [] };
 }
 
 export async function fetchTherapists(branchId, { date } = {}) {
@@ -731,11 +749,12 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
 // customerName is accepted but purely cosmetic — it is never used to filter.
 export async function getCustomerOutstandingBalance({ customerPhone, branchId, excludeBookingId } = {}) {
   try {
-    const phone = (customerPhone || '').trim();
-    if (!phone) return { data: { totalDue: 0, bookingCount: 0, bookings: [] }, error: null };
-
-    const normalizedPhone = phone.replace(/\D/g, '').slice(-10);
-    if (normalizedPhone.length < 10) return { data: { totalDue: 0, bookingCount: 0, bookings: [] }, error: null };
+    const normalizedPhone = toE164(customerPhone);
+    // Need a full number (country code + national) before matching — a stray
+    // fragment must not sweep up unrelated bookings.
+    if (!normalizedPhone || normalizedPhone.length < 11) {
+      return { data: { totalDue: 0, bookingCount: 0, bookings: [] }, error: null };
+    }
 
     let query = supabase
       .from('bookings')
@@ -747,10 +766,7 @@ export async function getCustomerOutstandingBalance({ customerPhone, branchId, e
     const { data: bookings, error } = await query;
     if (error) throw error;
 
-    const all = (bookings || []).filter((b) => {
-      const bPhone = (b.customer_phone || '').replace(/\D/g, '').slice(-10);
-      return bPhone.length === 10 && bPhone === normalizedPhone;
-    });
+    const all = (bookings || []).filter((b) => samePhone(b.customer_phone, normalizedPhone));
     const bookingIds = all.map(b => b.id);
     const paidMap = {};
     if (bookingIds.length > 0) {
@@ -1655,7 +1671,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       updatePayload.customer_name = customerName;
     }
     if (customerPhone !== undefined) {
-      updatePayload.customer_phone = customerPhone || null;
+      updatePayload.customer_phone = toE164(customerPhone);
     }
     if (specialRequests !== undefined) {
       updatePayload.special_requests = specialRequests || null;
@@ -1736,7 +1752,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       .single();
 
     if (updateError) {
-      if (updateError.code === '23P01') {
+      if (updateError.code === '23P01' || updateError.code === 'P0003') {
         return { data: null, error: { code: 'SCHEDULING_CONFLICT', message: 'The new date/time conflicts with an existing booking.' } };
       }
       throw updateError;
@@ -2403,7 +2419,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       // Fetch room to get capacity
       const { data: roomData } = await supabase
         .from('rooms')
-        .select('id, name, amenities')
+        .select('id, name, capacity')
         .eq('id', effectiveRoomId)
         .single();
 
@@ -2442,6 +2458,10 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       // GIST exclusion: therapist double-booking
       if (updateError.code === '23P01') {
         return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
+      }
+      // Room-capacity trigger: lost a race against a concurrent booking for the same room
+      if (updateError.code === 'P0003') {
+        return { data: null, error: { code: 'ROOM_CONFLICT', message: 'Room is fully booked at this time. Change the room or pick a different time.' } };
       }
       throw updateError;
     }
@@ -3636,7 +3656,8 @@ export async function getCustomerBookingHistory(customerAccountId) {
         *,
         service:services(id, name, duration_minutes),
         therapist:therapists(id, name, gender),
-        room:rooms(id, name)
+        room:rooms(id, name),
+        branch:branches(id, name)
       `)
       .eq('customer_account_id', customerAccountId)
       .order('date', { ascending: false });
@@ -3720,7 +3741,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       .from('bookings')
       .select(`
         id, booking_number, customer_name, customer_phone, status, payment_status,
-        date, start_time, end_time, start_datetime, end_datetime,
+        date, start_time, end_time, start_datetime, end_datetime, created_at,
         therapist_id, room_id,
         base_amount, discount_amount, final_amount, special_requests,
         service:services(name, duration_minutes),
@@ -3827,7 +3848,7 @@ export async function createBooking({
         // Room explicitly selected — verify it belongs to this branch and is active
         const { data: selectedRoom, error: roomLookupError } = await supabase
           .from('rooms')
-          .select('id, name, is_active, amenities')
+          .select('id, name, is_active, capacity')
           .eq('id', roomId)
           .eq('branch_id', resolvedBranchId)
           .maybeSingle();
@@ -3857,10 +3878,10 @@ export async function createBooking({
 
         availableRoom = selectedRoom;
       } else {
-        // 3. Fetch active rooms for branch (with amenities for capacity)
+        // 3. Fetch active rooms for branch (with capacity)
         const { data: rooms, error: roomsError } = await supabase
           .from('rooms')
-          .select('id, name, amenities')
+          .select('id, name, capacity')
           .eq('branch_id', resolvedBranchId)
           .eq('is_active', true)
           .order('name');
@@ -3907,10 +3928,10 @@ export async function createBooking({
     let isNewCustomer = false;
     const orgId = branchData?.org_id || null;
     try {
-      // Normalize to the last 10 digits so "9803023766" and "+9779803023766"
-      // (same number, with/without country code) resolve to the same customer
-      // instead of silently creating a duplicate record.
-      const phone = customerPhone ? customerPhone.replace(/\D/g, '').slice(-10) || null : null;
+      // Canonical E.164 ("+<countrycode><national>") so the same number always
+      // resolves to the same customer regardless of how it was typed, and two
+      // different countries' numbers never collide. See src/utils/phone.js.
+      const phone = toE164(customerPhone);
       const email = customerEmail?.trim().toLowerCase() || null;
 
       // Try to find existing customer by phone or email across the whole org.
@@ -4026,7 +4047,7 @@ export async function createBooking({
         customer_id: customerId,
         customer_name: customerName,
         customer_email: customerEmail || null,
-        customer_phone: customerPhone || null,
+        customer_phone: toE164(customerPhone),
         customer_gender: customerGender || null,
         customer_account_id: customerAccountId || null,
         date: date,
@@ -4050,11 +4071,13 @@ export async function createBooking({
 
     if (insertError) {
       if (insertError.code === '23P01') {
-        const msg = (insertError.message || '') + (insertError.details || '');
-        if (msg.includes('therapist')) {
-          return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
-        }
+        return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
+      }
+      if (insertError.code === 'P0003') {
         return { data: null, error: { code: 'ROOMS_FULL', message: 'Scheduling conflict. Please try a different time or room.' } };
+      }
+      if (insertError.code === 'P0005') {
+        return { data: null, error: { code: 'BRANCH_ONLINE_CAPACITY', message: 'This time is fully booked — no therapists available. Please choose another time.' } };
       }
       throw insertError;
     }
@@ -4118,9 +4141,9 @@ export async function createBooking({
 // Public/customer-facing referral lookup — exact phone match, scoped to the org by
 // slug, returns a masked display name (e.g. "Sita K."). Used by the public booking
 // flow's "Referred by a friend?" field before calling createBooking().
-export async function lookupReferrerByPhone(orgSlug, phone) {
+export async function lookupReferrerByPhone(orgSlug, phone, countryCode = '+977') {
   try {
-    const normalizedPhone = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
+    const normalizedPhone = toE164(phone, countryCode);
     if (!orgSlug || !normalizedPhone) return { data: null, error: null };
 
     const { data, error } = await supabase
@@ -4141,10 +4164,10 @@ export async function lookupReferrerByPhone(orgSlug, phone) {
 // types their phone, since a referral for an existing customer gets silently skipped
 // by createBooking()'s isNewCustomer check further down the flow. Does NOT change that
 // eligibility logic — this is a separate, read-only signal.
-export async function checkExistingCustomerByPhone(orgSlug, phone) {
+export async function checkExistingCustomerByPhone(orgSlug, phone, countryCode = '+977') {
   try {
-    const normalizedPhone = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
-    if (!orgSlug || !normalizedPhone || normalizedPhone.length < 10) return { data: false, error: null };
+    const normalizedPhone = toE164(phone, countryCode);
+    if (!orgSlug || !normalizedPhone || normalizedPhone.length < 11) return { data: false, error: null };
 
     const { data, error } = await supabase
       .rpc('public_check_customer_exists', { p_org_slug: orgSlug, p_phone: normalizedPhone });
@@ -4196,7 +4219,7 @@ export async function fetchRoomsForManagement(branchId) {
 
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name, branch_id, is_active, amenities, floor, created_at')
+      .select('id, name, branch_id, is_active, amenities, floor, capacity, created_at')
       .eq('branch_id', effectiveBranchId)
       .order('name');
 
@@ -4208,7 +4231,7 @@ export async function fetchRoomsForManagement(branchId) {
   }
 }
 
-export async function createRoom({ name, branchId, amenities = [], floor = null }) {
+export async function createRoom({ name, branchId, amenities = [], floor = null, capacity = 1 }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -4236,8 +4259,8 @@ export async function createRoom({ name, branchId, amenities = [], floor = null 
 
     const { data, error } = await supabase
       .from('rooms')
-      .insert({ name: name.trim(), branch_id: effectiveBranchId, is_active: true, amenities: amenities || [], floor: floor || null })
-      .select('id, name, branch_id, is_active, amenities, floor, created_at')
+      .insert({ name: name.trim(), branch_id: effectiveBranchId, is_active: true, amenities: amenities || [], floor: floor || null, capacity: capacity || 1 })
+      .select('id, name, branch_id, is_active, amenities, floor, capacity, created_at')
       .single();
 
     if (error) throw error;
@@ -4248,7 +4271,7 @@ export async function createRoom({ name, branchId, amenities = [], floor = null 
   }
 }
 
-export async function updateRoom({ roomId, name, amenities, floor }) {
+export async function updateRoom({ roomId, name, amenities, floor, capacity }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -4292,12 +4315,13 @@ export async function updateRoom({ roomId, name, amenities, floor }) {
     const updatePayload = { name: name.trim() };
     if (amenities !== undefined) updatePayload.amenities = amenities;
     if (floor !== undefined) updatePayload.floor = floor;
+    if (capacity !== undefined) updatePayload.capacity = capacity;
 
     const { data, error } = await supabase
       .from('rooms')
       .update(updatePayload)
       .eq('id', roomId)
-      .select('id, name, branch_id, is_active, amenities, floor, created_at')
+      .select('id, name, branch_id, is_active, amenities, floor, capacity, created_at')
       .single();
 
     if (error) throw error;
@@ -7493,10 +7517,9 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     if (!orgId || !branchId || !fullName) {
       return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
     }
-    // Normalize to the last 10 digits so "9803023766" and "+9779803023766"
-    // (same number, with/without country code) resolve to the same customer
-    // instead of silently creating a duplicate record.
-    const normalizedPhone = phone ? String(phone).replace(/\D/g, '').slice(-10) || null : null;
+    // Canonical E.164 so the same number always resolves to the same customer
+    // regardless of formatting / country code. See src/utils/phone.js.
+    const normalizedPhone = toE164(phone);
     const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
     const normalizedGender = gender || null;
     const normalizedDob = dateOfBirth || null;

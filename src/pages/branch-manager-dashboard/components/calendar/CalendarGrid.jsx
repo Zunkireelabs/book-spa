@@ -2,9 +2,9 @@ import React, { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallba
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useDroppable } from '@dnd-kit/core';
+import { useDroppable, useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
-import CalendarBookingCard from './CalendarBookingCard';
+import CalendarBookingCard, { canDragBooking, BookingHoverPreview } from './CalendarBookingCard';
 
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
@@ -131,16 +131,35 @@ const MAX_VISIBLE_OVERLAP = 2;
 const OVERLAP_GAP = 2;       // px between side-by-side cards
 const OVERLAP_PADDING = 4;   // px from column edges
 
+// Convert "HH:MM" or "HH:MM:SS" to 12h format (used in the overflow popover)
+function toTime12h(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')}${period}`;
+}
+
 /**
  * Group overlapping bookings into clusters.
  * Sweep algorithm: sort by startTime, extend running max endTime.
  * Strict overlap (startTime < clusterEnd), back-to-back are separate clusters.
+ * Ties on startTime (e.g. simultaneous online bookings) break by createdAt so
+ * whichever booking was actually placed first (down to the millisecond) lands
+ * in the leftmost card slot.
  */
 function clusterOverlapping(bookings) {
   const valid = bookings.filter(b => b.startTime && b.endTime);
   if (valid.length === 0) return [];
 
-  const sorted = [...valid].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const sorted = [...valid].sort((a, b) => {
+    const byStart = a.startTime.localeCompare(b.startTime);
+    if (byStart !== 0) return byStart;
+    if (a.createdAt && b.createdAt) return new Date(a.createdAt) - new Date(b.createdAt);
+    if (a.createdAt) return -1;
+    if (b.createdAt) return 1;
+    return 0;
+  });
   const clusters = [[sorted[0]]];
   let clusterEnd = sorted[0].endTime;
 
@@ -156,8 +175,19 @@ function clusterOverlapping(bookings) {
   return clusters;
 }
 
+// The overflow badge only ever needs to fit "+N" — giving it a full card-width
+// slot (the old behavior) squeezed the two real cards into equal thirds. It
+// gets a fixed narrow width instead (clamped so it stays legible in very
+// narrow/zoomed-out columns); cards keep the rest of the space.
+const BADGE_MIN_WIDTH = 34;
+const BADGE_MAX_WIDTH = 56;
+const BADGE_MIN_HEIGHT = 64; // px — keeps wrapped "+N" text readable on short clusters
+
 /**
  * Calculate positioning for cards within an overlap cluster.
+ * Shows up to MAX_VISIBLE_OVERLAP full-size cards side by side; any extra
+ * bookings collapse into a "+N more" badge (see OverflowBadge) instead of
+ * being squeezed into ever-thinner slivers.
  * Returns { cards: [{left, width}|null], badge: {left, width, count}|null }
  */
 function getOverlapLayout(clusterSize, columnWidth) {
@@ -165,25 +195,37 @@ function getOverlapLayout(clusterSize, columnWidth) {
     return { cards: [null], badge: null };
   }
 
-  const slots = clusterSize > MAX_VISIBLE_OVERLAP ? MAX_VISIBLE_OVERLAP + 1 : clusterSize;
   const availableWidth = columnWidth - OVERLAP_PADDING * 2;
-  const totalGap = (slots - 1) * OVERLAP_GAP;
-  const slotWidth = Math.floor((availableWidth - totalGap) / slots);
+  const visibleCount = Math.min(clusterSize, MAX_VISIBLE_OVERLAP);
+  const hasBadge = clusterSize > MAX_VISIBLE_OVERLAP;
+  const MIN_CARD_WIDTH = 10; // px — floor so cards never go negative-width in a very narrow/zoomed-out column
+
+  const totalGap = (visibleCount + (hasBadge ? 1 : 0) - 1) * OVERLAP_GAP;
+  let badgeWidth = hasBadge
+    ? Math.min(BADGE_MAX_WIDTH, Math.max(BADGE_MIN_WIDTH, Math.round(availableWidth * 0.38)))
+    : 0;
+  // The badge's own min-width can exceed what's left for cards in a very
+  // narrow column — shrink it (even below BADGE_MIN_WIDTH) rather than let
+  // the cards go negative-width.
+  if (hasBadge) {
+    const maxBadgeWidth = availableWidth - totalGap - MIN_CARD_WIDTH * visibleCount;
+    badgeWidth = Math.max(0, Math.min(badgeWidth, maxBadgeWidth));
+  }
+  const cardWidth = Math.max(MIN_CARD_WIDTH, Math.floor((availableWidth - totalGap - badgeWidth) / visibleCount));
 
   const cards = [];
-  for (let i = 0; i < Math.min(clusterSize, MAX_VISIBLE_OVERLAP); i++) {
+  for (let i = 0; i < visibleCount; i++) {
     cards.push({
-      left: OVERLAP_PADDING + i * (slotWidth + OVERLAP_GAP),
-      width: slotWidth,
+      left: OVERLAP_PADDING + i * (cardWidth + OVERLAP_GAP),
+      width: cardWidth,
     });
   }
 
   let badge = null;
-  if (clusterSize > MAX_VISIBLE_OVERLAP) {
-    const badgeIndex = MAX_VISIBLE_OVERLAP;
+  if (hasBadge) {
     badge = {
-      left: OVERLAP_PADDING + badgeIndex * (slotWidth + OVERLAP_GAP),
-      width: slotWidth,
+      left: OVERLAP_PADDING + visibleCount * (cardWidth + OVERLAP_GAP),
+      width: badgeWidth,
       count: clusterSize - MAX_VISIBLE_OVERLAP,
     };
   }
@@ -214,18 +256,207 @@ const DroppableColumn = ({ id, data, height, isActive }) => {
   );
 };
 
-// Badge showing "+N more" for overflow in compact overlap layout
-const OverflowBadge = ({ count, style }) => (
-  <div
-    className="absolute border-2 border-dashed border-text-secondary/40 bg-background/80 rounded flex items-center justify-center cursor-pointer z-[1]"
-    style={style}
-    onClick={(e) => e.stopPropagation()}
-  >
-    <span className="font-data text-[10px] text-text-secondary whitespace-nowrap">
-      +{count} more
-    </span>
-  </div>
-);
+// One row in the overflow popover's hidden-bookings list. Draggable exactly
+// like CalendarBookingCard (same activation constraint tells clicks from
+// drags apart) so staff can reassign a hidden booking to another therapist
+// without first opening it. Reports its dragging state up so the popover can
+// fade out (not unmount — unmounting mid-drag would tear down dnd-kit's
+// active drag) while it's in flight, then close once the drag ends.
+const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
+  const isDraggable = canDragBooking(booking);
+  const dragId = booking._colTherapistId
+    ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
+    : (booking.bookingId || booking.id);
+
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: dragId,
+    data: { booking, type: 'booking' },
+    disabled: !isDraggable,
+  });
+
+  // Only report actual true<->false transitions, not the initial mount
+  // (isDragging starts false) — otherwise the popover would close itself
+  // the instant it opens.
+  const prevDragging = useRef(false);
+  useEffect(() => {
+    if (prevDragging.current !== isDragging) {
+      prevDragging.current = isDragging;
+      onDragChange(isDragging);
+    }
+  }, [isDragging, onDragChange]);
+
+  // Same rich hover-preview as a regular card — hovering one row shows its
+  // details (no click needed); moving to the next row swaps the preview to
+  // that booking; leaving hides it.
+  const rowRef = useRef(null);
+  const hoverTimer = useRef(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewPos, setPreviewPos] = useState(null);
+
+  const handleMouseEnter = useCallback(() => {
+    hoverTimer.current = setTimeout(() => {
+      if (rowRef.current) {
+        const rect = rowRef.current.getBoundingClientRect();
+        const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
+        const popoverHeight = 280;
+        const maxTop = window.innerHeight - popoverHeight - 10;
+        setPreviewPos({
+          top: Math.max(10, Math.min(rect.top, maxTop)),
+          left: side === 'right' ? rect.right + 8 : rect.left - 288,
+        });
+      }
+      setShowPreview(true);
+    }, 200);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    setShowPreview(false);
+    setPreviewPos(null);
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      clearTimeout(hoverTimer.current);
+      setShowPreview(false);
+    }
+  }, [isDragging]);
+
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+
+  return (
+    <>
+      <button
+        ref={(node) => { rowRef.current = node; setNodeRef(node); }}
+        type="button"
+        className={`w-full text-left px-2.5 py-1.5 border-b border-border/50 last:border-b-0 hover:bg-background/80 transition-colors ${
+          isDraggable ? 'cursor-grab active:cursor-grabbing' : ''
+        }`}
+        onClick={() => {
+          if (!isDragging) onClick(booking);
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        {...(isDraggable ? { ...listeners, ...attributes } : {})}
+      >
+        <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
+        <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
+        <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
+      </button>
+      {showPreview && !isDragging && previewPos && (
+        <BookingHoverPreview booking={booking} position={previewPos} draggable={isDraggable} />
+      )}
+    </>
+  );
+};
+
+// Badge showing "+N" for overflow in compact overlap layout. Split into two
+// stacked regions: a small "+" strip on top (add a new booking at this same
+// time — onAdd) and the count below. Clicking the count expands — but not
+// into the badge's own narrow sliver, which is too thin to show a readable
+// list. Instead it takes over the FULL cluster area (`expandedStyle`, same
+// top/height/left/width the two cards + badge together already occupy) —
+// still the same time slot, same therapist column, nothing floats outside
+// it — and lists the hidden bookings (`bookings`) with a scroll. Deliberately
+// NOT the 2 already-visible ones too: they're already rendered as their own
+// draggable CalendarBookingCard, and dnd-kit doesn't allow two draggable
+// elements sharing the same id in one DndContext.
+const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, onAdd }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [rowDragging, setRowDragging] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const close = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setExpanded(false);
+    };
+    // Delay so the opening click itself doesn't immediately close it
+    const id = setTimeout(() => {
+      document.addEventListener('mousedown', close);
+      document.addEventListener('keydown', close);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [expanded]);
+
+  if (expanded) {
+    return (
+      <div
+        ref={wrapRef}
+        className="absolute overflow-hidden border-2 border-primary/50 bg-surface rounded flex flex-col z-dropdown shadow-spa-elevated"
+        style={{ ...(expandedStyle || style), opacity: rowDragging ? 0 : 1, pointerEvents: rowDragging ? 'none' : 'auto' }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex-shrink-0 flex items-center justify-between px-1.5 py-0.5 border-b border-border bg-background/60" style={{ height: 20 }}>
+          <span className="text-[10px] font-semibold text-text-primary truncate">+{count} more</span>
+          <button
+            type="button"
+            title="Collapse"
+            className="flex-shrink-0 text-text-secondary hover:text-text-primary"
+            onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+          >
+            <Icon name="X" size={11} />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {(bookings || []).map((booking) => (
+            <OverflowPopoverRow
+              key={booking.id}
+              booking={booking}
+              onClick={(b) => {
+                setExpanded(false);
+                onBookingClick?.(b);
+              }}
+              onDragChange={(dragging) => {
+                setRowDragging(dragging);
+                if (!dragging) setExpanded(false);
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="absolute overflow-hidden border-2 border-primary/40 bg-background/80 rounded flex flex-col z-dropdown"
+      style={style}
+    >
+      {!!onAdd && (
+        <button
+          type="button"
+          title="Add booking at this time"
+          className="flex-shrink-0 flex items-center justify-center border-b border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-white spa-transition-fast"
+          style={{ height: 18 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd();
+          }}
+        >
+          <Icon name="Plus" size={12} strokeWidth={3} />
+        </button>
+      )}
+      <button
+        type="button"
+        title={`${count} more booking${count === 1 ? '' : 's'} — click to view`}
+        className="flex-1 min-h-0 flex items-center justify-center cursor-pointer hover:bg-background"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(true);
+        }}
+      >
+        <span className="font-data text-[10px] leading-tight text-text-secondary px-0.5 whitespace-nowrap">
+          +{count}
+        </span>
+      </button>
+    </div>
+  );
+};
 
 // Sortable wrapper for draggable column headers
 const SortableColumnHeader = ({ id, children, minWidth }) => {
@@ -487,6 +718,7 @@ const CalendarGrid = ({
         isLocked: b.is_locked || false,
         startTime,
         endTime,
+        createdAt: b.created_at || null,
         date: bookingDate,
         therapistId: b.therapist_id,
         roomId: b.room_id,
@@ -767,6 +999,7 @@ const CalendarGrid = ({
         key={col.id}
         className="flex-1 relative border-r border-border/50 last:border-r-0 cursor-pointer"
         style={{ minWidth: minColWidth, height: totalHeight }}
+        data-cal-column="true"
         onClick={(e) => handleColumnClick(e, day, col)}
       >
         {/* Dashed interval lines with hover tooltips — per-column so hover works */}
@@ -785,39 +1018,80 @@ const CalendarGrid = ({
           const clusters = clusterOverlapping(colBookings);
           return clusters.map(cluster => {
             const layout = getOverlapLayout(cluster.length, minColWidth);
-            return cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
-              const cardKey = booking._colTherapistId ? `${booking.id}__${booking._colTherapistId}` : booking.id;
-              const pos = layout.cards[idx];
-              return (
-                <CalendarBookingCard
-                  key={cardKey}
-                  booking={booking}
-                  columnMode={columnMode}
-                  style={{
-                    top: timeToTop(booking.startTime),
-                    height: timeToHeight(booking.startTime, booking.endTime),
-                    ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
-                  }}
-                  onClick={onBookingClick}
-                  onResize={handleBookingResize}
-                  isSelected={selectedCardIds.has(cardKey)}
-                  onSelect={handleCardSelect}
-                />
-              );
-            }).concat(
-              layout.badge ? (
-                <OverflowBadge
-                  key={`badge-${cluster[0].id}`}
-                  count={layout.badge.count}
-                  style={{
-                    top: timeToTop(cluster[0].startTime),
-                    height: timeToHeight(cluster[0].startTime, cluster[0].endTime),
-                    left: layout.badge.left,
-                    width: layout.badge.width,
-                    right: 'auto',
-                  }}
-                />
-              ) : []
+            const clusterTop = timeToTop(cluster[0].startTime);
+            const clusterHeight = Math.max(
+              timeToHeight(cluster[0].startTime, cluster[0].endTime),
+              layout.badge ? BADGE_MIN_HEIGHT : 0
+            );
+            return (
+              <div
+                key={`cluster-${cluster[0].id}`}
+                className="group absolute inset-x-0"
+                style={{ top: clusterTop, height: clusterHeight }}
+              >
+                {cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
+                  const cardKey = booking._colTherapistId ? `${booking.id}__${booking._colTherapistId}` : booking.id;
+                  const pos = layout.cards[idx];
+                  return (
+                    <CalendarBookingCard
+                      key={cardKey}
+                      booking={booking}
+                      columnMode={columnMode}
+                      style={{
+                        top: timeToTop(booking.startTime) - clusterTop,
+                        height: timeToHeight(booking.startTime, booking.endTime),
+                        ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
+                      }}
+                      onClick={onBookingClick}
+                      onResize={handleBookingResize}
+                      isSelected={selectedCardIds.has(cardKey)}
+                      onSelect={handleCardSelect}
+                    />
+                  );
+                })}
+                {layout.badge && (
+                  <OverflowBadge
+                    key={`badge-${cluster[0].id}`}
+                    count={layout.badge.count}
+                    bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                    onBookingClick={onBookingClick}
+                    onAdd={onEmptySlotClick ? () => {
+                      if (activeDragId) return;
+                      const [h, m] = cluster[0].startTime.split(':').map(Number);
+                      onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
+                    } : null}
+                    style={{
+                      top: 0,
+                      height: clusterHeight,
+                      left: layout.badge.left,
+                      width: layout.badge.width,
+                      right: 'auto',
+                    }}
+                    expandedStyle={{
+                      top: 0,
+                      height: clusterHeight,
+                      left: OVERLAP_PADDING,
+                      width: minColWidth - OVERLAP_PADDING * 2,
+                      right: 'auto',
+                    }}
+                  />
+                )}
+                {!layout.badge && !!onEmptySlotClick && (
+                  <button
+                    type="button"
+                    title="Add booking at this time"
+                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-primary text-white shadow-spa-resting flex items-center justify-center opacity-0 group-hover:opacity-100 spa-transition-fast z-dropdown hover:bg-primary/90"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeDragId) return;
+                      const [h, m] = cluster[0].startTime.split(':').map(Number);
+                      onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
+                    }}
+                  >
+                    <Icon name="Plus" size={12} />
+                  </button>
+                )}
+              </div>
             );
           });
         })()}
@@ -925,6 +1199,7 @@ const CalendarGrid = ({
                   ? { left: TIME_COL_WIDTH, width: minColWidth, height: totalHeight }
                   : { minWidth: minColWidth, height: totalHeight }
                 }
+                data-cal-column="true"
                 onClick={(e) => handleColumnClick(e, currentDate, unassignedCol)}
               >
                 {renderGridLines()}
@@ -941,35 +1216,76 @@ const CalendarGrid = ({
                   const clusters = clusterOverlapping(colBookings);
                   return clusters.map((cluster) => {
                     const layout = getOverlapLayout(cluster.length, minColWidth);
-                    return cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
-                      const pos = layout.cards[idx];
-                      return (
-                        <CalendarBookingCard
-                          key={booking.id}
-                          booking={booking}
-                          columnMode={columnMode}
-                          style={{
-                            top: timeToTop(booking.startTime),
-                            height: timeToHeight(booking.startTime, booking.endTime),
-                            ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
-                          }}
-                          onClick={onBookingClick}
-                        />
-                      );
-                    }).concat(
-                      layout.badge ? (
-                        <OverflowBadge
-                          key={`badge-${cluster[0].id}`}
-                          count={layout.badge.count}
-                          style={{
-                            top: timeToTop(cluster[0].startTime),
-                            height: timeToHeight(cluster[0].startTime, cluster[0].endTime),
-                            left: layout.badge.left,
-                            width: layout.badge.width,
-                            right: 'auto',
-                          }}
-                        />
-                      ) : []
+                    const clusterTop = timeToTop(cluster[0].startTime);
+                    const clusterHeight = Math.max(
+                      timeToHeight(cluster[0].startTime, cluster[0].endTime),
+                      layout.badge ? BADGE_MIN_HEIGHT : 0
+                    );
+                    return (
+                      <div
+                        key={`cluster-${cluster[0].id}`}
+                        className="group absolute inset-x-0"
+                        style={{ top: clusterTop, height: clusterHeight }}
+                      >
+                        {cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
+                          const pos = layout.cards[idx];
+                          return (
+                            <CalendarBookingCard
+                              key={booking.id}
+                              booking={booking}
+                              columnMode={columnMode}
+                              style={{
+                                top: timeToTop(booking.startTime) - clusterTop,
+                                height: timeToHeight(booking.startTime, booking.endTime),
+                                ...(pos ? { left: pos.left, width: pos.width, right: 'auto' } : {}),
+                              }}
+                              onClick={onBookingClick}
+                            />
+                          );
+                        })}
+                        {layout.badge && (
+                          <OverflowBadge
+                            key={`badge-${cluster[0].id}`}
+                            count={layout.badge.count}
+                            bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                            onBookingClick={onBookingClick}
+                            onAdd={onEmptySlotClick ? () => {
+                              if (activeDragId) return;
+                              const [h, m] = cluster[0].startTime.split(':').map(Number);
+                              onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
+                            } : null}
+                            style={{
+                              top: 0,
+                              height: clusterHeight,
+                              left: layout.badge.left,
+                              width: layout.badge.width,
+                              right: 'auto',
+                            }}
+                            expandedStyle={{
+                              top: 0,
+                              height: clusterHeight,
+                              left: OVERLAP_PADDING,
+                              width: minColWidth - OVERLAP_PADDING * 2,
+                              right: 'auto',
+                            }}
+                          />
+                        )}
+                        {!layout.badge && !!onEmptySlotClick && (
+                          <button
+                            type="button"
+                            title="Add booking at this time"
+                            className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-primary text-white shadow-spa-resting flex items-center justify-center opacity-0 group-hover:opacity-100 spa-transition-fast z-dropdown hover:bg-primary/90"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (activeDragId) return;
+                              const [h, m] = cluster[0].startTime.split(':').map(Number);
+                              onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
+                            }}
+                          >
+                            <Icon name="Plus" size={12} />
+                          </button>
+                        )}
+                      </div>
                     );
                   });
                 })()}
