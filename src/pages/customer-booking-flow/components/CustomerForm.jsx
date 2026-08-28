@@ -110,7 +110,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
     }
     // Any edit to a field the match was found from invalidates it — re-check on next blur
     // rather than keep showing a confirm banner for stale input.
-    if (name === 'firstName' || name === 'phone' || name === 'email') {
+    if (name === 'firstName' || name === 'lastName' || name === 'phone' || name === 'email') {
       setMatchedCustomer(null);
       setMatchDismissed(false);
     }
@@ -178,11 +178,13 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       await maybeCheckExistingCustomer(nameValue, phoneValue);
     }
 
-    if (name === 'firstName' || name === 'phone' || name === 'email') {
-      const nameValue = name === 'firstName' ? value : customerInfo.firstName || '';
+    if (name === 'firstName' || name === 'lastName' || name === 'phone' || name === 'email') {
+      const firstNameValue = name === 'firstName' ? value : customerInfo.firstName || '';
+      const lastNameValue = name === 'lastName' ? value : customerInfo.lastName || '';
+      const fullNameValue = `${firstNameValue} ${lastNameValue}`.trim();
       const phoneValue = name === 'phone' ? value : customerInfo.phone || '';
       const emailValue = name === 'email' ? value : customerInfo.email || '';
-      await maybeFindCustomerMatch(nameValue, phoneValue, emailValue);
+      await maybeFindCustomerMatch(fullNameValue, phoneValue, emailValue);
     }
   };
 

@@ -69,34 +69,46 @@ RETURNS TABLE (
   created_at_a  timestamptz,
   created_at_b  timestamptz
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+BEGIN
+  IF p_org_id <> get_user_org_id() THEN
+    RAISE EXCEPTION 'customer_duplicate_candidates: not authorized for this organization';
+  END IF;
+  IF get_user_role() NOT IN ('manager', 'admin') THEN
+    RAISE EXCEPTION 'customer_duplicate_candidates: requires manager or admin role';
+  END IF;
+
+  -- Column aliases below are prefixed (v_nphone, not nphone) to avoid ambiguity against
+  -- this function's own RETURNS TABLE column of the same name, which plpgsql exposes as an
+  -- implicit variable in scope for the whole function body.
+  RETURN QUERY
   WITH norm AS (
     SELECT c.id, c.org_id, c.full_name, c.phone, c.email, c.branch_id, c.created_at,
-           public.normalize_phone_e164(c.phone) AS nphone
+           public.normalize_phone_e164(c.phone) AS v_nphone
     FROM public.customers c
     WHERE c.org_id = p_org_id
   ),
   grp AS (
-    SELECT nphone, array_agg(id ORDER BY created_at, id) AS ids
+    SELECT v_nphone, array_agg(id ORDER BY created_at, id) AS ids
     FROM norm
-    WHERE nphone IS NOT NULL
-    GROUP BY nphone
+    WHERE v_nphone IS NOT NULL
+    GROUP BY v_nphone
     HAVING count(*) > 1
   ),
   pairs AS (
     -- All groups found so far are exact pairs (verified against production), but generate
     -- every combination within a group so a future 3+ group doesn't get silently dropped.
-    SELECT g.nphone, a.id AS id_a, b.id AS id_b
+    SELECT g.v_nphone, a.id AS id_a, b.id AS id_b
     FROM grp g,
          LATERAL unnest(g.ids) WITH ORDINALITY AS a(id, ord_a),
          LATERAL unnest(g.ids) WITH ORDINALITY AS b(id, ord_b)
     WHERE a.ord_a < b.ord_b
   )
-  SELECT p.id_a, p.id_b, p.nphone,
+  SELECT p.id_a, p.id_b, p.v_nphone,
          na.full_name, nb.full_name,
          na.phone, nb.phone,
          na.email, nb.email,
@@ -111,6 +123,7 @@ AS $$
       AND d.customer_id_lo = LEAST(p.id_a, p.id_b)
       AND d.customer_id_hi = GREATEST(p.id_a, p.id_b)
   );
+END;
 $$;
 
 REVOKE ALL ON FUNCTION public.customer_duplicate_candidates(uuid) FROM PUBLIC, anon;
