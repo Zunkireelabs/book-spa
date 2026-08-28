@@ -2,8 +2,8 @@
 // DateTimeSelection (full multi-day grid) and AvailableTodayPanel (same-day quick picks), so the
 // two stay consistent about what "available" means (room capacity + gender headcount).
 
-export const START_HOUR = 9;
-export const END_HOUR = 21;
+export const START_HOUR = 10;
+export const END_HOUR = 20;
 
 export function getNepalNow() {
   const now = new Date();
