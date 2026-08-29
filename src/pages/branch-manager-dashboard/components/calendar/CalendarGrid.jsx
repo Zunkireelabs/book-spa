@@ -233,6 +233,50 @@ function getOverlapLayout(clusterSize, columnWidth) {
   return { cards, badge };
 }
 
+// Single source of truth for resolving a non-shared booking's assigned
+// therapist for display and column-bucketing. Two storage representations
+// exist for the same fact — the flat bookings.therapist_id column (primary)
+// and the booking_therapists junction table (secondary/legacy source, also
+// used for shared/multi-therapist bookings via a separate path) — plus a
+// third, independent axis: whether that therapist is visible under the
+// CURRENT view filter (All Positions / attendance-absent / service-only).
+// Every call site that needs "which therapist does this booking belong to"
+// must go through this function. Do not re-derive this inline at a new call
+// site — extend the truth table this function encodes instead.
+function resolveSingleTherapist(booking, therapistMap) {
+  const junctionRow = booking.booking_therapists?.length === 1 ? booking.booking_therapists[0] : null;
+
+  // Priority order: flat column first (primary), junction row second.
+  const candidates = [
+    booking.therapist_id ? { id: booking.therapist_id, name: booking.therapist?.name || null } : null,
+    junctionRow ? { id: junctionRow.therapist_id, name: junctionRow.therapist?.name || null } : null,
+  ].filter(Boolean);
+
+  // First candidate that's actually visible in the current filtered view wins.
+  const visible = candidates.find(c => isTherapistVisible(c.id, therapistMap));
+
+  // Display name is always populated if ANY candidate exists — prefer the
+  // resolved-visible candidate's live name (reflects renames), else fall
+  // back to the highest-priority (flat) candidate's embedded snapshot name
+  // so the card never goes blank just because the therapist is currently
+  // absent/filtered.
+  const displayName = visible
+    ? (therapistMap[visible.id] || visible.name)
+    : (candidates[0]?.name || null);
+
+  return {
+    id: visible ? visible.id : null,   // colId / baseEntry.therapistId — null means treat as unassigned
+    name: displayName,                  // baseEntry.therapistName — always populated if any assignment exists
+  };
+}
+
+// Shared visibility check, used by resolveSingleTherapist above AND by the
+// isShared (multi-therapist) per-entry loop below — do not duplicate this
+// check inline at either site.
+function isTherapistVisible(therapistId, therapistMap) {
+  return therapistMap[therapistId] !== undefined;
+}
+
 // Single droppable column component (replaces 144 tiny zones per column)
 // Note: This is a sibling to booking cards, not a parent, so pointerEvents doesn't block them
 const DroppableColumn = ({ id, data, height, isActive }) => {
@@ -700,10 +744,10 @@ const CalendarGrid = ({
 
       const startTime = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
       const endTime = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
-      const therapistName = b.booking_therapists?.length > 0
-        ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
-        : (therapistMap[b.therapist_id] || null);
       const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
+      const { id: visibleTherapistId, name: therapistName } = isShared
+        ? { id: null, name: b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ') }
+        : resolveSingleTherapist(b, therapistMap);
 
       const baseEntry = {
         id: b.id,
@@ -720,7 +764,7 @@ const CalendarGrid = ({
         endTime,
         createdAt: b.created_at || null,
         date: bookingDate,
-        therapistId: b.therapist_id,
+        therapistId: visibleTherapistId,
         roomId: b.room_id,
         therapistName,
         roomName: b.room?.name || roomMap[b.room_id] || null,
@@ -742,6 +786,10 @@ const CalendarGrid = ({
 
         b.booking_therapists.forEach(bt => {
           const colId = bt.therapist_id;
+          // Skip co-therapists currently filtered out of view — same reasoning as
+          // resolveSingleTherapist: an id with no rendered column must not create
+          // a silent orphan bucket.
+          if (!isTherapistVisible(colId, therapistMap)) return;
           if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
           map[bookingDate][colId].push({
             ...baseEntry,
@@ -756,7 +804,7 @@ const CalendarGrid = ({
       } else {
         const colId = columnMode === 'room'
           ? (b.room_id || 'unassigned')
-          : (b.therapist_id || 'unassigned');
+          : (visibleTherapistId || 'unassigned');
         if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
         map[bookingDate][colId].push(baseEntry);
       }
