@@ -720,7 +720,7 @@ const CalendarGrid = ({
         endTime,
         createdAt: b.created_at || null,
         date: bookingDate,
-        therapistId: b.therapist_id,
+        therapistId: b.therapist_id || b.booking_therapists?.[0]?.therapist_id || null,
         roomId: b.room_id,
         therapistName,
         roomName: b.room?.name || roomMap[b.room_id] || null,
