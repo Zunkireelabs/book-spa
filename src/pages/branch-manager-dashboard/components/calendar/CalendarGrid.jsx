@@ -704,6 +704,15 @@ const CalendarGrid = ({
         ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
         : (therapistMap[b.therapist_id] || null);
       const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
+      // Only trust the junction-table therapist as a column fallback if that
+      // therapist is actually visible under the current filter (All Positions /
+      // on-leave / service-only). Otherwise it buckets into a colId with no
+      // matching column and the card silently disappears — worse than falling
+      // back to Unassigned.
+      const visibleJunctionTherapistId = b.booking_therapists?.[0]?.therapist_id;
+      const fallbackTherapistId = (visibleJunctionTherapistId && therapistMap[visibleJunctionTherapistId] !== undefined)
+        ? visibleJunctionTherapistId
+        : null;
 
       const baseEntry = {
         id: b.id,
@@ -720,7 +729,7 @@ const CalendarGrid = ({
         endTime,
         createdAt: b.created_at || null,
         date: bookingDate,
-        therapistId: b.therapist_id || b.booking_therapists?.[0]?.therapist_id || null,
+        therapistId: b.therapist_id || fallbackTherapistId,
         roomId: b.room_id,
         therapistName,
         roomName: b.room?.name || roomMap[b.room_id] || null,
@@ -756,7 +765,7 @@ const CalendarGrid = ({
       } else {
         const colId = columnMode === 'room'
           ? (b.room_id || 'unassigned')
-          : (b.therapist_id || b.booking_therapists?.[0]?.therapist_id || 'unassigned');
+          : (b.therapist_id || fallbackTherapistId || 'unassigned');
         if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
         map[bookingDate][colId].push(baseEntry);
       }
