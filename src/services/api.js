@@ -2472,21 +2472,27 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
     //    old therapist_id here causes the card to render the previous name even
     //    though bookings.therapist_id was updated. Shared-booking reassignment
     //    goes through assignTherapist and never reaches this path.
-    if (newTherapistId !== undefined) {
-      await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
-      if (newTherapistId !== 'unassigned' && newTherapistId !== null) {
-        await supabase.from('booking_therapists').insert({
-          booking_id: bookingId,
-          therapist_id: newTherapistId,
-          start_time: updated.start_time,
-          end_time: updated.end_time,
-        });
+    try {
+      if (newTherapistId !== undefined) {
+        await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
+        if (newTherapistId !== 'unassigned' && newTherapistId !== null) {
+          await supabase.from('booking_therapists').insert({
+            booking_id: bookingId,
+            therapist_id: newTherapistId,
+            start_time: updated.start_time,
+            end_time: updated.end_time,
+          });
+        }
+      } else {
+        await supabase
+          .from('booking_therapists')
+          .update({ start_time: updated.start_time, end_time: updated.end_time })
+          .eq('booking_id', bookingId);
       }
-    } else {
-      await supabase
-        .from('booking_therapists')
-        .update({ start_time: updated.start_time, end_time: updated.end_time })
-        .eq('booking_id', bookingId);
+    } catch (junctionError) {
+      // Best-effort: booking row is already updated and correct. Don't fail
+      // the whole reschedule if this secondary sync write errors.
+      console.error('[API] rescheduleBooking booking_therapists sync error:', junctionError.message);
     }
 
     return {
