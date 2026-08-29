@@ -704,14 +704,17 @@ const CalendarGrid = ({
         ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
         : (therapistMap[b.therapist_id] || null);
       const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
-      // Only trust the junction-table therapist as a column fallback if that
-      // therapist is actually visible under the current filter (All Positions /
-      // on-leave / service-only). Otherwise it buckets into a colId with no
-      // matching column and the card silently disappears — worse than falling
-      // back to Unassigned.
-      const visibleJunctionTherapistId = b.booking_therapists?.[0]?.therapist_id;
-      const fallbackTherapistId = (visibleJunctionTherapistId && therapistMap[visibleJunctionTherapistId] !== undefined)
-        ? visibleJunctionTherapistId
+      // Resolve this booking's effective single-therapist id (flat column takes
+      // priority, junction table as fallback), then only trust it as a column/id
+      // value if that therapist is actually visible under the current filter (All
+      // Positions / on-leave / service-only toggle). A booking whose only assigned
+      // therapist is currently filtered out — most commonly: marked Absent/Leave
+      // today while they still have confirmed bookings — must NOT silently
+      // disappear; it should fall back to Unassigned so staff can still see and
+      // reassign it.
+      const rawSingleTherapistId = b.therapist_id || b.booking_therapists?.[0]?.therapist_id || null;
+      const visibleTherapistId = (rawSingleTherapistId && therapistMap[rawSingleTherapistId] !== undefined)
+        ? rawSingleTherapistId
         : null;
 
       const baseEntry = {
@@ -729,7 +732,7 @@ const CalendarGrid = ({
         endTime,
         createdAt: b.created_at || null,
         date: bookingDate,
-        therapistId: b.therapist_id || fallbackTherapistId,
+        therapistId: visibleTherapistId,
         roomId: b.room_id,
         therapistName,
         roomName: b.room?.name || roomMap[b.room_id] || null,
@@ -765,7 +768,7 @@ const CalendarGrid = ({
       } else {
         const colId = columnMode === 'room'
           ? (b.room_id || 'unassigned')
-          : (b.therapist_id || fallbackTherapistId || 'unassigned');
+          : (visibleTherapistId || 'unassigned');
         if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
         map[bookingDate][colId].push(baseEntry);
       }
