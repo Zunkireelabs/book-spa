@@ -756,7 +756,7 @@ const CalendarGrid = ({
       } else {
         const colId = columnMode === 'room'
           ? (b.room_id || 'unassigned')
-          : (b.therapist_id || 'unassigned');
+          : (b.therapist_id || b.booking_therapists?.[0]?.therapist_id || 'unassigned');
         if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
         map[bookingDate][colId].push(baseEntry);
       }
