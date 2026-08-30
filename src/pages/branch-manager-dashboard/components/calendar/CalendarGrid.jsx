@@ -175,6 +175,26 @@ function clusterOverlapping(bookings) {
   return clusters;
 }
 
+// True end time of a cluster — the latest endTime across ALL members, not
+// just cluster[0] (the earliest-STARTING member, which sort order guarantees,
+// but which can easily have an earlier end than a later-starting member it
+// transitively overlaps through a third booking). Using cluster[0].endTime
+// alone under-sizes the cluster's rendered box whenever that happens, which
+// visually clips the "+N more" badge into the wrong time range — it renders
+// within the earliest member's span even when the hidden booking(s) it
+// represents start later, making a booking near the END of a wide cluster
+// look like it's happening near the cluster's start until you click it.
+function clusterEndTime(cluster) {
+  return cluster.reduce((max, b) => (b.endTime > max ? b.endTime : max), cluster[0].endTime);
+}
+
+// Earliest startTime across a set of bookings — symmetric counterpart to
+// clusterEndTime(). Used to position the collapsed overflow badge at the
+// actual time span of the bookings it hides, not the whole cluster's span.
+function earliestStartTime(items) {
+  return items.reduce((min, b) => (b.startTime < min ? b.startTime : min), items[0].startTime);
+}
+
 // The overflow badge only ever needs to fit "+N" — giving it a full card-width
 // slot (the old behavior) squeezed the two real cards into equal thirds. It
 // gets a fixed narrow width instead (clamped so it stays legible in very
@@ -1068,7 +1088,7 @@ const CalendarGrid = ({
             const layout = getOverlapLayout(cluster.length, minColWidth);
             const clusterTop = timeToTop(cluster[0].startTime);
             const clusterHeight = Math.max(
-              timeToHeight(cluster[0].startTime, cluster[0].endTime),
+              timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
               layout.badge ? BADGE_MIN_HEIGHT : 0
             );
             return (
@@ -1097,20 +1117,35 @@ const CalendarGrid = ({
                     />
                   );
                 })}
-                {layout.badge && (
+                {layout.badge && (() => {
+                  const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
+                  const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                  const hiddenHeight = hidden.length
+                    ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
+                    : clusterHeight;
+                  // Clamp upward so the BADGE_MIN_HEIGHT floor can never push the box past the
+                  // cluster's own bottom edge — shift the top up instead of letting it overflow.
+                  const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
+                  return (
                   <OverflowBadge
                     key={`badge-${cluster[0].id}`}
                     count={layout.badge.count}
-                    bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                    bookings={hidden}
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? () => {
                       if (activeDragId) return;
-                      const [h, m] = cluster[0].startTime.split(':').map(Number);
+                      // Target the hidden segment's own start time, matching where this button
+                      // now visually sits (see earliestStartTime/hiddenTop above) — not the
+                      // cluster's overall start. Falls back to cluster[0] only if hidden is
+                      // somehow empty (shouldn't happen: layout.badge is only ever truthy when
+                      // cluster.length > MAX_VISIBLE_OVERLAP, so hidden always has ≥1 item).
+                      const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
+                      const [h, m] = anchorTime.split(':').map(Number);
                       onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
                     } : null}
                     style={{
-                      top: 0,
-                      height: clusterHeight,
+                      top: hiddenTop,
+                      height: hiddenHeight,
                       left: layout.badge.left,
                       width: layout.badge.width,
                       right: 'auto',
@@ -1123,7 +1158,8 @@ const CalendarGrid = ({
                       right: 'auto',
                     }}
                   />
-                )}
+                  );
+                })()}
                 {!layout.badge && !!onEmptySlotClick && (
                   <button
                     type="button"
@@ -1266,7 +1302,7 @@ const CalendarGrid = ({
                     const layout = getOverlapLayout(cluster.length, minColWidth);
                     const clusterTop = timeToTop(cluster[0].startTime);
                     const clusterHeight = Math.max(
-                      timeToHeight(cluster[0].startTime, cluster[0].endTime),
+                      timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
                       layout.badge ? BADGE_MIN_HEIGHT : 0
                     );
                     return (
@@ -1291,20 +1327,32 @@ const CalendarGrid = ({
                             />
                           );
                         })}
-                        {layout.badge && (
+                        {layout.badge && (() => {
+                          const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
+                          const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                          const hiddenHeight = hidden.length
+                            ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
+                            : clusterHeight;
+                          // Clamp upward so the BADGE_MIN_HEIGHT floor can never push the box past
+                          // the cluster's own bottom edge — shift the top up instead of overflowing.
+                          const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
+                          return (
                           <OverflowBadge
                             key={`badge-${cluster[0].id}`}
                             count={layout.badge.count}
-                            bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                            bookings={hidden}
                             onBookingClick={onBookingClick}
                             onAdd={onEmptySlotClick ? () => {
                               if (activeDragId) return;
-                              const [h, m] = cluster[0].startTime.split(':').map(Number);
+                              // Target the hidden segment's own start time, matching where this
+                              // button now visually sits — not the cluster's overall start.
+                              const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
+                              const [h, m] = anchorTime.split(':').map(Number);
                               onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
                             } : null}
                             style={{
-                              top: 0,
-                              height: clusterHeight,
+                              top: hiddenTop,
+                              height: hiddenHeight,
                               left: layout.badge.left,
                               width: layout.badge.width,
                               right: 'auto',
@@ -1317,7 +1365,8 @@ const CalendarGrid = ({
                               right: 'auto',
                             }}
                           />
-                        )}
+                          );
+                        })()}
                         {!layout.badge && !!onEmptySlotClick && (
                           <button
                             type="button"
