@@ -1119,10 +1119,13 @@ const CalendarGrid = ({
                 })}
                 {layout.badge && (() => {
                   const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
-                  const hiddenTop = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                  const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
                   const hiddenHeight = hidden.length
                     ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
                     : clusterHeight;
+                  // Clamp upward so the BADGE_MIN_HEIGHT floor can never push the box past the
+                  // cluster's own bottom edge — shift the top up instead of letting it overflow.
+                  const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
                   return (
                   <OverflowBadge
                     key={`badge-${cluster[0].id}`}
@@ -1131,7 +1134,13 @@ const CalendarGrid = ({
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? () => {
                       if (activeDragId) return;
-                      const [h, m] = cluster[0].startTime.split(':').map(Number);
+                      // Target the hidden segment's own start time, matching where this button
+                      // now visually sits (see earliestStartTime/hiddenTop above) — not the
+                      // cluster's overall start. Falls back to cluster[0] only if hidden is
+                      // somehow empty (shouldn't happen: layout.badge is only ever truthy when
+                      // cluster.length > MAX_VISIBLE_OVERLAP, so hidden always has ≥1 item).
+                      const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
+                      const [h, m] = anchorTime.split(':').map(Number);
                       onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
                     } : null}
                     style={{
@@ -1320,10 +1329,13 @@ const CalendarGrid = ({
                         })}
                         {layout.badge && (() => {
                           const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
-                          const hiddenTop = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                          const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
                           const hiddenHeight = hidden.length
                             ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
                             : clusterHeight;
+                          // Clamp upward so the BADGE_MIN_HEIGHT floor can never push the box past
+                          // the cluster's own bottom edge — shift the top up instead of overflowing.
+                          const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
                           return (
                           <OverflowBadge
                             key={`badge-${cluster[0].id}`}
@@ -1332,7 +1344,10 @@ const CalendarGrid = ({
                             onBookingClick={onBookingClick}
                             onAdd={onEmptySlotClick ? () => {
                               if (activeDragId) return;
-                              const [h, m] = cluster[0].startTime.split(':').map(Number);
+                              // Target the hidden segment's own start time, matching where this
+                              // button now visually sits — not the cluster's overall start.
+                              const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
+                              const [h, m] = anchorTime.split(':').map(Number);
                               onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
                             } : null}
                             style={{
