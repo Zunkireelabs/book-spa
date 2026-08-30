@@ -1,4 +1,4 @@
--- Migration 133: canonical E.164 phone storage (data backfill + self-healing triggers)
+-- Migration 137: canonical E.164 phone storage (data backfill + self-healing triggers)
 --
 -- Until now every phone number was normalised in JS to "last 10 digits"
 -- (`.replace(/\D/g,'').slice(-10)`). That is correct only for Nepal (+977 plus a
@@ -23,7 +23,9 @@
 --      `customers.phone` would merge two distinct customer rows in one org, so
 --      duplicates are resolved by a human rather than silently collapsed or
 --      hitting `customers_org_nphone_uniq` (migration-036) mid-backfill.
---   3. Backfill `customers.phone` and `bookings.customer_phone` to E.164.
+--   3. Backfill `customers.phone` and `bookings.customer_phone` to E.164 (the
+--      bookings backfill briefly disables trg_enforce_booking_immutability so
+--      locked/Completed bookings' customer_phone still gets normalised).
 --   4. BEFORE INSERT/UPDATE triggers on both columns so every future write —
 --      from any code path, staff form, or ad hoc SQL — is canonicalised too.
 --
@@ -45,6 +47,9 @@
 -- ============================================================
 -- 1. Shared normaliser
 -- ============================================================
+-- Intentionally duplicated in migration-133 (customer-duplicate-merge), which now runs
+-- before this one and depends on this function. CREATE OR REPLACE makes this copy a no-op
+-- when 133 has already run — do not remove either copy.
 
 CREATE OR REPLACE FUNCTION public.normalize_phone_e164(p_raw text)
 RETURNS text
@@ -91,7 +96,7 @@ BEGIN
 
   IF v_org IS NOT NULL THEN
     RAISE EXCEPTION
-      'migration-133: normalising customers.phone would merge % rows in org % onto % — merge/clean these duplicates first: %',
+      'migration-137: normalising customers.phone would merge % rows in org % onto % — merge/clean these duplicates first: %',
       array_length(v_ids, 1), v_org, v_nphone, v_ids;
   END IF;
 END $$;
@@ -105,10 +110,19 @@ SET phone = public.normalize_phone_e164(phone)
 WHERE phone IS NOT NULL
   AND phone IS DISTINCT FROM public.normalize_phone_e164(phone);
 
+-- trg_enforce_booking_immutability (schema.sql) rejects ANY UPDATE on a locked
+-- (day-closed) or Completed booking, including this backfill's own write to
+-- customer_phone. Disable it for just this one-time, system-level normalisation;
+-- future writes to customer_phone on a locked booking still go through the
+-- self-healing trigger below AND remain subject to the immutability check.
+ALTER TABLE public.bookings DISABLE TRIGGER trg_enforce_booking_immutability;
+
 UPDATE public.bookings
 SET customer_phone = public.normalize_phone_e164(customer_phone)
 WHERE customer_phone IS NOT NULL
   AND customer_phone IS DISTINCT FROM public.normalize_phone_e164(customer_phone);
+
+ALTER TABLE public.bookings ENABLE TRIGGER trg_enforce_booking_immutability;
 
 -- ============================================================
 -- 4. Self-healing triggers for every future write
@@ -151,4 +165,4 @@ CREATE TRIGGER bookings_normalize_phone
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('133', 'phone-e164') ON CONFLICT (version) DO NOTHING;
+VALUES ('137', 'phone-e164') ON CONFLICT (version) DO NOTHING;

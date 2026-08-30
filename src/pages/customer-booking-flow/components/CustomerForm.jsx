@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import Input from '../../../components/ui/Input';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import Icon from '../../../components/AppIcon';
-import { checkExistingCustomerByPhone } from '../../../services/api';
+import { checkExistingCustomerByPhone, findCustomerMatch } from '../../../services/api';
 
 const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, selectedService, selectedDateTime, genderPreference, orgSlug }) => {
   const [errors, setErrors] = useState({});
@@ -18,6 +18,11 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
   //   'new'      — confirmed not an existing customer -> referral section shown
   //   'existing' — confirmed existing -> referral section stays hidden, notice shown
   const [customerCheckStatus, setCustomerCheckStatus] = useState('idle');
+  // Actual matching customer record (name + phone/email loosely matched server-side) —
+  // separate from customerCheckStatus above, which only gates referral-section visibility
+  // and stays phone-only. This powers the "use your saved details?" confirm banner.
+  const [matchedCustomer, setMatchedCustomer] = useState(null);
+  const [matchDismissed, setMatchDismissed] = useState(false);
 
   const validateField = (name, value) => {
     const newErrors = { ...errors };
@@ -103,6 +108,12 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
     if (name === 'firstName' || name === 'phone') {
       setCustomerCheckStatus('idle');
     }
+    // Any edit to a field the match was found from invalidates it — re-check on next blur
+    // rather than keep showing a confirm banner for stale input.
+    if (name === 'firstName' || name === 'lastName' || name === 'phone' || name === 'email') {
+      setMatchedCustomer(null);
+      setMatchDismissed(false);
+    }
 
     onCustomerInfoChange({
       ...customerInfo,
@@ -135,6 +146,27 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
     setCustomerCheckStatus(data ? 'existing' : 'new');
   };
 
+  // Looks up the actual matching customer record (name + phone/email loosely matched
+  // server-side) once enough of name+phone/email are filled in. Separate from the
+  // phone-only existing/new check above — this one powers the confirm-autofill banner and
+  // requires the name to match too (anon-safe RPC, see migration-136).
+  const maybeFindCustomerMatch = async (nameValue, phoneValue, emailValue) => {
+    if (matchDismissed) return;
+    const hasName = nameValue.trim().length > 0;
+    const hasPhone = phoneValue.replace(/\D/g, '').length >= 7;
+    const hasEmail = emailValue.trim().length > 0;
+    if (!hasName || (!hasPhone && !hasEmail)) return;
+
+    const { data } = await findCustomerMatch(
+      orgSlug,
+      nameValue,
+      hasPhone ? phoneValue : null,
+      hasEmail ? emailValue : null,
+      customerInfo.phoneCountryCode || '+977'
+    );
+    setMatchedCustomer(data || null);
+  };
+
   const handleBlur = async (e) => {
     const { name, value } = e.target;
     setIsValidating(true);
@@ -145,6 +177,30 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
       const phoneValue = name === 'phone' ? value : customerInfo.phone || '';
       await maybeCheckExistingCustomer(nameValue, phoneValue);
     }
+
+    if (name === 'firstName' || name === 'lastName' || name === 'phone' || name === 'email') {
+      const firstNameValue = name === 'firstName' ? value : customerInfo.firstName || '';
+      const lastNameValue = name === 'lastName' ? value : customerInfo.lastName || '';
+      const fullNameValue = `${firstNameValue} ${lastNameValue}`.trim();
+      const phoneValue = name === 'phone' ? value : customerInfo.phone || '';
+      const emailValue = name === 'email' ? value : customerInfo.email || '';
+      await maybeFindCustomerMatch(fullNameValue, phoneValue, emailValue);
+    }
+  };
+
+  const acceptCustomerMatch = () => {
+    if (!matchedCustomer) return;
+    onCustomerInfoChange({
+      ...customerInfo,
+      gender: customerInfo.gender || matchedCustomer.gender || '',
+    });
+    setMatchedCustomer(null);
+    setMatchDismissed(true);
+  };
+
+  const dismissCustomerMatch = () => {
+    setMatchedCustomer(null);
+    setMatchDismissed(true);
   };
 
   const validateAllFields = () => {
@@ -236,7 +292,37 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-6">
           Personal Information
         </h3>
-        
+
+        {matchedCustomer && (
+          <div className="mb-6 flex items-start gap-3 rounded-spa-lg border border-primary/30 bg-primary/5 p-4">
+            <Icon name="UserCheck" size={18} className="text-primary flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="font-body font-body-medium text-sm text-text-primary">
+                We found your info — use it?
+              </p>
+              <p className="font-body font-body-normal text-xs text-text-secondary mt-0.5">
+                Looks like you've booked with us before under this name.
+              </p>
+              <div className="flex gap-3 mt-2">
+                <button
+                  type="button"
+                  onClick={acceptCustomerMatch}
+                  className="font-body font-body-medium text-xs text-primary hover:underline spa-touch-target"
+                >
+                  Yes, that's me
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissCustomerMatch}
+                  className="font-body font-body-normal text-xs text-text-secondary hover:underline spa-touch-target"
+                >
+                  No, this is different
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
           {/* First Name */}
           <div className="space-y-2">
@@ -347,7 +433,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               ].map((option) => (
                 <label
                   key={option.value}
-                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast spa-touch-target ${
                     customerInfo.gender === option.value
                       ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
                   }`}
@@ -393,7 +479,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               ].map((option) => (
                 <label
                   key={option.value}
-                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast spa-touch-target ${
                     customerInfo.referralSource === option.value
                       ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
                   }`}

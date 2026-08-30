@@ -175,6 +175,26 @@ function clusterOverlapping(bookings) {
   return clusters;
 }
 
+// True end time of a cluster — the latest endTime across ALL members, not
+// just cluster[0] (the earliest-STARTING member, which sort order guarantees,
+// but which can easily have an earlier end than a later-starting member it
+// transitively overlaps through a third booking). Using cluster[0].endTime
+// alone under-sizes the cluster's rendered box whenever that happens, which
+// visually clips the "+N more" badge into the wrong time range — it renders
+// within the earliest member's span even when the hidden booking(s) it
+// represents start later, making a booking near the END of a wide cluster
+// look like it's happening near the cluster's start until you click it.
+function clusterEndTime(cluster) {
+  return cluster.reduce((max, b) => (b.endTime > max ? b.endTime : max), cluster[0].endTime);
+}
+
+// Earliest startTime across a set of bookings — symmetric counterpart to
+// clusterEndTime(). Used to position the collapsed overflow badge at the
+// actual time span of the bookings it hides, not the whole cluster's span.
+function earliestStartTime(items) {
+  return items.reduce((min, b) => (b.startTime < min ? b.startTime : min), items[0].startTime);
+}
+
 // The overflow badge only ever needs to fit "+N" — giving it a full card-width
 // slot (the old behavior) squeezed the two real cards into equal thirds. It
 // gets a fixed narrow width instead (clamped so it stays legible in very
@@ -231,6 +251,50 @@ function getOverlapLayout(clusterSize, columnWidth) {
   }
 
   return { cards, badge };
+}
+
+// Single source of truth for resolving a non-shared booking's assigned
+// therapist for display and column-bucketing. Two storage representations
+// exist for the same fact — the flat bookings.therapist_id column (primary)
+// and the booking_therapists junction table (secondary/legacy source, also
+// used for shared/multi-therapist bookings via a separate path) — plus a
+// third, independent axis: whether that therapist is visible under the
+// CURRENT view filter (All Positions / attendance-absent / service-only).
+// Every call site that needs "which therapist does this booking belong to"
+// must go through this function. Do not re-derive this inline at a new call
+// site — extend the truth table this function encodes instead.
+function resolveSingleTherapist(booking, therapistMap) {
+  const junctionRow = booking.booking_therapists?.length === 1 ? booking.booking_therapists[0] : null;
+
+  // Priority order: flat column first (primary), junction row second.
+  const candidates = [
+    booking.therapist_id ? { id: booking.therapist_id, name: booking.therapist?.name || null } : null,
+    junctionRow ? { id: junctionRow.therapist_id, name: junctionRow.therapist?.name || null } : null,
+  ].filter(Boolean);
+
+  // First candidate that's actually visible in the current filtered view wins.
+  const visible = candidates.find(c => isTherapistVisible(c.id, therapistMap));
+
+  // Display name is always populated if ANY candidate exists — prefer the
+  // resolved-visible candidate's live name (reflects renames), else fall
+  // back to the highest-priority (flat) candidate's embedded snapshot name
+  // so the card never goes blank just because the therapist is currently
+  // absent/filtered.
+  const displayName = visible
+    ? (therapistMap[visible.id] || visible.name)
+    : (candidates[0]?.name || null);
+
+  return {
+    id: visible ? visible.id : null,   // colId / baseEntry.therapistId — null means treat as unassigned
+    name: displayName,                  // baseEntry.therapistName — always populated if any assignment exists
+  };
+}
+
+// Shared visibility check, used by resolveSingleTherapist above AND by the
+// isShared (multi-therapist) per-entry loop below — do not duplicate this
+// check inline at either site.
+function isTherapistVisible(therapistId, therapistMap) {
+  return therapistMap[therapistId] !== undefined;
 }
 
 // Single droppable column component (replaces 144 tiny zones per column)
@@ -700,10 +764,10 @@ const CalendarGrid = ({
 
       const startTime = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
       const endTime = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
-      const therapistName = b.booking_therapists?.length > 0
-        ? b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ')
-        : (therapistMap[b.therapist_id] || null);
       const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
+      const { id: visibleTherapistId, name: therapistName } = isShared
+        ? { id: null, name: b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ') }
+        : resolveSingleTherapist(b, therapistMap);
 
       const baseEntry = {
         id: b.id,
@@ -720,7 +784,7 @@ const CalendarGrid = ({
         endTime,
         createdAt: b.created_at || null,
         date: bookingDate,
-        therapistId: b.therapist_id,
+        therapistId: visibleTherapistId,
         roomId: b.room_id,
         therapistName,
         roomName: b.room?.name || roomMap[b.room_id] || null,
@@ -742,6 +806,10 @@ const CalendarGrid = ({
 
         b.booking_therapists.forEach(bt => {
           const colId = bt.therapist_id;
+          // Skip co-therapists currently filtered out of view — same reasoning as
+          // resolveSingleTherapist: an id with no rendered column must not create
+          // a silent orphan bucket.
+          if (!isTherapistVisible(colId, therapistMap)) return;
           if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
           map[bookingDate][colId].push({
             ...baseEntry,
@@ -756,7 +824,7 @@ const CalendarGrid = ({
       } else {
         const colId = columnMode === 'room'
           ? (b.room_id || 'unassigned')
-          : (b.therapist_id || 'unassigned');
+          : (visibleTherapistId || 'unassigned');
         if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
         map[bookingDate][colId].push(baseEntry);
       }
@@ -1020,7 +1088,7 @@ const CalendarGrid = ({
             const layout = getOverlapLayout(cluster.length, minColWidth);
             const clusterTop = timeToTop(cluster[0].startTime);
             const clusterHeight = Math.max(
-              timeToHeight(cluster[0].startTime, cluster[0].endTime),
+              timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
               layout.badge ? BADGE_MIN_HEIGHT : 0
             );
             return (
@@ -1049,20 +1117,35 @@ const CalendarGrid = ({
                     />
                   );
                 })}
-                {layout.badge && (
+                {layout.badge && (() => {
+                  const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
+                  const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                  const hiddenHeight = hidden.length
+                    ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
+                    : clusterHeight;
+                  // Clamp upward so the BADGE_MIN_HEIGHT floor can never push the box past the
+                  // cluster's own bottom edge — shift the top up instead of letting it overflow.
+                  const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
+                  return (
                   <OverflowBadge
                     key={`badge-${cluster[0].id}`}
                     count={layout.badge.count}
-                    bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                    bookings={hidden}
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? () => {
                       if (activeDragId) return;
-                      const [h, m] = cluster[0].startTime.split(':').map(Number);
+                      // Target the hidden segment's own start time, matching where this button
+                      // now visually sits (see earliestStartTime/hiddenTop above) — not the
+                      // cluster's overall start. Falls back to cluster[0] only if hidden is
+                      // somehow empty (shouldn't happen: layout.badge is only ever truthy when
+                      // cluster.length > MAX_VISIBLE_OVERLAP, so hidden always has ≥1 item).
+                      const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
+                      const [h, m] = anchorTime.split(':').map(Number);
                       onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
                     } : null}
                     style={{
-                      top: 0,
-                      height: clusterHeight,
+                      top: hiddenTop,
+                      height: hiddenHeight,
                       left: layout.badge.left,
                       width: layout.badge.width,
                       right: 'auto',
@@ -1075,7 +1158,8 @@ const CalendarGrid = ({
                       right: 'auto',
                     }}
                   />
-                )}
+                  );
+                })()}
                 {!layout.badge && !!onEmptySlotClick && (
                   <button
                     type="button"
@@ -1218,7 +1302,7 @@ const CalendarGrid = ({
                     const layout = getOverlapLayout(cluster.length, minColWidth);
                     const clusterTop = timeToTop(cluster[0].startTime);
                     const clusterHeight = Math.max(
-                      timeToHeight(cluster[0].startTime, cluster[0].endTime),
+                      timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
                       layout.badge ? BADGE_MIN_HEIGHT : 0
                     );
                     return (
@@ -1243,20 +1327,32 @@ const CalendarGrid = ({
                             />
                           );
                         })}
-                        {layout.badge && (
+                        {layout.badge && (() => {
+                          const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
+                          const hiddenTopRaw = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                          const hiddenHeight = hidden.length
+                            ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
+                            : clusterHeight;
+                          // Clamp upward so the BADGE_MIN_HEIGHT floor can never push the box past
+                          // the cluster's own bottom edge — shift the top up instead of overflowing.
+                          const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
+                          return (
                           <OverflowBadge
                             key={`badge-${cluster[0].id}`}
                             count={layout.badge.count}
-                            bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                            bookings={hidden}
                             onBookingClick={onBookingClick}
                             onAdd={onEmptySlotClick ? () => {
                               if (activeDragId) return;
-                              const [h, m] = cluster[0].startTime.split(':').map(Number);
+                              // Target the hidden segment's own start time, matching where this
+                              // button now visually sits — not the cluster's overall start.
+                              const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
+                              const [h, m] = anchorTime.split(':').map(Number);
                               onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
                             } : null}
                             style={{
-                              top: 0,
-                              height: clusterHeight,
+                              top: hiddenTop,
+                              height: hiddenHeight,
                               left: layout.badge.left,
                               width: layout.badge.width,
                               right: 'auto',
@@ -1269,7 +1365,8 @@ const CalendarGrid = ({
                               right: 'auto',
                             }}
                           />
-                        )}
+                          );
+                        })()}
                         {!layout.badge && !!onEmptySlotClick && (
                           <button
                             type="button"

@@ -53,19 +53,6 @@ const BookingSuccess = ({ bookingData }) => {
     }).format(price);
   };
 
-  const generateModificationLink = () => {
-    return `https://bookspa.com/modify/${bookingData?.bookingId}`;
-  };
-
-  const generateCancellationLink = () => {
-    return `https://bookspa.com/cancel/${bookingData?.bookingId}`;
-  };
-
-  const handleCopyLink = (link, type) => {
-    navigator.clipboard.writeText(link);
-    // You could add a toast notification here
-  };
-
   const handleNewBooking = () => {
     navigate('/customer-booking-flow');
   };
@@ -229,60 +216,6 @@ const BookingSuccess = ({ bookingData }) => {
             )}
           </div>
         )}
-      </div>
-
-      {/* Management Links */}
-      <div className="bg-surface rounded-spa-lg border border-border p-6">
-        <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
-          Manage Your Booking
-        </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-3 bg-background rounded-spa">
-            <div className="flex items-center space-x-3">
-              <Icon name="Edit" size={16} className="text-primary" />
-              <div>
-                <span className="font-body font-body-medium text-sm text-text-primary">
-                  Modify Booking
-                </span>
-                <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                  Change date, time, or service
-                </p>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleCopyLink(generateModificationLink(), 'modify')}
-              iconName="Copy"
-              iconSize={14}
-            >
-              Copy Link
-            </Button>
-          </div>
-
-          <div className="flex items-center justify-between p-3 bg-background rounded-spa">
-            <div className="flex items-center space-x-3">
-              <Icon name="X" size={16} className="text-error" />
-              <div>
-                <span className="font-body font-body-medium text-sm text-text-primary">
-                  Cancel Booking
-                </span>
-                <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                  Cancel at least 24 hours in advance
-                </p>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleCopyLink(generateCancellationLink(), 'cancel')}
-              iconName="Copy"
-              iconSize={14}
-            >
-              Copy Link
-            </Button>
-          </div>
-        </div>
       </div>
 
       {/* QR Code */}

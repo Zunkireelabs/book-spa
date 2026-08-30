@@ -81,4 +81,4 @@ CREATE TRIGGER trg_online_capacity_check
   EXECUTE FUNCTION check_branch_online_capacity();
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('134', 'branch-online-capacity') ON CONFLICT (version) DO NOTHING;
+VALUES ('138', 'branch-online-capacity') ON CONFLICT (version) DO NOTHING;

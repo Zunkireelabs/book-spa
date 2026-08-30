@@ -2472,21 +2472,27 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
     //    old therapist_id here causes the card to render the previous name even
     //    though bookings.therapist_id was updated. Shared-booking reassignment
     //    goes through assignTherapist and never reaches this path.
-    if (newTherapistId !== undefined) {
-      await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
-      if (newTherapistId !== 'unassigned' && newTherapistId !== null) {
-        await supabase.from('booking_therapists').insert({
-          booking_id: bookingId,
-          therapist_id: newTherapistId,
-          start_time: updated.start_time,
-          end_time: updated.end_time,
-        });
+    try {
+      if (newTherapistId !== undefined) {
+        await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
+        if (newTherapistId !== 'unassigned' && newTherapistId !== null) {
+          await supabase.from('booking_therapists').insert({
+            booking_id: bookingId,
+            therapist_id: newTherapistId,
+            start_time: updated.start_time,
+            end_time: updated.end_time,
+          });
+        }
+      } else {
+        await supabase
+          .from('booking_therapists')
+          .update({ start_time: updated.start_time, end_time: updated.end_time })
+          .eq('booking_id', bookingId);
       }
-    } else {
-      await supabase
-        .from('booking_therapists')
-        .update({ start_time: updated.start_time, end_time: updated.end_time })
-        .eq('booking_id', bookingId);
+    } catch (junctionError) {
+      // Best-effort: booking row is already updated and correct. Don't fail
+      // the whole reschedule if this secondary sync write errors.
+      console.error('[API] rescheduleBooking booking_therapists sync error:', junctionError.message);
     }
 
     return {
@@ -4180,6 +4186,33 @@ export async function checkExistingCustomerByPhone(orgSlug, phone, countryCode =
   }
 }
 
+// Surfaces the actual matching customer (not just a boolean) so the public flow can offer
+// "use your saved details?" — gated server-side to only match when the visitor-provided name
+// also matches, to avoid a PII-enumeration surface on this anon-accessible RPC.
+export async function findCustomerMatch(orgSlug, name, phone, email, countryCode = '+977') {
+  try {
+    const normalizedPhone = phone ? toE164(phone, countryCode) : null;
+    const trimmedName = (name || '').trim();
+    const trimmedEmail = (email || '').trim();
+    if (!orgSlug || !trimmedName || (!normalizedPhone && !trimmedEmail)) {
+      return { data: null, error: null };
+    }
+
+    const { data, error } = await supabase.rpc('public_find_customer_match', {
+      p_org_slug: orgSlug,
+      p_name: trimmedName,
+      p_phone: normalizedPhone,
+      p_email: trimmedEmail || null,
+    });
+
+    if (error) throw error;
+    return { data: data?.[0] || null, error: null };
+  } catch (error) {
+    console.error('[API] findCustomerMatch error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Manager/admin explicitly picks Wallet or Voucher for a pending Client referral
 // (customer-facing "how were you referred" flow) and credits it immediately.
 // Used by BookingActionModal.jsx's referral reward picker.
@@ -5570,6 +5603,50 @@ export async function fetchCustomers(branchId) {
     return { data: enriched, error: null };
   } catch (error) {
     console.error('[API] fetchCustomers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Potential-duplicates review (migration-135). Dynamic — re-queries current
+// phone-collision groups every call, excluding pairs already dismissed as "not a duplicate".
+export async function fetchDuplicateCandidates(orgId) {
+  try {
+    if (!orgId) return { data: null, error: { code: 'ORG_REQUIRED', message: 'Org ID is required.' } };
+    const { data, error } = await supabase.rpc('customer_duplicate_candidates', { p_org_id: orgId });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchDuplicateCandidates error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Irreversible: repoints every FK table onto the canonical row and deletes the duplicate.
+// Manager/admin only — enforced inside the RPC itself, not just RLS.
+export async function mergeCustomers(canonicalId, duplicateId) {
+  try {
+    const { error } = await supabase.rpc('merge_customers', {
+      p_canonical_id: canonicalId,
+      p_duplicate_id: duplicateId,
+    });
+    if (error) throw error;
+    return { data: true, error: null };
+  } catch (error) {
+    console.error('[API] mergeCustomers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function dismissDuplicateCandidate(orgId, customerIdA, customerIdB) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('customer_duplicate_dismissals')
+      .insert({ org_id: orgId, customer_id_a: customerIdA, customer_id_b: customerIdB, dismissed_by: user?.id || null });
+    if (error) throw error;
+    return { data: true, error: null };
+  } catch (error) {
+    console.error('[API] dismissDuplicateCandidate error:', error.message);
     return { data: null, error };
   }
 }
