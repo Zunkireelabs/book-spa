@@ -188,6 +188,13 @@ function clusterEndTime(cluster) {
   return cluster.reduce((max, b) => (b.endTime > max ? b.endTime : max), cluster[0].endTime);
 }
 
+// Earliest startTime across a set of bookings — symmetric counterpart to
+// clusterEndTime(). Used to position the collapsed overflow badge at the
+// actual time span of the bookings it hides, not the whole cluster's span.
+function earliestStartTime(items) {
+  return items.reduce((min, b) => (b.startTime < min ? b.startTime : min), items[0].startTime);
+}
+
 // The overflow badge only ever needs to fit "+N" — giving it a full card-width
 // slot (the old behavior) squeezed the two real cards into equal thirds. It
 // gets a fixed narrow width instead (clamped so it stays legible in very
@@ -1110,11 +1117,17 @@ const CalendarGrid = ({
                     />
                   );
                 })}
-                {layout.badge && (
+                {layout.badge && (() => {
+                  const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
+                  const hiddenTop = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                  const hiddenHeight = hidden.length
+                    ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
+                    : clusterHeight;
+                  return (
                   <OverflowBadge
                     key={`badge-${cluster[0].id}`}
                     count={layout.badge.count}
-                    bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                    bookings={hidden}
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? () => {
                       if (activeDragId) return;
@@ -1122,8 +1135,8 @@ const CalendarGrid = ({
                       onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
                     } : null}
                     style={{
-                      top: 0,
-                      height: clusterHeight,
+                      top: hiddenTop,
+                      height: hiddenHeight,
                       left: layout.badge.left,
                       width: layout.badge.width,
                       right: 'auto',
@@ -1136,7 +1149,8 @@ const CalendarGrid = ({
                       right: 'auto',
                     }}
                   />
-                )}
+                  );
+                })()}
                 {!layout.badge && !!onEmptySlotClick && (
                   <button
                     type="button"
@@ -1304,11 +1318,17 @@ const CalendarGrid = ({
                             />
                           );
                         })}
-                        {layout.badge && (
+                        {layout.badge && (() => {
+                          const hidden = cluster.slice(MAX_VISIBLE_OVERLAP);
+                          const hiddenTop = hidden.length ? timeToTop(earliestStartTime(hidden)) - clusterTop : 0;
+                          const hiddenHeight = hidden.length
+                            ? Math.max(timeToHeight(earliestStartTime(hidden), clusterEndTime(hidden)), BADGE_MIN_HEIGHT)
+                            : clusterHeight;
+                          return (
                           <OverflowBadge
                             key={`badge-${cluster[0].id}`}
                             count={layout.badge.count}
-                            bookings={cluster.slice(MAX_VISIBLE_OVERLAP)}
+                            bookings={hidden}
                             onBookingClick={onBookingClick}
                             onAdd={onEmptySlotClick ? () => {
                               if (activeDragId) return;
@@ -1316,8 +1336,8 @@ const CalendarGrid = ({
                               onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
                             } : null}
                             style={{
-                              top: 0,
-                              height: clusterHeight,
+                              top: hiddenTop,
+                              height: hiddenHeight,
                               left: layout.badge.left,
                               width: layout.badge.width,
                               right: 'auto',
@@ -1330,7 +1350,8 @@ const CalendarGrid = ({
                               right: 'auto',
                             }}
                           />
-                        )}
+                          );
+                        })()}
                         {!layout.badge && !!onEmptySlotClick && (
                           <button
                             type="button"
