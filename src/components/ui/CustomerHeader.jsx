@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useTenant } from 'contexts/TenantContext';
@@ -8,7 +8,6 @@ import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 const CustomerHeader = () => {
   const location = useLocation();
   const { orgSlug } = useParams();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const headerRef = useRef(null);
   // Height varies by breakpoint (h-auto min-h-16 py-3 on mobile vs a fixed
   // h-16 from sm up) and can grow further if org branding text wraps —
@@ -99,14 +98,15 @@ const CustomerHeader = () => {
             {/* Phone Contact */}
             <a
               href="tel:+977-1-4441234"
-              className="hidden sm:flex items-center space-x-2 px-3 py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group flex-shrink-0"
+              aria-label="Call +977-1-4441234"
+              className="flex items-center justify-center sm:justify-start space-x-0 sm:space-x-2 px-0 sm:px-3 py-0 sm:py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group flex-shrink-0 spa-touch-target"
             >
               <Icon
                 name="Phone"
                 size={16}
                 className="text-primary group-hover:text-primary/80"
               />
-              <span className="font-body font-body-medium text-sm text-text-primary">
+              <span className="hidden sm:inline font-body font-body-medium text-sm text-text-primary">
                 +977-1-4441234
               </span>
             </a>
@@ -128,47 +128,8 @@ const CustomerHeader = () => {
               <Icon name="MessageCircle" size={16} className="hidden sm:block" />
               <span className="hidden sm:inline font-body font-body-medium text-sm">Support</span>
             </button>
-
-            {/* Mobile Menu */}
-            <div className="md:hidden flex-shrink-0">
-              <button
-                onClick={() => setMobileMenuOpen((open) => !open)}
-                aria-label="Menu"
-                aria-expanded={mobileMenuOpen}
-                className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target"
-              >
-                <Icon name={mobileMenuOpen ? 'X' : 'Menu'} size={20} className="text-text-primary" />
-              </button>
-            </div>
           </div>
         </div>
-
-        {/* Mobile Navigation — collapsed under the menu button so the header stays a
-            stable 64px on every breakpoint (the booking flow's fixed progress bar sits
-            directly under it). Absolutely positioned so opening it never changes header height. */}
-        {mobileMenuOpen && (
-          <div className="md:hidden absolute left-0 right-0 top-full border-b border-border bg-surface shadow-spa-elevated">
-            <nav className="flex items-center justify-around py-3">
-              <Link
-                to={bookingPath}
-                onClick={() => setMobileMenuOpen(false)}
-                className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
-                  isBookingFlow ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
-                }`}
-              >
-                <Icon name="Calendar" size={20} />
-                <span className="font-caption font-caption-normal text-xs">Book</span>
-              </Link>
-              <a
-                href="tel:+977-1-4441234"
-                className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
-              >
-                <Icon name="Phone" size={20} />
-                <span className="font-caption font-caption-normal text-xs">Call</span>
-              </a>
-            </nav>
-          </div>
-        )}
       </div>
     </header>
   );

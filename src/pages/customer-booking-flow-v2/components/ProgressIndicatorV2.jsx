@@ -51,7 +51,7 @@ const ProgressIndicatorV2 = ({ currentStep, totalSteps }) => {
           ))}
         </div>
 
-        <div className="sm:hidden mt-0.5 text-center leading-tight">
+        <div className="sm:hidden mt-2 text-center leading-tight">
           <span className="font-body font-body-medium text-sm text-text-primary">
             Step {currentStep} of {totalSteps}: {steps[currentStep - 1]?.label}
           </span>
