@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import Icon from '../../../components/AppIcon';
+import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
 // Same visual language as the v1 ProgressIndicator, but with the Service and Date & Time
 // steps collapsed into one ("Service & Time") since v2 books them side-by-side in one step.
@@ -11,8 +12,15 @@ const ProgressIndicatorV2 = ({ currentStep, totalSteps }) => {
     { id: 4, label: 'Confirm', icon: 'CheckCircle' }
   ];
 
+  const barRef = useRef(null);
+  useMeasuredHeightVar(barRef, '--progress-indicator-h');
+
   return (
-    <div className="w-full bg-surface border-b border-border sticky top-16 left-0 right-0 z-header">
+    <div
+      ref={barRef}
+      className="w-full bg-surface border-b border-border sticky left-0 right-0 z-header"
+      style={{ top: 'var(--customer-header-h, 64px)' }}
+    >
       <div className="max-w-4xl mx-auto px-4 py-1 sm:py-2">
         <div className="flex items-center">
           {steps.map((step, index) => (

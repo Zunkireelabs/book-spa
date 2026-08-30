@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import Icon from '../../../components/AppIcon';
+import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
 const ProgressIndicator = ({ currentStep, totalSteps }) => {
   const steps = [
@@ -10,8 +11,15 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
     { id: 5, label: 'Confirm', icon: 'CheckCircle' }
   ];
 
+  const barRef = useRef(null);
+  useMeasuredHeightVar(barRef, '--progress-indicator-h');
+
   return (
-    <div className="w-full bg-surface border-b border-border fixed top-16 left-0 right-0 z-header">
+    <div
+      ref={barRef}
+      className="w-full bg-surface border-b border-border fixed left-0 right-0 z-header"
+      style={{ top: 'var(--customer-header-h, 64px)' }}
+    >
       <div className="max-w-4xl mx-auto px-4 py-1 sm:py-2">
         <div className="flex items-center">
           {steps.map((step, index) => (

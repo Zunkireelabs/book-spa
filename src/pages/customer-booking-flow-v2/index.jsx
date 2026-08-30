@@ -158,9 +158,16 @@ const CustomerBookingFlowV2 = () => {
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
+    // The real button's position shifts once the step's data (services, slots)
+    // finishes an async load, which fires neither a scroll nor a resize event —
+    // watch the page's own height so a late-loading list doesn't leave the
+    // floating button's visibility stuck on a stale pre-load position.
+    const resizeObserver = new ResizeObserver(onScroll);
+    resizeObserver.observe(document.body);
     return () => {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
+      resizeObserver.disconnect();
     };
   }, [currentStep, selectedService]);
 
@@ -177,9 +184,14 @@ const CustomerBookingFlowV2 = () => {
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
+    // Same as above: branches load async, so the real button's position (right
+    // after the branch cards) can shift after this effect's initial measurement.
+    const resizeObserver = new ResizeObserver(onScroll);
+    resizeObserver.observe(document.body);
     return () => {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
+      resizeObserver.disconnect();
     };
   }, [currentStep, selectedBranch]);
 
@@ -409,7 +421,7 @@ const CustomerBookingFlowV2 = () => {
   const wideOpen = currentStep === 2 && selectedService !== null;
 
   return (
-    <div className="min-h-screen bg-background pt-16">
+    <div className="min-h-screen bg-background" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
       <CustomerHeader />
 
       {currentStep < 5 && (

@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
+import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
 const CustomerHeader = () => {
   const location = useLocation();
   const { orgSlug } = useParams();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const headerRef = useRef(null);
+  // Height varies by breakpoint (h-auto min-h-16 py-3 on mobile vs a fixed
+  // h-16 from sm up) and can grow further if org branding text wraps —
+  // publish the real measured height so fixed/sticky elements stacked under
+  // this header (progress bars, sticky filters, content padding-top) never
+  // hardcode a stale 64px and end up overlapping it.
+  useMeasuredHeightVar(headerRef, '--customer-header-h');
 
   // Try to get tenant context, but don't fail if not available
   let tenantData = { orgName: 'Zennly', isCleaning: false, isSalon: false };
@@ -44,7 +52,7 @@ const CustomerHeader = () => {
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
+    <header ref={headerRef} className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
       <div className="relative max-w-7xl mx-auto pl-4 pr-2 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
@@ -115,7 +123,7 @@ const CustomerHeader = () => {
             </Link>
 
             {/* Support Button */}
-            <button className="flex items-center justify-center space-x-2 w-9 h-9 sm:w-auto sm:h-auto px-0 py-0 sm:px-4 sm:py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast sm:spa-touch-target flex-shrink-0">
+            <button className="flex items-center justify-center space-x-2 sm:w-auto sm:h-auto px-0 py-0 sm:px-4 sm:py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target flex-shrink-0">
               <Icon name="MessageCircle" size={14} className="sm:hidden" />
               <Icon name="MessageCircle" size={16} className="hidden sm:block" />
               <span className="hidden sm:inline font-body font-body-medium text-sm">Support</span>

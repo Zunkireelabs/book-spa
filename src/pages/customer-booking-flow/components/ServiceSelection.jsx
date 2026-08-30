@@ -115,7 +115,10 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          <div className="sticky top-[141px] sm:top-[131px] z-sticky-filter bg-background pt-7 pb-2">
+          <div
+            className="sticky z-sticky-filter bg-background pt-7 pb-2"
+            style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
+          >
             <div className="text-center mb-3">
               <div className="flex items-center justify-center space-x-2 mb-1">
                 <Icon name="Sparkles" size={20} className="text-primary" />
