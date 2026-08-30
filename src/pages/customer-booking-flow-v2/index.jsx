@@ -34,6 +34,13 @@ const CustomerBookingFlowV2 = () => {
   // on top of, the real one once the customer reaches the bottom of the page.
   const [showFloatingPrev, setShowFloatingPrev] = useState(false);
   const prevBtnRef = useRef(null);
+  // Same pattern for step 1's "Enter Details" button: floats on the right from the
+  // moment the customer lands on the branch list, then stops (hides) the instant
+  // the real button — rendered in its normal spot right after the branch cards,
+  // right-aligned even on mobile, see enterDetailsBtnRef — scrolls into view. It
+  // "docks" there instead of continuing to float past it.
+  const [showFloatingEnterDetails, setShowFloatingEnterDetails] = useState(false);
+  const enterDetailsBtnRef = useRef(null);
 
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);
@@ -156,6 +163,27 @@ const CustomerBookingFlowV2 = () => {
       window.removeEventListener('resize', onScroll);
     };
   }, [currentStep, selectedService]);
+
+  useEffect(() => {
+    if (currentStep !== 1) {
+      setShowFloatingEnterDetails(false);
+      return;
+    }
+    const onScroll = () => {
+      const realBtnRect = enterDetailsBtnRef.current?.getBoundingClientRect();
+      const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
+      setShowFloatingEnterDetails(!realBtnVisible);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [currentStep, selectedBranch]);
+
+
 
   const handleNext = async () => {
     if (!canProceed()) return;
@@ -416,13 +444,13 @@ const CustomerBookingFlowV2 = () => {
           </div>
         )}
 
-        <div className="mb-8">
+        <div className="mb-4 sm:mb-8">
           {renderStepContent()}
         </div>
 
         {/* Navigation — step 2 has its own Continue button inside the booking panel */}
         {currentStep < 5 && currentStep !== 2 && (
-          <div className="flex flex-col sm:flex-row gap-4 justify-between">
+          <div ref={currentStep === 1 ? enterDetailsBtnRef : undefined} className="flex flex-col sm:flex-row gap-2 sm:gap-4 justify-between">
             <div className="flex space-x-4">
               {currentStep > 1 && (
                 <Button
@@ -500,6 +528,23 @@ const CustomerBookingFlowV2 = () => {
               className="bg-surface shadow-spa-elevated"
             >
               Previous
+            </Button>
+          </div>
+        )}
+
+        {currentStep === 1 && showFloatingEnterDetails && (
+          <div className="lg:hidden fixed bottom-4 right-4 z-dropdown">
+            <Button
+              variant="primary"
+              onClick={handleNext}
+              iconName="ChevronRight"
+              iconPosition="right"
+              iconSize={16}
+              disabled={!canProceed() || isLoading}
+              loading={isLoading}
+              className="spa-touch-target shadow-spa-elevated"
+            >
+              Enter Details
             </Button>
           </div>
         )}

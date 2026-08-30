@@ -71,7 +71,7 @@ const BookingConfirmation = ({
   };
 
   const formatPrice = (price) => {
-    return new Intl.NumberFormat('ne-NP', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'NPR',
       minimumFractionDigits: 0
