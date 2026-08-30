@@ -175,6 +175,19 @@ function clusterOverlapping(bookings) {
   return clusters;
 }
 
+// True end time of a cluster — the latest endTime across ALL members, not
+// just cluster[0] (the earliest-STARTING member, which sort order guarantees,
+// but which can easily have an earlier end than a later-starting member it
+// transitively overlaps through a third booking). Using cluster[0].endTime
+// alone under-sizes the cluster's rendered box whenever that happens, which
+// visually clips the "+N more" badge into the wrong time range — it renders
+// within the earliest member's span even when the hidden booking(s) it
+// represents start later, making a booking near the END of a wide cluster
+// look like it's happening near the cluster's start until you click it.
+function clusterEndTime(cluster) {
+  return cluster.reduce((max, b) => (b.endTime > max ? b.endTime : max), cluster[0].endTime);
+}
+
 // The overflow badge only ever needs to fit "+N" — giving it a full card-width
 // slot (the old behavior) squeezed the two real cards into equal thirds. It
 // gets a fixed narrow width instead (clamped so it stays legible in very
@@ -1068,7 +1081,7 @@ const CalendarGrid = ({
             const layout = getOverlapLayout(cluster.length, minColWidth);
             const clusterTop = timeToTop(cluster[0].startTime);
             const clusterHeight = Math.max(
-              timeToHeight(cluster[0].startTime, cluster[0].endTime),
+              timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
               layout.badge ? BADGE_MIN_HEIGHT : 0
             );
             return (
@@ -1266,7 +1279,7 @@ const CalendarGrid = ({
                     const layout = getOverlapLayout(cluster.length, minColWidth);
                     const clusterTop = timeToTop(cluster[0].startTime);
                     const clusterHeight = Math.max(
-                      timeToHeight(cluster[0].startTime, cluster[0].endTime),
+                      timeToHeight(cluster[0].startTime, clusterEndTime(cluster)),
                       layout.badge ? BADGE_MIN_HEIGHT : 0
                     );
                     return (
