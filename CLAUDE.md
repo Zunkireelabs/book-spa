@@ -242,7 +242,7 @@ Cancelled  Cancelled / No Show (terminal)
 
 | Role | Max Discount |
 |------|-------------|
-| staff | 15% (can request up to 50% from a manager/admin) |
+| staff | **50% direct-apply — TEMPORARY, raised from 15% on 2026-08-31.** No manager approval step while this is in effect; the request-to-approver path is unreachable since direct-apply now equals the hard ceiling. Revert by lowering `DISCOUNT_LIMITS.staff` back to `0.15` in `api.js`. |
 | manager | 100% |
 | admin | 100% |
 

@@ -4,7 +4,7 @@ import Button from '../../../components/ui/Button';
 import ServiceSelection from '../../customer-booking-flow/components/ServiceSelection';
 import DateTimeSelection from '../../customer-booking-flow/components/DateTimeSelection';
 
-const formatPrice = (price) => new Intl.NumberFormat('ne-NP', {
+const formatPrice = (price) => new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'NPR',
   minimumFractionDigits: 0
