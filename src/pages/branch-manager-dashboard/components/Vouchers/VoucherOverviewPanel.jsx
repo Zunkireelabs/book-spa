@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchVoucherOverview, fetchVoucherTypes } from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
 import NewVoucherModal from './NewVoucherModal';
 
 function formatNPR(amount) {
@@ -11,6 +12,8 @@ function formatNPR(amount) {
 // wallet summary, and a per-branch table showing how many vouchers each
 // branch has been given and what it still owes against them.
 const VoucherOverviewPanel = () => {
+  const { profile } = useAuth();
+  const userRole = profile?.role || 'manager';
   const [overview, setOverview] = useState(null);
   const [voucherTypes, setVoucherTypes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -235,6 +238,7 @@ const VoucherOverviewPanel = () => {
 
       {showNewVoucher && (
         <NewVoucherModal
+          userRole={userRole}
           onClose={() => setShowNewVoucher(false)}
           onIssued={() => {
             setShowNewVoucher(false);

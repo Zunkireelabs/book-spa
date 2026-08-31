@@ -664,6 +664,7 @@ const BranchStaffDashboard = () => {
             />
           ) : viewMode === 'new-voucher' && VOUCHER_ENABLED ? (
             <NewVoucherModal
+              userRole={userRole}
               onClose={() => setSearchParams({ view: 'dashboard' })}
               onIssued={() => {
                 setSearchParams({ view: 'dashboard' });
