@@ -566,13 +566,16 @@ const BookingActionModal = ({
   // against the still-owed remainder (e.g. after extending a booking that already had a payment).
   const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
-  const discountLimitLabel = userRole === 'admin' ? '100%' : userRole === 'manager' ? '100%' : '15%';
+  // TEMPORARY (2026-08-31): staff direct-apply limit raised from 15% to 50% to
+  // match the hard cap below — see DISCOUNT_LIMITS in services/api.js for the
+  // revert note.
+  const discountLimitLabel = userRole === 'admin' ? '100%' : userRole === 'manager' ? '100%' : '50%';
 
   // Request-mode derivations: a discount over the user's role limit must be
   // routed to a chosen approver instead of being applied directly.
   // Staff request ceiling stays at 50%; manager/admin direct-apply ceiling is 100%.
   const DISCOUNT_HARD_CAP = userRole === 'staff' ? 50 : 100;
-  const discountMaxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
+  const discountMaxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 50;
 
   // --- Discount tab: per-row resolution ---
   // Every checked booking (current + related) resolves to a discount either from its own
@@ -640,7 +643,8 @@ const BookingActionModal = ({
     }
 
     // If ANY row exceeds the role's direct-apply limit, the whole batch routes to one approver.
-    const maxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 15;
+    // TEMPORARY: staff limit raised 15% -> 50%, see the discountMaxPercent note above.
+    const maxPercent = userRole === 'admin' ? 100 : userRole === 'manager' ? 100 : 50;
     const exceedsLimit = maxRowEffPercent > maxPercent;
 
     if (exceedsLimit && !selectedApprover) {
@@ -1551,7 +1555,6 @@ const BookingActionModal = ({
                       <Icon name="Info" size={14} className="text-accent flex-shrink-0" />
                       <span className="font-caption font-caption-normal text-xs text-accent">
                         Your role ({userRole}) allows up to {discountLimitLabel} discount.
-                        {userRole !== 'admin' && userRole !== 'manager' && ' You can request up to 50% from a manager or admin.'}
                       </span>
                     </div>
 
@@ -1599,7 +1602,7 @@ const BookingActionModal = ({
                         value={discountValue}
                         onWheel={(e) => e.target.blur()}
                         onChange={(e) => { setDiscountValue(e.target.value); setDiscountError(null); }}
-                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.15))}`}
+                        placeholder={discountType === 'percentage' ? `Max ${discountLimitLabel}` : `Max NPR ${Math.floor((booking.baseAmount || 0) * (userRole === 'admin' ? 1.00 : userRole === 'manager' ? 1.00 : 0.50))}`}
                         className={`w-full px-3 py-2.5 border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast ${
                           discountExceedsCap ? 'border-error' : 'border-border'
                         }`}
