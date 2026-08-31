@@ -8418,6 +8418,12 @@ export async function createVoucherType({ orgId, name, codePrefix, standardPrice
     return { data, error: null };
   } catch (error) {
     console.error('[API] createVoucherType error:', error.message);
+    if (error.code === '23505') {
+      return {
+        data: null,
+        error: { code: 'DUPLICATE_NAME', message: `A voucher type named "${name.trim()}" already exists.` },
+      };
+    }
     return { data: null, error };
   }
 }
