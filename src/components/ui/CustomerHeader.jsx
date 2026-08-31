@@ -1,13 +1,20 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
+import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
 const CustomerHeader = () => {
   const location = useLocation();
   const { orgSlug } = useParams();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const headerRef = useRef(null);
+  // Height varies by breakpoint (h-auto min-h-16 py-3 on mobile vs a fixed
+  // h-16 from sm up) and can grow further if org branding text wraps —
+  // publish the real measured height so fixed/sticky elements stacked under
+  // this header (progress bars, sticky filters, content padding-top) never
+  // hardcode a stale 64px and end up overlapping it.
+  useMeasuredHeightVar(headerRef, '--customer-header-h');
 
   // Try to get tenant context, but don't fail if not available
   let tenantData = { orgName: 'Zennly', isCleaning: false, isSalon: false };
@@ -44,18 +51,18 @@ const CustomerHeader = () => {
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+    <header ref={headerRef} className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
+      <div className="relative max-w-7xl mx-auto pl-4 pr-2 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
-          <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center spa-transition-fast group-hover:bg-primary/90">
+          <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0 flex-1">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary rounded-lg flex items-center justify-center spa-transition-fast group-hover:bg-primary/90 flex-shrink-0">
               <svg
-                width="24"
-                height="24"
+                width="18"
+                height="18"
                 viewBox="0 0 24 24"
                 fill="none"
-                className="text-primary-foreground"
+                className="text-primary-foreground sm:w-6 sm:h-6"
               >
                 <path
                   d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
@@ -64,18 +71,18 @@ const CustomerHeader = () => {
                 <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
               </svg>
             </div>
-            <div className="flex flex-col">
-              <span className="font-heading font-heading-semibold text-lg text-text-primary truncate max-w-[140px] sm:max-w-none">
+            <div className="flex flex-col min-w-0">
+              <span className="font-heading font-heading-semibold text-base sm:text-lg text-text-primary truncate">
                 {orgName || 'Zennly'}
               </span>
-              <span className="font-caption font-caption-normal text-xs text-text-secondary -mt-1">
+              <span className="block font-caption font-caption-normal text-[10px] sm:text-xs text-text-secondary -mt-0.5 sm:-mt-1 truncate">
                 {getTagline()}
               </span>
             </div>
           </Link>
 
           {/* Navigation Links */}
-          <nav className="hidden md:flex items-center space-x-8">
+          <nav className="hidden md:flex items-center flex-shrink-0">
             <Link
               to={bookingPath}
               className={`font-body font-body-normal text-sm spa-transition-fast hover:text-primary ${
@@ -87,18 +94,19 @@ const CustomerHeader = () => {
           </nav>
 
           {/* Contact & Support */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
             {/* Phone Contact */}
-            <a 
+            <a
               href="tel:+977-1-4441234"
-              className="hidden sm:flex items-center space-x-2 px-3 py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group"
+              aria-label="Call +977-1-4441234"
+              className="flex items-center justify-center sm:justify-start space-x-0 sm:space-x-2 px-0 sm:px-3 py-0 sm:py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group flex-shrink-0 spa-touch-target"
             >
-              <Icon 
-                name="Phone" 
-                size={16} 
-                className="text-primary group-hover:text-primary/80" 
+              <Icon
+                name="Phone"
+                size={16}
+                className="text-primary group-hover:text-primary/80"
               />
-              <span className="font-body font-body-medium text-sm text-text-primary">
+              <span className="hidden sm:inline font-body font-body-medium text-sm text-text-primary">
                 +977-1-4441234
               </span>
             </a>
@@ -106,60 +114,22 @@ const CustomerHeader = () => {
             {/* Login / Account */}
             <Link
               to={customer && customerProfile ? accountPath : loginPath}
-              className="flex items-center space-x-2 px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target"
+              className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-spa border border-border hover:bg-background spa-transition-fast spa-touch-target flex-shrink-0"
             >
-              <Icon name="User" size={16} className="text-text-primary" />
-              <span className="font-body font-body-medium text-sm text-text-primary">
+              <Icon name="User" size={16} className="text-text-primary flex-shrink-0" />
+              <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
                 {customer && customerProfile ? customerProfile.full_name.split(' ')[0] : 'Login'}
               </span>
             </Link>
 
             {/* Support Button */}
-            <button className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target">
-              <Icon name="MessageCircle" size={16} />
+            <button className="flex items-center justify-center space-x-2 sm:w-auto sm:h-auto px-0 py-0 sm:px-4 sm:py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target flex-shrink-0">
+              <Icon name="MessageCircle" size={14} className="sm:hidden" />
+              <Icon name="MessageCircle" size={16} className="hidden sm:block" />
               <span className="hidden sm:inline font-body font-body-medium text-sm">Support</span>
             </button>
-
-            {/* Mobile Menu */}
-            <div className="md:hidden">
-              <button
-                onClick={() => setMobileMenuOpen((open) => !open)}
-                aria-label="Menu"
-                aria-expanded={mobileMenuOpen}
-                className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target"
-              >
-                <Icon name={mobileMenuOpen ? 'X' : 'Menu'} size={20} className="text-text-primary" />
-              </button>
-            </div>
           </div>
         </div>
-
-        {/* Mobile Navigation — collapsed under the menu button so the header stays a
-            stable 64px on every breakpoint (the booking flow's fixed progress bar sits
-            directly under it). Absolutely positioned so opening it never changes header height. */}
-        {mobileMenuOpen && (
-          <div className="md:hidden absolute left-0 right-0 top-full border-b border-border bg-surface shadow-spa-elevated">
-            <nav className="flex items-center justify-around py-3">
-              <Link
-                to={bookingPath}
-                onClick={() => setMobileMenuOpen(false)}
-                className={`flex flex-col items-center space-y-1 px-3 py-2 rounded-spa spa-transition-fast ${
-                  isBookingFlow ? 'text-primary bg-primary/5' : 'text-text-secondary hover:text-primary'
-                }`}
-              >
-                <Icon name="Calendar" size={20} />
-                <span className="font-caption font-caption-normal text-xs">Book</span>
-              </Link>
-              <a
-                href="tel:+977-1-4441234"
-                className="flex flex-col items-center space-y-1 px-3 py-2 rounded-spa text-text-secondary hover:text-primary spa-transition-fast"
-              >
-                <Icon name="Phone" size={20} />
-                <span className="font-caption font-caption-normal text-xs">Call</span>
-              </a>
-            </nav>
-          </div>
-        )}
       </div>
     </header>
   );

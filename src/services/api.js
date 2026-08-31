@@ -49,7 +49,11 @@ const VALID_TRANSITIONS = {
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'No Show'];
 
 const DISCOUNT_LIMITS = {
-  staff:        0.15, // 15% direct-apply; 15–50% must be requested to a manager/admin
+  // TEMPORARY (2026-08-31): raised from 0.15 to match STAFF_REQUEST_CEILING, so staff
+  // can direct-apply up to 50% with no manager approval step. Revert by setting this
+  // back to 0.15 — the request-to-manager path (STAFF_REQUEST_CEILING below) reactivates
+  // automatically once this drops below it again.
+  staff:        0.50,
   manager:      1.00, // 100%
   admin:        1.00, // 100%
   admin_viewer: 0,    // view-only role — RLS blocks writes regardless, this is just a safe default
@@ -8342,7 +8346,7 @@ export async function fetchVouchers() {
 export async function issueVoucher({
   branchId, voucherTypeId, guestName, guestInfo = null, discountPercent = 0,
   actualPrice = null, issuedDate = null, expiryDate = null, remarks = null,
-  customerId = null, tenders = [],
+  customerId = null, tenders = [], voucherCode = null,
 }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
@@ -8368,12 +8372,58 @@ export async function issueVoucher({
       p_remarks: remarks,
       p_customer_id: customerId,
       p_tenders: cleanedTenders,
+      // Temporary — manual entry to match pre-printed voucher booklets.
+      // See migration-139-voucher-manual-code.sql.
+      p_voucher_code: voucherCode,
     });
     if (error) throw error;
     capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
     return { data, error: null };
   } catch (error) {
     console.error('[API] issueVoucher error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only quick-add for voucher types, used inline from the voucher issuance
+// flow (NewVoucherModal) — no RPC needed, voucher_types RLS ("Admin can manage
+// voucher types") already restricts writes to admin.
+export async function createVoucherType({ orgId, name, codePrefix, standardPrice, category }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!orgId)              return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
+    if (!name?.trim())       return { data: null, error: { code: 'INVALID_INPUT', message: 'Voucher type name is required.' } };
+    if (!codePrefix?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Code prefix is required.' } };
+    const price = Number(standardPrice);
+    if (!(price >= 0)) return { data: null, error: { code: 'INVALID_INPUT', message: 'Standard price must be zero or greater.' } };
+    if (!['spa', 'salon', 'body_scrub', 'package'].includes(category)) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Category must be one of spa, salon, body_scrub, package.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('voucher_types')
+      .insert({
+        org_id: orgId,
+        name: name.trim(),
+        code_prefix: codePrefix.trim().toUpperCase(),
+        standard_price: price,
+        category,
+        is_active: true,
+      })
+      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createVoucherType error:', error.message);
+    if (error.code === '23505') {
+      return {
+        data: null,
+        error: { code: 'DUPLICATE_NAME', message: `A voucher type named "${name.trim()}" already exists.` },
+      };
+    }
     return { data: null, error };
   }
 }

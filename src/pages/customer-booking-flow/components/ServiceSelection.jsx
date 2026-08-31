@@ -67,7 +67,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
   }, [orgId, tenantLoading, selectedBranch?.id]);
 
   const formatPrice = (price) => {
-    return new Intl.NumberFormat('ne-NP', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'NPR',
       minimumFractionDigits: 0
@@ -115,18 +115,21 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
       {showStickyBlock && (
         <>
-          <div className="text-center pt-2">
-            <div className="flex items-center justify-center space-x-2 mb-1">
-              <Icon name="Sparkles" size={20} className="text-primary" />
-              <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                Choose Service
-              </h1>
+          <div
+            className="sticky z-sticky-filter bg-background pt-7 pb-2"
+            style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
+          >
+            <div className="text-center mb-3">
+              <div className="flex items-center justify-center space-x-2 mb-1">
+                <Icon name="Sparkles" size={20} className="text-primary" />
+                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                  Choose Service
+                </h1>
+              </div>
+              <p className="font-body font-body-normal text-text-secondary">
+                Step 2 of 5 - Complete your spa booking journey
+              </p>
             </div>
-            <p className="font-body font-body-normal text-text-secondary">
-              Step 2 of 5 - Complete your spa booking journey
-            </p>
-          </div>
-          <div className="sticky top-[141px] sm:top-[131px] z-sticky-filter bg-background pt-2 pb-2">
             <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input
@@ -145,21 +148,21 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {categories.map((category) => (
-              <button
-                key={category}
-                onClick={() => setSelectedCategory(category)}
-                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
-                  selectedCategory === category
-                    ? 'bg-primary text-white'
-                    : 'bg-background text-text-secondary hover:bg-primary/10'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
+            <div className="flex flex-wrap gap-2">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                    selectedCategory === category
+                      ? 'bg-primary text-white'
+                      : 'bg-background text-text-secondary hover:bg-primary/10'
+                  }`}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
           </div>
         </>
       )}
