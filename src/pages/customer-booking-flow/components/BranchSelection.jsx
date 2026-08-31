@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { useTenant } from '../../../contexts/TenantContext';
-import { fetchBranchesByOrgId, fetchRooms } from '../../../services/api';
+import { fetchBranchesByOrgId } from '../../../services/api';
 
 const INDUSTRY_IMAGES = {
   spa: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop',
@@ -17,7 +17,6 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [roomsByBranch, setRoomsByBranch] = useState({});
 
   useEffect(() => {
     async function loadBranches() {
@@ -47,16 +46,6 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
         }));
 
         setBranches(activeBranches);
-
-        // Fetch rooms for each branch to show amenities
-        const roomsMap = {};
-        for (const branch of activeBranches) {
-          const { data: rooms } = await fetchRooms(branch.id);
-          if (rooms) {
-            roomsMap[branch.id] = rooms;
-          }
-        }
-        setRoomsByBranch(roomsMap);
 
         if (activeBranches.length === 1 && !selectedBranch) {
           onBranchSelect(activeBranches[0]);
@@ -90,9 +79,6 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {branches.map((branch) => {
-        const rooms = roomsByBranch[branch.id] || [];
-        const allAmenities = [...new Set(rooms.flatMap(r => r.amenities || []))].slice(0, 4);
-
         return (
           <div
             key={branch.id}
@@ -115,22 +101,6 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
                   <Icon name="MapPin" size={12} /> {branch.address}
                 </p>
               </div>
-
-              {allAmenities.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Our Facilities:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {allAmenities.map((a, i) => (
-                      <span key={i} className="px-2 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-medium uppercase">
-                        {a}
-                      </span>
-                    ))}
-                    {rooms.flatMap(r => r.amenities || []).length > 4 && (
-                      <span className="text-[10px] text-text-tertiary self-center">+ more</span>
-                    )}
-                  </div>
-                </div>
-              )}
 
               <div className="flex items-center justify-between pt-2 border-t border-border/50">
                 <span className="text-xs text-text-secondary flex items-center gap-1">

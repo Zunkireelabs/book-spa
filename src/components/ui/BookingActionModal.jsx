@@ -2080,23 +2080,23 @@ const BookingActionModal = ({
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
             {/* Left side — Add another service / Rebook */}
             {!isEditing && !newBookingMode && !showExtendPanel && onCreateBooking ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-stretch gap-2">
                 <button
                   onClick={() => openNewBookingForm('add-service')}
-                  className="px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
+                  className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
                 >
                   Add another service
                 </button>
                 <button
                   onClick={() => onRebookStart?.(booking)}
-                  className="px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
+                  className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
                 >
                   {rebookLabel}
                 </button>
                 {!isTerminal && !isLocked && extendOptions.length > 0 && (
                   <button
                     onClick={() => setShowExtendPanel(true)}
-                    className="px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
+                    className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-primary border border-primary/30 rounded-spa hover:bg-primary/5 spa-transition-fast min-h-[36px]"
                   >
                     Extend Service
                   </button>
