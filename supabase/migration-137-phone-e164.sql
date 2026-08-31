@@ -105,10 +105,26 @@ END $$;
 -- 3. Backfill (only rows that actually change)
 -- ============================================================
 
+-- customers_org_nphone_uniq (migration-036) is a plain, non-deferrable unique
+-- index, so Postgres checks it per-row as this single bulk UPDATE runs, not
+-- once at the end. That fails on rows whose NEW normalised value happens to
+-- land on the nphone another row's OLD value still occupies, even though that
+-- other row is *also* being updated away from it later in this same
+-- statement — e.g. a customer at raw phone "97700000" collides with another
+-- row normalising into "+97700000" first, even though the final, fully-
+-- updated table has no such duplicate. The pre-flight check above already
+-- guarantees the FINAL state is duplicate-free, so it's safe to drop this
+-- index for the backfill and recreate it immediately after, identically.
+DROP INDEX IF EXISTS public.customers_org_nphone_uniq;
+
 UPDATE public.customers
 SET phone = public.normalize_phone_e164(phone)
 WHERE phone IS NOT NULL
   AND phone IS DISTINCT FROM public.normalize_phone_e164(phone);
+
+CREATE UNIQUE INDEX IF NOT EXISTS customers_org_nphone_uniq ON public.customers
+  USING btree (org_id, NULLIF(regexp_replace(COALESCE(phone, ''::text), '\D'::text, ''::text, 'g'::text), ''::text))
+  WHERE (NULLIF(regexp_replace(COALESCE(phone, ''::text), '\D'::text, ''::text, 'g'::text), ''::text) IS NOT NULL);
 
 -- trg_enforce_booking_immutability (schema.sql) rejects ANY UPDATE on a locked
 -- (day-closed) or Completed booking, including this backfill's own write to
