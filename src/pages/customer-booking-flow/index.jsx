@@ -388,7 +388,14 @@ const CustomerBookingFlow = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background pt-32">
+    <div
+      className="min-h-screen bg-background"
+      style={{
+        paddingTop: currentStep < 6
+          ? 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))'
+          : 'var(--customer-header-h, 64px)',
+      }}
+    >
       <CustomerHeader />
 
       {/* Progress Indicator */}
