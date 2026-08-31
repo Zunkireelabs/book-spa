@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import Icon from '../../../components/AppIcon';
+import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
 const ProgressIndicator = ({ currentStep, totalSteps }) => {
   const steps = [
@@ -10,21 +11,28 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
     { id: 5, label: 'Confirm', icon: 'CheckCircle' }
   ];
 
+  const barRef = useRef(null);
+  useMeasuredHeightVar(barRef, '--progress-indicator-h');
+
   return (
-    <div className="w-full bg-surface border-b border-border fixed top-16 left-0 right-0 z-header">
-      <div className="max-w-4xl mx-auto px-4 py-2">
-        <div className="flex items-center justify-between">
+    <div
+      ref={barRef}
+      className="w-full bg-surface border-b border-border fixed left-0 right-0 z-header"
+      style={{ top: 'var(--customer-header-h, 64px)' }}
+    >
+      <div className="max-w-4xl mx-auto px-4 py-1 sm:py-2">
+        <div className="flex items-center">
           {steps.map((step, index) => (
-            <div key={step.id} className="flex items-center flex-1">
-              <div className="flex flex-col items-center">
+            <React.Fragment key={step.id}>
+              <div className="flex flex-col items-center flex-shrink-0">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center spa-transition-fast ${
-                  currentStep >= step.id 
-                    ? 'bg-primary text-primary-foreground' 
+                  currentStep >= step.id
+                    ? 'bg-primary text-primary-foreground'
                     : 'bg-background border-2 border-border text-text-secondary'
                 }`}>
-                  <Icon 
-                    name={currentStep > step.id ? 'Check' : step.icon} 
-                    size={16} 
+                  <Icon
+                    name={currentStep > step.id ? 'Check' : step.icon}
+                    size={16}
                   />
                 </div>
                 <span className={`font-caption font-caption-normal text-xs mt-1 hidden sm:block ${
@@ -38,12 +46,12 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
                   currentStep > step.id ? 'bg-primary' : 'bg-border'
                 }`} />
               )}
-            </div>
+            </React.Fragment>
           ))}
         </div>
         
         {/* Mobile step indicator */}
-        <div className="sm:hidden mt-2 text-center">
+        <div className="sm:hidden mt-0.5 text-center leading-tight">
           <span className="font-body font-body-medium text-sm text-text-primary">
             Step {currentStep} of {totalSteps}: {steps[currentStep - 1]?.label}
           </span>

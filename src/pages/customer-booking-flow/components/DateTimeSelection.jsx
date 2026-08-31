@@ -288,7 +288,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                     }
                   />
                 </div>
-                <span className="font-body font-body-medium text-xs sm:text-sm leading-tight text-text-primary">
+                <span className="font-body font-body-medium text-[11px] sm:text-sm leading-tight text-text-primary">
                   {option.label}
                 </span>
               </label>

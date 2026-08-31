@@ -7,8 +7,15 @@ import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelect
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
-import { fetchVoucherTypes, issueVoucher, fetchMembershipForCustomer } from '../../../../services/api';
+import { fetchVoucherTypes, issueVoucher, createVoucherType, fetchMembershipForCustomer } from '../../../../services/api';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
+
+const VOUCHER_TYPE_CATEGORIES = [
+  { value: 'spa', label: 'Spa' },
+  { value: 'salon', label: 'Salon' },
+  { value: 'body_scrub', label: 'Body scrub' },
+  { value: 'package', label: 'Package' },
+];
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -20,20 +27,26 @@ function toDateInputValue(date) {
 
 const DEFAULT_VALIDITY_DAYS = 90;
 
+const EMPTY_NEW_TYPE = { name: '', codePrefix: '', standardPrice: '', category: 'spa' };
+
 // Manager/admin only — issues a new voucher via issue_voucher() (migration-071).
-// The voucher code is minted server-side (sequential per branch+type, e.g.
-// "NT 4326-0001") — there's no code field here to type or clash on, unlike
-// the old Excel workbook's pre-allocated master code list.
-const NewVoucherModal = ({ onClose, onIssued }) => {
+//
+// Voucher code: TEMPORARY manual entry (migration-139) — staff have physical
+// voucher booklets with pre-printed codes and need the system's code to match.
+// Revert path: stop sending voucherCode (or hide the field below); the RPC
+// falls back to its old counter-based auto-generation whenever no code is sent.
+const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
-  const { paymentMethods } = useOrg();
+  const { orgId, paymentMethods } = useOrg();
+  const isAdmin = userRole === 'admin';
 
   const [types, setTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
   const [voucherTypeId, setVoucherTypeId] = useState('');
+  const [voucherCode, setVoucherCode] = useState('');
   const [guestName, setGuestName] = useState('');
   const [linkedCustomerId, setLinkedCustomerId] = useState(null);
   const [guestCountryCode, setGuestCountryCode] = useState('+977');
@@ -55,6 +68,27 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [issued, setIssued] = useState(null); // the issued voucher row, shown as a success state
+
+  const [showNewType, setShowNewType] = useState(false);
+  const [newType, setNewType] = useState(EMPTY_NEW_TYPE);
+  const [newTypeSubmitting, setNewTypeSubmitting] = useState(false);
+  const [newTypeError, setNewTypeError] = useState(null);
+
+  const loadTypes = async ({ selectId } = {}) => {
+    const { data, error: fetchError } = await fetchVoucherTypes();
+    if (fetchError) {
+      setLoadError(fetchError.message || 'Failed to load voucher types.');
+      setLoadingTypes(false);
+      return;
+    }
+    setTypes(data || []);
+    const toSelect = selectId ? data?.find((t) => t.id === selectId) : data?.[0];
+    if (toSelect) {
+      setVoucherTypeId(toSelect.id);
+      setActualPrice(String(toSelect.standard_price));
+    }
+    setLoadingTypes(false);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -129,12 +163,37 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
   );
   const tenderRemaining = useMemo(() => Math.round((totalAmount - tenderTotal) * 100) / 100, [totalAmount, tenderTotal]);
 
+  const handleCreateNewType = async (e) => {
+    e.preventDefault();
+    setNewTypeError(null);
+    if (!newType.name.trim()) { setNewTypeError('Type name is required.'); return; }
+    if (!newType.codePrefix.trim()) { setNewTypeError('Code prefix is required.'); return; }
+    const price = Number(newType.standardPrice);
+    if (!(price >= 0)) { setNewTypeError('Standard price must be zero or greater.'); return; }
+
+    setNewTypeSubmitting(true);
+    const { data, error: createErr } = await createVoucherType({
+      orgId,
+      name: newType.name,
+      codePrefix: newType.codePrefix,
+      standardPrice: price,
+      category: newType.category,
+    });
+    setNewTypeSubmitting(false);
+    if (createErr) { setNewTypeError(createErr.message || 'Failed to create voucher type.'); return; }
+
+    setNewType(EMPTY_NEW_TYPE);
+    setShowNewType(false);
+    await loadTypes({ selectId: data.id });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
 
     if (isOverall || !branchId) { setError('Select a specific branch before issuing a voucher.'); return; }
     if (!voucherTypeId) { setError('Please select a voucher type.'); return; }
+    if (!voucherCode.trim()) { setError('Voucher code is required.'); return; }
     if (!guestName.trim()) { setError('Guest name is required.'); return; }
     if (actualPriceNum < 0) { setError('Price cannot be negative.'); return; }
     if (discountNum < 0 || discountNum > 100) { setError('Discount must be between 0 and 100.'); return; }
@@ -151,6 +210,7 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
     const { data, error: rpcError } = await issueVoucher({
       branchId,
       voucherTypeId,
+      voucherCode: voucherCode.trim(),
       guestName: guestName.trim(),
       guestInfo: guestPhoneDigits ? `${guestCountryCode}${guestPhoneDigits}` : (guestOtherInfo.trim() || null),
       discountPercent: discountNum,
@@ -327,6 +387,94 @@ const NewVoucherModal = ({ onClose, onIssued }) => {
                     Stored-value voucher — the guest can redeem it across multiple partial visits until the balance runs out.
                   </p>
                 )}
+                {isAdmin && (
+                  <div className="mt-2">
+                    {!showNewType ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowNewType(true)}
+                        className="flex items-center gap-1 text-xs font-body font-body-medium text-primary hover:underline"
+                      >
+                        <Icon name="Plus" size={12} />
+                        <span>Can't find the type? Add new voucher type</span>
+                      </button>
+                    ) : (
+                      <div className="bg-background border border-border rounded-spa p-3 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-heading font-heading-semibold text-xs text-text-primary">New voucher type</h4>
+                          <button
+                            type="button"
+                            onClick={() => { setShowNewType(false); setNewType(EMPTY_NEW_TYPE); setNewTypeError(null); }}
+                            className="p-1 rounded-spa hover:bg-surface spa-transition-fast"
+                          >
+                            <Icon name="X" size={12} className="text-text-secondary" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={newType.name}
+                            onChange={(e) => setNewType((p) => ({ ...p, name: e.target.value }))}
+                            placeholder="Type name"
+                            className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                          <input
+                            type="text"
+                            value={newType.codePrefix}
+                            onChange={(e) => setNewType((p) => ({ ...p, codePrefix: e.target.value.toUpperCase() }))}
+                            placeholder="Code prefix, e.g. NT 4326"
+                            className="w-full h-9 px-2.5 text-xs font-data tracking-wide border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={newType.standardPrice}
+                            onChange={(e) => setNewType((p) => ({ ...p, standardPrice: e.target.value }))}
+                            placeholder="Standard price (NPR)"
+                            className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                          <CustomSelect
+                            value={newType.category}
+                            onChange={(v) => setNewType((p) => ({ ...p, category: v }))}
+                            options={VOUCHER_TYPE_CATEGORIES}
+                            size="sm"
+                          />
+                        </div>
+                        {newTypeError && (
+                          <p className="font-caption text-xs text-error">{newTypeError}</p>
+                        )}
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={handleCreateNewType}
+                            disabled={newTypeSubmitting}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-spa bg-primary text-white text-xs font-body font-body-medium hover:bg-primary/90 disabled:opacity-50 spa-transition-fast"
+                          >
+                            {newTypeSubmitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                            <span>Add type</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Voucher code</label>
+                <input
+                  type="text"
+                  value={voucherCode}
+                  onChange={(e) => setVoucherCode(e.target.value)}
+                  placeholder="e.g., NT 4326-0001"
+                  className="w-full h-10 px-3 text-sm font-data tracking-wide border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+                <p className="mt-1.5 font-caption text-xs text-text-tertiary">
+                  Type the code from the physical voucher booklet — it must match exactly.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
