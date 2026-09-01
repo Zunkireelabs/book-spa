@@ -367,7 +367,7 @@ const PaymentModal = ({
       setError('Apply this customer\'s referral wallet reward before completing payment.');
       return;
     }
-    if (entered <= 0) {
+    if (entered <= 0 && leftover <= 0) {
       setError('Enter a payment amount.');
       return;
     }
@@ -862,7 +862,7 @@ const PaymentModal = ({
             variant="success"
             onClick={handleSubmit}
             loading={isSubmitting}
-            disabled={entered <= 0 || referralRewardBlocksPayment}
+            disabled={(entered <= 0 && leftover <= 0) || referralRewardBlocksPayment}
             iconName="Check"
             iconPosition="left"
           >

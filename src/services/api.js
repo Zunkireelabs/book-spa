@@ -427,8 +427,11 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       return { data: { success: true, settledWithoutPayment: true }, error: null };
     }
 
-    // 7. Normalize tenders (fall back to a single full-remaining tender)
-    let tenderList = Array.isArray(tenders) && tenders.length > 0
+    // 7. Normalize tenders. An explicit empty array means "leave the full
+    // amount due" (no tenders to collect) — only fall back to a single
+    // full-remaining tender when tenders wasn't provided at all (legacy
+    // single-paymentMode callers).
+    let tenderList = Array.isArray(tenders)
       ? tenders
       : [{ amount: remaining, paymentMode }];
 
@@ -441,9 +444,9 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       }))
       .filter(t => t.amount > 0);
 
-    if (tenderList.length === 0) {
-      return { data: null, error: { code: 'NO_TENDER', message: 'Enter at least one payment amount.' } };
-    }
+    // Zero tenders is valid — it's how a booking gets left 100% due (dueHolderName
+    // requirement enforced below at step 8). Only a genuinely malformed tender
+    // (bad paymentMode, missing voucher ref) is rejected, in the loop below.
     for (const t of tenderList) {
       const mode = (t.paymentMode || '').trim();
       if (!mode || mode.length > 40) {
