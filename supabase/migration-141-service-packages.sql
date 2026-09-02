@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS public.package_redemptions (
   id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   package_id          uuid        NOT NULL REFERENCES public.packages(id),
   org_id              uuid        NOT NULL REFERENCES public.organizations(id),
-  redeemed_date       date        NOT NULL DEFAULT current_date,
+  redeemed_date       date        NOT NULL DEFAULT ((now() AT TIME ZONE 'Asia/Kathmandu')::date),
   branch_id           uuid        REFERENCES public.branches(id),
   booking_id          uuid        REFERENCES public.bookings(id),
   guest_name_used_by  text,
@@ -123,7 +123,7 @@ SELECT
   COALESCE(r.sessions_used, 0)                              AS sessions_used,
   p.sessions_total - COALESCE(r.sessions_used, 0)            AS sessions_remaining,
   CASE
-    WHEN p.expiry_date < current_date
+    WHEN p.expiry_date < ((now() AT TIME ZONE 'Asia/Kathmandu')::date)
       AND p.sessions_total - COALESCE(r.sessions_used, 0) > 0 THEN 'expired'
     WHEN COALESCE(r.sessions_used, 0) = 0 THEN 'unused'
     WHEN p.sessions_total - COALESCE(r.sessions_used, 0) <= 0 THEN 'fully_redeemed'
@@ -307,10 +307,12 @@ DECLARE
   v_role          user_role := get_user_role();
   v_org           uuid      := get_user_org_id();
   v_package_org   uuid;
+  v_package_service uuid;
   v_sessions_total int;
   v_expiry_date   date;
   v_branch_org    uuid;
   v_booking_org   uuid;
+  v_booking_service uuid;
   v_sessions_used int;
   v_row           public.package_redemptions;
 BEGIN
@@ -330,7 +332,7 @@ BEGIN
   IF p_booking_id IS NOT NULL THEN
     -- bookings has no org_id column (only branch_id) so org_id is resolved
     -- via branches, same as migration-108.
-    SELECT br.org_id INTO v_booking_org
+    SELECT br.org_id, b.service_id INTO v_booking_org, v_booking_service
     FROM public.bookings b
     JOIN public.branches br ON br.id = b.branch_id
     WHERE b.id = p_booking_id;
@@ -341,8 +343,8 @@ BEGIN
 
   -- Lock the package row so a concurrent redemption can't race the
   -- sessions-remaining check.
-  SELECT org_id, sessions_total, expiry_date
-  INTO v_package_org, v_sessions_total, v_expiry_date
+  SELECT org_id, service_id, sessions_total, expiry_date
+  INTO v_package_org, v_package_service, v_sessions_total, v_expiry_date
   FROM public.packages
   WHERE id = p_package_id
   FOR UPDATE;
@@ -354,11 +356,18 @@ BEGIN
     RAISE EXCEPTION 'redeem_package_session: package is not in your organization';
   END IF;
 
+  -- A package only covers the one service it was issued for — a booking for
+  -- a different service must not silently burn a session against it.
+  IF p_booking_id IS NOT NULL AND v_package_service IS NOT NULL
+     AND v_booking_service IS DISTINCT FROM v_package_service THEN
+    RAISE EXCEPTION 'redeem_package_session: booking service does not match this package''s service';
+  END IF;
+
   SELECT COUNT(*) INTO v_sessions_used
   FROM public.package_redemptions
   WHERE package_id = p_package_id;
 
-  IF v_expiry_date < current_date THEN
+  IF v_expiry_date < ((now() AT TIME ZONE 'Asia/Kathmandu')::date) THEN
     RAISE EXCEPTION 'redeem_package_session: package expired on %', v_expiry_date;
   END IF;
 
