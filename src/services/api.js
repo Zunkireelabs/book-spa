@@ -436,12 +436,15 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       : [{ amount: remaining, paymentMode }];
 
     // SessionPackage tenders redeem one session from a customer's prepaid
-    // package (migration-141) — the value was already collected when the
-    // package itself was purchased, so a redemption carries no NPR amount.
-    // Pulled out here, BEFORE the amount-normalization/filter step below
-    // (which drops any tender with amount<=0), so these never enter — and
-    // never need to be excluded from — the tenderTotal/remaining/leftover
-    // math further down.
+    // package (migration-141). The session's value was already collected when
+    // the package itself was purchased, so the caller never supplies an NPR
+    // amount for it (unlike every other tender type) — pulled out here,
+    // BEFORE the amount-normalization/filter step below (which drops any
+    // tender with amount<=0 and would otherwise silently discard these).
+    // They're re-priced further down (once `remaining` minus the other NPR
+    // tenders is known) and folded back into `tenderTotal`/`leftover` so the
+    // booking can actually settle — see the "settlement" comment below for
+    // why v_paid/payment_status needs a real payments.amount, not $0.
     const sessionPackageTenders = tenderList.filter(t => t.paymentMode === 'SessionPackage');
     for (const t of sessionPackageTenders) {
       if (!t.packageId) {
@@ -474,10 +477,39 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       // draw (migration-090) — deliberately allowed, see voucherWalletPooledTenders below.
     }
 
-    const tenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
-    if (tenderTotal > remaining) {
-      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${tenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
+    const nprTenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    if (nprTenderTotal > remaining) {
+      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${nprTenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
     }
+
+    // SessionPackage tenders settle whatever balance is left after the NPR
+    // tenders above ("1 session, full service value" — a redemption is
+    // expected to cover the rest of this booking's remaining balance, not a
+    // caller-chosen amount). This residual — split evenly across multiple
+    // SessionPackage tenders, if more than one, with any rounding remainder
+    // folded into the last — becomes each tender's `payments.amount`. That's
+    // required for update_booking_payment_status() (migration-042) to ever
+    // mark the booking 'paid': it sums payments.amount directly (`v_paid`),
+    // so a $0 row can never cross the `v_paid >= v_final` threshold. This
+    // mirrors how Membership/VoucherWallet tenders also post a real
+    // payments.amount despite not being new cash collected today — only
+    // `nprTenderTotal` (computed above, before this block) represents an NPR
+    // tender amount the payer is actively choosing a method for; this residual
+    // is deliberately kept out of THAT sum and the OVERPAYMENT check above,
+    // since it is by construction never able to overpay (it's exactly
+    // `remaining - nprTenderTotal`, never more).
+    const sessionPackageResidual = Math.round((remaining - nprTenderTotal) * 100) / 100;
+    let sessionPackageAmounts = [];
+    if (sessionPackageTenders.length > 0) {
+      const share = Math.floor((sessionPackageResidual / sessionPackageTenders.length) * 100) / 100;
+      sessionPackageAmounts = sessionPackageTenders.map(() => share);
+      const distributed = Math.round(share * sessionPackageTenders.length * 100) / 100;
+      const remainder = Math.round((sessionPackageResidual - distributed) * 100) / 100;
+      sessionPackageAmounts[sessionPackageAmounts.length - 1] =
+        Math.round((sessionPackageAmounts[sessionPackageAmounts.length - 1] + remainder) * 100) / 100;
+    }
+    const sessionPackageTotal = Math.round(sessionPackageAmounts.reduce((s, a) => s + a, 0) * 100) / 100;
+    const tenderTotal = Math.round((nprTenderTotal + sessionPackageTotal) * 100) / 100;
 
     const leftover = Math.round((remaining - tenderTotal) * 100) / 100;
     const resolvedDueHolder = (dueHolderName || '').trim() || booking.due_holder_name || null;
@@ -600,12 +632,13 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
 
     // SessionPackage tenders: each redeems one session against a distinct
     // package (not poolable, like ReferralVoucher/VoucherWallet-by-id above),
-    // so it's one redeem_package_session() call per tender. Deliberately kept
-    // outside the tenderTotal/remaining/leftover math above (see the
-    // extraction comment near step 7) — redeem_package_session() itself has
-    // no amount param and only appends a package_redemptions row, it does NOT
-    // insert a payments row, so a $0 payment row is inserted per tender here
-    // for the audit trail (mirrors the zero-amount auto-settle row in step 6).
+    // so it's one redeem_package_session() call per tender. redeem_package_session()
+    // itself has no amount param and only appends a package_redemptions row —
+    // it does NOT insert a payments row (unlike record_voucher_wallet_payment),
+    // so a payment row is inserted per tender here using the residual amount
+    // computed above (sessionPackageAmounts), NOT $0 — see the settlement
+    // comment above for why a non-zero payments.amount is required for
+    // update_booking_payment_status() to ever mark the booking 'paid'.
     if (sessionPackageTenders.length > 0) {
       const priorTendersExist = otherTenders.length > 0 || membershipTenders.length > 0
         || referralWalletTenders.length > 0 || referralVoucherTenders.length > 0
@@ -623,7 +656,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
           .from('payments')
           .insert({
             booking_id: bookingId,
-            amount: 0,
+            amount: sessionPackageAmounts[i],
             payment_mode: 'SessionPackage',
             recorded_by: user.id,
             notes: (!priorTendersExist && i === 0) ? (notes || null) : null,
