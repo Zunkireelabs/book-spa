@@ -13,7 +13,12 @@ import Icon from '../AppIcon';
 // here). `selectedPackageId` marks whichever package is currently the active
 // SessionPackage tender (only one at a time, since one booking = one session
 // redeemed), so its row can show "Selected" instead of the redeem action.
-const PackageWalletCard = ({ packages, selectedPackageId = null, onRedeem, onUndo }) => {
+// `redeemDisabled` (true when this booking's own remaining balance is already
+// 0 — e.g. the modal was opened only to collect a bundled previous due) turns
+// the action into an inert "Already settled" label instead of a button that
+// would silently no-op (a $0 SessionPackage tender gets filtered out before
+// ever reaching onConfirm).
+const PackageWalletCard = ({ packages, selectedPackageId = null, redeemDisabled = false, onRedeem, onUndo }) => {
   const list = packages || [];
   if (list.length === 0) return null;
 
@@ -50,6 +55,10 @@ const PackageWalletCard = ({ packages, selectedPackageId = null, onRedeem, onUnd
                 >
                   Selected — undo
                 </button>
+              ) : redeemDisabled ? (
+                <span className="text-[11px] font-caption text-text-tertiary flex-shrink-0">
+                  Booking already settled
+                </span>
               ) : (
                 <button
                   type="button"

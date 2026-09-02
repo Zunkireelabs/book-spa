@@ -282,13 +282,13 @@ const PaymentModal = ({
   }, [bookingId]);
 
   const packagesUsable = customerPackages.length > 0;
-  // Included in the payment-method dropdown for label consistency with the
-  // other wallet-style leaves, but the only supported way to create a valid
-  // SessionPackage tender is the PackageWalletCard's "Redeem 1 Session" button
-  // below (it needs a specific packageId) — handleSubmit rejects a tender of
-  // this mode with no packageId, same guard as ReferralVoucher/VoucherWallet.
-  const sessionPackageLeaf = packagesUsable ? { value: 'SessionPackage', label: 'Package' } : null;
 
+  // Deliberately NOT added to any extraLeaf array — a SessionPackage tender
+  // always needs a specific packageId, and picking it from the raw
+  // payment-method dropdown has no way to supply one. Same reasoning as
+  // ReferralVoucher (also never in extraLeaf): the only way to create either
+  // tender type is its own card's action button (applyReferralVoucher /
+  // redeemPackage below), which sets every required field at once.
   const selectedPackageTender = tenders.find((t) => t.paymentMode === 'SessionPackage') || null;
 
   const redeemPackage = (pkg) => {
@@ -609,6 +609,7 @@ const PaymentModal = ({
           <PackageWalletCard
             packages={customerPackages}
             selectedPackageId={selectedPackageTender?.packageId || null}
+            redeemDisabled={remaining <= 0}
             onRedeem={redeemPackage}
             onUndo={undoPackage}
           />
@@ -653,7 +654,7 @@ const PaymentModal = ({
                         <div className="w-36 flex-shrink-0">
                           <PaymentMethodSelector
                             paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, sessionPackageLeaf]}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
                             value={t.paymentMode}
                             onChange={(v) => updateTender(i, { paymentMode: v })}
                             size="md"
@@ -707,7 +708,7 @@ const PaymentModal = ({
                         <div className="w-36 flex-shrink-0">
                           <PaymentMethodSelector
                             paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, sessionPackageLeaf]}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
                             value={t.paymentMode}
                             onChange={(v) => updateTender(i, { paymentMode: v })}
                             size="md"
@@ -798,25 +799,20 @@ const PaymentModal = ({
                   );
                 }
 
-                // A SessionPackage tender always carries a packageId — created only by
-                // PackageWalletCard's "Redeem 1 Session" button (which sets a locked,
-                // full-covering amount, never a freely-typed one). The only way this
-                // row can lack a packageId is picking "Package" directly from the
-                // dropdown below, which handleSubmit rejects at submit time — shown
-                // here as a prompt back to the card instead of a broken input.
+                // A SessionPackage tender is only ever created by PackageWalletCard's
+                // "Redeem 1 Session" button (redeemPackage below), which always sets
+                // packageId + a locked, full-covering amount in the same call — it's
+                // never independently selectable from the dropdown (not in any
+                // extraLeaf array, same as ReferralVoucher), so packageId is always
+                // present here. Rendered as a locked summary row, never a free-typed
+                // amount, since a session redemption is never partial.
                 if (isSessionPackage) {
                   return (
                     <div key={i} className="flex items-center gap-2">
                       <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-spa border border-primary/30 bg-primary/5">
                         <Icon name="PackageCheck" size={14} className="text-primary flex-shrink-0" />
-                        {t.packageId ? (
-                          <>
-                            <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.packageLabel || 'Package'}</span>
-                            <span className="font-data font-data-medium text-sm text-primary ml-auto">{formatNPR(t.amount)}</span>
-                          </>
-                        ) : (
-                          <span className="font-caption text-xs text-text-secondary">Pick a package above to redeem a session.</span>
-                        )}
+                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.packageLabel || 'Package'}</span>
+                        <span className="font-data font-data-medium text-sm text-primary ml-auto">{formatNPR(t.amount)}</span>
                       </div>
                       <button
                         type="button"
