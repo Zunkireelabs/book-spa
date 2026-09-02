@@ -1326,8 +1326,10 @@ export async function fetchReferralRewardForBooking(bookingId) {
 // Matches by `customer_id` (registered customers) OR `guest_info` (phone —
 // walk-in/guest-issued packages with no linked customer row), mirroring how
 // `fetchReferralRewardForBooking` resolves rewards. `package_balances` is a
-// view over `packages` (see migration-141) so RLS on the underlying table
-// still applies to it. Returns the enriched rows the UI needs
+// view over `packages` (see migration-141) declared `WITH (security_invoker
+// = true)`, which is what makes it run as the querying role rather than the
+// view owner — without that, it would bypass RLS on the underlying table
+// entirely. Returns the enriched rows the UI needs
 // (`sessionsRemaining`, `expiryDate`, etc.) — `[]` when nothing matches.
 export async function getActivePackagesForCustomer(customerId, phone, serviceId) {
   try {
@@ -2815,12 +2817,14 @@ export async function getDailySummary(branchId, date) {
 // legacy 'Card' string check plus the named custom bank methods (migration-052 relaxed
 // payment_mode to a free string, so orgs can add more bank names later — this list covers
 // what's configured today). Wallet is internal credit only (Membership/Referral/Voucher
-// balances, plus SessionPackage — migration-141 — since a redemption's value was already
-// recognized as revenue when the package was purchased, not today); Digital is external
-// non-card electronic payment. See getDailySummary above for the same 'today' semantics
-// (bookings.date, not payment created_at).
+// balances); Digital is external non-card electronic payment. SessionPackage
+// (migration-141) is skipped entirely before bucketing, not treated as wallet — its value
+// was already recognized as revenue when the package was purchased, so per the
+// cash-based-reconciliation policy it must not be counted as money collected today in any
+// bucket, including totalSales. See getDailySummary/getDailyOperationalReport for the same
+// 'today' semantics (bookings.date, not payment created_at) and the same exclusion policy.
 const CARD_MODES = new Set(['Card', 'Nabil', 'GlobalIME', 'NICAsia']);
-const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher', 'SessionPackage']);
+const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
 const DIGITAL_MODES = new Set(['Esewa', 'Khalti', 'MobileBanking', 'Cheque']);
 
 export async function getTodayInsights(branchId, from, to) {
@@ -2859,6 +2863,12 @@ export async function getTodayInsights(branchId, from, to) {
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
+        // SessionPackage rows (migration-141) are never counted as money
+        // collected today — that value was already recognized as revenue
+        // when the package itself was purchased (same policy as
+        // getDailySummary/getDailyOperationalReport). Skip entirely, don't
+        // fold into totalSales or any bucket.
+        if (p.payment_mode === 'SessionPackage') continue;
         const amount = Number(p.amount);
         totalSales += amount;
         if (p.payment_mode === 'Cash') {
@@ -3197,11 +3207,19 @@ export async function getDailyOperationalReport(branchId, date) {
         noShowBookings: all.filter(b => b.status === 'No Show').length,
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
-        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections
+        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections.
+        // Excludes SessionPackage rows (migration-141) — same policy as getDailySummary:
+        // that value was already recognized as revenue when the package itself was
+        // purchased, so it isn't cash collected today. Without this exclusion,
+        // getDailyOperationalReport would disagree with getDailySummary (whose
+        // netRevenue is what closeDay persists) on any day with a SessionPackage
+        // redemption.
         // Folds in voucherSalesTotal so the live branch matches what the closed
         // snapshot already includes (closeDay persists getDailySummary()'s
         // voucher-inclusive netRevenue).
-        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
+        netRevenue: paymentRows
+          .filter(p => p.payment_mode !== 'SessionPackage')
+          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
       };
     }
 
@@ -3217,6 +3235,8 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
       for (const p of paymentRows) {
+        // SessionPackage rows are never money collected today — see netRevenue above.
+        if (p.payment_mode === 'SessionPackage') continue;
         const amount = Number(p.amount);
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }

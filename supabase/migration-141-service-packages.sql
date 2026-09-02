@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS public.packages (
   sessions_total   int           NOT NULL CHECK (sessions_total > 0),
   package_code     text,
   remarks          text,
-  issued_by        uuid          REFERENCES auth.users(id),
+  issued_by        uuid          REFERENCES public.users(id),
   created_at       timestamptz   NOT NULL DEFAULT now(),
   CONSTRAINT packages_expiry_after_issue CHECK (expiry_date >= issued_date)
 );
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS public.package_redemptions (
   booking_id          uuid        REFERENCES public.bookings(id),
   guest_name_used_by  text,
   notes               text,
-  performed_by        uuid        REFERENCES auth.users(id),
+  performed_by        uuid        REFERENCES public.users(id),
   created_at          timestamptz NOT NULL DEFAULT now()
 );
 
@@ -108,7 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_package_redemptions_branch
 -- 2. BALANCE VIEW (computed, not stored)
 -- ============================================================
 
-CREATE OR REPLACE VIEW public.package_balances AS
+CREATE OR REPLACE VIEW public.package_balances WITH (security_invoker = true) AS
 SELECT
   p.id                    AS package_id,
   p.org_id,

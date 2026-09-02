@@ -14,10 +14,12 @@ const BASIS_OPTIONS = [
   { value: 'vat_exclusive', label: 'VAT exclusive (back VAT out first)' },
 ];
 
-// Same exclusion list as migration-116's platform_org_sales_base — these payment
-// modes settle out of a wallet/membership balance, not new money, so they must be
-// excluded here or they'd double-count against the Paid Memberships/Vouchers lists.
-const WALLET_PAYMENT_MODES = ['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher'];
+// Same exclusion list as migration-142's platform_org_sales_base (originally
+// migration-116) — these payment modes settle out of a wallet/membership/package
+// balance, not new money, so they must be excluded here or they'd double-count
+// against the Paid Memberships/Vouchers lists (and, for SessionPackage, against
+// the money already collected when the package itself was sold).
+const WALLET_PAYMENT_MODES = ['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher', 'SessionPackage'];
 
 const nonWalletAmount = (booking) =>
   (booking.payments || [])

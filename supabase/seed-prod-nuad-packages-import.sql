@@ -30,7 +30,11 @@
 -- bare 10-digit number. The sheet's Contact Number column is bare 10 digits,
 -- so the match is `customers.phone = '+977' || <sheet number>`. Best-effort:
 -- when no customers row matches, customer_id stays NULL and guest_name /
--- guest_info (free text) carry the sheet data instead.
+-- guest_info (free text) carry the sheet data instead. guest_info is written
+-- as E.164 (`'+977' || <sheet number>`), matching NewPackageModal.jsx's
+-- format and getActivePackagesForCustomer()'s exact-string match against
+-- bookings.customer_phone -- a bare-digit guest_info would silently fail
+-- that lookup at checkout for any package whose customer_id didn't resolve.
 --
 -- ============================================================
 -- Two rows flagged for CLIENT CONFIRMATION (do not resolve here):
@@ -120,7 +124,7 @@ INSERT INTO public.packages (
 )
 SELECT
   o.id, br.id, pt.id, svc.id, cust.id,
-  v.guest_name, v.phone_digits, v.issued_date, v.expiry_date, v.paid_amount, v.sessions_total
+  v.guest_name, '+977' || v.phone_digits, v.issued_date, v.expiry_date, v.paid_amount, v.sessions_total
 FROM public.organizations o
 JOIN public.branches br ON br.org_id = o.id AND br.name = 'Lazimpat'
 CROSS JOIN (VALUES
