@@ -89,7 +89,7 @@ const TransferReportPanel = () => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Status', 'Transferred By', 'Remarks'];
+    const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Status', 'Reverts At', 'Transferred By', 'Remarks'];
     let csv = header.join(',') + '\n';
     filtered.forEach((t) => {
       csv += [
@@ -99,6 +99,7 @@ const TransferReportPanel = () => {
         esc(t.toBranch),
         esc(formatDateOnly(t.effectiveDate)),
         esc(t.applied ? 'Applied' : 'Scheduled'),
+        esc(t.revertAt ? (t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}` : formatDateTime(t.revertAt)) : '—'),
         esc(t.transferredBy),
         esc(t.note || ''),
       ].join(',') + '\n';
@@ -188,6 +189,7 @@ const TransferReportPanel = () => {
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">From → To</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Effective Date</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
+                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Reverts At</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Transferred By</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Remarks</th>
                 </tr>
@@ -208,6 +210,18 @@ const TransferReportPanel = () => {
                         <Icon name={t.applied ? 'CheckCircle' : 'Clock'} size={12} />
                         {t.applied ? 'Applied' : 'Scheduled'}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {t.revertAt ? (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
+                          t.reverted ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
+                        }`} title={t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}` : `Reverts ${formatDateTime(t.revertAt)}`}>
+                          <Icon name={t.reverted ? 'CheckCircle' : 'Clock'} size={12} />
+                          {t.reverted ? 'Reverted' : formatDateTime(t.revertAt)}
+                        </span>
+                      ) : (
+                        <span className="font-body text-sm text-text-tertiary">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.transferredBy}</td>
                     <td className="px-4 py-3 font-body text-sm text-text-secondary">{t.note || '—'}</td>

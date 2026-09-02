@@ -1510,12 +1510,20 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
     if (ids.length > 0) {
       const { data: therapistsData } = await supabase
         .from('therapists')
-        .select('id, name, is_active')
+        .select('id, name, is_active, branch_id')
         .in('id', ids);
 
       const inactive = (therapistsData || []).find(t => !t.is_active);
       if (inactive) {
         return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign inactive therapist: ${inactive.name}` } };
+      }
+
+      // A therapist currently on a temporary transfer has branch_id pointing at the
+      // destination branch, not this booking's branch — block assigning them here
+      // until they're auto-reverted (migration-141).
+      const wrongBranch = (therapistsData || []).find(t => t.branch_id !== booking.branch_id);
+      if (wrongBranch) {
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch right now (may be temporarily transferred elsewhere).` } };
       }
 
       if (booking.date) {
@@ -2389,12 +2397,18 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
         // Resolve therapist name + check active status
         const { data: therapist } = await supabase
           .from('therapists')
-          .select('name, is_active')
+          .select('name, is_active, branch_id')
           .eq('id', newTherapistId)
           .single();
 
         if (therapist && !therapist.is_active) {
           return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Cannot assign an inactive therapist.' } };
+        }
+        // A therapist currently on a temporary transfer has branch_id pointing at the
+        // destination branch, not this booking's branch — block reassigning to them
+        // here until they're auto-reverted (migration-141).
+        if (therapist && therapist.branch_id !== booking.branch_id) {
+          return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch right now (may be temporarily transferred elsewhere).` } };
         }
         updatePayload.therapist_id = newTherapistId;
         updatePayload.therapist_name_snapshot = therapist?.name || null;
@@ -3728,8 +3742,10 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     if (branchError) throw branchError;
 
-    // 2. Fetch therapists and rooms in parallel
-    const [therapistsResult, roomsResult] = await Promise.all([
+    // 2. Fetch therapists, rooms, and any staffers currently transferred OUT of this
+    //    branch (they still show as a column here — booking creation is already
+    //    blocked for them since their branch_id now points elsewhere — see migration-141).
+    const [therapistsResult, roomsResult, transferredOutResult, transferredInResult] = await Promise.all([
       supabase
         .from('therapists')
         .select('id, name, gender, specialties, position, is_service_staff, display_order')
@@ -3744,10 +3760,64 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('is_active', true)
         .order('display_order')
         .order('name'),
+      supabase
+        .from('staff_transfers')
+        .select('id, revert_at, effective_date, start_time, from_display_order, therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
+        .eq('from_branch_id', resolvedBranchId)
+        .eq('applied', true)
+        .eq('reverted', false),
+      // Staffers currently visiting THIS branch on a temporary transfer — they already
+      // appear normally in therapistsResult above (branch_id points here); this tags them
+      // with where they're from + their actual visiting window, so the calendar can block
+      // everything OUTSIDE that window (they're only really here for that slice of time).
+      supabase
+        .from('staff_transfers')
+        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+        .eq('to_branch_id', resolvedBranchId)
+        .eq('applied', true)
+        .eq('reverted', false),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
     if (roomsResult.error) throw roomsResult.error;
+    if (transferredOutResult.error) throw transferredOutResult.error;
+    if (transferredInResult.error) throw transferredInResult.error;
+
+    const activeTherapistIds = new Set((therapistsResult.data || []).map(t => t.id));
+    const transferredOutTherapists = (transferredOutResult.data || [])
+      .filter(t => t.therapist && !activeTherapistIds.has(t.therapist.id))
+      .map(t => ({
+        ...t.therapist,
+        // therapist.display_order now reflects their DESTINATION branch's ordering
+        // (overwritten the moment the transfer applied) — from_display_order is the
+        // position they held HERE, captured before that overwrite (migration-145).
+        // Falling back to the live value only if that capture is missing (legacy rows).
+        display_order: t.from_display_order ?? t.therapist.display_order,
+        transferredOut: true,
+        returnsAt: t.revert_at,
+        // Kathmandu wall-clock instant the transfer actually took effect — lets the
+        // calendar shade only the real [start, revert_at] window, not the whole day.
+        transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
+      }));
+
+    const transferredInById = {};
+    (transferredInResult.data || []).forEach(t => {
+      transferredInById[t.therapist_id] = {
+        fromBranch: t.fromBranch?.name || null,
+        returnsAt: t.revert_at,
+        transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
+      };
+    });
+
+    const normalTherapists = (therapistsResult.data || []).map(t =>
+      transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t
+    );
+
+    // Slot the transferred-out column back into its ORIGINAL position among the branch's
+    // normal columns (by the preserved origin display_order, then name) instead of always
+    // appending it at the end.
+    const mergedTherapists = [...normalTherapists, ...transferredOutTherapists]
+      .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
 
     // 3. Fetch bookings in date range, excluding Cancelled and No Show
     const { data: bookings, error: bookingsError } = await supabase
@@ -3779,7 +3849,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           closeTime: branch.close_time || '21:00:00',
           timezone: branch.timezone || 'Asia/Kathmandu',
         },
-        therapists: therapistsResult.data || [],
+        therapists: mergedTherapists,
         rooms: roomsResult.data || [],
         bookings: bookings || [],
       },
@@ -4755,12 +4825,22 @@ export async function deleteTherapist({ therapistId }) {
 }
 
 /**
- * Transfer a staffer to another branch in the same org.
+ * Transfer a staffer to another branch in the same org for a required duration.
  * Authorization + the audit row are enforced server-side by the
- * SECURITY DEFINER transfer_therapist() function (migration-039):
- * only an admin, or the manager of the staffer's CURRENT branch, may transfer.
+ * SECURITY DEFINER transfer_therapist() function (migration-039, required-duration
+ * form added in migration-141): only an admin, or the manager of the staffer's
+ * CURRENT branch, may transfer. Every transfer auto-reverts back to the original
+ * branch when the duration elapses — there is no permanent-transfer option.
  */
-export async function transferTherapist({ therapistId, toBranchId, note = null, effectiveDate = null }) {
+export async function transferTherapist({
+  therapistId,
+  toBranchId,
+  startTime,
+  durationValue,
+  durationUnit,
+  note = null,
+  effectiveDate = null,
+}) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -4768,12 +4848,21 @@ export async function transferTherapist({ therapistId, toBranchId, note = null, 
     const { data, error } = await supabase.rpc('transfer_therapist', {
       p_therapist_id: therapistId,
       p_to_branch_id: toBranchId,
+      p_start_time: startTime,
+      p_duration_value: durationValue,
+      p_duration_unit: durationUnit,
       p_note: note,
       p_effective_date: effectiveDate,
     });
 
     if (error) throw error;
-    capture('staff_transfer_scheduled', { therapist_id: therapistId, to_branch_id: toBranchId, effective_date: effectiveDate });
+    capture('staff_transfer_scheduled', {
+      therapist_id: therapistId,
+      to_branch_id: toBranchId,
+      effective_date: effectiveDate,
+      duration_value: durationValue,
+      duration_unit: durationUnit,
+    });
     return { data: { transferId: data }, error: null };
   } catch (error) {
     console.error('[API] transferTherapist error:', error.message);
@@ -4791,6 +4880,7 @@ export async function fetchStaffTransfers() {
       .from('staff_transfers')
       .select(`
         id, transferred_at, effective_date, applied, note,
+        start_time, duration_value, duration_unit, revert_at, reverted, reverted_at,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name),
@@ -4806,6 +4896,12 @@ export async function fetchStaffTransfers() {
       effectiveDate: t.effective_date,
       applied: t.applied,
       note: t.note,
+      startTime: t.start_time,
+      durationValue: t.duration_value,
+      durationUnit: t.duration_unit,
+      revertAt: t.revert_at,
+      reverted: t.reverted,
+      revertedAt: t.reverted_at,
       therapistName: t.therapist?.name || '—',
       fromBranch: t.fromBranch?.name || '—',
       toBranch: t.toBranch?.name || '—',
@@ -4830,6 +4926,7 @@ export async function fetchPendingTransfers(branchId = null) {
       .from('staff_transfers')
       .select(`
         id, transferred_at, effective_date, applied, note, therapist_id,
+        start_time, duration_value, duration_unit, revert_at, reverted, reverted_at,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name),
@@ -4852,6 +4949,12 @@ export async function fetchPendingTransfers(branchId = null) {
       effectiveDate: t.effective_date,
       applied: t.applied,
       note: t.note,
+      startTime: t.start_time,
+      durationValue: t.duration_value,
+      durationUnit: t.duration_unit,
+      revertAt: t.revert_at,
+      reverted: t.reverted,
+      revertedAt: t.reverted_at,
       therapistName: t.therapist?.name || '—',
       fromBranch: t.fromBranch?.name || '—',
       toBranch: t.toBranch?.name || '—',
@@ -4879,6 +4982,89 @@ export async function cancelScheduledTransfer(transferId) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] cancelScheduledTransfer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Push an ACTIVE (applied, not yet reverted) transfer's revert_at further out —
+ * "Add Extra Time" — without creating a second transfer row. Only the destination
+ * branch's manager (whoever currently has the staffer) or an admin may do this;
+ * enforced server-side by extend_staff_transfer() (migration-142). Fails cleanly if
+ * the transfer has already auto-reverted (race-safe — checked atomically server-side).
+ */
+export async function extendStaffTransfer({ transferId, additionalValue, additionalUnit }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('extend_staff_transfer', {
+      p_transfer_id: transferId,
+      p_additional_value: additionalValue,
+      p_additional_unit: additionalUnit,
+    });
+
+    if (error) throw error;
+    capture('staff_transfer_extended', { transfer_id: transferId, additional_value: additionalValue, additional_unit: additionalUnit });
+    return { data: { revertAt: data }, error: null };
+  } catch (error) {
+    console.error('[API] extendStaffTransfer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * For each therapist currently AT branchId, the single most recent staff_transfers
+ * row (either direction), used by the Attendance panel to decide what the Transfer
+ * button should open: a blank create form, the ACTIVE transfer (destination's view,
+ * offering "Add Extra Time"), or a just-COMPLETED summary (origin's view, offering
+ * "Transfer Therapist Again").
+ */
+export async function fetchTherapistTransferStatus(branchId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('staff_transfers')
+      .select(`
+        id, therapist_id, from_branch_id, to_branch_id, transferred_at, effective_date,
+        start_time, duration_value, duration_unit, revert_at, applied, reverted, reverted_at, note,
+        fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
+        toBranch:branches!staff_transfers_to_branch_id_fkey(name)
+      `)
+      .or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`)
+      .order('transferred_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Keep only the latest row per therapist (data is already ordered newest-first).
+    const map = {};
+    (data || []).forEach(t => {
+      if (map[t.therapist_id]) return;
+      map[t.therapist_id] = {
+        id: t.id,
+        therapistId: t.therapist_id,
+        fromBranchId: t.from_branch_id,
+        toBranchId: t.to_branch_id,
+        fromBranch: t.fromBranch?.name || '—',
+        toBranch: t.toBranch?.name || '—',
+        transferredAt: t.transferred_at,
+        effectiveDate: t.effective_date,
+        startTime: t.start_time,
+        durationValue: t.duration_value,
+        durationUnit: t.duration_unit,
+        revertAt: t.revert_at,
+        applied: t.applied,
+        reverted: t.reverted,
+        revertedAt: t.reverted_at,
+        note: t.note,
+      };
+    });
+
+    return { data: map, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistTransferStatus error:', error.message);
     return { data: null, error };
   }
 }
@@ -6254,6 +6440,24 @@ export async function getRiskIndicators({ branchId, date }) {
 
 const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Leave', '1st-Half Day', '2nd-Half Day'];
 
+// therapist_attendance.check_in_time/check_out_time are timestamptz columns, but the UI only
+// ever deals with a plain "HH:MM" clock time (a native <input type="time">, no date picker of
+// its own — the date is the attendance page's date filter). These two helpers bridge that gap
+// in the Nepal business timezone, matching the `+05:45` offset pattern already used elsewhere
+// in this file (e.g. the collections date-range boundary above) rather than trusting the
+// Postgres session timezone.
+function combineDateTimeKathmandu(date, time) {
+  if (!date || !time) return null;
+  return `${date}T${time}:00+05:45`;
+}
+
+function formatTimeKathmandu(isoTimestamp) {
+  if (!isoTimestamp) return null;
+  return new Date(isoTimestamp).toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
 /**
  * Fetch attendance for all active therapists for a specific branch + date.
  * Therapists without a record get status = null.
@@ -6303,8 +6507,8 @@ export async function fetchAttendance({ branchId, date }) {
         therapistName: t.name,
         isServiceStaff: t.is_service_staff !== false,
         status: att?.status || null,
-        checkInTime: att?.check_in_time || null,
-        checkOutTime: att?.check_out_time || null,
+        checkInTime: formatTimeKathmandu(att?.check_in_time),
+        checkOutTime: formatTimeKathmandu(att?.check_out_time),
         notes: att?.notes || null,
       };
     });
@@ -6362,8 +6566,8 @@ export async function markAttendance({ therapistId, date, status, checkInTime, c
       therapist_id: therapistId,
       date: targetDate,
       status,
-      check_in_time: checkInTime || null,
-      check_out_time: checkOutTime || null,
+      check_in_time: combineDateTimeKathmandu(targetDate, checkInTime),
+      check_out_time: combineDateTimeKathmandu(targetDate, checkOutTime),
       notes: notes || null,
       marked_by: user.id,
     };
@@ -6385,8 +6589,8 @@ export async function markAttendance({ therapistId, date, status, checkInTime, c
         .from('therapist_attendance')
         .update({
           status,
-          check_in_time: checkInTime || null,
-          check_out_time: checkOutTime || null,
+          check_in_time: combineDateTimeKathmandu(targetDate, checkInTime),
+          check_out_time: combineDateTimeKathmandu(targetDate, checkOutTime),
           notes: notes || null,
           marked_by: user.id,
         })
