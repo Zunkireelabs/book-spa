@@ -183,6 +183,33 @@ AND NOT EXISTS (
     AND p.paid_amount = v.paid_amount
 );
 
+-- ============================================================
+-- 3. Assertion -- abort and roll back if the import is incomplete.
+--    A plain JOIN keyed on exact name matches silently inserts zero rows
+--    for any service/package-type name that fails to resolve (no error,
+--    COMMIT still succeeds) -- this is real production customer financial
+--    data, so a partial, silently-incomplete run must not be allowed to
+--    stand. Scoped to org + branch so it stays meaningful (doesn't count
+--    unrelated orgs' packages) and idempotent on re-run: WHERE NOT EXISTS
+--    above means a second run against an already-imported DB inserts zero
+--    additional rows but the 28 existing ones still satisfy this count.
+-- ============================================================
+
+DO $$
+DECLARE
+  v_count int;
+BEGIN
+  SELECT count(*) INTO v_count
+  FROM public.packages p
+  JOIN public.branches br ON br.id = p.branch_id
+  JOIN public.organizations o ON o.id = p.org_id
+  WHERE o.slug = 'nuad-thai-spa' AND br.name = 'Lazimpat';
+
+  IF v_count <> 28 THEN
+    RAISE EXCEPTION 'Expected 28 Lazimpat packages after import, got %. Aborting -- check service/package_type name resolution.', v_count;
+  END IF;
+END $$;
+
 COMMIT;
 
 -- Verify:
