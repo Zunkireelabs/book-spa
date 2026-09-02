@@ -330,6 +330,28 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         },
       ],
     }] : []),
+    {
+      id: 'packages',
+      label: 'Packages',
+      icon: 'Layers',
+      roles: ['manager', 'admin'],
+      children: [
+        {
+          id: 'package-overview',
+          label: 'All Packages',
+          icon: 'LayoutDashboard',
+          path: `${basePath}?view=package-overview`,
+          roles: ['manager', 'admin'],
+        },
+        {
+          id: 'package-list',
+          label: 'Packages Issued',
+          icon: 'Layers',
+          path: `${basePath}?view=packages`,
+          roles: ['manager', 'admin'],
+        },
+      ],
+    },
     ...(OUTREACH_ENABLED ? [{
       id: 'outreach',
       label: 'Outreach',
