@@ -368,7 +368,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, payment_status, final_amount, is_locked, due_holder_name')
+      .select('id, branch_id, status, payment_status, final_amount, is_locked, due_holder_name')
       .eq('id', bookingId)
       .single();
 
@@ -434,6 +434,21 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     let tenderList = Array.isArray(tenders)
       ? tenders
       : [{ amount: remaining, paymentMode }];
+
+    // SessionPackage tenders redeem one session from a customer's prepaid
+    // package (migration-141) — the value was already collected when the
+    // package itself was purchased, so a redemption carries no NPR amount.
+    // Pulled out here, BEFORE the amount-normalization/filter step below
+    // (which drops any tender with amount<=0), so these never enter — and
+    // never need to be excluded from — the tenderTotal/remaining/leftover
+    // math further down.
+    const sessionPackageTenders = tenderList.filter(t => t.paymentMode === 'SessionPackage');
+    for (const t of sessionPackageTenders) {
+      if (!t.packageId) {
+        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing package reference for session package tender.' } };
+      }
+    }
+    tenderList = tenderList.filter(t => t.paymentMode !== 'SessionPackage');
 
     tenderList = tenderList
       .map(t => ({
@@ -583,6 +598,43 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (paymentId) insertedIds.push(paymentId);
     }
 
+    // SessionPackage tenders: each redeems one session against a distinct
+    // package (not poolable, like ReferralVoucher/VoucherWallet-by-id above),
+    // so it's one redeem_package_session() call per tender. Deliberately kept
+    // outside the tenderTotal/remaining/leftover math above (see the
+    // extraction comment near step 7) — redeem_package_session() itself has
+    // no amount param and only appends a package_redemptions row, it does NOT
+    // insert a payments row, so a $0 payment row is inserted per tender here
+    // for the audit trail (mirrors the zero-amount auto-settle row in step 6).
+    if (sessionPackageTenders.length > 0) {
+      const priorTendersExist = otherTenders.length > 0 || membershipTenders.length > 0
+        || referralWalletTenders.length > 0 || referralVoucherTenders.length > 0
+        || voucherWalletTenders.length > 0 || voucherWalletPooledTenders.length > 0;
+      for (let i = 0; i < sessionPackageTenders.length; i++) {
+        const t = sessionPackageTenders[i];
+        const { error: redeemError } = await supabase.rpc('redeem_package_session', {
+          p_package_id: t.packageId,
+          p_booking_id: bookingId,
+          p_branch_claimed_id: booking.branch_id,
+        });
+        if (redeemError) throw redeemError;
+
+        const { data: paymentRow, error: insertError } = await supabase
+          .from('payments')
+          .insert({
+            booking_id: bookingId,
+            amount: 0,
+            payment_mode: 'SessionPackage',
+            recorded_by: user.id,
+            notes: (!priorTendersExist && i === 0) ? (notes || null) : null,
+          })
+          .select('id')
+          .single();
+        if (insertError) throw insertError;
+        if (paymentRow?.id) insertedIds.push(paymentRow.id);
+      }
+    }
+
     // 10. If this payment just fully settled the balance and the booking is also
     // already Completed, credit any pending referral tied to it. Non-blocking —
     // same reasoning as updateBookingStatus()'s call to the same RPC: a crediting
@@ -613,7 +665,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     }
 
     capture('staff_payment_recorded', {
-      tender_modes: tenderList.map(t => t.paymentMode),
+      tender_modes: [...tenderList.map(t => t.paymentMode), ...sessionPackageTenders.map(() => 'SessionPackage')],
       total_amount: tenderTotal,
       fully_paid: leftover === 0,
     });
@@ -1229,6 +1281,85 @@ export async function fetchReferralRewardForBooking(bookingId) {
     return { data: { customerId, walletBalance, vouchers: voucherList }, error: null };
   } catch (error) {
     console.error('[API] fetchReferralRewardForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Active (redeemable) session packages for a customer/guest, scoped to one
+// service — used by PaymentModal to surface a `PackageWalletCard` at checkout
+// (migration-141). A package only shows up here if it's bound to the same
+// service being booked (a package for a different service is never a valid
+// tender for this booking) and hasn't been fully redeemed or expired.
+// Matches by `customer_id` (registered customers) OR `guest_info` (phone —
+// walk-in/guest-issued packages with no linked customer row), mirroring how
+// `fetchReferralRewardForBooking` resolves rewards. `package_balances` is a
+// view over `packages` (see migration-141) so RLS on the underlying table
+// still applies to it. Returns the enriched rows the UI needs
+// (`sessionsRemaining`, `expiryDate`, etc.) — `[]` when nothing matches.
+export async function getActivePackagesForCustomer(customerId, phone, serviceId) {
+  try {
+    if (!serviceId || (!customerId && !phone)) return { data: [], error: null };
+
+    let query = supabase
+      .from('package_balances')
+      .select(`
+        package_id, org_id, branch_id, package_type_id, service_id, customer_id,
+        guest_name, guest_info, expiry_date, sessions_total, sessions_used,
+        sessions_remaining, status, last_redeemed_date
+      `)
+      .eq('service_id', serviceId)
+      .not('status', 'in', '("fully_redeemed","expired")');
+
+    // Sanitize phone before interpolating into a raw PostgREST filter string
+    // (same guard as the booking search filter above).
+    const sanitizedPhone = phone ? String(phone).replace(/[,.()"\\]/g, '') : null;
+    if (customerId && sanitizedPhone) {
+      query = query.or(`customer_id.eq.${customerId},guest_info.eq.${sanitizedPhone}`);
+    } else if (customerId) {
+      query = query.eq('customer_id', customerId);
+    } else {
+      query = query.eq('guest_info', sanitizedPhone);
+    }
+
+    const { data: balances, error: balanceError } = await query;
+    if (balanceError) throw balanceError;
+    if (!balances || balances.length === 0) return { data: [], error: null };
+
+    const packageIds = balances.map((b) => b.package_id);
+    const { data: packageRows, error: packageError } = await supabase
+      .from('packages')
+      .select('id, package_type_id, package_code, remarks, issued_date, paid_amount, package_type:package_type_id(name)')
+      .in('id', packageIds);
+    if (packageError) throw packageError;
+
+    const packageById = {};
+    for (const p of packageRows || []) packageById[p.id] = p;
+
+    const result = balances.map((b) => {
+      const pkg = packageById[b.package_id] || {};
+      return {
+        packageId: b.package_id,
+        packageTypeId: b.package_type_id,
+        packageName: pkg.package_type?.name || 'Package',
+        packageCode: pkg.package_code || null,
+        serviceId: b.service_id,
+        customerId: b.customer_id,
+        guestName: b.guest_name,
+        guestInfo: b.guest_info,
+        expiryDate: b.expiry_date,
+        sessionsTotal: b.sessions_total,
+        sessionsUsed: b.sessions_used,
+        sessionsRemaining: b.sessions_remaining,
+        status: b.status,
+        issuedDate: pkg.issued_date || null,
+        paidAmount: pkg.paid_amount != null ? Number(pkg.paid_amount) : null,
+        remarks: pkg.remarks || null,
+      };
+    });
+
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getActivePackagesForCustomer error:', error.message);
     return { data: null, error };
   }
 }
