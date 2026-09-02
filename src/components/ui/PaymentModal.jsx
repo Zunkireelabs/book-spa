@@ -5,6 +5,7 @@ import PaymentMethodSelector from './PaymentMethodSelector';
 import MembershipWalletCard from './MembershipWalletCard';
 import ReferralRewardCard from './ReferralRewardCard';
 import VoucherWalletCard from './VoucherWalletCard';
+import PackageWalletCard from './PackageWalletCard';
 import {
   fetchMembershipForBooking,
   fetchReferralRewardForBooking,
@@ -12,6 +13,8 @@ import {
   resolveCustomerReferralReward,
   searchVouchersForPayment,
   fetchVouchersForBooking,
+  fetchBookingById,
+  getActivePackagesForCustomer,
 } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
@@ -249,6 +252,58 @@ const PaymentModal = ({
     });
   };
 
+  // --- session packages (migration-141) ---
+  // Prepaid session bundles for a specific service — "Redeem 1 Session" always
+  // settles this booking's ENTIRE own remaining balance (never a partial or a
+  // bundled additional booking): the session's value was already collected when
+  // the package was purchased, so recordPayment computes the redemption's
+  // payments.amount server-side as this bookingId's own `remaining` minus any
+  // other NPR tenders. To keep that invariant intact through the client-side
+  // waterfall allocator below (which otherwise could spill a partial tender's
+  // dollar value onto a bundled additional booking), redeeming a package always
+  // REPLACES the entire tenders array with a single full-covering tender — same
+  // "replace, don't append" approach as the Membership auto-fill effect above —
+  // rather than being added alongside other tenders.
+  const [customerPackages, setCustomerPackages] = useState([]);
+  useEffect(() => {
+    if (!bookingId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: bookingRow } = await fetchBookingById(bookingId);
+      if (cancelled || !bookingRow) return;
+      const { data } = await getActivePackagesForCustomer(
+        bookingRow.customer_id,
+        bookingRow.customer_phone,
+        bookingRow.service_id
+      );
+      if (!cancelled) setCustomerPackages(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [bookingId]);
+
+  const packagesUsable = customerPackages.length > 0;
+  // Included in the payment-method dropdown for label consistency with the
+  // other wallet-style leaves, but the only supported way to create a valid
+  // SessionPackage tender is the PackageWalletCard's "Redeem 1 Session" button
+  // below (it needs a specific packageId) — handleSubmit rejects a tender of
+  // this mode with no packageId, same guard as ReferralVoucher/VoucherWallet.
+  const sessionPackageLeaf = packagesUsable ? { value: 'SessionPackage', label: 'Package' } : null;
+
+  const selectedPackageTender = tenders.find((t) => t.paymentMode === 'SessionPackage') || null;
+
+  const redeemPackage = (pkg) => {
+    setTenders([{
+      amount: String(remaining),
+      paymentMode: 'SessionPackage',
+      packageId: pkg.packageId,
+      packageLabel: pkg.packageName,
+    }]);
+  };
+
+  const undoPackage = () => {
+    setTenders([{ amount: String(grandTotal || ''), paymentMode: firstLeafValue(PAYMENT_TREE) }]);
+  };
+
   // --- pending self-service referral reward this customer earned as a referrer
   // (migration-072's "requires_manual_reward" — the customer flow never
   // auto-credits a self-service referral, so we prompt staff here at their
@@ -342,6 +397,7 @@ const PaymentModal = ({
             paymentMode: t.paymentMode,
             ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
             ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
+            ...(t.paymentMode === 'SessionPackage' ? { packageId: t.packageId } : {}),
           });
           t.amount = round2(t.amount - amt);
           needed = round2(needed - amt);
@@ -401,11 +457,13 @@ const PaymentModal = ({
     setError(null);
     const cleanedTenders = tenders
       .filter(t => Number(t.amount) > 0)
+      .filter(t => t.paymentMode !== 'SessionPackage' || !!t.packageId)
       .map(t => ({
         amount: round2(t.amount),
         paymentMode: t.paymentMode,
         ...(t.paymentMode === 'ReferralVoucher' ? { referralId: t.referralId } : {}),
         ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
+        ...(t.paymentMode === 'SessionPackage' ? { packageId: t.packageId } : {}),
       }));
     const { primaryTenders, additionalAllocations } = allocateTenders(cleanedTenders);
     const result = await onConfirm({
@@ -548,6 +606,13 @@ const PaymentModal = ({
             poolPendingDeduction={voucherPoolCommitted}
           />
 
+          <PackageWalletCard
+            packages={customerPackages}
+            selectedPackageId={selectedPackageTender?.packageId || null}
+            onRedeem={redeemPackage}
+            onUndo={undoPackage}
+          />
+
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}
           <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -568,6 +633,7 @@ const PaymentModal = ({
                 const isReferralWallet = t.paymentMode === 'ReferralWallet';
                 const isReferralVoucher = t.paymentMode === 'ReferralVoucher';
                 const isVoucherWallet = t.paymentMode === 'VoucherWallet';
+                const isSessionPackage = t.paymentMode === 'SessionPackage';
                 const isVoucherPoolRow = isVoucherWallet && !t.voucherId && voucherPoolUsable && !t.manualSearch;
                 const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
                 const overReferralWallet = isReferralWallet && Number(t.amount) > Number(referralReward?.walletBalance || 0);
@@ -587,7 +653,7 @@ const PaymentModal = ({
                         <div className="w-36 flex-shrink-0">
                           <PaymentMethodSelector
                             paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, sessionPackageLeaf]}
                             value={t.paymentMode}
                             onChange={(v) => updateTender(i, { paymentMode: v })}
                             size="md"
@@ -641,7 +707,7 @@ const PaymentModal = ({
                         <div className="w-36 flex-shrink-0">
                           <PaymentMethodSelector
                             paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, sessionPackageLeaf]}
                             value={t.paymentMode}
                             onChange={(v) => updateTender(i, { paymentMode: v })}
                             size="md"
@@ -725,6 +791,38 @@ const PaymentModal = ({
                         onClick={() => removeTender(i)}
                         className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
                         aria-label="Remove voucher"
+                      >
+                        <Icon name="Trash2" size={16} />
+                      </button>
+                    </div>
+                  );
+                }
+
+                // A SessionPackage tender always carries a packageId — created only by
+                // PackageWalletCard's "Redeem 1 Session" button (which sets a locked,
+                // full-covering amount, never a freely-typed one). The only way this
+                // row can lack a packageId is picking "Package" directly from the
+                // dropdown below, which handleSubmit rejects at submit time — shown
+                // here as a prompt back to the card instead of a broken input.
+                if (isSessionPackage) {
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-spa border border-primary/30 bg-primary/5">
+                        <Icon name="PackageCheck" size={14} className="text-primary flex-shrink-0" />
+                        {t.packageId ? (
+                          <>
+                            <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.packageLabel || 'Package'}</span>
+                            <span className="font-data font-data-medium text-sm text-primary ml-auto">{formatNPR(t.amount)}</span>
+                          </>
+                        ) : (
+                          <span className="font-caption text-xs text-text-secondary">Pick a package above to redeem a session.</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeTender(i)}
+                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                        aria-label="Remove package"
                       >
                         <Icon name="Trash2" size={16} />
                       </button>
