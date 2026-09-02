@@ -9007,6 +9007,276 @@ export async function fetchVoucherWallets() {
 }
 
 // ============================================================
+// SERVICE PACKAGES (migration-141) — manager/admin issue; staff/manager/
+// admin can read (redemption is a staff-facing action). Mirrors the
+// vouchers pattern above, structurally, but each package is bound to
+// exactly one service_id and tracks *sessions*, not a monetary balance.
+// ============================================================
+
+export async function fetchPackageTypes() {
+  try {
+    const { data, error } = await supabase
+      .from('package_types')
+      .select('id, name, service_id, default_sessions, standard_price, validity_days, is_active, display_order, service:services ( id, name, duration_minutes )')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchPackageTypes error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function issuePackage({
+  orgId, branchId, packageTypeId, customerId = null, guestName = null,
+  guestInfo = null, issuedDate = null, expiryDate = null, paidAmount = null,
+  sessionsTotal = null, remarks = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('issue_package', {
+      p_org_id: orgId,
+      p_branch_id: branchId,
+      p_package_type_id: packageTypeId,
+      p_customer_id: customerId,
+      p_guest_name: guestName,
+      p_guest_info: guestInfo,
+      p_issued_date: issuedDate,
+      p_expiry_date: expiryDate,
+      p_paid_amount: paidAmount,
+      p_sessions_total: sessionsTotal,
+      p_remarks: remarks,
+    });
+    if (error) throw error;
+    capture('package_issued', { package_type_id: packageTypeId, branch_id: branchId, linked_to_customer: !!customerId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] issuePackage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Packages joined with their live balance (from the package_balances view,
+// computed from package_redemptions — not stored). Sorted alphabetically by
+// guest name, same as fetchVouchers.
+export async function fetchPackages() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [packagesRes, balancesRes] = await Promise.all([
+      supabase
+        .from('packages')
+        .select(`
+          id, package_code, issued_date, expiry_date, guest_name, guest_info,
+          paid_amount, sessions_total, remarks, created_at,
+          branch:branches ( id, name ),
+          package_type:package_types ( id, name ),
+          service:services ( id, name, duration_minutes ),
+          issuer:users!issued_by ( id, full_name )
+        `)
+        .order('guest_name', { ascending: true }),
+      supabase
+        .from('package_balances')
+        .select('package_id, sessions_used, sessions_remaining, status, last_redeemed_date'),
+    ]);
+    if (packagesRes.error) throw packagesRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+
+    const balanceByPackage = new Map((balancesRes.data || []).map((b) => [b.package_id, b]));
+
+    const rows = (packagesRes.data || []).map((p) => {
+      const balance = balanceByPackage.get(p.id) || {};
+      return {
+        id: p.id,
+        packageCode: p.package_code,
+        issuedDate: p.issued_date,
+        expiryDate: p.expiry_date,
+        guestName: p.guest_name,
+        guestInfo: p.guest_info,
+        branchId: p.branch?.id || null,
+        branchName: p.branch?.name || '—',
+        packageTypeId: p.package_type?.id || null,
+        packageTypeName: p.package_type?.name || '—',
+        serviceName: p.service?.name || '—',
+        serviceDurationMinutes: p.service?.duration_minutes || null,
+        paidAmount: Number(p.paid_amount || 0),
+        sessionsTotal: p.sessions_total,
+        remarks: p.remarks,
+        issuedByName: p.issuer?.full_name || '—',
+        sessionsUsed: balance.sessions_used || 0,
+        sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
+        status: balance.status || 'unused',
+        lastRedeemedDate: balance.last_redeemed_date || null,
+      };
+    });
+
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchPackages error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Single package + its live balance, for the detail modal.
+export async function fetchPackage(packageId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [packageRes, balanceRes] = await Promise.all([
+      supabase
+        .from('packages')
+        .select(`
+          id, package_code, issued_date, expiry_date, guest_name, guest_info,
+          paid_amount, sessions_total, remarks, created_at,
+          branch:branches ( id, name ),
+          package_type:package_types ( id, name ),
+          service:services ( id, name, duration_minutes ),
+          issuer:users!issued_by ( id, full_name )
+        `)
+        .eq('id', packageId)
+        .single(),
+      supabase
+        .from('package_balances')
+        .select('sessions_used, sessions_remaining, status, last_redeemed_date')
+        .eq('package_id', packageId)
+        .maybeSingle(),
+    ]);
+    if (packageRes.error) throw packageRes.error;
+
+    const p = packageRes.data;
+    const balance = balanceRes.data || {};
+    return {
+      data: {
+        id: p.id,
+        packageCode: p.package_code,
+        issuedDate: p.issued_date,
+        expiryDate: p.expiry_date,
+        guestName: p.guest_name,
+        guestInfo: p.guest_info,
+        branchId: p.branch?.id || null,
+        branchName: p.branch?.name || '—',
+        packageTypeId: p.package_type?.id || null,
+        packageTypeName: p.package_type?.name || '—',
+        serviceName: p.service?.name || '—',
+        serviceDurationMinutes: p.service?.duration_minutes || null,
+        paidAmount: Number(p.paid_amount || 0),
+        sessionsTotal: p.sessions_total,
+        remarks: p.remarks,
+        issuedByName: p.issuer?.full_name || '—',
+        sessionsUsed: balance.sessions_used || 0,
+        sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
+        status: balance.status || 'unused',
+        lastRedeemedDate: balance.last_redeemed_date || null,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchPackage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchPackageRedemptions(packageId) {
+  try {
+    const { data, error } = await supabase
+      .from('package_redemptions')
+      .select(`
+        id, redeemed_date, guest_name_used_by, notes, created_at, booking_id,
+        branch:branches ( id, name ),
+        performer:users!performed_by ( id, full_name )
+      `)
+      .eq('package_id', packageId)
+      .order('redeemed_date', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchPackageRedemptions error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// "All Packages" dashboard: org-wide totals (packages issued, sessions
+// issued/used/remaining, amount collected) and a per-branch breakdown —
+// same shape as fetchVoucherOverview but tracking sessions instead of a
+// monetary balance.
+export async function fetchPackageOverview() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [packagesRes, balancesRes, branchesRes] = await Promise.all([
+      supabase.from('packages').select('id, branch_id, paid_amount, sessions_total'),
+      supabase.from('package_balances').select('package_id, sessions_used, sessions_remaining, status'),
+      supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
+    ]);
+    if (packagesRes.error) throw packagesRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+    if (branchesRes.error) throw branchesRes.error;
+
+    const balanceByPackage = new Map((balancesRes.data || []).map((b) => [b.package_id, b]));
+    const packages = (packagesRes.data || []).map((p) => {
+      const balance = balanceByPackage.get(p.id) || {};
+      return {
+        id: p.id,
+        branchId: p.branch_id,
+        paidAmount: Number(p.paid_amount || 0),
+        sessionsTotal: p.sessions_total,
+        sessionsUsed: balance.sessions_used || 0,
+        sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
+        status: balance.status || 'unused',
+      };
+    });
+
+    const totals = packages.reduce((acc, p) => ({
+      totalPackages: acc.totalPackages + 1,
+      totalPaidAmount: acc.totalPaidAmount + p.paidAmount,
+      totalSessionsIssued: acc.totalSessionsIssued + p.sessionsTotal,
+      totalSessionsUsed: acc.totalSessionsUsed + p.sessionsUsed,
+      totalSessionsRemaining: acc.totalSessionsRemaining + p.sessionsRemaining,
+    }), { totalPackages: 0, totalPaidAmount: 0, totalSessionsIssued: 0, totalSessionsUsed: 0, totalSessionsRemaining: 0 });
+
+    const statusCounts = packages.reduce((acc, p) => {
+      acc[p.status] = (acc[p.status] || 0) + 1;
+      return acc;
+    }, { unused: 0, partially_used: 0, fully_redeemed: 0, expired: 0 });
+
+    const byBranch = new Map();
+    packages.forEach((p) => {
+      const row = byBranch.get(p.branchId) || { count: 0, paidAmount: 0, sessionsIssued: 0, sessionsUsed: 0, sessionsRemaining: 0 };
+      row.count += 1;
+      row.paidAmount += p.paidAmount;
+      row.sessionsIssued += p.sessionsTotal;
+      row.sessionsUsed += p.sessionsUsed;
+      row.sessionsRemaining += p.sessionsRemaining;
+      byBranch.set(p.branchId, row);
+    });
+
+    const branches = (branchesRes.data || []).map((b) => {
+      const row = byBranch.get(b.id) || { count: 0, paidAmount: 0, sessionsIssued: 0, sessionsUsed: 0, sessionsRemaining: 0 };
+      return {
+        branchId: b.id,
+        branchName: b.name,
+        issuedCount: row.count,
+        paidAmount: row.paidAmount,
+        sessionsIssued: row.sessionsIssued,
+        sessionsUsed: row.sessionsUsed,
+        sessionsRemaining: row.sessionsRemaining,
+      };
+    });
+
+    return { data: { totals, statusCounts, branches }, error: null };
+  } catch (error) {
+    console.error('[API] fetchPackageOverview error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
 // Outreach (Phase 1) — rules, templates, message outbox/log, provider +
 // AI config. Writes to outreach_messages always go through SECURITY
 // DEFINER RPCs (outreach_enqueue_for_completed / outreach_scan_winback,
