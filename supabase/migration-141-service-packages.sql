@@ -44,7 +44,7 @@
 
 CREATE TABLE IF NOT EXISTS public.package_types (
   id               uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id           uuid          REFERENCES public.organizations(id) ON DELETE CASCADE,
+  org_id           uuid          NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   service_id       uuid          REFERENCES public.services(id),
   name             text          NOT NULL,
   default_sessions int,
@@ -60,9 +60,9 @@ CREATE INDEX IF NOT EXISTS idx_package_types_service ON public.package_types(ser
 
 CREATE TABLE IF NOT EXISTS public.packages (
   id               uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id           uuid          REFERENCES public.organizations(id) ON DELETE CASCADE,
-  branch_id        uuid          REFERENCES public.branches(id),
-  package_type_id  uuid          REFERENCES public.package_types(id),
+  org_id           uuid          NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  branch_id        uuid          NOT NULL REFERENCES public.branches(id),
+  package_type_id  uuid          NOT NULL REFERENCES public.package_types(id),
   service_id       uuid          REFERENCES public.services(id),
   customer_id      uuid          REFERENCES public.customers(id),
   guest_name       text,
@@ -88,7 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_packages_service      ON public.packages(service_
 CREATE TABLE IF NOT EXISTS public.package_redemptions (
   id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   package_id          uuid        NOT NULL REFERENCES public.packages(id),
-  org_id              uuid        REFERENCES public.organizations(id),
+  org_id              uuid        NOT NULL REFERENCES public.organizations(id),
   redeemed_date       date        NOT NULL DEFAULT current_date,
   branch_id           uuid        REFERENCES public.branches(id),
   booking_id          uuid        REFERENCES public.bookings(id),
@@ -153,7 +153,7 @@ DROP POLICY IF EXISTS "Staff can read package types" ON public.package_types;
 CREATE POLICY "Staff can read package types"
   ON public.package_types FOR SELECT
   TO authenticated
-  USING (org_id = get_user_org_id() AND get_user_role() IN ('staff','manager','admin'));
+  USING (org_id = get_user_org_id() AND get_user_role() IN ('staff','manager','admin','admin_viewer'));
 
 -- No direct write policy on package_types -- managed via dashboard SQL for
 -- now (same posture as voucher_types), except admin gets a direct-manage
@@ -169,7 +169,7 @@ DROP POLICY IF EXISTS "Staff can read own org packages" ON public.packages;
 CREATE POLICY "Staff can read own org packages"
   ON public.packages FOR SELECT
   TO authenticated
-  USING (org_id = get_user_org_id() AND get_user_role() IN ('staff','manager','admin'));
+  USING (org_id = get_user_org_id() AND get_user_role() IN ('staff','manager','admin','admin_viewer'));
 
 -- NO direct INSERT/UPDATE/DELETE policy -- writes go through issue_package().
 
@@ -177,7 +177,7 @@ DROP POLICY IF EXISTS "Staff can read own org package redemptions" ON public.pac
 CREATE POLICY "Staff can read own org package redemptions"
   ON public.package_redemptions FOR SELECT
   TO authenticated
-  USING (org_id = get_user_org_id() AND get_user_role() IN ('staff','manager','admin'));
+  USING (org_id = get_user_org_id() AND get_user_role() IN ('staff','manager','admin','admin_viewer'));
 
 -- NO direct INSERT/UPDATE/DELETE policy -- ledger is append-only via
 -- redeem_package_session().
@@ -328,7 +328,12 @@ BEGIN
   END IF;
 
   IF p_booking_id IS NOT NULL THEN
-    SELECT org_id INTO v_booking_org FROM public.bookings WHERE id = p_booking_id;
+    -- bookings has no org_id column (only branch_id) so org_id is resolved
+    -- via branches, same as migration-108.
+    SELECT br.org_id INTO v_booking_org
+    FROM public.bookings b
+    JOIN public.branches br ON br.id = b.branch_id
+    WHERE b.id = p_booking_id;
     IF v_booking_org IS NULL OR v_booking_org IS DISTINCT FROM v_org THEN
       RAISE EXCEPTION 'redeem_package_session: booking is not in your organization';
     END IF;
@@ -380,7 +385,7 @@ REVOKE ALL ON FUNCTION public.redeem_package_session(uuid, uuid, uuid, text, tex
 GRANT EXECUTE ON FUNCTION public.redeem_package_session(uuid, uuid, uuid, text, text) TO authenticated;
 
 -- ============================================================
--- 5. RECORD MIGRATION
+-- MIGRATION 141 COMPLETE
 -- ============================================================
 
 INSERT INTO public.schema_migrations (version, name)
