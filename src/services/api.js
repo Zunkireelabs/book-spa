@@ -2734,6 +2734,15 @@ export async function getDailySummary(branchId, date) {
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
+        // SessionPackage rows (migration-141) carry a real payments.amount so
+        // update_booking_payment_status() can settle the booking (see
+        // recordPayment), but that value was already recognized as revenue
+        // when the package itself was purchased — it isn't cash collected
+        // today, so it's excluded here (this scoped fix intentionally does
+        // NOT touch classifyPaymentMode/Membership/VoucherWallet, which have
+        // this same "already-recognized-elsewhere" property but are a
+        // pre-existing gap outside this fix's scope).
+        if (p.payment_mode === 'SessionPackage') continue;
         const amount = Number(p.amount);
         netRevenue += amount;
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
@@ -2806,10 +2815,12 @@ export async function getDailySummary(branchId, date) {
 // legacy 'Card' string check plus the named custom bank methods (migration-052 relaxed
 // payment_mode to a free string, so orgs can add more bank names later — this list covers
 // what's configured today). Wallet is internal credit only (Membership/Referral/Voucher
-// balances); Digital is external non-card electronic payment. See getDailySummary above
-// for the same 'today' semantics (bookings.date, not payment created_at).
+// balances, plus SessionPackage — migration-141 — since a redemption's value was already
+// recognized as revenue when the package was purchased, not today); Digital is external
+// non-card electronic payment. See getDailySummary above for the same 'today' semantics
+// (bookings.date, not payment created_at).
 const CARD_MODES = new Set(['Card', 'Nabil', 'GlobalIME', 'NICAsia']);
-const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
+const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher', 'SessionPackage']);
 const DIGITAL_MODES = new Set(['Esewa', 'Khalti', 'MobileBanking', 'Cheque']);
 
 export async function getTodayInsights(branchId, from, to) {
