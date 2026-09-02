@@ -14,6 +14,8 @@ import {
   fetchPendingTransfers,
   cancelScheduledTransfer,
   fetchAllBranches,
+  extendStaffTransfer,
+  fetchTherapistTransferStatus,
 } from '../../../../services/api';
 
 function formatPrettyDate(d) {
@@ -22,6 +24,35 @@ function formatPrettyDate(d) {
   const [y, m, day] = d.split('-').map(Number);
   return new Date(y, m - 1, day).toLocaleDateString('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
+
+const DURATION_UNIT_OPTIONS = [
+  { value: 'minute', label: 'Minute' },
+  { value: 'hour', label: 'Hour' },
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+];
+
+// Client-side estimate only, for the modal's preview line — the server independently
+// computes the authoritative revert_at (migration-141's transfer_therapist()).
+function computeRevertPreview(dateStr, timeStr, value, unit) {
+  if (!dateStr || !timeStr || !value || !unit) return null;
+  const start = new Date(`${dateStr}T${timeStr}`);
+  if (Number.isNaN(start.getTime())) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  let revert;
+  if (unit === 'month') {
+    revert = new Date(start);
+    revert.setMonth(revert.getMonth() + n);
+  } else {
+    const msPerUnit = { minute: 60000, hour: 3600000, day: 86400000, week: 604800000 };
+    revert = new Date(start.getTime() + n * msPerUnit[unit]);
+  }
+  return revert.toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }
 
@@ -81,8 +112,17 @@ const AttendancePanel = ({ branchId }) => {
   // Transfer feature
   const [orgBranches, setOrgBranches] = useState([]);
   const [pendingByTherapist, setPendingByTherapist] = useState({});
+  const [transferStatusByTherapist, setTransferStatusByTherapist] = useState({});
+  const [extendDurationUnit, setExtendDurationUnit] = useState('');
+  const [extendDurationValue, setExtendDurationValue] = useState('');
+  const [extendError, setExtendError] = useState(null);
+  const [extending, setExtending] = useState(false);
   const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
   const [transferToBranch, setTransferToBranch] = useState('');
+  const [transferStartDate, setTransferStartDate] = useState('');
+  const [transferStartTime, setTransferStartTime] = useState('');
+  const [transferDurationUnit, setTransferDurationUnit] = useState('');
+  const [transferDurationValue, setTransferDurationValue] = useState('');
   const [transferNote, setTransferNote] = useState('');
   const [transferError, setTransferError] = useState(null);
   const [transferring, setTransferring] = useState(false);
@@ -140,10 +180,14 @@ const AttendancePanel = ({ branchId }) => {
 
   const loadPendingTransfers = useCallback(async () => {
     if (!branchId) return;
-    const { data } = await fetchPendingTransfers(branchId);
+    const [{ data }, { data: statusMap }] = await Promise.all([
+      fetchPendingTransfers(branchId),
+      fetchTherapistTransferStatus(branchId),
+    ]);
     const map = {};
     (data || []).forEach(t => { map[t.therapistId] = t; });
     setPendingByTherapist(map);
+    setTransferStatusByTherapist(statusMap || {});
   }, [branchId]);
 
   const loadData = useCallback(async () => {
@@ -359,26 +403,94 @@ const AttendancePanel = ({ branchId }) => {
   };
 
   const openTransfer = (t) => {
-    setTransferTarget({ therapistId: t.therapistId, therapistName: t.therapistName });
+    const latest = transferStatusByTherapist[t.therapistId] || null;
+    const activeTransfer = latest && latest.applied && !latest.reverted && latest.revertAt && latest.toBranchId === branchId
+      ? latest
+      : null;
+    const completedTransfer = !activeTransfer && latest && latest.reverted && latest.fromBranchId === branchId
+      ? latest
+      : null;
+
+    setTransferTarget({ therapistId: t.therapistId, therapistName: t.therapistName, activeTransfer, completedTransfer });
     setTransferToBranch('');
+    setTransferStartDate(selectedDate);
+    setTransferStartTime('');
+    setTransferDurationUnit('');
+    setTransferDurationValue('');
     setTransferNote('');
     setTransferError(null);
+    setExtendDurationUnit('');
+    setExtendDurationValue('');
+    setExtendError(null);
   };
+
+  const isExtendFormComplete = !!extendDurationUnit && !!extendDurationValue && Number(extendDurationValue) > 0;
+
+  const handleExtendTransfer = async () => {
+    if (!isExtendFormComplete) {
+      setExtendError('Enter a valid extra duration.');
+      return;
+    }
+    setExtending(true);
+    setExtendError(null);
+
+    const result = await extendStaffTransfer({
+      transferId: transferTarget.activeTransfer.id,
+      additionalValue: Number(extendDurationValue),
+      additionalUnit: extendDurationUnit,
+    });
+
+    if (result.error) {
+      setExtendError(result.error.message || 'Failed to extend transfer.');
+      setExtending(false);
+      return;
+    }
+
+    const name = transferTarget.therapistName;
+    setTransferTarget(null);
+    setExtending(false);
+    showToast(`Extended ${name}'s transfer — now returns ${new Date(result.data.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`);
+    await loadData();
+  };
+
+  const isTransferFormComplete =
+    !!transferToBranch &&
+    !!transferStartDate &&
+    !!transferStartTime &&
+    !!transferDurationUnit &&
+    !!transferDurationValue &&
+    Number(transferDurationValue) > 0;
 
   const handleTransfer = async () => {
     if (!transferToBranch) {
       setTransferError('Select a destination branch.');
       return;
     }
+    if (!transferStartDate || !transferStartTime) {
+      setTransferError('Select a start date and time.');
+      return;
+    }
+    if (!transferDurationUnit) {
+      setTransferError('Select a duration unit.');
+      return;
+    }
+    if (!transferDurationValue || Number(transferDurationValue) <= 0) {
+      setTransferError('Enter a valid duration.');
+      return;
+    }
+
     setTransferring(true);
     setTransferError(null);
 
-    const isFuture = selectedDate > today;
+    const isFuture = transferStartDate > today;
     const result = await transferTherapist({
       therapistId: transferTarget.therapistId,
       toBranchId: transferToBranch,
+      startTime: transferStartTime,
+      durationValue: Number(transferDurationValue),
+      durationUnit: transferDurationUnit,
       note: transferNote.trim() || null,
-      effectiveDate: selectedDate,
+      effectiveDate: transferStartDate,
     });
 
     if (result.error) {
@@ -388,12 +500,13 @@ const AttendancePanel = ({ branchId }) => {
     }
 
     const name = transferTarget.therapistName;
+    const revertPreview = computeRevertPreview(transferStartDate, transferStartTime, transferDurationValue, transferDurationUnit);
     setTransferTarget(null);
     setTransferring(false);
     showToast(
       isFuture
-        ? `Transfer scheduled for ${name} on ${formatPrettyDate(selectedDate)}.`
-        : `${name} transferred.`
+        ? `Transfer scheduled for ${name} on ${formatPrettyDate(transferStartDate)}${revertPreview ? `, returns around ${revertPreview}` : ''}.`
+        : `${name} transferred${revertPreview ? `, returns around ${revertPreview}` : ''}.`
     );
     await loadData();
   };
@@ -741,7 +854,13 @@ const AttendancePanel = ({ branchId }) => {
                       onClick={() => openTransfer(t)}
                       disabled={!!pendingByTherapist[t.therapistId]}
                       className="inline-flex items-center justify-center w-8 h-8 rounded-spa bg-background text-text-secondary hover:bg-accent/10 hover:text-accent spa-transition-fast disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-text-secondary"
-                      title={pendingByTherapist[t.therapistId] ? 'A transfer is already scheduled' : `Transfer ${staffLabel.toLowerCase()}`}
+                      title={
+                        pendingByTherapist[t.therapistId]
+                          ? 'A transfer is already scheduled'
+                          : transferStatusByTherapist[t.therapistId]?.applied && !transferStatusByTherapist[t.therapistId]?.reverted && transferStatusByTherapist[t.therapistId]?.toBranchId === branchId
+                            ? 'View active transfer / add extra time'
+                            : `Transfer ${staffLabel.toLowerCase()}`
+                      }
                     >
                       <Icon name="ArrowRightLeft" size={16} />
                     </button>
@@ -755,64 +874,190 @@ const AttendancePanel = ({ branchId }) => {
 
       {/* Transfer Modal */}
       {transferTarget && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !transferring && setTransferTarget(null)}>
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !transferring && !extending && setTransferTarget(null)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                Transfer {staffLabel}
+                {transferTarget.activeTransfer ? `Active Transfer — ${staffLabel}` : `Transfer ${staffLabel}`}
               </h3>
-              <button onClick={() => !transferring && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
+              <button onClick={() => !transferring && !extending && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
                 <Icon name="X" size={20} className="text-text-secondary" />
               </button>
             </div>
 
-            <p className="font-body text-sm text-text-secondary">
-              Move <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> to another branch.
-            </p>
+            {transferTarget.activeTransfer ? (
+              <>
+                {/* ACTIVE: show current transfer details + Add Extra Time. Cannot start a
+                    new transfer for this staffer until this one resolves (server-enforced). */}
+                <p className="font-body text-sm text-text-secondary">
+                  <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> is currently transferred here from{' '}
+                  <span className="font-body-medium text-text-primary">{transferTarget.activeTransfer.fromBranch}</span>.
+                </p>
 
-            <div className={`flex items-center gap-2 p-3 rounded-spa text-sm ${
-              selectedDate > today ? 'bg-accent/10 text-accent' : 'bg-primary/5 text-text-secondary'
-            }`}>
-              <Icon name="Calendar" size={16} className="flex-shrink-0" />
-              <span>
-                {selectedDate > today
-                  ? <>Scheduled for <span className="font-body-medium">{formatPrettyDate(selectedDate)}</span>. The {staffLabel.toLowerCase()} stays at the current branch until then.</>
-                  : <>Effective <span className="font-body-medium">{formatPrettyDate(selectedDate)}</span> (applies immediately).</>}
-              </span>
-            </div>
+                <div className="bg-primary/5 rounded-spa p-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Destination branch</span>
+                    <span className="font-body-medium text-text-primary">{transferTarget.activeTransfer.toBranch}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Start</span>
+                    <span className="font-body-medium text-text-primary">
+                      {formatPrettyDate(transferTarget.activeTransfer.effectiveDate)} {transferTarget.activeTransfer.startTime?.slice(0, 5)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Current return</span>
+                    <span className="font-body-medium text-accent">
+                      {new Date(transferTarget.activeTransfer.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Status</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium bg-success/10 text-success">
+                      <Icon name="CheckCircle" size={11} /> Active
+                    </span>
+                  </div>
+                </div>
 
-            {transferError && (
-              <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-                <Icon name="AlertCircle" size={16} />
-                <span>{transferError}</span>
-              </div>
+                {extendError && (
+                  <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                    <Icon name="AlertCircle" size={16} />
+                    <span>{extendError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    label="Add Extra Time"
+                    placeholder="Select unit..."
+                    options={DURATION_UNIT_OPTIONS}
+                    value={extendDurationUnit}
+                    onChange={setExtendDurationUnit}
+                  />
+                  <div className="space-y-1">
+                    <label className="block font-body font-body-medium text-sm text-text-primary">Amount</label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={extendDurationValue}
+                      onChange={(e) => setExtendDurationValue(e.target.value)}
+                      placeholder="e.g. 2"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={extending}>Close</Button>
+                  <Button variant="primary" size="sm" onClick={handleExtendTransfer} loading={extending} disabled={!isExtendFormComplete}>
+                    Add Extra Time
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {transferTarget.completedTransfer && (
+                  <div className="bg-background rounded-spa border border-border p-3 space-y-1 text-sm">
+                    <p className="font-body font-body-medium text-text-primary flex items-center gap-1.5">
+                      <Icon name="CheckCircle" size={14} className="text-success" /> Transfer completed
+                    </p>
+                    <p className="font-body text-text-secondary">
+                      Returned to <span className="font-body-medium">{transferTarget.completedTransfer.fromBranch}</span> from{' '}
+                      {transferTarget.completedTransfer.toBranch} at{' '}
+                      {transferTarget.completedTransfer.revertedAt
+                        ? new Date(transferTarget.completedTransfer.revertedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                        : '—'}.
+                    </p>
+                  </div>
+                )}
+
+                <p className="font-body text-sm text-text-secondary">
+                  Move <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> to another branch for a set duration. They'll automatically return to their current branch once it elapses.
+                </p>
+
+                {transferError && (
+                  <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                    <Icon name="AlertCircle" size={16} />
+                    <span>{transferError}</span>
+                  </div>
+                )}
+
+                <Select
+                  label="Destination Branch"
+                  placeholder="Select a branch..."
+                  options={orgBranches
+                    .filter(b => b.id !== branchId)
+                    .map(b => ({ value: b.id, label: b.name }))}
+                  value={transferToBranch}
+                  onChange={setTransferToBranch}
+                />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block font-body font-body-medium text-sm text-text-primary">Start Date</label>
+                    <input
+                      type="date"
+                      value={transferStartDate}
+                      onChange={(e) => setTransferStartDate(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
+                    <input
+                      type="time"
+                      value={transferStartTime}
+                      onChange={(e) => setTransferStartTime(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    label="Duration Unit"
+                    placeholder="Select unit..."
+                    options={DURATION_UNIT_OPTIONS}
+                    value={transferDurationUnit}
+                    onChange={setTransferDurationUnit}
+                  />
+                  <div className="space-y-1">
+                    <label className="block font-body font-body-medium text-sm text-text-primary">Duration</label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={transferDurationValue}
+                      onChange={(e) => setTransferDurationValue(e.target.value)}
+                      placeholder="e.g. 2"
+                    />
+                  </div>
+                </div>
+
+                {isTransferFormComplete && (
+                  <p className="font-caption text-xs text-text-tertiary">
+                    Will automatically move back to the current branch around{' '}
+                    <span className="font-body-medium text-text-secondary">
+                      {computeRevertPreview(transferStartDate, transferStartTime, transferDurationValue, transferDurationUnit)}
+                    </span>.
+                  </p>
+                )}
+
+                <div className="space-y-1">
+                  <label className="block font-body font-body-medium text-sm text-text-primary">Note (optional)</label>
+                  <Input
+                    value={transferNote}
+                    onChange={(e) => setTransferNote(e.target.value)}
+                    placeholder="Reason for transfer..."
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={transferring}>Cancel</Button>
+                  <Button variant="primary" size="sm" onClick={handleTransfer} loading={transferring} disabled={!isTransferFormComplete}>
+                    {transferTarget.completedTransfer ? 'Transfer Therapist Again' : (transferStartDate > today ? 'Schedule Transfer' : 'Transfer')}
+                  </Button>
+                </div>
+              </>
             )}
-
-            <Select
-              label="Destination Branch"
-              placeholder="Select a branch..."
-              options={orgBranches
-                .filter(b => b.id !== branchId)
-                .map(b => ({ value: b.id, label: b.name }))}
-              value={transferToBranch}
-              onChange={setTransferToBranch}
-            />
-
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Note (optional)</label>
-              <Input
-                value={transferNote}
-                onChange={(e) => setTransferNote(e.target.value)}
-                placeholder="Reason for transfer..."
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={transferring}>Cancel</Button>
-              <Button variant="primary" size="sm" onClick={handleTransfer} loading={transferring}>
-                {selectedDate > today ? 'Schedule Transfer' : 'Transfer'}
-              </Button>
-            </div>
           </div>
         </div>
       )}
