@@ -293,15 +293,26 @@ const PlatformOrgDetail = () => {
 
   // Present-period export — the not-yet-collected numbers currently shown in
   // the Collect Commission panel, for whatever Period start/end is selected.
-  const handleExportPresentPeriod = () => {
-    exportRowsToExcel(`commission-present-period-${orgId}`, [{
+  const handleExportPresentPeriodSummary = () => {
+    exportRowsToExcel(`commission-present-period-summary-${orgId}`, [{
       'Period Start': wizFrom,
       'Period End': wizTo,
       'Sales (Period)': grossSales,
       'Owed To Date': orgRollup?.commission_owed_to_date == null ? '' : Number(orgRollup.commission_owed_to_date),
       'Collected To Date': orgRollup?.collected_to_date == null ? '' : Number(orgRollup.collected_to_date),
       'Net Owed': orgRollup?.net_owed == null ? '' : Number(orgRollup.net_owed),
-    }], 'Present Period');
+    }], 'Present Period Summary');
+  };
+
+  // Itemized export for the present period — exactly what's on screen in the
+  // Paid Bookings/Memberships/Vouchers table below (already loaded, no extra
+  // fetch), respecting the current branch/type filters (what you see is what
+  // you download).
+  const handleExportPresentPeriodDetail = () => {
+    const rows = drillRows.map((r) => ({
+      Date: r.date, Type: r.type, Branch: r.branch_name, Description: r.description, Amount: r.amount,
+    }));
+    exportRowsToExcel(`commission-present-period-detail-${orgId}-${wizFrom}_to_${wizTo}`, rows, 'Present Period Detail');
   };
 
   const submitCollect = async () => {
@@ -352,9 +363,9 @@ const PlatformOrgDetail = () => {
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="font-heading font-heading-semibold text-text-primary">Collect Commission</h3>
-            <button type="button" onClick={handleExportPresentPeriod} disabled={rollupLoading}
+            <button type="button" onClick={handleExportPresentPeriodSummary} disabled={rollupLoading}
               className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
-              Export Excel (Present Period)
+              Export Excel (Present Period Summary)
             </button>
           </div>
 
@@ -525,7 +536,13 @@ const PlatformOrgDetail = () => {
 
         {/* Itemized paid drill-in */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
-          <h3 className="font-heading font-heading-semibold text-text-primary">Paid Bookings, Memberships & Vouchers</h3>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="font-heading font-heading-semibold text-text-primary">Paid Bookings, Memberships & Vouchers</h3>
+            <button type="button" onClick={handleExportPresentPeriodDetail} disabled={drillRows.length === 0}
+              className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
+              Export Excel (Detail)
+            </button>
+          </div>
           <p className="font-body text-xs text-text-secondary">
             Paid only. Unpaid/refunded bookings are excluded (not new money, or not money yet), and
             wallet-funded portions of a booking (membership/referral/voucher redemption) are excluded
