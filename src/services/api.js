@@ -7101,7 +7101,7 @@ function daysInPeriodInclusive(startDate, endDate) {
 // therapist has zero attendance rows at all for the period (branches that don't mark
 // attendance rigorously would otherwise show 0% utilization for everyone, which both hides
 // real utilization and unfairly zeroes out 15% of performanceScore's weighting).
-function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes, periodDays) {
+export function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes, periodDays) {
   const completed = bookings.filter(b => b.status === 'Completed');
   const servicesCompleted = completed.length;
   const totalAssigned = bookings.length;
@@ -7388,7 +7388,7 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     const bookings = bookingsResult.data || [];
     const attendanceRows = (!attendanceResult.error && attendanceResult.data) || [];
 
-    const metrics = computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes);
+    const metrics = computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes, daysInPeriodInclusive(startDate, endDate));
 
     return { data: { ...metrics, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
