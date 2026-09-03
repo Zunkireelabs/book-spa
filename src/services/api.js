@@ -9096,7 +9096,8 @@ export async function fetchPackages() {
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
-          issuer:users!issued_by ( id, full_name )
+          issuer:users!issued_by ( id, full_name ),
+          customer:customers ( id, full_name, phone )
         `)
         .order('guest_name', { ascending: true }),
       supabase
@@ -9115,8 +9116,8 @@ export async function fetchPackages() {
         packageCode: p.package_code,
         issuedDate: p.issued_date,
         expiryDate: p.expiry_date,
-        guestName: p.guest_name,
-        guestInfo: p.guest_info,
+        guestName: p.guest_name || p.customer?.full_name || '—',
+        guestInfo: p.guest_info || p.customer?.phone || '',
         branchId: p.branch?.id || null,
         branchName: p.branch?.name || '—',
         packageTypeId: p.package_type?.id || null,
@@ -9156,7 +9157,8 @@ export async function fetchPackage(packageId) {
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
-          issuer:users!issued_by ( id, full_name )
+          issuer:users!issued_by ( id, full_name ),
+          customer:customers ( id, full_name, phone )
         `)
         .eq('id', packageId)
         .single(),
@@ -9176,8 +9178,8 @@ export async function fetchPackage(packageId) {
         packageCode: p.package_code,
         issuedDate: p.issued_date,
         expiryDate: p.expiry_date,
-        guestName: p.guest_name,
-        guestInfo: p.guest_info,
+        guestName: p.guest_name || p.customer?.full_name || '—',
+        guestInfo: p.guest_info || p.customer?.phone || '',
         branchId: p.branch?.id || null,
         branchName: p.branch?.name || '—',
         packageTypeId: p.package_type?.id || null,
