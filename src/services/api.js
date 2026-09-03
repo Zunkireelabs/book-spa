@@ -369,7 +369,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     // 1. Fetch booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, payment_status, final_amount, is_locked, due_holder_name')
+      .select('id, branch_id, status, payment_status, final_amount, is_locked, due_holder_name')
       .eq('id', bookingId)
       .single();
 
@@ -436,6 +436,24 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       ? tenders
       : [{ amount: remaining, paymentMode }];
 
+    // SessionPackage tenders redeem one session from a customer's prepaid
+    // package (migration-141). The session's value was already collected when
+    // the package itself was purchased, so the caller never supplies an NPR
+    // amount for it (unlike every other tender type) — pulled out here,
+    // BEFORE the amount-normalization/filter step below (which drops any
+    // tender with amount<=0 and would otherwise silently discard these).
+    // They're re-priced further down (once `remaining` minus the other NPR
+    // tenders is known) and folded back into `tenderTotal`/`leftover` so the
+    // booking can actually settle — see the "settlement" comment below for
+    // why v_paid/payment_status needs a real payments.amount, not $0.
+    const sessionPackageTenders = tenderList.filter(t => t.paymentMode === 'SessionPackage');
+    for (const t of sessionPackageTenders) {
+      if (!t.packageId) {
+        return { data: null, error: { code: 'INVALID_PAYMENT_MODE', message: 'Missing package reference for session package tender.' } };
+      }
+    }
+    tenderList = tenderList.filter(t => t.paymentMode !== 'SessionPackage');
+
     tenderList = tenderList
       .map(t => ({
         amount: Math.round(Number(t.amount) * 100) / 100,
@@ -460,10 +478,39 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       // draw (migration-090) — deliberately allowed, see voucherWalletPooledTenders below.
     }
 
-    const tenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
-    if (tenderTotal > remaining) {
-      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${tenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
+    const nprTenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    if (nprTenderTotal > remaining) {
+      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${nprTenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
     }
+
+    // SessionPackage tenders settle whatever balance is left after the NPR
+    // tenders above ("1 session, full service value" — a redemption is
+    // expected to cover the rest of this booking's remaining balance, not a
+    // caller-chosen amount). This residual — split evenly across multiple
+    // SessionPackage tenders, if more than one, with any rounding remainder
+    // folded into the last — becomes each tender's `payments.amount`. That's
+    // required for update_booking_payment_status() (migration-042) to ever
+    // mark the booking 'paid': it sums payments.amount directly (`v_paid`),
+    // so a $0 row can never cross the `v_paid >= v_final` threshold. This
+    // mirrors how Membership/VoucherWallet tenders also post a real
+    // payments.amount despite not being new cash collected today — only
+    // `nprTenderTotal` (computed above, before this block) represents an NPR
+    // tender amount the payer is actively choosing a method for; this residual
+    // is deliberately kept out of THAT sum and the OVERPAYMENT check above,
+    // since it is by construction never able to overpay (it's exactly
+    // `remaining - nprTenderTotal`, never more).
+    const sessionPackageResidual = Math.round((remaining - nprTenderTotal) * 100) / 100;
+    let sessionPackageAmounts = [];
+    if (sessionPackageTenders.length > 0) {
+      const share = Math.floor((sessionPackageResidual / sessionPackageTenders.length) * 100) / 100;
+      sessionPackageAmounts = sessionPackageTenders.map(() => share);
+      const distributed = Math.round(share * sessionPackageTenders.length * 100) / 100;
+      const remainder = Math.round((sessionPackageResidual - distributed) * 100) / 100;
+      sessionPackageAmounts[sessionPackageAmounts.length - 1] =
+        Math.round((sessionPackageAmounts[sessionPackageAmounts.length - 1] + remainder) * 100) / 100;
+    }
+    const sessionPackageTotal = Math.round(sessionPackageAmounts.reduce((s, a) => s + a, 0) * 100) / 100;
+    const tenderTotal = Math.round((nprTenderTotal + sessionPackageTotal) * 100) / 100;
 
     const leftover = Math.round((remaining - tenderTotal) * 100) / 100;
     const resolvedDueHolder = (dueHolderName || '').trim() || booking.due_holder_name || null;
@@ -584,6 +631,44 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
       if (paymentId) insertedIds.push(paymentId);
     }
 
+    // SessionPackage tenders: each redeems one session against a distinct
+    // package (not poolable, like ReferralVoucher/VoucherWallet-by-id above),
+    // so it's one redeem_package_session() call per tender. redeem_package_session()
+    // itself has no amount param and only appends a package_redemptions row —
+    // it does NOT insert a payments row (unlike record_voucher_wallet_payment),
+    // so a payment row is inserted per tender here using the residual amount
+    // computed above (sessionPackageAmounts), NOT $0 — see the settlement
+    // comment above for why a non-zero payments.amount is required for
+    // update_booking_payment_status() to ever mark the booking 'paid'.
+    if (sessionPackageTenders.length > 0) {
+      const priorTendersExist = otherTenders.length > 0 || membershipTenders.length > 0
+        || referralWalletTenders.length > 0 || referralVoucherTenders.length > 0
+        || voucherWalletTenders.length > 0 || voucherWalletPooledTenders.length > 0;
+      for (let i = 0; i < sessionPackageTenders.length; i++) {
+        const t = sessionPackageTenders[i];
+        const { error: redeemError } = await supabase.rpc('redeem_package_session', {
+          p_package_id: t.packageId,
+          p_booking_id: bookingId,
+          p_branch_claimed_id: booking.branch_id,
+        });
+        if (redeemError) throw redeemError;
+
+        const { data: paymentRow, error: insertError } = await supabase
+          .from('payments')
+          .insert({
+            booking_id: bookingId,
+            amount: sessionPackageAmounts[i],
+            payment_mode: 'SessionPackage',
+            recorded_by: user.id,
+            notes: (!priorTendersExist && i === 0) ? (notes || null) : null,
+          })
+          .select('id')
+          .single();
+        if (insertError) throw insertError;
+        if (paymentRow?.id) insertedIds.push(paymentRow.id);
+      }
+    }
+
     // 10. If this payment just fully settled the balance and the booking is also
     // already Completed, credit any pending referral tied to it. Non-blocking —
     // same reasoning as updateBookingStatus()'s call to the same RPC: a crediting
@@ -614,7 +699,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     }
 
     capture('staff_payment_recorded', {
-      tender_modes: tenderList.map(t => t.paymentMode),
+      tender_modes: [...tenderList.map(t => t.paymentMode), ...sessionPackageTenders.map(() => 'SessionPackage')],
       total_amount: tenderTotal,
       fully_paid: leftover === 0,
     });
@@ -1230,6 +1315,87 @@ export async function fetchReferralRewardForBooking(bookingId) {
     return { data: { customerId, walletBalance, vouchers: voucherList }, error: null };
   } catch (error) {
     console.error('[API] fetchReferralRewardForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Active (redeemable) session packages for a customer/guest, scoped to one
+// service — used by PaymentModal to surface a `PackageWalletCard` at checkout
+// (migration-141). A package only shows up here if it's bound to the same
+// service being booked (a package for a different service is never a valid
+// tender for this booking) and hasn't been fully redeemed or expired.
+// Matches by `customer_id` (registered customers) OR `guest_info` (phone —
+// walk-in/guest-issued packages with no linked customer row), mirroring how
+// `fetchReferralRewardForBooking` resolves rewards. `package_balances` is a
+// view over `packages` (see migration-141) declared `WITH (security_invoker
+// = true)`, which is what makes it run as the querying role rather than the
+// view owner — without that, it would bypass RLS on the underlying table
+// entirely. Returns the enriched rows the UI needs
+// (`sessionsRemaining`, `expiryDate`, etc.) — `[]` when nothing matches.
+export async function getActivePackagesForCustomer(customerId, phone, serviceId) {
+  try {
+    if (!serviceId || (!customerId && !phone)) return { data: [], error: null };
+
+    let query = supabase
+      .from('package_balances')
+      .select(`
+        package_id, org_id, branch_id, package_type_id, service_id, customer_id,
+        guest_name, guest_info, expiry_date, sessions_total, sessions_used,
+        sessions_remaining, status, last_redeemed_date
+      `)
+      .eq('service_id', serviceId)
+      .not('status', 'in', '("fully_redeemed","expired")');
+
+    // Sanitize phone before interpolating into a raw PostgREST filter string
+    // (same guard as the booking search filter above).
+    const sanitizedPhone = phone ? String(phone).replace(/[,.()"\\]/g, '') : null;
+    if (customerId && sanitizedPhone) {
+      query = query.or(`customer_id.eq.${customerId},guest_info.eq.${sanitizedPhone}`);
+    } else if (customerId) {
+      query = query.eq('customer_id', customerId);
+    } else {
+      query = query.eq('guest_info', sanitizedPhone);
+    }
+
+    const { data: balances, error: balanceError } = await query;
+    if (balanceError) throw balanceError;
+    if (!balances || balances.length === 0) return { data: [], error: null };
+
+    const packageIds = balances.map((b) => b.package_id);
+    const { data: packageRows, error: packageError } = await supabase
+      .from('packages')
+      .select('id, package_type_id, package_code, remarks, issued_date, paid_amount, package_type:package_type_id(name)')
+      .in('id', packageIds);
+    if (packageError) throw packageError;
+
+    const packageById = {};
+    for (const p of packageRows || []) packageById[p.id] = p;
+
+    const result = balances.map((b) => {
+      const pkg = packageById[b.package_id] || {};
+      return {
+        packageId: b.package_id,
+        packageTypeId: b.package_type_id,
+        packageName: pkg.package_type?.name || 'Package',
+        packageCode: pkg.package_code || null,
+        serviceId: b.service_id,
+        customerId: b.customer_id,
+        guestName: b.guest_name,
+        guestInfo: b.guest_info,
+        expiryDate: b.expiry_date,
+        sessionsTotal: b.sessions_total,
+        sessionsUsed: b.sessions_used,
+        sessionsRemaining: b.sessions_remaining,
+        status: b.status,
+        issuedDate: pkg.issued_date || null,
+        paidAmount: pkg.paid_amount != null ? Number(pkg.paid_amount) : null,
+        remarks: pkg.remarks || null,
+      };
+    });
+
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getActivePackagesForCustomer error:', error.message);
     return { data: null, error };
   }
 }
@@ -2632,6 +2798,15 @@ export async function getDailySummary(branchId, date) {
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
+        // SessionPackage rows (migration-141) carry a real payments.amount so
+        // update_booking_payment_status() can settle the booking (see
+        // recordPayment), but that value was already recognized as revenue
+        // when the package itself was purchased — it isn't cash collected
+        // today, so it's excluded here (this scoped fix intentionally does
+        // NOT touch classifyPaymentMode/Membership/VoucherWallet, which have
+        // this same "already-recognized-elsewhere" property but are a
+        // pre-existing gap outside this fix's scope).
+        if (p.payment_mode === 'SessionPackage') continue;
         const amount = Number(p.amount);
         netRevenue += amount;
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
@@ -2704,8 +2879,12 @@ export async function getDailySummary(branchId, date) {
 // legacy 'Card' string check plus the named custom bank methods (migration-052 relaxed
 // payment_mode to a free string, so orgs can add more bank names later — this list covers
 // what's configured today). Wallet is internal credit only (Membership/Referral/Voucher
-// balances); Digital is external non-card electronic payment. See getDailySummary above
-// for the same 'today' semantics (bookings.date, not payment created_at).
+// balances); Digital is external non-card electronic payment. SessionPackage
+// (migration-141) is skipped entirely before bucketing, not treated as wallet — its value
+// was already recognized as revenue when the package was purchased, so per the
+// cash-based-reconciliation policy it must not be counted as money collected today in any
+// bucket, including totalSales. See getDailySummary/getDailyOperationalReport for the same
+// 'today' semantics (bookings.date, not payment created_at) and the same exclusion policy.
 const CARD_MODES = new Set(['Card', 'Nabil', 'GlobalIME', 'NICAsia']);
 const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
 const DIGITAL_MODES = new Set(['Esewa', 'Khalti', 'MobileBanking', 'Cheque']);
@@ -2746,6 +2925,12 @@ export async function getTodayInsights(branchId, from, to) {
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
+        // SessionPackage rows (migration-141) are never counted as money
+        // collected today — that value was already recognized as revenue
+        // when the package itself was purchased (same policy as
+        // getDailySummary/getDailyOperationalReport). Skip entirely, don't
+        // fold into totalSales or any bucket.
+        if (p.payment_mode === 'SessionPackage') continue;
         const amount = Number(p.amount);
         totalSales += amount;
         if (p.payment_mode === 'Cash') {
@@ -3084,11 +3269,19 @@ export async function getDailyOperationalReport(branchId, date) {
         noShowBookings: all.filter(b => b.status === 'No Show').length,
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
-        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections
+        // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections.
+        // Excludes SessionPackage rows (migration-141) — same policy as getDailySummary:
+        // that value was already recognized as revenue when the package itself was
+        // purchased, so it isn't cash collected today. Without this exclusion,
+        // getDailyOperationalReport would disagree with getDailySummary (whose
+        // netRevenue is what closeDay persists) on any day with a SessionPackage
+        // redemption.
         // Folds in voucherSalesTotal so the live branch matches what the closed
         // snapshot already includes (closeDay persists getDailySummary()'s
         // voucher-inclusive netRevenue).
-        netRevenue: paymentRows.reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
+        netRevenue: paymentRows
+          .filter(p => p.payment_mode !== 'SessionPackage')
+          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
       };
     }
 
@@ -3104,6 +3297,8 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
       for (const p of paymentRows) {
+        // SessionPackage rows are never money collected today — see netRevenue above.
+        if (p.payment_mode === 'SessionPackage') continue;
         const amount = Number(p.amount);
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
@@ -9559,6 +9754,276 @@ export async function fetchVoucherWallets() {
     return { data: rows, error: null };
   } catch (error) {
     console.error('[API] fetchVoucherWallets error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// SERVICE PACKAGES (migration-141) — manager/admin issue; staff/manager/
+// admin can read (redemption is a staff-facing action). Mirrors the
+// vouchers pattern above, structurally, but each package is bound to
+// exactly one service_id and tracks *sessions*, not a monetary balance.
+// ============================================================
+
+export async function fetchPackageTypes() {
+  try {
+    const { data, error } = await supabase
+      .from('package_types')
+      .select('id, name, service_id, default_sessions, standard_price, validity_days, is_active, display_order, service:services ( id, name, duration_minutes )')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchPackageTypes error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function issuePackage({
+  orgId, branchId, packageTypeId, customerId = null, guestName = null,
+  guestInfo = null, issuedDate = null, expiryDate = null, paidAmount = null,
+  sessionsTotal = null, remarks = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('issue_package', {
+      p_org_id: orgId,
+      p_branch_id: branchId,
+      p_package_type_id: packageTypeId,
+      p_customer_id: customerId,
+      p_guest_name: guestName,
+      p_guest_info: guestInfo,
+      p_issued_date: issuedDate,
+      p_expiry_date: expiryDate,
+      p_paid_amount: paidAmount,
+      p_sessions_total: sessionsTotal,
+      p_remarks: remarks,
+    });
+    if (error) throw error;
+    capture('package_issued', { package_type_id: packageTypeId, branch_id: branchId, linked_to_customer: !!customerId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] issuePackage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Packages joined with their live balance (from the package_balances view,
+// computed from package_redemptions — not stored). Sorted alphabetically by
+// guest name, same as fetchVouchers.
+export async function fetchPackages() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [packagesRes, balancesRes] = await Promise.all([
+      supabase
+        .from('packages')
+        .select(`
+          id, package_code, issued_date, expiry_date, guest_name, guest_info,
+          paid_amount, sessions_total, remarks, created_at,
+          branch:branches ( id, name ),
+          package_type:package_types ( id, name ),
+          service:services ( id, name, duration_minutes ),
+          issuer:users!issued_by ( id, full_name )
+        `)
+        .order('guest_name', { ascending: true }),
+      supabase
+        .from('package_balances')
+        .select('package_id, sessions_used, sessions_remaining, status, last_redeemed_date'),
+    ]);
+    if (packagesRes.error) throw packagesRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+
+    const balanceByPackage = new Map((balancesRes.data || []).map((b) => [b.package_id, b]));
+
+    const rows = (packagesRes.data || []).map((p) => {
+      const balance = balanceByPackage.get(p.id) || {};
+      return {
+        id: p.id,
+        packageCode: p.package_code,
+        issuedDate: p.issued_date,
+        expiryDate: p.expiry_date,
+        guestName: p.guest_name,
+        guestInfo: p.guest_info,
+        branchId: p.branch?.id || null,
+        branchName: p.branch?.name || '—',
+        packageTypeId: p.package_type?.id || null,
+        packageTypeName: p.package_type?.name || '—',
+        serviceName: p.service?.name || '—',
+        serviceDurationMinutes: p.service?.duration_minutes || null,
+        paidAmount: Number(p.paid_amount || 0),
+        sessionsTotal: p.sessions_total,
+        remarks: p.remarks,
+        issuedByName: p.issuer?.full_name || '—',
+        sessionsUsed: balance.sessions_used || 0,
+        sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
+        status: balance.status || 'unused',
+        lastRedeemedDate: balance.last_redeemed_date || null,
+      };
+    });
+
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchPackages error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Single package + its live balance, for the detail modal.
+export async function fetchPackage(packageId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [packageRes, balanceRes] = await Promise.all([
+      supabase
+        .from('packages')
+        .select(`
+          id, package_code, issued_date, expiry_date, guest_name, guest_info,
+          paid_amount, sessions_total, remarks, created_at,
+          branch:branches ( id, name ),
+          package_type:package_types ( id, name ),
+          service:services ( id, name, duration_minutes ),
+          issuer:users!issued_by ( id, full_name )
+        `)
+        .eq('id', packageId)
+        .single(),
+      supabase
+        .from('package_balances')
+        .select('sessions_used, sessions_remaining, status, last_redeemed_date')
+        .eq('package_id', packageId)
+        .maybeSingle(),
+    ]);
+    if (packageRes.error) throw packageRes.error;
+
+    const p = packageRes.data;
+    const balance = balanceRes.data || {};
+    return {
+      data: {
+        id: p.id,
+        packageCode: p.package_code,
+        issuedDate: p.issued_date,
+        expiryDate: p.expiry_date,
+        guestName: p.guest_name,
+        guestInfo: p.guest_info,
+        branchId: p.branch?.id || null,
+        branchName: p.branch?.name || '—',
+        packageTypeId: p.package_type?.id || null,
+        packageTypeName: p.package_type?.name || '—',
+        serviceName: p.service?.name || '—',
+        serviceDurationMinutes: p.service?.duration_minutes || null,
+        paidAmount: Number(p.paid_amount || 0),
+        sessionsTotal: p.sessions_total,
+        remarks: p.remarks,
+        issuedByName: p.issuer?.full_name || '—',
+        sessionsUsed: balance.sessions_used || 0,
+        sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
+        status: balance.status || 'unused',
+        lastRedeemedDate: balance.last_redeemed_date || null,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchPackage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchPackageRedemptions(packageId) {
+  try {
+    const { data, error } = await supabase
+      .from('package_redemptions')
+      .select(`
+        id, redeemed_date, guest_name_used_by, notes, created_at, booking_id,
+        branch:branches ( id, name ),
+        performer:users!performed_by ( id, full_name )
+      `)
+      .eq('package_id', packageId)
+      .order('redeemed_date', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchPackageRedemptions error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// "All Packages" dashboard: org-wide totals (packages issued, sessions
+// issued/used/remaining, amount collected) and a per-branch breakdown —
+// same shape as fetchVoucherOverview but tracking sessions instead of a
+// monetary balance.
+export async function fetchPackageOverview() {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [packagesRes, balancesRes, branchesRes] = await Promise.all([
+      supabase.from('packages').select('id, branch_id, paid_amount, sessions_total'),
+      supabase.from('package_balances').select('package_id, sessions_used, sessions_remaining, status'),
+      supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
+    ]);
+    if (packagesRes.error) throw packagesRes.error;
+    if (balancesRes.error) throw balancesRes.error;
+    if (branchesRes.error) throw branchesRes.error;
+
+    const balanceByPackage = new Map((balancesRes.data || []).map((b) => [b.package_id, b]));
+    const packages = (packagesRes.data || []).map((p) => {
+      const balance = balanceByPackage.get(p.id) || {};
+      return {
+        id: p.id,
+        branchId: p.branch_id,
+        paidAmount: Number(p.paid_amount || 0),
+        sessionsTotal: p.sessions_total,
+        sessionsUsed: balance.sessions_used || 0,
+        sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
+        status: balance.status || 'unused',
+      };
+    });
+
+    const totals = packages.reduce((acc, p) => ({
+      totalPackages: acc.totalPackages + 1,
+      totalPaidAmount: acc.totalPaidAmount + p.paidAmount,
+      totalSessionsIssued: acc.totalSessionsIssued + p.sessionsTotal,
+      totalSessionsUsed: acc.totalSessionsUsed + p.sessionsUsed,
+      totalSessionsRemaining: acc.totalSessionsRemaining + p.sessionsRemaining,
+    }), { totalPackages: 0, totalPaidAmount: 0, totalSessionsIssued: 0, totalSessionsUsed: 0, totalSessionsRemaining: 0 });
+
+    const statusCounts = packages.reduce((acc, p) => {
+      acc[p.status] = (acc[p.status] || 0) + 1;
+      return acc;
+    }, { unused: 0, partially_used: 0, fully_redeemed: 0, expired: 0 });
+
+    const byBranch = new Map();
+    packages.forEach((p) => {
+      const row = byBranch.get(p.branchId) || { count: 0, paidAmount: 0, sessionsIssued: 0, sessionsUsed: 0, sessionsRemaining: 0 };
+      row.count += 1;
+      row.paidAmount += p.paidAmount;
+      row.sessionsIssued += p.sessionsTotal;
+      row.sessionsUsed += p.sessionsUsed;
+      row.sessionsRemaining += p.sessionsRemaining;
+      byBranch.set(p.branchId, row);
+    });
+
+    const branches = (branchesRes.data || []).map((b) => {
+      const row = byBranch.get(b.id) || { count: 0, paidAmount: 0, sessionsIssued: 0, sessionsUsed: 0, sessionsRemaining: 0 };
+      return {
+        branchId: b.id,
+        branchName: b.name,
+        issuedCount: row.count,
+        paidAmount: row.paidAmount,
+        sessionsIssued: row.sessionsIssued,
+        sessionsUsed: row.sessionsUsed,
+        sessionsRemaining: row.sessionsRemaining,
+      };
+    });
+
+    return { data: { totals, statusCounts, branches }, error: null };
+  } catch (error) {
+    console.error('[API] fetchPackageOverview error:', error.message);
     return { data: null, error };
   }
 }

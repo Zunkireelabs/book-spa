@@ -56,6 +56,8 @@ import MembershipCollectionPanel from './components/Memberships/MembershipCollec
 import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import VoucherListPanel from './components/Vouchers/VoucherListPanel';
 import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
+import PackageListPanel from './components/Packages/PackageListPanel';
+import PackageOverviewPanel from './components/Packages/PackageOverviewPanel';
 import OutreachPanel from './components/Outreach/OutreachPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
@@ -644,6 +646,8 @@ const BranchManagerDashboard = () => {
               {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
               {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}
               {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin'].includes(profile?.role) && <VoucherListPanel />}
+              {viewMode === 'package-overview' && ['manager','admin'].includes(profile?.role) && <PackageOverviewPanel />}
+              {viewMode === 'packages' && ['manager','admin'].includes(profile?.role) && <PackageListPanel />}
               {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
