@@ -7,7 +7,8 @@ import {
   getOrgMembershipDeposits, getOrgVoucherSales,
   getRevenueRollup, formatNPR,
 } from 'services/platformApi';
-import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from 'utils/periodPresets';
+import { getTodayISO, toISO } from 'utils/periodPresets';
+import { exportRowsToExcel } from 'utils/exportExcel';
 
 const BASIS_OPTIONS = [
   { value: 'vat_inclusive', label: 'VAT inclusive (rate on full amount)' },
@@ -41,8 +42,6 @@ const VAT_RATE_MAX = 100;
 
 const PlatformOrgDetail = () => {
   const { orgId } = useParams();
-  const [preset, setPreset] = useState('monthly');
-  const range = useMemo(() => getPeriodRange(preset), [preset]);
 
   const [rates, setRates] = useState([]);
   const [collections, setCollections] = useState([]);
@@ -106,22 +105,31 @@ const PlatformOrgDetail = () => {
   const effectiveFrom = wizFrom;
   const effectiveTo = wizTo;
 
-  const reload = useCallback(() => {
+  // Rates/collections aren't period-scoped (full history) — only refetch on
+  // org change or after a commission is collected, never on a date edit.
+  const reloadRatesAndCollections = useCallback(() => {
+    setError('');
+    Promise.all([listRates(orgId), listCollections(orgId)])
+      .then(([r, c]) => { setRates(r || []); setCollections(c || []); })
+      .catch((e) => setError(e.message || 'Load failed'));
+  }, [orgId]);
+
+  useEffect(() => { reloadRatesAndCollections(); }, [reloadRatesAndCollections]);
+
+  // Bookings/memberships/vouchers ARE period-scoped — refetch whenever the
+  // shared Period start/end changes.
+  useEffect(() => {
     setError('');
     Promise.all([
-      listRates(orgId), listCollections(orgId),
-      getOrgBookings(orgId, range.startDate, range.endDate),
-      getOrgMembershipDeposits(orgId, range.startDate, range.endDate),
-      getOrgVoucherSales(orgId, range.startDate, range.endDate),
+      getOrgBookings(orgId, wizFrom, wizTo),
+      getOrgMembershipDeposits(orgId, wizFrom, wizTo),
+      getOrgVoucherSales(orgId, wizFrom, wizTo),
     ])
-      .then(([r, c, b, md, vs]) => {
-        setRates(r || []); setCollections(c || []); setBookings(b || []);
-        setMembershipDeposits(md || []); setVoucherSales(vs || []);
+      .then(([b, md, vs]) => {
+        setBookings(b || []); setMembershipDeposits(md || []); setVoucherSales(vs || []);
       })
       .catch((e) => setError(e.message || 'Load failed'));
-  }, [orgId, range.startDate, range.endDate]);
-
-  useEffect(() => { reload(); }, [reload]);
+  }, [orgId, wizFrom, wizTo]);
 
   useEffect(() => {
     let alive = true;
@@ -184,7 +192,7 @@ const PlatformOrgDetail = () => {
 
   const DRILL_PAGE_SIZE = 100;
   const [drillPage, setDrillPage] = useState(1);
-  useEffect(() => { setDrillPage(1); }, [drillFilter, branchFilter, preset]);
+  useEffect(() => { setDrillPage(1); }, [drillFilter, branchFilter, wizFrom, wizTo]);
   const drillPageCount = Math.max(1, Math.ceil(drillRows.length / DRILL_PAGE_SIZE));
   const drillPageRows = drillRows.slice((drillPage - 1) * DRILL_PAGE_SIZE, drillPage * DRILL_PAGE_SIZE);
 
@@ -201,6 +209,26 @@ const PlatformOrgDetail = () => {
   const commissionBase = wizBasis === 'vat_exclusive' ? grossSales / (1 + wizVatNum / 100) : grossSales;
   const computedCommission = commissionBase * wizRateNum / 100;
 
+  const handleExportCollectionHistory = () => {
+    const rows = collections.map((c) => {
+      const vatExclBase = c.gross_sales == null ? null
+        : c.commission_basis === 'vat_exclusive' ? c.gross_sales / (1 + Number(c.vat_rate_percent || 0) / 100)
+        : c.gross_sales;
+      return {
+        'Period Start': c.period_start,
+        'Period End': c.period_end,
+        'Sales': c.gross_sales == null ? '' : Number(c.gross_sales),
+        'VAT-excl. Base': vatExclBase == null ? '' : Number(vatExclBase),
+        'Cut %': c.rate_percent == null ? '' : Number(c.rate_percent),
+        'Amount To Be Collected': c.expected_amount == null ? '' : Number(c.expected_amount),
+        'Amount Already Collected': Number(c.amount_collected),
+        'Collected On': c.collected_at,
+        'Notes': c.notes || '',
+      };
+    });
+    exportRowsToExcel(`commission-collection-history-${orgId}`, rows, 'Collection History');
+  };
+
   const submitCollect = async () => {
     setCollecting(true);
     try {
@@ -212,7 +240,7 @@ const PlatformOrgDetail = () => {
       setWizNotes('');
       setWizActualAmount('');
       setConfirming(false);
-      reload();
+      reloadRatesAndCollections();
     } catch (err) { setError(err.message); }
     finally { setCollecting(false); }
   };
@@ -220,24 +248,34 @@ const PlatformOrgDetail = () => {
   return (
     <div className="min-h-screen bg-background">
       <PlatformNav />
-      <main className="max-w-5xl mx-auto px-6 py-6 space-y-6">
+      <main className="max-w-6xl mx-auto px-6 py-6 space-y-4">
         <Link to="/platform/dashboard" className="font-body text-sm text-primary hover:underline">← All clients</Link>
         {error && <p className="font-body text-sm text-error">{error}</p>}
+
+        <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 items-start">
+          {/* Period filter — drives every section on this page (Collect Commission,
+              Collection history, and the Paid Bookings/Memberships/Vouchers drill-in) */}
+          <aside className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3 lg:sticky lg:top-6">
+            <h3 className="font-heading font-heading-semibold text-text-primary text-sm">Period</h3>
+            <label className="font-body text-sm text-text-secondary block">Start
+              <input type="date" value={wizFrom} onChange={(e) => setWizFrom(e.target.value)}
+                className="block border border-border rounded-spa px-2 py-1 w-full mt-1" />
+            </label>
+            <label className="font-body text-sm text-text-secondary block">End
+              <input type="date" value={wizTo} onChange={(e) => setWizTo(e.target.value)}
+                className="block border border-border rounded-spa px-2 py-1 w-full mt-1" />
+            </label>
+            <div className="pt-2 border-t border-border">
+              <span className="font-body text-sm text-text-secondary block mb-1">Branch</span>
+              <CustomSelect value={branchFilter} onChange={setBranchFilter} options={branchOptions} />
+            </div>
+          </aside>
+
+          <div className="space-y-6 min-w-0">
 
         {/* Collect Commission wizard */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
           <h3 className="font-heading font-heading-semibold text-text-primary">Collect Commission</h3>
-
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="font-body text-sm text-text-secondary">Period start
-              <input type="date" value={wizFrom} onChange={(e) => setWizFrom(e.target.value)}
-                className="block border border-border rounded-spa px-2 py-1" />
-            </label>
-            <label className="font-body text-sm text-text-secondary">Period end
-              <input type="date" value={wizTo} onChange={(e) => setWizTo(e.target.value)}
-                className="block border border-border rounded-spa px-2 py-1" />
-            </label>
-          </div>
 
           {rollupLoading ? (
             <p className="font-body text-sm text-text-secondary">Loading…</p>
@@ -325,7 +363,13 @@ const PlatformOrgDetail = () => {
 
         {/* Collection history */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
-          <h3 className="font-heading font-heading-semibold text-text-primary">Collection history</h3>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="font-heading font-heading-semibold text-text-primary">Collection history</h3>
+            <button type="button" onClick={handleExportCollectionHistory} disabled={collections.length === 0}
+              className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
+              Export Excel
+            </button>
+          </div>
           {collections.length === 0 ? (
             <p className="text-text-secondary font-body text-sm">Nothing collected yet.</p>
           ) : (
@@ -380,24 +424,12 @@ const PlatformOrgDetail = () => {
 
         {/* Itemized paid drill-in */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="font-heading font-heading-semibold text-text-primary">Paid Bookings, Memberships & Vouchers</h3>
-            <div className="flex gap-2">
-              <div className="w-48">
-                <CustomSelect value={branchFilter} onChange={setBranchFilter} options={branchOptions} />
-              </div>
-              <div className="w-48">
-                <CustomSelect value={preset} onChange={setPreset}
-                  options={PERIOD_PRESETS.map((p) => ({ value: p.id, label: p.label }))} />
-              </div>
-            </div>
-          </div>
+          <h3 className="font-heading font-heading-semibold text-text-primary">Paid Bookings, Memberships & Vouchers</h3>
           <p className="font-body text-xs text-text-secondary">
             Paid only. Unpaid/refunded bookings are excluded (not new money, or not money yet), and
             wallet-funded portions of a booking (membership/referral/voucher redemption) are excluded
-            here since they're already counted in Paid Memberships/Vouchers. Totals here only match
-            the "Sales (period)" figure above when this preset's range equals the calculator's
-            selected range — the two are controlled independently.
+            here since they're already counted in Paid Memberships/Vouchers. Filtered by the Period
+            dates on the left — matches the "Sales (period)" figure above exactly.
           </p>
 
           <div className="flex gap-2 flex-wrap">
@@ -455,6 +487,9 @@ const PlatformOrgDetail = () => {
             <span className="text-text-primary">{formatNPR(drillSubtotal)}</span>
           </div>
         </section>
+
+          </div>
+        </div>
       </main>
     </div>
   );
