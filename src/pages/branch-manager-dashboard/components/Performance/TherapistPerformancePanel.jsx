@@ -3,7 +3,6 @@ import Icon from '../../../../components/AppIcon';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getTherapistPerformance } from '../../../../services/api';
-import TherapistDetailView from './TherapistDetailView';
 
 function getTier(score) {
   if (score >= 85) return { label: 'Top Performer', color: 'bg-success/10 text-success' };
@@ -24,10 +23,6 @@ function ScoreBadge({ score }) {
   );
 }
 
-function formatHours(h) {
-  return `${Number(h || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })}h`;
-}
-
 const TherapistPerformancePanel = ({ branchId }) => {
   const today = getTodayISO();
 
@@ -41,7 +36,6 @@ const TherapistPerformancePanel = ({ branchId }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedTherapist, setSelectedTherapist] = useState(null); // { id, name } | null
 
   // Range is driven by APPLIED dates so editing the pickers doesn't re-fetch
   // until the user clicks Apply.
@@ -98,7 +92,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
     const rows = visibleTherapists;
     if (!rows.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Rank', 'Therapist', 'Score', 'Tier', 'Services', 'Customers', 'Worked (h)', 'Occupied (h)', 'Utilization %'];
+    const header = ['Rank', 'Therapist', 'Score', 'Tier', 'Revenue', 'Completed', 'Total Assigned', 'Completion %', 'Attendance %', 'Utilization %', 'Avg/Booking'];
     let csv = header.join(',') + '\n';
     rows.forEach((t, idx) => {
       csv += [
@@ -106,11 +100,13 @@ const TherapistPerformancePanel = ({ branchId }) => {
         esc(t.therapistName),
         t.performanceScore,
         esc(getTier(t.performanceScore).label),
-        t.servicesCompleted,
-        t.customersAttended,
-        t.workedHours,
-        t.occupiedHours,
+        t.paidRevenue,
+        t.completedBookings,
+        t.totalAssigned,
+        t.completionRate,
+        t.attendanceRate,
         t.utilizationRate,
+        t.avgRevenuePerBooking,
       ].join(',') + '\n';
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -121,18 +117,6 @@ const TherapistPerformancePanel = ({ branchId }) => {
     link.click();
     URL.revokeObjectURL(url);
   };
-
-  // ── Drill-down: therapist detail view replaces this whole panel ──────────
-  if (selectedTherapist) {
-    return (
-      <TherapistDetailView
-        therapistId={selectedTherapist.id}
-        therapistName={selectedTherapist.name}
-        branchId={branchId}
-        onBack={() => setSelectedTherapist(null)}
-      />
-    );
-  }
 
   // ── Loading ────────────────────────────────────────────────
   if (loading) {
@@ -172,7 +156,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
         <div>
           <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Performance Index</h2>
           <p className="font-body text-sm text-text-secondary">
-            Ranked by weighted performance score. Click a therapist for the full breakdown.
+            Ranked by weighted performance score.
             {data && ` Period: ${data.periodStart} to ${data.periodEnd}`}
           </p>
         </div>
@@ -234,31 +218,26 @@ const TherapistPerformancePanel = ({ branchId }) => {
         ) : (
           <>
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full min-w-[720px]">
+            <table className="w-full min-w-[800px]">
               <thead>
                 <tr className="bg-background/50 border-b border-border">
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide w-12">#</th>
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Therapist</th>
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Score</th>
-                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Services</th>
-                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Customers</th>
-                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Worked</th>
-                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Occupied</th>
+                  <th className="px-4 py-3 text-right font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Revenue</th>
+                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Completed</th>
+                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Completion</th>
+                  <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Attendance</th>
                   <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Utilization</th>
+                  <th className="px-4 py-3 text-right font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Avg/Booking</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {therapists.map((t, idx) => {
+                  const tier = getTier(t.performanceScore);
                   const rank = idx + 1;
                   return (
-                    <tr
-                      key={t.therapistId}
-                      onClick={() => setSelectedTherapist({ id: t.therapistId, name: t.therapistName })}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedTherapist({ id: t.therapistId, name: t.therapistName }); } }}
-                      role="button"
-                      tabIndex={0}
-                      className="hover:bg-background/30 spa-transition-fast cursor-pointer"
-                    >
+                    <tr key={t.therapistId} className="hover:bg-background/30 spa-transition-fast">
                       {/* Rank */}
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full font-data font-data-medium text-xs ${
@@ -270,12 +249,11 @@ const TherapistPerformancePanel = ({ branchId }) => {
 
                       {/* Therapist */}
                       <td className="px-4 py-3">
-                        <div className="flex items-center space-x-2 min-w-0">
+                        <div className="flex items-center space-x-2">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                             <Icon name="User" size={14} className="text-primary" />
                           </div>
-                          <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
-                          <Icon name="ChevronRight" size={14} className="text-text-tertiary ml-auto flex-shrink-0" />
+                          <span className="font-body font-body-medium text-sm text-text-primary">{t.therapistName}</span>
                         </div>
                       </td>
 
@@ -284,24 +262,37 @@ const TherapistPerformancePanel = ({ branchId }) => {
                         <ScoreBadge score={t.performanceScore} />
                       </td>
 
-                      {/* Services */}
-                      <td className="px-4 py-3 text-center">
-                        <span className="font-data font-data-normal text-sm text-text-primary">{t.servicesCompleted}</span>
+                      {/* Revenue */}
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-normal text-sm text-text-primary">
+                          NPR {t.paidRevenue.toLocaleString('en-IN')}
+                        </span>
                       </td>
 
-                      {/* Customers */}
+                      {/* Completed */}
                       <td className="px-4 py-3 text-center">
-                        <span className="font-data font-data-normal text-sm text-text-primary">{t.customersAttended}</span>
+                        <span className="font-data font-data-normal text-sm text-text-primary">
+                          {t.completedBookings}
+                          <span className="text-text-tertiary text-xs"> / {t.totalAssigned}</span>
+                        </span>
                       </td>
 
-                      {/* Worked */}
+                      {/* Completion Rate */}
                       <td className="px-4 py-3 text-center">
-                        <span className="font-data font-data-normal text-sm text-text-primary">{formatHours(t.workedHours)}</span>
+                        <span className={`font-data font-data-normal text-sm ${
+                          t.completionRate >= 80 ? 'text-success' : t.completionRate >= 60 ? 'text-warning' : 'text-error'
+                        }`}>
+                          {t.completionRate}%
+                        </span>
                       </td>
 
-                      {/* Occupied */}
+                      {/* Attendance */}
                       <td className="px-4 py-3 text-center">
-                        <span className="font-data font-data-normal text-sm text-text-primary">{formatHours(t.occupiedHours)}</span>
+                        <span className={`font-data font-data-normal text-sm ${
+                          t.attendanceRate >= 80 ? 'text-success' : t.attendanceRate >= 60 ? 'text-warning' : 'text-error'
+                        }`}>
+                          {t.attendanceRate}%
+                        </span>
                       </td>
 
                       {/* Utilization */}
@@ -310,6 +301,13 @@ const TherapistPerformancePanel = ({ branchId }) => {
                           t.utilizationRate >= 70 ? 'text-success' : t.utilizationRate >= 40 ? 'text-warning' : 'text-error'
                         }`}>
                           {t.utilizationRate}%
+                        </span>
+                      </td>
+
+                      {/* Avg Revenue Per Booking */}
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-normal text-sm text-text-primary">
+                          NPR {t.avgRevenuePerBooking.toLocaleString('en-IN')}
                         </span>
                       </td>
                     </tr>
@@ -324,13 +322,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
             {therapists.map((t, idx) => {
               const rank = idx + 1;
               return (
-                <div
-                  key={t.therapistId}
-                  onClick={() => setSelectedTherapist({ id: t.therapistId, name: t.therapistName })}
-                  role="button"
-                  tabIndex={0}
-                  className="p-4 space-y-3 cursor-pointer active:bg-background/40"
-                >
+                <div key={t.therapistId} className="p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full font-data font-data-medium text-xs flex-shrink-0 ${
@@ -342,33 +334,42 @@ const TherapistPerformancePanel = ({ branchId }) => {
                         <Icon name="User" size={14} className="text-primary" />
                       </div>
                       <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
-                      <Icon name="ChevronRight" size={14} className="text-text-tertiary flex-shrink-0" />
                     </div>
                     <ScoreBadge score={t.performanceScore} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-text-tertiary text-xs">Services</span>
-                      <span className="font-data font-data-normal text-text-primary">{t.servicesCompleted}</span>
+                      <span className="text-text-tertiary text-xs">Revenue</span>
+                      <span className="font-data font-data-normal text-text-primary">NPR {t.paidRevenue.toLocaleString('en-IN')}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-text-tertiary text-xs">Customers</span>
-                      <span className="font-data font-data-normal text-text-primary">{t.customersAttended}</span>
+                      <span className="text-text-tertiary text-xs">Completed</span>
+                      <span className="font-data font-data-normal text-text-primary">
+                        {t.completedBookings}<span className="text-text-tertiary text-xs">/{t.totalAssigned}</span>
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-text-tertiary text-xs">Worked</span>
-                      <span className="font-data font-data-normal text-text-primary">{formatHours(t.workedHours)}</span>
+                      <span className="text-text-tertiary text-xs">Completion</span>
+                      <span className={`font-data font-data-normal ${
+                        t.completionRate >= 80 ? 'text-success' : t.completionRate >= 60 ? 'text-warning' : 'text-error'
+                      }`}>{t.completionRate}%</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-text-tertiary text-xs">Occupied</span>
-                      <span className="font-data font-data-normal text-text-primary">{formatHours(t.occupiedHours)}</span>
+                      <span className="text-text-tertiary text-xs">Attendance</span>
+                      <span className={`font-data font-data-normal ${
+                        t.attendanceRate >= 80 ? 'text-success' : t.attendanceRate >= 60 ? 'text-warning' : 'text-error'
+                      }`}>{t.attendanceRate}%</span>
                     </div>
-                    <div className="flex justify-between col-span-2">
+                    <div className="flex justify-between">
                       <span className="text-text-tertiary text-xs">Utilization</span>
                       <span className={`font-data font-data-normal ${
                         t.utilizationRate >= 70 ? 'text-success' : t.utilizationRate >= 40 ? 'text-warning' : 'text-error'
                       }`}>{t.utilizationRate}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary text-xs">Avg/Booking</span>
+                      <span className="font-data font-data-normal text-text-primary">NPR {t.avgRevenuePerBooking.toLocaleString('en-IN')}</span>
                     </div>
                   </div>
                 </div>

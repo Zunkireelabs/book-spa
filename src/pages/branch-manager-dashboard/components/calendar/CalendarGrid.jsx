@@ -126,19 +126,6 @@ function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// Nepal-business-timezone date ("YYYY-MM-DD") + time-of-day ("HH:MM") for an ISO instant —
-// used to shade only the ACTUAL [transfer start, revert_at] window on a transferred-out
-// column, not the whole day, regardless of the viewer's own browser timezone.
-function toKathmanduParts(isoString) {
-  if (!isoString) return null;
-  const d = new Date(isoString);
-  if (Number.isNaN(d.getTime())) return null;
-  return {
-    date: d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }),
-    time: d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }),
-  };
-}
-
 // ── Overlap layout constants & helpers ─────────────────
 const MAX_VISIBLE_OVERLAP = 2;
 const OVERLAP_GAP = 2;       // px between side-by-side cards
@@ -752,11 +739,6 @@ const CalendarGrid = ({
       icon: 'User',
       subtitle: t.gender,
       attendance: attendanceMap[t.id],
-      transferredOut: t.transferredOut,
-      returnsAt: t.returnsAt,
-      transferStartAt: t.transferStartAt,
-      transferredIn: t.transferredIn,
-      fromBranch: t.fromBranch,
     }));
     cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
     return cols;
@@ -884,23 +866,6 @@ const CalendarGrid = ({
     return Math.max(((eh * 60 + em) - (sh * 60 + sm)) / 60 * eHH, 24);
   };
 
-  // Only the ACTUAL [transfer start, revert_at] window on THIS day, not the whole day —
-  // e.g. a 15:45-18:45 transfer only shades that slice, leaving the rest of the day bookable.
-  const openHourStr = `${String(openHour).padStart(2, '0')}:00`;
-  const closeHourStr = `${String(closeHour).padStart(2, '0')}:00`;
-  const getTransferBlockRange = (col, day) => {
-    if (!col.transferredOut && !col.transferredIn) return null;
-    const start = toKathmanduParts(col.transferStartAt);
-    const end = toKathmanduParts(col.returnsAt);
-    if (!end) return { fromTime: openHourStr, toTime: closeHourStr };
-    if (start && day < start.date) return null;
-    if (day > end.date) return null;
-    return {
-      fromTime: start && day === start.date ? start.time : openHourStr,
-      toTime: day === end.date ? end.time : closeHourStr,
-    };
-  };
-
   // Current time
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
@@ -957,20 +922,12 @@ const CalendarGrid = ({
   // ── Column header renderer ────────────────────────────────
   const renderColumnHeader = (col) => {
     const isUnassigned = col.type === 'unassigned';
-    const returnsAtLabel = col.returnsAt
-      ? new Date(col.returnsAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-      : null;
-    const headerTooltip = col.transferredOut
-      ? `${col.name} — Transferred${returnsAtLabel ? `, back ${returnsAtLabel}` : ''}`
-      : col.transferredIn
-        ? `${col.name} — Visiting from ${col.fromBranch || 'another branch'}${returnsAtLabel ? `, until ${returnsAtLabel}` : ''}`
-        : col.name;
     return (
       <div
         key={col.id}
-        className={`relative flex-1 border-r border-border last:border-r-0 px-1 py-2 text-center ${col.transferredOut ? 'bg-background/70' : ''}`}
+        className="relative flex-1 border-r border-border last:border-r-0 px-1 py-2 text-center"
         style={{ minWidth: minColWidth }}
-        onMouseEnter={(e) => showHeaderTooltip(e, headerTooltip)}
+        onMouseEnter={(e) => showHeaderTooltip(e, col.name)}
         onMouseLeave={hideHeaderTooltip}
       >
         <div className={`flex items-center justify-center gap-1 overflow-hidden min-w-0 ${isUnassigned ? 'text-warning' : 'text-text-primary'}`}>
@@ -1001,26 +958,10 @@ const CalendarGrid = ({
           {col.attendance === 'Leave' && (
             <span className="w-2 h-2 rounded-full bg-warning flex-shrink-0" title="On Leave" />
           )}
-          {col.transferredOut && (
-            <Icon name="ArrowRightLeft" size={11} className="text-secondary flex-shrink-0" title="Transferred out" />
-          )}
-          {col.transferredIn && (
-            <Icon name="ArrowRightLeft" size={11} className="text-primary flex-shrink-0" title="Visiting from another branch" />
-          )}
         </div>
         {col.subtitle && (
-          <div className="text-[10px] font-caption text-text-secondary uppercase tracking-wider mt-0.5">
+          <div className="text-[10px] font-caption text-text-secondary/60 uppercase tracking-wider mt-0.5">
             {col.subtitle}
-          </div>
-        )}
-        {col.transferredOut && (
-          <div className="text-[9px] font-caption text-secondary font-bold uppercase tracking-wider mt-0.5">
-            Transferred{returnsAtLabel ? ` · back ${returnsAtLabel}` : ''}
-          </div>
-        )}
-        {col.transferredIn && (
-          <div className="text-[9px] font-caption text-primary font-bold uppercase tracking-wider mt-0.5">
-            Visiting{col.fromBranch ? ` · from ${col.fromBranch}` : ''}{returnsAtLabel ? ` · until ${returnsAtLabel}` : ''}
           </div>
         )}
       </div>
@@ -1139,60 +1080,6 @@ const CalendarGrid = ({
           height={totalHeight}
           isActive={!!activeDragId}
         />
-
-        {/* Filled/blocked overlay while this therapist is unavailable HERE due to a
-            transfer (migration-145): transferredOut shows the window they're AWAY;
-            transferredIn shows everything EXCEPT their visiting window (they're only
-            actually here for that slice, even though branch_id points here for the
-            whole active period). pointer-events-none so clicks still reach the
-            column's own onClick, separately blocked in onEmptySlotClick/handleDragEnd.
-            Sits below the booking cards (rendered after) so cards stay visible. */}
-        {col.transferredOut && (() => {
-          const range = getTransferBlockRange(col, day);
-          if (!range) return null;
-          const blockTop = timeToTop(range.fromTime);
-          const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
-          return (
-            <div
-              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
-              style={{
-                top: blockTop,
-                height: blockHeight,
-                backgroundColor: 'rgba(15,118,110,0.35)',
-              }}
-            >
-              <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
-                Not bookable
-              </span>
-            </div>
-          );
-        })()}
-
-        {col.transferredIn && (() => {
-          const bookableWindow = getTransferBlockRange(col, day);
-          const segments = [];
-          if (!bookableWindow) {
-            segments.push({ from: openHourStr, to: closeHourStr });
-          } else {
-            if (bookableWindow.fromTime > openHourStr) segments.push({ from: openHourStr, to: bookableWindow.fromTime });
-            if (bookableWindow.toTime < closeHourStr) segments.push({ from: bookableWindow.toTime, to: closeHourStr });
-          }
-          return segments.map((seg, i) => {
-            const segTop = timeToTop(seg.from);
-            const segHeight = Math.max(timeToHeight(seg.from, seg.to), 20);
-            return (
-              <div
-                key={i}
-                className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
-                style={{ top: segTop, height: segHeight, backgroundColor: 'rgba(15,118,110,0.35)' }}
-              >
-                <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
-                  Not bookable
-                </span>
-              </div>
-            );
-          });
-        })()}
 
         {/* Booking cards with overlap handling */}
         {(() => {
