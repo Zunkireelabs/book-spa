@@ -13,7 +13,6 @@ import {
   assignTherapist,
   recordPayment,
   fetchAttendance,
-  LEAVE_LIKE_ATTENDANCE_STATUSES,
 } from '../../../services/api';
 import { transformBooking, toDbStatus } from '../../../services/bookingTransformers';
 import StatusLegend from '../../../components/ui/StatusLegend';
@@ -88,8 +87,8 @@ const OperationalCalendar = ({ branchId }) => {
     const attMap = {};
     if (attResult.data) {
       for (const a of attResult.data) {
-        if (a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)) {
-          attMap[a.therapistId] = a.status === 'Absent' ? 'Absent' : 'Leave';
+        if (a.status === 'Absent' || a.status === 'Leave') {
+          attMap[a.therapistId] = a.status;
         }
       }
     }
