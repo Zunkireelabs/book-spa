@@ -40,6 +40,23 @@ const CustomersTab = ({ therapistId, branchId, range }) => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const customers = data?.customers || [];
+
+  // Distinct people, not visit count — a repeat customer's 2nd/3rd completed booking should not
+  // inflate this number (mirrors computeTherapistMetrics' customersAttended dedup on the main
+  // table / Overview tab, so this banner never disagrees with those).
+  //
+  // Hooks must run unconditionally on every render (Rules of Hooks) — this useMemo has to sit
+  // above the loading/error early-returns below, not after them, or the loading render calls
+  // one fewer hook than the loaded render (React error #310).
+  const uniqueAttendedCount = useMemo(() => {
+    const key = (c) => {
+      const normalizedPhone = (c.customerPhone || '').replace(/\D/g, '');
+      return normalizedPhone ? `phone:${normalizedPhone}` : (c.customerId || `name:${(c.customerName || '').trim().toLowerCase()}`);
+    };
+    return new Set(customers.filter(c => c.status === 'Completed').map(key)).size;
+  }, [customers]);
+
   if (loading) {
     return (
       <div className="bg-surface rounded-spa-lg border border-border p-6 space-y-3 animate-pulse">
@@ -59,19 +76,6 @@ const CustomersTab = ({ therapistId, branchId, range }) => {
       </div>
     );
   }
-
-  const customers = data?.customers || [];
-
-  // Distinct people, not visit count — a repeat customer's 2nd/3rd completed booking should not
-  // inflate this number (mirrors computeTherapistMetrics' customersAttended dedup on the main
-  // table / Overview tab, so this banner never disagrees with those).
-  const uniqueAttendedCount = useMemo(() => {
-    const key = (c) => {
-      const normalizedPhone = (c.customerPhone || '').replace(/\D/g, '');
-      return normalizedPhone ? `phone:${normalizedPhone}` : (c.customerId || `name:${(c.customerName || '').trim().toLowerCase()}`);
-    };
-    return new Set(customers.filter(c => c.status === 'Completed').map(key)).size;
-  }, [customers]);
 
   return (
     <div className="space-y-3">
