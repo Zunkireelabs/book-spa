@@ -61,3 +61,21 @@ export function computeTherapistBranchAt(transfers, fallbackBranchId, atDate) {
 
   return branch;
 }
+
+/**
+ * Whether a booking's date/start_time falls at or after a therapist's already-recorded
+ * check-out for that date — i.e. they've clocked out and shouldn't be booked into any
+ * slot from that point through the rest of the day.
+ *
+ * @param {string|null} checkOutTime - raw therapist_attendance.check_out_time
+ *   (timestamptz) for that therapist on that date, or null/undefined if not checked out.
+ * @param {string} bookingDate - the booking's date (YYYY-MM-DD).
+ * @param {string} bookingStartTime - the booking's start_time (HH:MM or HH:MM:SS).
+ * @returns {boolean}
+ */
+export function isAfterCheckout(checkOutTime, bookingDate, bookingStartTime) {
+  if (!checkOutTime) return false;
+  const atDate = toKathmanduDate(bookingDate, bookingStartTime);
+  if (!atDate) return false;
+  return atDate >= new Date(checkOutTime);
+}
