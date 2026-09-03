@@ -13,11 +13,7 @@ const PAYMENT_ITEMS = [
   { key: 'unpaid', label: 'Unpaid', borderColor: '#facc15' },
 ];
 
-const TRANSFER_ITEMS = [
-  { key: 'not-bookable', label: 'Not Bookable', color: '#0f766e' },
-];
-
-const StatusLegend = ({ showPayment = false, showTransferBlocked = false, compact = false }) => {
+const StatusLegend = ({ showPayment = false, compact = false }) => {
   return (
     <div className={`flex items-center flex-wrap ${compact ? 'gap-x-3 gap-y-1' : 'gap-x-4 gap-y-1'}`}>
       {STATUS_ITEMS.map((item) => (
@@ -36,17 +32,6 @@ const StatusLegend = ({ showPayment = false, showTransferBlocked = false, compac
           <span
             className="inline-block w-2.5 h-2.5 rounded-sm border-2"
             style={{ borderColor: item.borderColor, backgroundColor: 'transparent' }}
-          />
-          <span className="font-caption font-caption-normal text-xs text-text-secondary">
-            {item.label}
-          </span>
-        </div>
-      ))}
-      {showTransferBlocked && TRANSFER_ITEMS.map((item) => (
-        <div key={item.key} className="flex items-center space-x-1.5">
-          <span
-            className="inline-block w-2.5 h-2.5 rounded-sm"
-            style={{ backgroundColor: item.color }}
           />
           <span className="font-caption font-caption-normal text-xs text-text-secondary">
             {item.label}

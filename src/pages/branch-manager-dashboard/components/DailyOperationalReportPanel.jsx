@@ -738,9 +738,6 @@ function AttendanceBadge({ status }) {
     'Present': 'bg-success/10 text-success',
     'Absent': 'bg-error/10 text-error',
     'Leave': 'bg-warning/10 text-warning',
-    'Annual Leave': 'bg-warning/10 text-warning',
-    'Sick Leave': 'bg-warning/10 text-warning',
-    'Day Off': 'bg-primary/10 text-primary',
     '1st-Half Day': 'bg-indigo-100 text-indigo-700',
     '2nd-Half Day': 'bg-indigo-100 text-indigo-700',
   };
