@@ -13,6 +13,7 @@ import {
   assignTherapist,
   recordPayment,
   fetchAttendance,
+  LEAVE_LIKE_ATTENDANCE_STATUSES,
   rescheduleBooking,
   fetchServices,
   createBooking,
@@ -24,6 +25,7 @@ import {
   getCustomerOutstandingBalance,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
+import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -1204,6 +1206,54 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   );
 };
 
+// Nepal-business-timezone date/time-of-day parts for an ISO instant — mirrors the same
+// helper in CalendarGrid.jsx, kept local to avoid a cross-component import for one function.
+function toKathmanduParts(isoString) {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return null;
+  return {
+    date: d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }),
+    time: d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', hour12: false }),
+  };
+}
+
+// Whether a specific (day, hour, minute) slot is blocked for a transferred therapist — matches
+// the CalendarGrid fill exactly, so nothing that LOOKS bookable silently rejects on click.
+// transferredOut: blocked WHILE the transfer window is active (they're away).
+// transferredIn: blocked OUTSIDE the transfer window (they're only actually visiting for that
+// slice, even though branch_id points here for the whole active period).
+function isTransferBlockedSlot(therapist, day, hour, minute) {
+  if (!therapist?.transferredOut && !therapist?.transferredIn) return false;
+  const start = toKathmanduParts(therapist.transferStartAt);
+  const end = toKathmanduParts(therapist.returnsAt);
+  if (!end) return true; // unknown revert time — block conservatively
+
+  let insideWindow;
+  if (start && day < start.date) {
+    insideWindow = false;
+  } else if (day > end.date) {
+    insideWindow = false;
+  } else {
+    const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    const fromTime = start && day === start.date ? start.time : '00:00';
+    const toTime = day === end.date ? end.time : '23:59';
+    insideWindow = slotTime >= fromTime && slotTime < toTime;
+  }
+
+  return therapist.transferredOut ? insideWindow : !insideWindow;
+}
+
+// Whether a (day, hour, minute) slot for a therapist falls at/after their recorded
+// check-out for that specific day. `checkedOutByTherapistAndDate` is the
+// "<therapistId>_<date>" -> raw check_out_time map from getCalendarBookings.
+function isCheckedOutBlockedSlot(checkedOutByTherapistAndDate, therapistId, day, hour, minute) {
+  const checkOutTime = checkedOutByTherapistAndDate?.[`${therapistId}_${day}`];
+  if (!checkOutTime) return false;
+  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return isAfterCheckout(checkOutTime, day, slotTime);
+}
+
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
@@ -1383,8 +1433,8 @@ const OperationalCalendar = ({ branchId }) => {
     const attMap = {};
     if (attResult.data) {
       for (const a of attResult.data) {
-        if (a.status === 'Absent' || a.status === 'Leave') {
-          attMap[a.therapistId] = a.status;
+        if (a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)) {
+          attMap[a.therapistId] = a.status === 'Absent' ? 'Absent' : 'Leave';
         }
       }
     }
@@ -1601,6 +1651,22 @@ const OperationalCalendar = ({ branchId }) => {
     setOverSlotData(null);
     setDragGrabOffset(0);
 
+    // Block dragging a booking onto a therapist column that's currently transferred
+    // out to another branch (migration-145) — column stays visible, but not bookable
+    // here until they're auto-reverted. Server-side (assignTherapist/rescheduleBooking)
+    // enforces this too; this is just the earlier, friendlier UX pre-emption.
+    if (columnMode === 'therapist' && isCrossColumn) {
+      const targetTherapist = calendarData?.therapists?.find(th => th.id === effectiveTargetColId);
+      if (isTransferBlockedSlot(targetTherapist, newDate, hour, minute)) {
+        showToast('This therapist is temporarily transferred to another branch during this time and is not bookable here right now.', 'error');
+        return;
+      }
+      if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, effectiveTargetColId, newDate, hour, minute)) {
+        showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
+        return;
+      }
+    }
+
     if (isCrossColumn) {
       // Cross-column drop → show confirmation dialog
       setPendingReassign({
@@ -1687,7 +1753,7 @@ const OperationalCalendar = ({ branchId }) => {
         timeOnly: true,
       });
     }
-  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap]);
+  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData]);
 
   // Execute reschedule with optimistic update (time-only, no column change)
   const executeReschedule = useCallback(async ({ bookingId, newDate, newStartTime, newEndTime, durationMinutes }) => {
@@ -1820,6 +1886,21 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Quick-create handlers ──────────────────────────────────
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    // Block new bookings on a therapist column that's currently transferred out to
+    // another branch (migration-145) — the column stays visible, but isn't bookable
+    // here until they're auto-reverted back.
+    if (slotInfo.colType === 'therapist') {
+      const t = calendarData?.therapists?.find(th => th.id === slotInfo.colId);
+      if (isTransferBlockedSlot(t, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
+        showToast('This therapist is temporarily transferred to another branch during this time and is not bookable here right now.', 'error');
+        return;
+      }
+      if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
+        showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
+        return;
+      }
+    }
+
     // Rebook mode — place booking at clicked slot
     if (rebookSource) {
       // Capture and immediately clear to prevent double-click duplicates
@@ -1858,7 +1939,7 @@ const OperationalCalendar = ({ branchId }) => {
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
-  }, [servicesCache, servicesLoading, rebookSource, branchId, refreshCalendar]);
+  }, [servicesCache, servicesLoading, rebookSource, branchId, refreshCalendar, calendarData]);
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
@@ -2425,7 +2506,7 @@ const OperationalCalendar = ({ branchId }) => {
                 <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
                   Status
                 </div>
-                <StatusLegend showPayment compact />
+                <StatusLegend showPayment showTransferBlocked compact />
               </div>
 
               {/* Drag hint */}
@@ -2505,6 +2586,7 @@ const OperationalCalendar = ({ branchId }) => {
                   bookings={calendarData.bookings}
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
+                  checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
