@@ -210,12 +210,20 @@ const PlatformOrgDetail = () => {
   const commissionBase = wizBasis === 'vat_exclusive' ? grossSales / (1 + wizVatNum / 100) : grossSales;
   const computedCommission = commissionBase * wizRateNum / 100;
 
+  // The rate row with the latest effective_from — the currently-open rate
+  // if one exists (an org's open row always has the latest effective_from
+  // by construction), otherwise the most recent closed segment for an org
+  // with no open rate at all.
+  const mostRecentRate = rates.length > 0
+    ? rates.reduce((latest, r) => (r.effective_from > latest.effective_from ? r : latest), rates[0])
+    : null;
+
   // True when this period would hit platform_collect_commission's backdate
-  // guard (migration-123/144) — Period Start predates the currently-open
-  // rate AND there's more than one historical rate segment, so the flat
+  // guard (migration-123/144) — Period Start predates the most recent rate
+  // segment AND there's more than one historical rate segment, so the flat
   // Basis/VAT%/Cut% inputs above don't apply: the backend will blend each
   // overlapping segment's own rate instead of the typed-in one.
-  const willBlend = !!activeRate && wizFrom < activeRate.effective_from && rates.length > 1;
+  const willBlend = !!mostRecentRate && wizFrom < mostRecentRate.effective_from && rates.length > 1;
 
   const [blendedPreview, setBlendedPreview] = useState(null);
   const [blendedPreviewLoading, setBlendedPreviewLoading] = useState(false);
@@ -414,7 +422,7 @@ const PlatformOrgDetail = () => {
 
               {willBlend ? (
                 <p className="font-body text-xs text-text-secondary pt-2 border-t border-border">
-                  This period starts before the org's current rate ({activeRate.effective_from}) and
+                  This period starts before the org's most recent rate ({mostRecentRate.effective_from}) and
                   spans multiple historical rate changes — commission will be calculated per rate
                   segment automatically. Basis/VAT%/Cut% don't apply here.
                 </p>

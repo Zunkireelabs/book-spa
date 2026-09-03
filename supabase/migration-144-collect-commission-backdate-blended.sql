@@ -21,8 +21,92 @@
 -- for a null rate_percent (Collection history table, migration-127-era).
 -- Any other error from platform_set_commission_rate (e.g. not authorized)
 -- still propagates and aborts the whole collection, unchanged.
+--
+-- Second, narrower fix in the same migration: platform_set_commission_rate's
+-- backdate guard only looked at the currently OPEN rate row (effective_to IS
+-- NULL). An org with NO open rate at all (every segment closed) but with
+-- real closed history had no guard whatsoever — p_effective_from could land
+-- before that history with no error, silently inserting an out-of-order/
+-- overlapping segment. Closes that gap by falling back to the most recent
+-- rate row (open or closed) when there's no open one, applying the same
+-- ordering guard. The open row (if any) always has the latest effective_from
+-- among an org's rows by construction (set_commission_rate only ever closes
+-- the current open row and opens a new, later one, or widens a sole row
+-- backward) — so "most recent by effective_from" is a strict superset of
+-- "the open row" and changes nothing for orgs that do have one.
 
 DROP FUNCTION IF EXISTS public.platform_collect_commission(uuid,date,date,numeric,text,numeric,date,text,numeric);
+DROP FUNCTION IF EXISTS public.platform_set_commission_rate(uuid,numeric,text,numeric,date);
+
+CREATE OR REPLACE FUNCTION public.platform_set_commission_rate(
+  p_org_id uuid, p_rate numeric, p_basis text, p_vat_rate numeric, p_effective_from date
+) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_open      public.org_commission_rates%ROWTYPE;
+  v_latest    public.org_commission_rates%ROWTYPE;
+  v_new_id    uuid;
+  v_row_count int;
+BEGIN
+  IF NOT public.is_platform_admin() THEN
+    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO v_open FROM public.org_commission_rates
+   WHERE org_id = p_org_id AND effective_to IS NULL
+   ORDER BY effective_from DESC LIMIT 1;
+
+  IF FOUND THEN
+    IF p_effective_from < v_open.effective_from THEN
+      SELECT count(*) INTO v_row_count FROM public.org_commission_rates WHERE org_id = p_org_id;
+      IF v_row_count > 1 THEN
+        RAISE EXCEPTION 'new effective_from (%) cannot be before the current rate''s effective_from (%) — earlier history already exists for this org',
+          p_effective_from, v_open.effective_from USING ERRCODE = '22007';
+      END IF;
+      -- Sole row for this org: widen it backward in place, no history to conflict with.
+      UPDATE public.org_commission_rates
+         SET rate_percent = p_rate,
+             commission_basis = p_basis::public.commission_basis,
+             vat_rate_percent = COALESCE(p_vat_rate, 13.00),
+             effective_from = p_effective_from
+       WHERE id = v_open.id
+      RETURNING id INTO v_new_id;
+      RETURN v_new_id;
+    ELSIF p_effective_from = v_open.effective_from THEN
+      UPDATE public.org_commission_rates
+         SET rate_percent = p_rate,
+             commission_basis = p_basis::public.commission_basis,
+             vat_rate_percent = COALESCE(p_vat_rate, 13.00)
+       WHERE id = v_open.id
+      RETURNING id INTO v_new_id;
+      RETURN v_new_id;
+    ELSE
+      UPDATE public.org_commission_rates
+         SET effective_to = p_effective_from - 1
+       WHERE id = v_open.id;
+    END IF;
+  ELSE
+    -- No open rate for this org. Still guard against an out-of-order/
+    -- overlapping insert if closed history exists.
+    SELECT * INTO v_latest FROM public.org_commission_rates
+     WHERE org_id = p_org_id
+     ORDER BY effective_from DESC LIMIT 1;
+    IF FOUND AND p_effective_from < v_latest.effective_from THEN
+      RAISE EXCEPTION 'new effective_from (%) cannot be before the most recent rate''s effective_from (%) — earlier history already exists for this org',
+        p_effective_from, v_latest.effective_from USING ERRCODE = '22007';
+    END IF;
+  END IF;
+
+  INSERT INTO public.org_commission_rates
+    (org_id, rate_percent, commission_basis, vat_rate_percent, effective_from, created_by)
+  VALUES
+    (p_org_id, p_rate, p_basis::public.commission_basis, COALESCE(p_vat_rate, 13.00), p_effective_from, auth.uid())
+  RETURNING id INTO v_new_id;
+
+  RETURN v_new_id;
+END $$;
+
+GRANT EXECUTE ON FUNCTION public.platform_set_commission_rate(uuid,numeric,text,numeric,date) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.platform_collect_commission(
   p_org_id uuid, p_period_start date, p_period_end date,
