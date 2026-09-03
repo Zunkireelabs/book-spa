@@ -3762,14 +3762,22 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .order('name'),
       // is_permanent = false: a Permanent transfer (migration-150) is a plain reassignment
       // with no revert — the staffer should just appear as a normal column at their new
-      // branch, not as a "transferred out/visiting" overlay.
+      // branch, not as a "transferred out/visiting" overlay. revert_at IS NOT NULL additionally
+      // excludes historical pre-migration-141 rows: `reverted`/`is_permanent` are both
+      // NOT NULL DEFAULT false columns added later, so every legacy row backfills to
+      // reverted=false/is_permanent=false and would otherwise match this filter forever,
+      // showing a permanent phantom "transferred out"/"visiting" column for any staffer who
+      // was ever moved under the old model — revert_at is the one column that's genuinely
+      // NULL on those old rows (they never had a duration), so it's the reliable "this is a
+      // real, still-active temporary window" signal.
       supabase
         .from('staff_transfers')
         .select('id, revert_at, effective_date, start_time, from_display_order, therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
         .eq('from_branch_id', resolvedBranchId)
         .eq('applied', true)
         .eq('reverted', false)
-        .eq('is_permanent', false),
+        .eq('is_permanent', false)
+        .not('revert_at', 'is', null),
       // Staffers currently visiting THIS branch on a temporary transfer — they already
       // appear normally in therapistsResult above (branch_id points here); this tags them
       // with where they're from + their actual visiting window, so the calendar can block
@@ -3780,7 +3788,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('to_branch_id', resolvedBranchId)
         .eq('applied', true)
         .eq('reverted', false)
-        .eq('is_permanent', false),
+        .eq('is_permanent', false)
+        .not('revert_at', 'is', null),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -6841,7 +6850,15 @@ function bookingCustomerKey(b) {
 // ('Confirmed','In-Progress','Completed'). `attendanceRows` must already be filtered to this
 // therapist + period, selecting at least `status, check_in_time, check_out_time`.
 // `dayWindowMinutes` is the branch's operating window (close_time - open_time) in minutes.
-function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes) {
+function daysInPeriodInclusive(startDate, endDate) {
+  return Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1);
+}
+
+// periodDays: total calendar days in the requested range — used ONLY as a fallback when a
+// therapist has zero attendance rows at all for the period (branches that don't mark
+// attendance rigorously would otherwise show 0% utilization for everyone, which both hides
+// real utilization and unfairly zeroes out 15% of performanceScore's weighting).
+function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes, periodDays) {
   const completed = bookings.filter(b => b.status === 'Completed');
   const servicesCompleted = completed.length;
   const totalAssigned = bookings.length;
@@ -6855,7 +6872,18 @@ function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes) {
   const assignedCustomers = new Set(bookings.map(bookingCustomerKey));
   const customersAttended = attendedCustomers.size;
   const customersAssigned = assignedCustomers.size;
-  const notAttended = Math.max(0, customersAssigned - customersAttended);
+  // "Not attended" must only count appointments that have actually already happened — a
+  // Confirmed booking scheduled later today/this week hasn't failed to be attended, it just
+  // hasn't occurred yet. Using start_datetime (a real timestamptz) rather than customersAssigned
+  // - customersAttended avoids mislabeling upcoming bookings as no-shows.
+  const now = Date.now();
+  const notAttendedCustomers = new Set(
+    bookings
+      .filter(b => b.status !== 'Completed' && b.start_datetime && new Date(b.start_datetime).getTime() <= now)
+      .map(bookingCustomerKey)
+  );
+  for (const key of attendedCustomers) notAttendedCustomers.delete(key);
+  const notAttended = notAttendedCustomers.size;
 
   const occupiedMinutes = completed.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
   const avgServiceDurationMinutes = servicesCompleted > 0 ? Math.round(occupiedMinutes / servicesCompleted) : 0;
@@ -6878,6 +6906,11 @@ function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes) {
     } else {
       workedMinutes += dayWindow;
     }
+  }
+  // No attendance marked at all for the period — assume the full period was worked rather
+  // than reporting 0h/0% (matches the pre-refactor behavior this replaced).
+  if (attendedDaysTotal === 0 && periodDays > 0) {
+    workedMinutes = periodDays * dayWindowMinutes;
   }
   const attendanceRate = attendedDaysTotal > 0 ? presentOrHalfDays / attendedDaysTotal : 1;
 
@@ -6959,7 +6992,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     // 2. Fetch bookings + attendance in parallel
     let bookingsQuery = supabase
       .from('bookings')
-      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone')
+      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime')
       .gte('date', startDate)
       .lte('date', endDate)
       .in('therapist_id', therapistIds)
@@ -7009,7 +7042,8 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
       const metrics = computeTherapistMetrics(
         bookingsByTherapist[t.id],
         attendanceByTherapist[t.id],
-        dayWindowFor(t.branch_id)
+        dayWindowFor(t.branch_id),
+        daysInPeriodInclusive(startDate, endDate)
       );
 
       return {
@@ -7077,24 +7111,22 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     const endDate = toDate || today;
     const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
 
-    const { data: therapist, error: tErr } = await supabase
-      .from('therapists')
-      .select('id, branch_id')
-      .eq('id', therapistId)
-      .single();
-    if (tErr) throw tErr;
-
+    // Branch hours come from the branchId PARAM (resolveBranchId, same as getTherapistPerformance's
+    // non-overall path) — not from the therapist's live branch_id. The bookings/attendance
+    // queries below are scoped by branchId via withBranch(); deriving dayWindowMinutes from the
+    // therapist's current branch instead would silently use the wrong operating window if the
+    // therapist has since been transferred elsewhere.
     const { data: branch, error: bErr } = await supabase
       .from('branches')
       .select('open_time, close_time')
-      .eq('id', therapist.branch_id)
+      .eq('id', resolveBranchId(branchId))
       .single();
     if (bErr) throw bErr;
     const dayWindowMinutes = timeToMinutes(branch.close_time) - timeToMinutes(branch.open_time);
 
     let bookingsQuery = supabase
       .from('bookings')
-      .select('status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone')
+      .select('status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime')
       .eq('therapist_id', therapistId)
       .gte('date', startDate)
       .lte('date', endDate)
@@ -7276,17 +7308,13 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
     const endDate = toDate || today;
     const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
 
-    const { data: therapist, error: tErr } = await supabase
-      .from('therapists')
-      .select('id, branch_id')
-      .eq('id', therapistId)
-      .single();
-    if (tErr) throw tErr;
-
+    // Branch hours come from the branchId PARAM (resolveBranchId), matching what the attendance
+    // query below is scoped to via withBranch() — not the therapist's live branch_id, which
+    // could point elsewhere if they've since been transferred (see getTherapistOverview).
     const { data: branch, error: bErr } = await supabase
       .from('branches')
       .select('open_time, close_time')
-      .eq('id', therapist.branch_id)
+      .eq('id', resolveBranchId(branchId))
       .single();
     if (bErr) throw bErr;
 

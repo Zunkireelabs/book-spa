@@ -45,8 +45,16 @@ function computeRevertPreview(dateStr, timeStr, value, unit) {
   if (!Number.isFinite(n) || n <= 0) return null;
   let revert;
   if (unit === 'month') {
-    revert = new Date(start);
-    revert.setMonth(revert.getMonth() + n);
+    // Match Postgres's `timestamp + interval 'n months'` semantics (clamp to the last valid day
+    // of the target month), not JS Date.setMonth()'s overflow-into-next-month behavior — e.g.
+    // Jan 31 + 1 month is Feb 28 server-side, not Mar 3. The server (transfer_therapist()) is
+    // the actual source of truth for revert_at; this is just the preview shown before confirming.
+    const targetMonthIndex = start.getMonth() + n;
+    const targetYear = start.getFullYear() + Math.floor(targetMonthIndex / 12);
+    const normalizedMonth = ((targetMonthIndex % 12) + 12) % 12;
+    const lastDayOfTargetMonth = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+    const clampedDay = Math.min(start.getDate(), lastDayOfTargetMonth);
+    revert = new Date(targetYear, normalizedMonth, clampedDay, start.getHours(), start.getMinutes(), start.getSeconds());
   } else {
     const msPerUnit = { minute: 60000, hour: 3600000, day: 86400000, week: 604800000 };
     revert = new Date(start.getTime() + n * msPerUnit[unit]);
