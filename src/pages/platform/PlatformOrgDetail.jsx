@@ -420,31 +420,30 @@ const PlatformOrgDetail = () => {
                 </div>
               </dl>
 
-              {willBlend ? (
+              {willBlend && (
                 <p className="font-body text-xs text-text-secondary pt-2 border-t border-border">
                   This period starts before the org's most recent rate ({mostRecentRate.effective_from}) and
                   spans multiple historical rate changes — commission will be calculated per rate
-                  segment automatically. Basis/VAT%/Cut% don't apply here.
+                  segment automatically. Basis/VAT%/Cut% below are ignored for this collection.
                 </p>
-              ) : (
-                <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
-                  <div className="w-64">
-                    <span className="font-body text-sm text-text-secondary">Basis</span>
-                    <CustomSelect value={wizBasis} onChange={setWizBasis} options={BASIS_OPTIONS} />
-                  </div>
-                  <label className="font-body text-sm text-text-secondary">VAT %
-                    <input type="number" step="0.01" value={wizVat} onChange={(e) => setWizVat(e.target.value)}
-                      className={`block border rounded-spa px-2 py-1 w-20 ${wizVatNum > VAT_RATE_MAX ? 'border-error' : 'border-border'}`} />
-                    {wizVatNum > VAT_RATE_MAX && (
-                      <span className="block text-xs text-error mt-0.5">Max {VAT_RATE_MAX}%</span>
-                    )}
-                  </label>
-                  <label className="font-body text-sm text-text-secondary">Cut %
-                    <input type="number" step="0.01" value={wizRate} onChange={(e) => setWizRate(e.target.value)}
-                      className="block border border-border rounded-spa px-2 py-1 w-24" />
-                  </label>
-                </div>
               )}
+              <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
+                <div className="w-64">
+                  <span className="font-body text-sm text-text-secondary">Basis</span>
+                  <CustomSelect value={wizBasis} onChange={setWizBasis} options={BASIS_OPTIONS} />
+                </div>
+                <label className="font-body text-sm text-text-secondary">VAT %
+                  <input type="number" step="0.01" value={wizVat} onChange={(e) => setWizVat(e.target.value)}
+                    className={`block border rounded-spa px-2 py-1 w-20 ${wizVatNum > VAT_RATE_MAX ? 'border-error' : 'border-border'}`} />
+                  {wizVatNum > VAT_RATE_MAX && (
+                    <span className="block text-xs text-error mt-0.5">Max {VAT_RATE_MAX}%</span>
+                  )}
+                </label>
+                <label className="font-body text-sm text-text-secondary">Cut %
+                  <input type="number" step="0.01" value={wizRate} onChange={(e) => setWizRate(e.target.value)}
+                    className="block border border-border rounded-spa px-2 py-1 w-24" />
+                </label>
+              </div>
               <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
                 <label className="font-body text-sm text-text-secondary">Actual amount collected (if different)
                   <input type="number" step="0.01" placeholder="Use computed" value={wizActualAmount}
