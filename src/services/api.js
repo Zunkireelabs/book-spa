@@ -3,6 +3,7 @@ import { transformMembership, transformMemberships } from './bookingTransformers
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
+import { computeTherapistBranchAt, toKathmanduDate } from './therapistBranchWindow';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -1484,7 +1485,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
     // 1. Fetch booking (include room_id + date for attendance check)
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, branch_id, room_id, date')
+      .select('id, status, is_locked, branch_id, room_id, date, start_time')
       .eq('id', bookingId)
       .single();
 
@@ -1518,12 +1519,28 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
         return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Cannot assign inactive therapist: ${inactive.name}` } };
       }
 
-      // A therapist currently on a temporary transfer has branch_id pointing at the
-      // destination branch, not this booking's branch — block assigning them here
-      // until they're auto-reverted (migration-145).
-      const wrongBranch = (therapistsData || []).find(t => t.branch_id !== booking.branch_id);
+      // A therapist's live branch_id only reflects the CURRENT moment (flipped by the
+      // apply/revert cron) — it's the wrong thing to check against a booking on a
+      // different date. Reconstruct their expected branch AT THE BOOKING'S DATE/TIME
+      // from the full staff_transfers window history instead (see
+      // therapistBranchWindow.js) so scheduled-but-not-yet-applied and
+      // already-reverted transfer windows are both handled correctly.
+      const atDate = toKathmanduDate(booking.date, booking.start_time);
+      const { data: transferRows } = await supabase
+        .from('staff_transfers')
+        .select('therapist_id, from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at')
+        .in('therapist_id', ids);
+
+      const transfersByTherapist = {};
+      (transferRows || []).forEach(t => {
+        (transfersByTherapist[t.therapist_id] ||= []).push(t);
+      });
+
+      const wrongBranch = (therapistsData || []).find(t =>
+        computeTherapistBranchAt(transfersByTherapist[t.id] || [], t.branch_id, atDate) !== booking.branch_id
+      );
       if (wrongBranch) {
-        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch right now (may be temporarily transferred elsewhere).` } };
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
       }
 
       if (booking.date) {
@@ -2404,14 +2421,45 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
         if (therapist && !therapist.is_active) {
           return { data: null, error: { code: 'THERAPIST_INACTIVE', message: 'Cannot assign an inactive therapist.' } };
         }
-        // A therapist currently on a temporary transfer has branch_id pointing at the
-        // destination branch, not this booking's branch — block reassigning to them
-        // here until they're auto-reverted (migration-145).
-        if (therapist && therapist.branch_id !== booking.branch_id) {
-          return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch right now (may be temporarily transferred elsewhere).` } };
+        // A therapist's live branch_id only reflects the CURRENT moment (flipped by
+        // the apply/revert cron) — it's the wrong thing to check against the NEW
+        // date/time being rescheduled to. Reconstruct their expected branch at
+        // newDate/newStartTime from the full staff_transfers window history instead
+        // (see therapistBranchWindow.js).
+        if (therapist) {
+          const { data: transferRows } = await supabase
+            .from('staff_transfers')
+            .select('from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at')
+            .eq('therapist_id', newTherapistId);
+          const atDate = toKathmanduDate(newDate, newStartTime);
+          const effectiveBranch = computeTherapistBranchAt(transferRows || [], therapist.branch_id, atDate);
+          if (effectiveBranch !== booking.branch_id) {
+            return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
+          }
         }
         updatePayload.therapist_id = newTherapistId;
         updatePayload.therapist_name_snapshot = therapist?.name || null;
+      }
+    } else if (booking.therapist_id) {
+      // Therapist isn't being reassigned, but the booking is still moving to a new
+      // date/time — the CURRENTLY assigned therapist's visiting window still needs
+      // re-validating against that new date/time (same reasoning as 6a above).
+      const { data: currentTherapist } = await supabase
+        .from('therapists')
+        .select('name, branch_id')
+        .eq('id', booking.therapist_id)
+        .single();
+
+      if (currentTherapist) {
+        const { data: transferRows } = await supabase
+          .from('staff_transfers')
+          .select('from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at')
+          .eq('therapist_id', booking.therapist_id);
+        const atDate = toKathmanduDate(newDate, newStartTime);
+        const effectiveBranch = computeTherapistBranchAt(transferRows || [], currentTherapist.branch_id, atDate);
+        if (effectiveBranch !== booking.branch_id) {
+          return { data: null, error: { code: 'INVALID_THERAPIST', message: `${currentTherapist.name} is not available in this branch at this time (transferred elsewhere for this date). Reassign or choose a different date.` } };
+        }
       }
     }
 
