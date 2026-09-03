@@ -17,12 +17,12 @@
 -- the transferred-out column back into its original position instead of the end of the array;
 -- apply_due_staff_reverts() uses it to restore the real display_order on actual return.
 --
--- Builds on migration-141/142/143/144.
+-- Builds on migration-145/146/147/148.
 --
 -- Reversible:
 --   ALTER TABLE public.staff_transfers DROP COLUMN IF EXISTS from_display_order;
---   -- then re-run migration-144's CREATE OR REPLACE body for apply_due_staff_reverts()
---   -- and migration-143's body for transfer_therapist().
+--   -- then re-run migration-148's CREATE OR REPLACE body for apply_due_staff_reverts()
+--   -- and migration-147's body for transfer_therapist().
 
 -- 1. New column ----------------------------------------------------------------
 ALTER TABLE public.staff_transfers
@@ -224,5 +224,5 @@ REVOKE ALL ON FUNCTION public.apply_due_staff_reverts() FROM authenticated;
 
 -- 4. Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('145', 'preserve-origin-column-position')
+VALUES ('149', 'preserve-origin-column-position')
 ON CONFLICT (version) DO NOTHING;

@@ -2,7 +2,7 @@
 -- (bugfix, REVERSIBLE)
 --
 -- Bug: apply_due_staff_transfers() (the cron job) only checked `effective_date <= today`,
--- ignoring the `start_time` column added in migration-141. A transfer scheduled for LATER
+-- ignoring the `start_time` column added in migration-145. A transfer scheduled for LATER
 -- TODAY (e.g. effective_date = today, start_time = 15:40) was incorrectly applied by the next
 -- 5-minute cron tick, however early that happened to be — moving the therapist's branch_id
 -- hours (or minutes) before the intended start time. transfer_therapist()'s own "is this
@@ -12,7 +12,7 @@
 -- Surfaced 2026-09-02: a transfer for ANISHA THAKURI (Lazimpat -> Thamel, start 15:40, 3h) was
 -- applied by cron before 15:40 actually arrived.
 --
--- Builds on migration-141 (start_time/duration columns) and migration-048 (user-branch sync).
+-- Builds on migration-145 (start_time/duration columns) and migration-048 (user-branch sync).
 --
 -- Reversible: re-run migration-048's CREATE OR REPLACE body for apply_due_staff_transfers()
 -- (reverts the WHERE clause back to `effective_date <= v_today`).
@@ -71,5 +71,5 @@ REVOKE ALL ON FUNCTION public.apply_due_staff_transfers() FROM authenticated;
 
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('144', 'fix-apply-due-transfers-time')
+VALUES ('148', 'fix-apply-due-transfers-time')
 ON CONFLICT (version) DO NOTHING;

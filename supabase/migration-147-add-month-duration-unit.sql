@@ -1,13 +1,13 @@
 -- Migration 143: add "month" as a staff transfer duration unit (additive, REVERSIBLE)
 --
 -- Adds Month alongside Minute/Hour/Day/Week for transfer durations and extensions.
--- Builds on migration-141 (required-duration transfers) and migration-142 (extend).
+-- Builds on migration-145 (required-duration transfers) and migration-146 (extend).
 --
 -- Reversible:
 --   ALTER TABLE public.staff_transfers DROP CONSTRAINT IF EXISTS staff_transfers_duration_unit_check;
 --   ALTER TABLE public.staff_transfers ADD CONSTRAINT staff_transfers_duration_unit_check
 --     CHECK (duration_unit = ANY (ARRAY['minute','hour','day','week']));
---   -- then re-run migration-141/142's transfer_therapist()/extend_staff_transfer() bodies
+--   -- then re-run migration-145/146's transfer_therapist()/extend_staff_transfer() bodies
 --   -- with 'month' removed from their allowed-unit checks.
 
 -- 1. Widen the column CHECK to allow 'month' ----------------------------------
@@ -211,5 +211,5 @@ $$;
 
 -- 4. Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('143', 'add-month-duration-unit')
+VALUES ('147', 'add-month-duration-unit')
 ON CONFLICT (version) DO NOTHING;

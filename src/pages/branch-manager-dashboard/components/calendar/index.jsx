@@ -1641,7 +1641,7 @@ const OperationalCalendar = ({ branchId }) => {
     setDragGrabOffset(0);
 
     // Block dragging a booking onto a therapist column that's currently transferred
-    // out to another branch (migration-141) — column stays visible, but not bookable
+    // out to another branch (migration-145) — column stays visible, but not bookable
     // here until they're auto-reverted. Server-side (assignTherapist/rescheduleBooking)
     // enforces this too; this is just the earlier, friendlier UX pre-emption.
     if (columnMode === 'therapist' && isCrossColumn) {
@@ -1872,7 +1872,7 @@ const OperationalCalendar = ({ branchId }) => {
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
     // Block new bookings on a therapist column that's currently transferred out to
-    // another branch (migration-141) — the column stays visible, but isn't bookable
+    // another branch (migration-145) — the column stays visible, but isn't bookable
     // here until they're auto-reverted back.
     if (slotInfo.colType === 'therapist') {
       const t = calendarData?.therapists?.find(th => th.id === slotInfo.colId);

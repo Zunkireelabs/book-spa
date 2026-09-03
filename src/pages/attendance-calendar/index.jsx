@@ -27,7 +27,7 @@ function getDatesInRange(startDate, endDate) {
   return dates;
 }
 
-// Legacy 'Leave' (pre-migration-147 rows) is shown the same as the new leave types it was
+// Legacy 'Leave' (pre-migration-151 rows) is shown the same as the new leave types it was
 // split into — we can't retroactively tell whether an old 'Leave' entry was sick or annual.
 function cellStyle(status) {
   switch (status) {

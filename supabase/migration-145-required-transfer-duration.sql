@@ -272,5 +272,5 @@ $$;
 
 -- 5. Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('141', 'required-transfer-duration')
+VALUES ('145', 'required-transfer-duration')
 ON CONFLICT (version) DO NOTHING;

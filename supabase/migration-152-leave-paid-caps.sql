@@ -1,6 +1,6 @@
 -- Migration 148: track unpaid (over-cap) leave days on payroll items (additive, REVERSIBLE)
 --
--- Sick Leave and Annual Leave (migration-147) are paid only up to a per-calendar-year cap —
+-- Sick Leave and Annual Leave (migration-151) are paid only up to a per-calendar-year cap —
 -- 14 paid Sick Leave days/year, 18 paid Annual Leave days/year (application logic, see
 -- SICK_LEAVE_PAID_CAP_DAYS/ANNUAL_LEAVE_PAID_CAP_DAYS in services/api.js's generatePayroll()).
 -- Days beyond the cap are deducted from salary exactly like Absent days. This column surfaces
@@ -16,5 +16,5 @@ ALTER TABLE public.payroll_items
 
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('148', 'leave-paid-caps')
+VALUES ('152', 'leave-paid-caps')
 ON CONFLICT (version) DO NOTHING;
