@@ -105,22 +105,31 @@ const PlatformOrgDetail = () => {
   const effectiveFrom = wizFrom;
   const effectiveTo = wizTo;
 
-  const reload = useCallback(() => {
+  // Rates/collections aren't period-scoped (full history) — only refetch on
+  // org change or after a commission is collected, never on a date edit.
+  const reloadRatesAndCollections = useCallback(() => {
+    setError('');
+    Promise.all([listRates(orgId), listCollections(orgId)])
+      .then(([r, c]) => { setRates(r || []); setCollections(c || []); })
+      .catch((e) => setError(e.message || 'Load failed'));
+  }, [orgId]);
+
+  useEffect(() => { reloadRatesAndCollections(); }, [reloadRatesAndCollections]);
+
+  // Bookings/memberships/vouchers ARE period-scoped — refetch whenever the
+  // shared Period start/end changes.
+  useEffect(() => {
     setError('');
     Promise.all([
-      listRates(orgId), listCollections(orgId),
       getOrgBookings(orgId, wizFrom, wizTo),
       getOrgMembershipDeposits(orgId, wizFrom, wizTo),
       getOrgVoucherSales(orgId, wizFrom, wizTo),
     ])
-      .then(([r, c, b, md, vs]) => {
-        setRates(r || []); setCollections(c || []); setBookings(b || []);
-        setMembershipDeposits(md || []); setVoucherSales(vs || []);
+      .then(([b, md, vs]) => {
+        setBookings(b || []); setMembershipDeposits(md || []); setVoucherSales(vs || []);
       })
       .catch((e) => setError(e.message || 'Load failed'));
   }, [orgId, wizFrom, wizTo]);
-
-  useEffect(() => { reload(); }, [reload]);
 
   useEffect(() => {
     let alive = true;
@@ -231,7 +240,7 @@ const PlatformOrgDetail = () => {
       setWizNotes('');
       setWizActualAmount('');
       setConfirming(false);
-      reload();
+      reloadRatesAndCollections();
     } catch (err) { setError(err.message); }
     finally { setCollecting(false); }
   };
@@ -256,6 +265,10 @@ const PlatformOrgDetail = () => {
               <input type="date" value={wizTo} onChange={(e) => setWizTo(e.target.value)}
                 className="block border border-border rounded-spa px-2 py-1 w-full mt-1" />
             </label>
+            <div className="pt-2 border-t border-border">
+              <span className="font-body text-sm text-text-secondary block mb-1">Branch</span>
+              <CustomSelect value={branchFilter} onChange={setBranchFilter} options={branchOptions} />
+            </div>
           </aside>
 
           <div className="space-y-6 min-w-0">
@@ -411,14 +424,7 @@ const PlatformOrgDetail = () => {
 
         {/* Itemized paid drill-in */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="font-heading font-heading-semibold text-text-primary">Paid Bookings, Memberships & Vouchers</h3>
-            <div className="flex gap-2">
-              <div className="w-48">
-                <CustomSelect value={branchFilter} onChange={setBranchFilter} options={branchOptions} />
-              </div>
-            </div>
-          </div>
+          <h3 className="font-heading font-heading-semibold text-text-primary">Paid Bookings, Memberships & Vouchers</h3>
           <p className="font-body text-xs text-text-secondary">
             Paid only. Unpaid/refunded bookings are excluded (not new money, or not money yet), and
             wallet-funded portions of a booking (membership/referral/voucher redemption) are excluded
