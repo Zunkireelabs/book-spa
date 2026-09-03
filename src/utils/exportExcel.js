@@ -17,10 +17,22 @@ export function exportRowsToExcel(filename, rows, sheetName = 'Sheet1') {
  */
 export function exportSheetsToExcel(filename, sheets) {
   const workbook = XLSX.utils.book_new();
+  const usedNames = new Set();
   sheets.forEach(({ name, rows }) => {
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    // Excel sheet names: max 31 chars, no []:*?/\ characters.
-    const safeName = name.replace(/[[\]:*?/\\]/g, '-').slice(0, 31) || 'Sheet';
+    // Excel sheet names: max 31 chars, no []:*?/\ characters, and must be
+    // unique within the workbook — two periods with identical dates (e.g. a
+    // re-collected/adjusted range), or two names that truncate to the same
+    // 31 chars, would otherwise collide and throw.
+    const base = (name.replace(/[[\]:*?/\\]/g, '-').slice(0, 31) || 'Sheet');
+    let safeName = base;
+    let suffix = 2;
+    while (usedNames.has(safeName)) {
+      const suffixStr = ` (${suffix})`;
+      safeName = base.slice(0, 31 - suffixStr.length) + suffixStr;
+      suffix += 1;
+    }
+    usedNames.add(safeName);
     XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
   });
   XLSX.writeFile(workbook, `${filename}.xlsx`);
