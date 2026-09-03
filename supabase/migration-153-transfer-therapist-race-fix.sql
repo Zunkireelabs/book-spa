@@ -8,7 +8,7 @@
 -- double-clicking "Transfer" at once) could both pass the EXISTS check before either
 -- INSERT lands, producing two conflicting active transfers for one staffer.
 --
--- Fix mirrors migration-140 exactly: a partial UNIQUE INDEX encodes the "at most one
+-- Fix mirrors migration-140: a partial UNIQUE INDEX encodes the "at most one
 -- pending-or-in-progress transfer per therapist" invariant as a real DB constraint (the
 -- predicate matches the existing EXISTS check's boolean logic verbatim), and the INSERT
 -- is wrapped in a nested BEGIN/EXCEPTION so a duplicate that slips past the pre-check
@@ -20,6 +20,17 @@
 -- so this does NOT block legitimate SEQUENTIAL transfers (staffer moves to Branch B,
 -- that transfer completes/reverts, then later moves to Branch C); it only blocks two
 -- transfers being active/pending for the same staffer AT THE SAME TIME.
+--
+-- The index alone still leaves ONE gap: two Permanent transfers applied IMMEDIATELY
+-- (revert_at is always NULL for those) never match the "still active" predicate, so
+-- two truly simultaneous immediate-Permanent requests for the same therapist could
+-- both insert successfully before either commits. A per-therapist
+-- pg_advisory_xact_lock() closes that: it fully serializes every transfer_therapist()
+-- call for a given therapist_id (auto-released at transaction end, so it never
+-- outlives this call and can't deadlock across therapists), so the second caller
+-- simply waits for the first to commit/rollback before its own EXISTS check even
+-- runs. The unique index stays as defense-in-depth against any future write path
+-- that bypasses this function.
 --
 -- Builds on migration-150. Same 8-arg signature — CREATE OR REPLACE in place, no DROP
 -- FUNCTION needed since the arity isn't changing.
@@ -87,6 +98,11 @@ BEGIN
   v_today         := v_now::date;
   v_effective     := COALESCE(p_effective_date, v_today);
   v_start_ts      := (v_effective::text || ' ' || COALESCE(p_start_time, '00:00:00'::time)::text)::timestamp;
+
+  -- Serialize every transfer_therapist() call for THIS therapist. Released
+  -- automatically at transaction end (commit or rollback) — never held past this
+  -- call, so it can't deadlock or strand a lock across requests.
+  PERFORM pg_advisory_xact_lock(hashtext('staff_transfer:' || p_therapist_id::text)::bigint);
 
   SELECT branch_id, org_id, display_order INTO v_from_branch, v_therapist_org, v_from_display_order
   FROM public.therapists
