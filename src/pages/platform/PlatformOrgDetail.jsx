@@ -27,6 +27,31 @@ const nonWalletAmount = (booking) =>
     .filter((p) => !WALLET_PAYMENT_MODES.includes(p.payment_mode))
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
+// Pure row-shapers, reused both for the currently-loaded period (via useMemo
+// below) and for an on-demand per-period Detail export (a historical period
+// whose itemized bookings/memberships/vouchers aren't already in state).
+const toBookingRows = (bookings) =>
+  bookings
+    .filter((b) => b.payment_status === 'paid')
+    .map((b) => ({ ...b, nonWalletAmount: nonWalletAmount(b) }))
+    .filter((b) => b.nonWalletAmount > 0)
+    .map((b) => ({
+      key: `booking-${b.booking_id}`, type: 'Booking', date: b.date,
+      branch_name: b.branch_name, description: b.service_name, amount: b.nonWalletAmount,
+    }));
+
+const toMembershipRows = (membershipDeposits) =>
+  membershipDeposits.map((m, i) => ({
+    key: `membership-${i}`, type: 'Membership', date: m.date, branch_name: m.branch_name,
+    description: m.customer_name + (m.notes ? ` — ${m.notes}` : ''), amount: Number(m.amount || 0),
+  }));
+
+const toVoucherRows = (voucherSales) =>
+  voucherSales.map((v, i) => ({
+    key: `voucher-${i}`, type: 'Voucher', date: v.date, branch_name: v.branch_name,
+    description: `${v.guest_name} (${v.voucher_code})`, amount: Number(v.amount || 0),
+  }));
+
 const dayAfter = (isoDate) => {
   const d = new Date(`${isoDate}T00:00:00`);
   d.setDate(d.getDate() + 1);
@@ -141,33 +166,9 @@ const PlatformOrgDetail = () => {
     return () => { alive = false; };
   }, [orgId, effectiveFrom, effectiveTo]);
 
-  const paidBookings = useMemo(() =>
-    bookings
-      .filter((b) => b.payment_status === 'paid')
-      .map((b) => ({ ...b, nonWalletAmount: nonWalletAmount(b) }))
-      .filter((b) => b.nonWalletAmount > 0),
-    [bookings]);
-
-  const bookingRows = useMemo(() =>
-    paidBookings.map((b) => ({
-      key: `booking-${b.booking_id}`, type: 'Booking', date: b.date,
-      branch_name: b.branch_name, description: b.service_name, amount: b.nonWalletAmount,
-    })),
-    [paidBookings]);
-
-  const membershipRows = useMemo(() =>
-    membershipDeposits.map((m, i) => ({
-      key: `membership-${i}`, type: 'Membership', date: m.date, branch_name: m.branch_name,
-      description: m.customer_name + (m.notes ? ` — ${m.notes}` : ''), amount: Number(m.amount || 0),
-    })),
-    [membershipDeposits]);
-
-  const voucherRows = useMemo(() =>
-    voucherSales.map((v, i) => ({
-      key: `voucher-${i}`, type: 'Voucher', date: v.date, branch_name: v.branch_name,
-      description: `${v.guest_name} (${v.voucher_code})`, amount: Number(v.amount || 0),
-    })),
-    [voucherSales]);
+  const bookingRows = useMemo(() => toBookingRows(bookings), [bookings]);
+  const membershipRows = useMemo(() => toMembershipRows(membershipDeposits), [membershipDeposits]);
+  const voucherRows = useMemo(() => toVoucherRows(voucherSales), [voucherSales]);
 
   const [drillFilter, setDrillFilter] = useState('all'); // 'all' | 'bookings' | 'memberships' | 'vouchers'
   const [branchFilter, setBranchFilter] = useState('all');
@@ -209,24 +210,68 @@ const PlatformOrgDetail = () => {
   const commissionBase = wizBasis === 'vat_exclusive' ? grossSales / (1 + wizVatNum / 100) : grossSales;
   const computedCommission = commissionBase * wizRateNum / 100;
 
-  const handleExportCollectionHistory = () => {
-    const rows = collections.map((c) => {
-      const vatExclBase = c.gross_sales == null ? null
-        : c.commission_basis === 'vat_exclusive' ? c.gross_sales / (1 + Number(c.vat_rate_percent || 0) / 100)
-        : c.gross_sales;
-      return {
-        'Period Start': c.period_start,
-        'Period End': c.period_end,
-        'Sales': c.gross_sales == null ? '' : Number(c.gross_sales),
-        'VAT-excl. Base': vatExclBase == null ? '' : Number(vatExclBase),
-        'Cut %': c.rate_percent == null ? '' : Number(c.rate_percent),
-        'Amount To Be Collected': c.expected_amount == null ? '' : Number(c.expected_amount),
-        'Amount Already Collected': Number(c.amount_collected),
-        'Collected On': c.collected_at,
-        'Notes': c.notes || '',
-      };
-    });
-    exportRowsToExcel(`commission-collection-history-${orgId}`, rows, 'Collection History');
+  const buildCollectionSummaryRows = (list) => list.map((c) => {
+    const vatExclBase = c.gross_sales == null ? null
+      : c.commission_basis === 'vat_exclusive' ? c.gross_sales / (1 + Number(c.vat_rate_percent || 0) / 100)
+      : c.gross_sales;
+    return {
+      'Period Start': c.period_start,
+      'Period End': c.period_end,
+      'Sales': c.gross_sales == null ? '' : Number(c.gross_sales),
+      'VAT-excl. Base': vatExclBase == null ? '' : Number(vatExclBase),
+      'Cut %': c.rate_percent == null ? '' : Number(c.rate_percent),
+      'Amount To Be Collected': c.expected_amount == null ? '' : Number(c.expected_amount),
+      'Amount Already Collected': Number(c.amount_collected),
+      'Collected On': c.collected_at,
+      'Notes': c.notes || '',
+    };
+  });
+
+  // Whole-table summary export — every past collection period, one row each.
+  const handleExportAllSummary = () => {
+    exportRowsToExcel(`commission-collection-history-${orgId}`, buildCollectionSummaryRows(collections), 'Collection History');
+  };
+
+  // Single-period summary export — same shape, one row.
+  const handleExportRowSummary = (c) => {
+    exportRowsToExcel(`commission-summary-${orgId}-${c.period_start}_to_${c.period_end}`,
+      buildCollectionSummaryRows([c]), 'Summary');
+  };
+
+  // Single-period detail export — itemized bookings/memberships/vouchers for
+  // THAT historical period's own dates, fetched on demand (not already in
+  // state, since only the currently-selected Period is loaded live).
+  const [detailExportingId, setDetailExportingId] = useState(null);
+  const handleExportRowDetail = async (c) => {
+    setDetailExportingId(c.id);
+    try {
+      const [b, md, vs] = await Promise.all([
+        getOrgBookings(orgId, c.period_start, c.period_end),
+        getOrgMembershipDeposits(orgId, c.period_start, c.period_end),
+        getOrgVoucherSales(orgId, c.period_start, c.period_end),
+      ]);
+      const rows = [...toBookingRows(b || []), ...toMembershipRows(md || []), ...toVoucherRows(vs || [])]
+        .sort((r1, r2) => (r1.date < r2.date ? 1 : r1.date > r2.date ? -1 : 0))
+        .map((r) => ({ Date: r.date, Type: r.type, Branch: r.branch_name, Description: r.description, Amount: r.amount }));
+      exportRowsToExcel(`commission-detail-${orgId}-${c.period_start}_to_${c.period_end}`, rows, 'Detail');
+    } catch (e) {
+      setError(e.message || 'Detail export failed');
+    } finally {
+      setDetailExportingId(null);
+    }
+  };
+
+  // Present-period export — the not-yet-collected numbers currently shown in
+  // the Collect Commission panel, for whatever Period start/end is selected.
+  const handleExportPresentPeriod = () => {
+    exportRowsToExcel(`commission-present-period-${orgId}`, [{
+      'Period Start': wizFrom,
+      'Period End': wizTo,
+      'Sales (Period)': grossSales,
+      'Owed To Date': orgRollup?.commission_owed_to_date == null ? '' : Number(orgRollup.commission_owed_to_date),
+      'Collected To Date': orgRollup?.collected_to_date == null ? '' : Number(orgRollup.collected_to_date),
+      'Net Owed': orgRollup?.net_owed == null ? '' : Number(orgRollup.net_owed),
+    }], 'Present Period');
   };
 
   const submitCollect = async () => {
@@ -275,7 +320,13 @@ const PlatformOrgDetail = () => {
 
         {/* Collect Commission wizard */}
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
-          <h3 className="font-heading font-heading-semibold text-text-primary">Collect Commission</h3>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="font-heading font-heading-semibold text-text-primary">Collect Commission</h3>
+            <button type="button" onClick={handleExportPresentPeriod} disabled={rollupLoading}
+              className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
+              Export Excel (Present Period)
+            </button>
+          </div>
 
           {rollupLoading ? (
             <p className="font-body text-sm text-text-secondary">Loading…</p>
@@ -365,9 +416,9 @@ const PlatformOrgDetail = () => {
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="font-heading font-heading-semibold text-text-primary">Collection history</h3>
-            <button type="button" onClick={handleExportCollectionHistory} disabled={collections.length === 0}
+            <button type="button" onClick={handleExportAllSummary} disabled={collections.length === 0}
               className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
-              Export Excel
+              Export All (Summary)
             </button>
           </div>
           {collections.length === 0 ? (
@@ -385,6 +436,7 @@ const PlatformOrgDetail = () => {
                     <th className="text-right px-3 py-2 font-body">Collected</th>
                     <th className="text-left px-3 py-2 font-body">Collected On</th>
                     <th className="text-left px-3 py-2 font-body">Notes</th>
+                    <th className="text-left px-3 py-2 font-body">Export</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -413,6 +465,19 @@ const PlatformOrgDetail = () => {
                         </td>
                         <td className="px-3 py-2 text-text-secondary">{c.collected_at}</td>
                         <td className="px-3 py-2 text-text-secondary">{c.notes || '—'}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => handleExportRowSummary(c)}
+                              className="font-body text-xs text-primary hover:underline">
+                              Summary
+                            </button>
+                            <button type="button" onClick={() => handleExportRowDetail(c)}
+                              disabled={detailExportingId === c.id}
+                              className="font-body text-xs text-primary hover:underline disabled:opacity-40">
+                              {detailExportingId === c.id ? 'Loading…' : 'Detail'}
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
