@@ -209,7 +209,7 @@ export async function fetchTherapists(branchId, { date } = {}) {
         .from('therapist_attendance')
         .select('therapist_id, status')
         .eq('date', date)
-        .in('status', ['Absent', 'Leave']);
+        .in('status', ['Absent', ...LEAVE_LIKE_ATTENDANCE_STATUSES]);
       attendanceQuery = withBranch(attendanceQuery, branchId);
       attendancePromise = attendanceQuery;
     } else {
@@ -1532,7 +1532,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
           .select('therapist_id, status')
           .in('therapist_id', ids)
           .eq('date', booking.date)
-          .in('status', ['Absent', 'Leave']);
+          .in('status', ['Absent', ...LEAVE_LIKE_ATTENDANCE_STATUSES]);
         const absent = (absentRecords || []).find(Boolean);
         if (absent) {
           const absentTherapist = (therapistsData || []).find(t => t.id === absent.therapist_id);
@@ -3436,7 +3436,7 @@ export async function getUtilizationIntelligence({ branchId, date, from, to }) {
       .from('therapist_attendance')
       .select('therapist_id, status')
       .eq('date', targetDate)
-      .in('status', ['Absent', 'Leave']);
+      .in('status', ['Absent', ...LEAVE_LIKE_ATTENDANCE_STATUSES]);
     attendanceQuery = withBranch(attendanceQuery, branchId);
     const [roomsResult, therapistsResult, attendanceResult] = await Promise.all([
       roomsQuery,
@@ -3760,12 +3760,16 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('is_active', true)
         .order('display_order')
         .order('name'),
+      // is_permanent = false: a Permanent transfer (migration-146) is a plain reassignment
+      // with no revert — the staffer should just appear as a normal column at their new
+      // branch, not as a "transferred out/visiting" overlay.
       supabase
         .from('staff_transfers')
         .select('id, revert_at, effective_date, start_time, from_display_order, therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
         .eq('from_branch_id', resolvedBranchId)
         .eq('applied', true)
-        .eq('reverted', false),
+        .eq('reverted', false)
+        .eq('is_permanent', false),
       // Staffers currently visiting THIS branch on a temporary transfer — they already
       // appear normally in therapistsResult above (branch_id points here); this tags them
       // with where they're from + their actual visiting window, so the calendar can block
@@ -3775,7 +3779,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
         .eq('to_branch_id', resolvedBranchId)
         .eq('applied', true)
-        .eq('reverted', false),
+        .eq('reverted', false)
+        .eq('is_permanent', false),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4105,7 +4110,7 @@ export async function createBooking({
           .select('therapist_id, status')
           .in('therapist_id', allTherapistIds)
           .eq('date', date)
-          .in('status', ['Absent', 'Leave']);
+          .in('status', ['Absent', ...LEAVE_LIKE_ATTENDANCE_STATUSES]);
         const absent = (absentRecords || []).find(Boolean);
         if (absent) {
           const absentTherapist = therapistsData.find(t => t.id === absent.therapist_id);
@@ -4825,19 +4830,20 @@ export async function deleteTherapist({ therapistId }) {
 }
 
 /**
- * Transfer a staffer to another branch in the same org for a required duration.
- * Authorization + the audit row are enforced server-side by the
- * SECURITY DEFINER transfer_therapist() function (migration-039, required-duration
- * form added in migration-141): only an admin, or the manager of the staffer's
- * CURRENT branch, may transfer. Every transfer auto-reverts back to the original
- * branch when the duration elapses — there is no permanent-transfer option.
+ * Transfer a staffer to another branch in the same org, either Temporary (required
+ * duration, auto-reverts) or Permanent (no duration, stays until transferred again).
+ * Authorization + the audit row are enforced server-side by the SECURITY DEFINER
+ * transfer_therapist() function (migration-039, required-duration form added in
+ * migration-141, permanent option restored in migration-146): only an admin, or the
+ * manager of the staffer's CURRENT branch, may transfer.
  */
 export async function transferTherapist({
   therapistId,
   toBranchId,
-  startTime,
-  durationValue,
-  durationUnit,
+  permanent = false,
+  startTime = null,
+  durationValue = null,
+  durationUnit = null,
   note = null,
   effectiveDate = null,
 }) {
@@ -4848,11 +4854,12 @@ export async function transferTherapist({
     const { data, error } = await supabase.rpc('transfer_therapist', {
       p_therapist_id: therapistId,
       p_to_branch_id: toBranchId,
-      p_start_time: startTime,
-      p_duration_value: durationValue,
-      p_duration_unit: durationUnit,
+      p_start_time: permanent ? null : startTime,
+      p_duration_value: permanent ? null : durationValue,
+      p_duration_unit: permanent ? null : durationUnit,
       p_note: note,
       p_effective_date: effectiveDate,
+      p_permanent: permanent,
     });
 
     if (error) throw error;
@@ -4860,6 +4867,7 @@ export async function transferTherapist({
       therapist_id: therapistId,
       to_branch_id: toBranchId,
       effective_date: effectiveDate,
+      permanent,
       duration_value: durationValue,
       duration_unit: durationUnit,
     });
@@ -4880,7 +4888,7 @@ export async function fetchStaffTransfers() {
       .from('staff_transfers')
       .select(`
         id, transferred_at, effective_date, applied, note,
-        start_time, duration_value, duration_unit, revert_at, reverted, reverted_at,
+        start_time, duration_value, duration_unit, revert_at, reverted, reverted_at, is_permanent,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name),
@@ -4900,6 +4908,7 @@ export async function fetchStaffTransfers() {
       durationValue: t.duration_value,
       durationUnit: t.duration_unit,
       revertAt: t.revert_at,
+      isPermanent: t.is_permanent,
       reverted: t.reverted,
       revertedAt: t.reverted_at,
       therapistName: t.therapist?.name || '—',
@@ -4926,7 +4935,7 @@ export async function fetchPendingTransfers(branchId = null) {
       .from('staff_transfers')
       .select(`
         id, transferred_at, effective_date, applied, note, therapist_id,
-        start_time, duration_value, duration_unit, revert_at, reverted, reverted_at,
+        start_time, duration_value, duration_unit, revert_at, reverted, reverted_at, is_permanent,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name),
@@ -4953,6 +4962,7 @@ export async function fetchPendingTransfers(branchId = null) {
       durationValue: t.duration_value,
       durationUnit: t.duration_unit,
       revertAt: t.revert_at,
+      isPermanent: t.is_permanent,
       reverted: t.reverted,
       revertedAt: t.reverted_at,
       therapistName: t.therapist?.name || '—',
@@ -5029,7 +5039,7 @@ export async function fetchTherapistTransferStatus(branchId) {
       .from('staff_transfers')
       .select(`
         id, therapist_id, from_branch_id, to_branch_id, transferred_at, effective_date,
-        start_time, duration_value, duration_unit, revert_at, applied, reverted, reverted_at, note,
+        start_time, duration_value, duration_unit, revert_at, applied, reverted, reverted_at, is_permanent, note,
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name)
       `)
@@ -5055,6 +5065,7 @@ export async function fetchTherapistTransferStatus(branchId) {
         durationValue: t.duration_value,
         durationUnit: t.duration_unit,
         revertAt: t.revert_at,
+        isPermanent: t.is_permanent,
         applied: t.applied,
         reverted: t.reverted,
         revertedAt: t.reverted_at,
@@ -6438,7 +6449,20 @@ export async function getRiskIndicators({ branchId, date }) {
 // Phase 10F-2: Therapist Attendance API (Read + Write)
 // ============================================================
 
-const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Leave', '1st-Half Day', '2nd-Half Day'];
+const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Annual Leave', 'Sick Leave', 'Day Off'];
+
+// Statuses that mean the staffer isn't working that day — not deducted from salary (see
+// migration-147) and block booking assignment for the date, same as the legacy 'Leave' value
+// (kept in the DB enum for historical rows but no longer offered as an entry option).
+export const LEAVE_LIKE_ATTENDANCE_STATUSES = ['Leave', 'Annual Leave', 'Sick Leave', 'Day Off'];
+
+// Paid-leave caps, per calendar year (Jan 1 – Dec 31 of the payroll period's year): Sick Leave
+// and Annual Leave are only free of deduction up to these many days per year — anything beyond
+// is deducted like Absent. Legacy 'Leave' rows and 'Day Off' are uncapped (always paid) — we
+// can't retroactively split old 'Leave' rows into sick/annual, and Day Off has no cap per the
+// 2026-09-03 spec. Bump these two numbers if the policy changes.
+const SICK_LEAVE_PAID_CAP_DAYS = 14;
+const ANNUAL_LEAVE_PAID_CAP_DAYS = 18;
 
 // therapist_attendance.check_in_time/check_out_time are timestamptz columns, but the UI only
 // ever deals with a plain "HH:MM" clock time (a native <input type="time">, no date picker of
@@ -6661,13 +6685,10 @@ export async function fetchAttendanceSummary({ branchId, date }) {
     let halfDayCount = 0;
 
     for (const r of records) {
-      switch (r.status) {
-        case 'Present': presentCount++; break;
-        case 'Absent': absentCount++; break;
-        case 'Leave': leaveCount++; break;
-        case '1st-Half Day': halfDayCount++; break;
-        case '2nd-Half Day': halfDayCount++; break;
-      }
+      if (r.status === 'Present') presentCount++;
+      else if (r.status === 'Absent') absentCount++;
+      else if (LEAVE_LIKE_ATTENDANCE_STATUSES.includes(r.status)) leaveCount++;
+      else if (r.status === '1st-Half Day' || r.status === '2nd-Half Day') halfDayCount++;
     }
 
     const attendanceRate = totalTherapists > 0
@@ -6732,10 +6753,11 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
       switch (status) {
         case 'Present': acc.present++; acc.marked++; break;
         case 'Absent': acc.absent++; acc.marked++; break;
-        case 'Leave': acc.leave++; acc.marked++; break;
         case '1st-Half Day':
         case '2nd-Half Day': acc.halfDay++; acc.marked++; break;
-        default: break;
+        default:
+          if (LEAVE_LIKE_ATTENDANCE_STATUSES.includes(status)) { acc.leave++; acc.marked++; }
+          break;
       }
     };
 
@@ -6792,6 +6814,96 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
 // Phase 10D-5: Therapist Performance Index (Read-Only)
 // ============================================================
 
+// Grace window before a check-in/check-out counts as "late"/"early" against the branch's
+// open_time/close_time — attendance is marked to the minute but a few minutes of slack avoids
+// flagging normal clock variance as a lateness event.
+const ATTENDANCE_GRACE_MINUTES = 10;
+
+// Stable identity for de-duplicating a booking's customer even when customer_id is null
+// (walk-in/guest bookings — bookings.customer_id is nullable, migration-412-ish ALTER).
+// Phone is preferred over customer_id: customers.phone is enforced unique per org
+// (customers_org_nphone_uniq), so it's a more reliable identity than customer_id when the SAME
+// person has one booking linked to their profile and another walk-in booking that staff never
+// matched to it (common in practice) — keying on customer_id there would double-count one
+// person as two "customers attended".
+function bookingCustomerKey(b) {
+  const normalizedPhone = (b.customer_phone || '').replace(/\D/g, '');
+  if (normalizedPhone) return `phone:${normalizedPhone}`;
+  if (b.customer_id) return `id:${b.customer_id}`;
+  return `name:${(b.customer_name || '').trim().toLowerCase()}`;
+}
+
+// Shared per-therapist metric computation — used by both the bulk getTherapistPerformance table
+// and the single-therapist getTherapistOverview, so the two views can never drift apart for the
+// same period (see migration/plan note: "data consistency" requirement).
+//
+// `bookings` must already be filtered to this therapist + period + status IN
+// ('Confirmed','In-Progress','Completed'). `attendanceRows` must already be filtered to this
+// therapist + period, selecting at least `status, check_in_time, check_out_time`.
+// `dayWindowMinutes` is the branch's operating window (close_time - open_time) in minutes.
+function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes) {
+  const completed = bookings.filter(b => b.status === 'Completed');
+  const servicesCompleted = completed.length;
+  const totalAssigned = bookings.length;
+
+  const paidBookings = completed.filter(b => b.payment_status === 'paid');
+  const paidRevenue = paidBookings.reduce((sum, b) => sum + (Number(b.final_amount) || 0), 0);
+  const completionRate = totalAssigned > 0 ? servicesCompleted / totalAssigned : 0;
+  const avgRevenuePerBooking = servicesCompleted > 0 ? Math.round(paidRevenue / servicesCompleted) : 0;
+
+  const attendedCustomers = new Set(completed.map(bookingCustomerKey));
+  const assignedCustomers = new Set(bookings.map(bookingCustomerKey));
+  const customersAttended = attendedCustomers.size;
+  const customersAssigned = assignedCustomers.size;
+  const notAttended = Math.max(0, customersAssigned - customersAttended);
+
+  const occupiedMinutes = completed.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
+  const avgServiceDurationMinutes = servicesCompleted > 0 ? Math.round(occupiedMinutes / servicesCompleted) : 0;
+
+  // Actual worked minutes: real check-in→check-out span where recorded, else fall back to the
+  // branch's scheduled window for that day (full for Present, half for Half-day) — same
+  // fallback the pre-existing utilization calc used, just now exposed as its own number.
+  let workedMinutes = 0;
+  let attendedDaysTotal = 0;
+  let presentOrHalfDays = 0;
+  for (const a of attendanceRows) {
+    attendedDaysTotal += 1;
+    const isHalf = a.status === '1st-Half Day' || a.status === '2nd-Half Day';
+    if (a.status !== 'Present' && !isHalf) continue;
+    presentOrHalfDays += 1;
+    const dayWindow = isHalf ? dayWindowMinutes / 2 : dayWindowMinutes;
+    if (a.check_in_time && a.check_out_time) {
+      const span = (new Date(a.check_out_time) - new Date(a.check_in_time)) / 60000;
+      workedMinutes += Math.max(0, span);
+    } else {
+      workedMinutes += dayWindow;
+    }
+  }
+  const attendanceRate = attendedDaysTotal > 0 ? presentOrHalfDays / attendedDaysTotal : 1;
+
+  const workedHours = Math.round((workedMinutes / 60) * 10) / 10;
+  const occupiedHours = Math.round((occupiedMinutes / 60) * 10) / 10;
+  // Utilization = Occupied Time ÷ Actual Worked Time × 100 (capped at 100 for display safety).
+  const utilizationRate = workedMinutes > 0 ? Math.round(Math.min(occupiedMinutes / workedMinutes, 1) * 100) : 0;
+
+  return {
+    servicesCompleted,
+    completedBookings: servicesCompleted,
+    totalAssigned,
+    paidRevenue,
+    completionRate: Math.round(completionRate * 100),
+    avgRevenuePerBooking,
+    attendanceRate: Math.round(attendanceRate * 100),
+    customersAttended,
+    customersAssigned,
+    notAttended,
+    workedHours,
+    occupiedHours,
+    utilizationRate,
+    avgServiceDurationMinutes,
+  };
+}
+
 export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
   try {
     if (!branchId) {
@@ -6847,7 +6959,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     // 2. Fetch bookings + attendance in parallel
     let bookingsQuery = supabase
       .from('bookings')
-      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot')
+      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone')
       .gte('date', startDate)
       .lte('date', endDate)
       .in('therapist_id', therapistIds)
@@ -6855,7 +6967,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     bookingsQuery = withBranch(bookingsQuery, branchId);
     let attendanceQuery = supabase
       .from('therapist_attendance')
-      .select('therapist_id, status')
+      .select('therapist_id, status, check_in_time, check_out_time')
       .gte('date', startDate)
       .lte('date', endDate)
       .in('therapist_id', therapistIds);
@@ -6870,18 +6982,13 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     const allBookings = bookingsResult.data || [];
     const allAttendance = (!attendanceResult.error && attendanceResult.data) || [];
 
-    // 3. Compute working days in range (for utilization denominator)
-    const rangeStart = new Date(startDate);
-    const rangeEnd = new Date(endDate);
-    const totalDaysInRange = Math.max(1, Math.round((rangeEnd - rangeStart) / 86400000) + 1);
-
-    // 4. Aggregate per therapist
+    // 3. Aggregate per therapist
     const bookingsByTherapist = {};
     const attendanceByTherapist = {};
 
     for (const t of therapists) {
       bookingsByTherapist[t.id] = [];
-      attendanceByTherapist[t.id] = { total: 0, present: 0, daysWorked: 0 };
+      attendanceByTherapist[t.id] = [];
     }
 
     for (const b of allBookings) {
@@ -6892,52 +6999,26 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
 
     for (const a of allAttendance) {
       if (attendanceByTherapist[a.therapist_id]) {
-        attendanceByTherapist[a.therapist_id].total += 1;
-        if (a.status === 'Present') {
-          attendanceByTherapist[a.therapist_id].present += 1;
-          attendanceByTherapist[a.therapist_id].daysWorked += 1;
-        } else if (a.status === '1st-Half Day' || a.status === '2nd-Half Day') {
-          attendanceByTherapist[a.therapist_id].present += 1;
-          attendanceByTherapist[a.therapist_id].daysWorked += 0.5;
-        }
-        // Absent/Leave: 0 added to daysWorked
+        attendanceByTherapist[a.therapist_id].push(a);
       }
     }
 
-    // 5. Compute raw metrics per therapist
+    // 4. Compute metrics per therapist via the shared helper (same code path as
+    // getTherapistOverview, so the main table and the detail view's Overview tab never drift).
     const rawMetrics = therapists.map(t => {
-      const bookings = bookingsByTherapist[t.id];
-      const completedBookings = bookings.filter(b => b.status === 'Completed').length;
-      const totalAssigned = bookings.length;
-      const paidBookings = bookings.filter(b => b.payment_status === 'paid');
-      const paidRevenue = paidBookings.reduce((sum, b) => sum + (Number(b.final_amount) || 0), 0);
-      const completionRate = totalAssigned > 0 ? completedBookings / totalAssigned : 0;
-      const avgRevenuePerBooking = completedBookings > 0 ? Math.round(paidRevenue / completedBookings) : 0;
-
-      // Attendance rate
-      const att = attendanceByTherapist[t.id];
-      const attendanceRate = att.total > 0 ? att.present / att.total : (totalDaysInRange > 0 ? 1 : 0);
-
-      // Utilization: total booked minutes / (operating minutes * days worked)
-      // Present = 1.0 day, Half-Day = 0.5 day, Absent/Leave = 0.0 day
-      const totalBookedMinutes = bookings.reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
-      const daysWorked = att.total > 0 ? att.daysWorked : totalDaysInRange;
-      const totalAvailableMinutes = daysWorked * dayWindowFor(t.branch_id);
-      const utilizationRate = totalAvailableMinutes > 0 ? totalBookedMinutes / totalAvailableMinutes : 0;
+      const metrics = computeTherapistMetrics(
+        bookingsByTherapist[t.id],
+        attendanceByTherapist[t.id],
+        dayWindowFor(t.branch_id)
+      );
 
       return {
         therapistId: t.id,
         therapistName: t.name,
         gender: t.gender,
         specialties: t.specialties || [],
-        completedBookings,
-        totalAssigned,
-        paidRevenue,
-        completionRate: Math.round(completionRate * 100),
-        avgRevenuePerBooking,
-        attendanceRate: Math.round(attendanceRate * 100),
-        utilizationRate: Math.round(Math.min(utilizationRate, 1) * 100),
-        _rawRevenue: paidRevenue,
+        ...metrics,
+        _rawRevenue: metrics.paidRevenue,
       };
     });
 
@@ -6972,6 +7053,338 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     };
   } catch (error) {
     console.error('[API] getTherapistPerformance error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Therapist Performance — single-therapist drill-down (Overview/Customers/Services/Attendance)
+// ============================================================
+
+// One therapist's Overview-tab numbers for a period. Built on the same computeTherapistMetrics
+// helper as the bulk getTherapistPerformance table, so the two can never show different numbers
+// for the same therapist + period.
+export async function getTherapistOverview({ branchId, therapistId, fromDate, toDate }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    if (!therapistId) {
+      return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const endDate = toDate || today;
+    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+
+    const { data: therapist, error: tErr } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .eq('id', therapistId)
+      .single();
+    if (tErr) throw tErr;
+
+    const { data: branch, error: bErr } = await supabase
+      .from('branches')
+      .select('open_time, close_time')
+      .eq('id', therapist.branch_id)
+      .single();
+    if (bErr) throw bErr;
+    const dayWindowMinutes = timeToMinutes(branch.close_time) - timeToMinutes(branch.open_time);
+
+    let bookingsQuery = supabase
+      .from('bookings')
+      .select('status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone')
+      .eq('therapist_id', therapistId)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+    bookingsQuery = withBranch(bookingsQuery, branchId);
+    let attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('status, check_in_time, check_out_time')
+      .eq('therapist_id', therapistId)
+      .gte('date', startDate)
+      .lte('date', endDate);
+    attendanceQuery = withBranch(attendanceQuery, branchId);
+
+    const [bookingsResult, attendanceResult] = await Promise.all([bookingsQuery, attendanceQuery]);
+    if (bookingsResult.error) throw bookingsResult.error;
+    const bookings = bookingsResult.data || [];
+    const attendanceRows = (!attendanceResult.error && attendanceResult.data) || [];
+
+    const metrics = computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes);
+
+    return { data: { ...metrics, periodStart: startDate, periodEnd: endDate }, error: null };
+  } catch (error) {
+    console.error('[API] getTherapistOverview error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Customers tab: one row per attended (Completed) visit, classified New/Repeat using the same
+// "first-ever completed booking org-wide" definition getCustomerIntelligence uses for CRM
+// loyalty tiers. Pass includeMissedCancelled to also list Cancelled/No Show appointments.
+export async function getTherapistCustomerHistory({ branchId, therapistId, fromDate, toDate, includeMissedCancelled = false }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    if (!therapistId) {
+      return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const endDate = toDate || today;
+    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+
+    const statuses = includeMissedCancelled ? ['Completed', 'Cancelled', 'No Show'] : ['Completed'];
+
+    let query = supabase
+      .from('bookings')
+      .select('id, customer_id, customer_name, customer_phone, service_name_snapshot, date, start_time, service_duration_snapshot, status')
+      .eq('therapist_id', therapistId)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('status', statuses)
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false });
+    query = withBranch(query, branchId);
+
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+    const rows = bookings || [];
+
+    // For every distinct customer_id present, find their earliest org-wide Completed booking
+    // date. A booking whose date equals that earliest date is that customer's "New" visit;
+    // everything else is "Repeat". No customer_id (walk-in/guest) → always "New".
+    const customerIds = [...new Set(rows.map(r => r.customer_id).filter(Boolean))];
+    const firstVisitByCustomer = {};
+    if (customerIds.length > 0) {
+      const { data: history, error: histErr } = await supabase
+        .from('bookings')
+        .select('customer_id, date')
+        .in('customer_id', customerIds)
+        .eq('status', 'Completed')
+        .order('date', { ascending: true });
+      if (histErr) throw histErr;
+      for (const h of (history || [])) {
+        if (!(h.customer_id in firstVisitByCustomer)) {
+          firstVisitByCustomer[h.customer_id] = h.date;
+        }
+      }
+    }
+
+    const customers = rows.map(r => ({
+      bookingId: r.id,
+      customerId: r.customer_id,
+      customerName: r.customer_name,
+      customerPhone: r.customer_phone,
+      serviceName: r.service_name_snapshot,
+      date: r.date,
+      startTime: r.start_time,
+      durationMinutes: r.service_duration_snapshot,
+      status: r.status,
+      customerType: r.status !== 'Completed'
+        ? null
+        : (!r.customer_id || firstVisitByCustomer[r.customer_id] === r.date) ? 'New' : 'Repeat',
+    }));
+
+    return { data: { customers, periodStart: startDate, periodEnd: endDate }, error: null };
+  } catch (error) {
+    console.error('[API] getTherapistCustomerHistory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Services tab: per-service Completed/Cancelled/Missed(No Show) counts, avg duration, revenue.
+export async function getTherapistServiceBreakdown({ branchId, therapistId, fromDate, toDate }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    if (!therapistId) {
+      return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const endDate = toDate || today;
+    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+
+    let query = supabase
+      .from('bookings')
+      .select('service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot')
+      .eq('therapist_id', therapistId)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .in('status', ['Completed', 'Cancelled', 'No Show']);
+    query = withBranch(query, branchId);
+
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const byService = {};
+    for (const b of (bookings || [])) {
+      const name = b.service_name_snapshot || 'Unknown Service';
+      if (!byService[name]) {
+        byService[name] = { serviceName: name, completed: 0, cancelled: 0, missed: 0, revenue: 0, _durations: [] };
+      }
+      const s = byService[name];
+      if (b.status === 'Completed') {
+        s.completed += 1;
+        if (b.payment_status === 'paid') s.revenue += Number(b.final_amount) || 0;
+        if (b.service_duration_snapshot) s._durations.push(b.service_duration_snapshot);
+      } else if (b.status === 'Cancelled') {
+        s.cancelled += 1;
+      } else if (b.status === 'No Show') {
+        s.missed += 1;
+      }
+    }
+
+    const services = Object.values(byService).map(s => ({
+      serviceName: s.serviceName,
+      completed: s.completed,
+      cancelled: s.cancelled,
+      missed: s.missed,
+      avgDurationMinutes: s._durations.length > 0
+        ? Math.round(s._durations.reduce((a, b) => a + b, 0) / s._durations.length)
+        : 0,
+      revenue: s.revenue,
+    })).sort((a, b) => b.completed - a.completed);
+
+    return { data: { services, periodStart: startDate, periodEnd: endDate }, error: null };
+  } catch (error) {
+    console.error('[API] getTherapistServiceBreakdown error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Attendance tab: scheduled vs actual worked hours, late/early/extra/partial counts, and a
+// per-day shift history. "Scheduled" = branch open→close window on Present/Half-day days (no
+// shift/roster table exists in this app — see migration/plan notes). Late/early are only
+// computed for full-day Present rows with recorded check-in/out, using a ±10min grace window.
+export async function getTherapistAttendanceDetail({ branchId, therapistId, fromDate, toDate }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    if (!therapistId) {
+      return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const endDate = toDate || today;
+    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
+
+    const { data: therapist, error: tErr } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .eq('id', therapistId)
+      .single();
+    if (tErr) throw tErr;
+
+    const { data: branch, error: bErr } = await supabase
+      .from('branches')
+      .select('open_time, close_time')
+      .eq('id', therapist.branch_id)
+      .single();
+    if (bErr) throw bErr;
+
+    const openMin = timeToMinutes(branch.open_time);
+    const closeMin = timeToMinutes(branch.close_time);
+    const dayWindowMinutes = closeMin - openMin;
+
+    let query = supabase
+      .from('therapist_attendance')
+      .select('date, status, check_in_time, check_out_time')
+      .eq('therapist_id', therapistId)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date', { ascending: true });
+    query = withBranch(query, branchId);
+
+    const { data: rows, error } = await query;
+    if (error) throw error;
+    const attendance = rows || [];
+
+    let scheduledMinutes = 0;
+    let workedMinutes = 0;
+    let lateArrivals = 0;
+    let earlyDepartures = 0;
+    let extraMinutes = 0;
+    let partialShifts = 0;
+
+    const shiftHistory = attendance.map(a => {
+      const isHalf = a.status === '1st-Half Day' || a.status === '2nd-Half Day';
+      const isWorkDay = a.status === 'Present' || isHalf;
+      const dayWindow = isHalf ? dayWindowMinutes / 2 : dayWindowMinutes;
+
+      const checkInTime = formatTimeKathmandu(a.check_in_time);
+      const checkOutTime = formatTimeKathmandu(a.check_out_time);
+      let workedMin = null;
+      let dayStatus = a.status;
+
+      if (isWorkDay) {
+        if (isHalf) partialShifts += 1;
+        scheduledMinutes += dayWindow;
+
+        if (a.check_in_time && a.check_out_time) {
+          workedMin = Math.max(0, (new Date(a.check_out_time) - new Date(a.check_in_time)) / 60000);
+        } else {
+          workedMin = dayWindow;
+        }
+        workedMinutes += workedMin;
+
+        if (workedMin > dayWindow) extraMinutes += workedMin - dayWindow;
+
+        // Late/early are only derivable against the branch clock for full-day rows with BOTH a
+        // real check-in AND check-out — a half-day slot isn't pinned to a fixed half of
+        // open_time/close_time, and judging only one side of a partial pair (e.g. checkout
+        // recorded but check-in missing) would contradict workedMin above, which itself only
+        // uses the real span when both timestamps are present (falling back to the full
+        // scheduled window otherwise) — flagging "Early departure" against that fallback would
+        // show a self-contradicting "Worked: <full day> · Early departure" row.
+        let flagged = false;
+        const hasFullPair = !isHalf && a.check_in_time && a.check_out_time;
+        if (hasFullPair && timeToMinutes(checkInTime) > openMin + ATTENDANCE_GRACE_MINUTES) {
+          lateArrivals += 1;
+          dayStatus = 'Late';
+          flagged = true;
+        }
+        if (hasFullPair && timeToMinutes(checkOutTime) < closeMin - ATTENDANCE_GRACE_MINUTES) {
+          earlyDepartures += 1;
+          dayStatus = flagged && dayStatus === 'Late' ? 'Late' : 'Early departure';
+          flagged = true;
+        }
+        if (!flagged) dayStatus = isHalf ? a.status : (hasFullPair ? 'On time' : a.status);
+      }
+
+      return {
+        date: a.date,
+        scheduledHours: Math.round((dayWindow / 60) * 10) / 10,
+        checkIn: checkInTime,
+        checkOut: checkOutTime,
+        workedHours: workedMin !== null ? Math.round((workedMin / 60) * 10) / 10 : null,
+        status: dayStatus,
+      };
+    });
+
+    return {
+      data: {
+        scheduledHours: Math.round((scheduledMinutes / 60) * 10) / 10,
+        actualWorkedHours: Math.round((workedMinutes / 60) * 10) / 10,
+        lateArrivals,
+        earlyDepartures,
+        extraHours: Math.round((extraMinutes / 60) * 10) / 10,
+        partialShifts,
+        shiftHistory,
+        periodStart: startDate,
+        periodEnd: endDate,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getTherapistAttendanceDetail error:', error.message);
     return { data: null, error };
   }
 }
@@ -7543,6 +7956,7 @@ export async function getPayrollRun({ branchId, periodMonth }) {
           absentDays: Number(i.absent_days),
           halfDays: i.half_days,
           leaveDays: i.leave_days,
+          unpaidLeaveDays: Number(i.unpaid_leave_days),
           attendanceDeduction: Number(i.attendance_deduction),
           serviceRevenue: Number(i.service_revenue),
           serviceCommission: Number(i.service_commission),
@@ -7636,8 +8050,44 @@ export async function generatePayroll({ branchId, periodMonth }) {
       if (row.status === 'Present') t.present += 1;
       else if (row.status === 'Absent') t.absent += 1;
       else if (row.status === '1st-Half Day' || row.status === '2nd-Half Day') t.halfDay += 1;
-      else if (row.status === 'Leave') t.leave += 1;
+      else if (LEAVE_LIKE_ATTENDANCE_STATUSES.includes(row.status)) t.leave += 1;
     }
+
+    // Sick/Annual Leave paid-day caps run per calendar year, not per pay period — so a
+    // therapist's 15th sick day in June is unpaid even though June itself has plenty of paid
+    // days left. Fetch the whole year up to this period's last day, split each type into
+    // "before this period" vs. "in this period", and only the days that push the YTD count
+    // past the cap WITHIN this period are deducted (days already over the cap before this
+    // period were — or will be — deducted in the period they actually landed in).
+    const yearStart = `${year}-01-01`;
+    const { data: ytdLeaveRows, error: ytdErr } = await supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status, date')
+      .in('therapist_id', therapistIds)
+      .in('status', ['Sick Leave', 'Annual Leave'])
+      .gte('date', yearStart)
+      .lte('date', lastDay);
+    if (ytdErr) throw ytdErr;
+
+    const ytdMap = {};
+    for (const therapistId of therapistIds) {
+      ytdMap[therapistId] = { sickBefore: 0, sickIn: 0, annualBefore: 0, annualIn: 0 };
+    }
+    for (const row of (ytdLeaveRows || [])) {
+      const t = ytdMap[row.therapist_id];
+      if (!t) continue;
+      const inPeriod = row.date >= firstDay;
+      if (row.status === 'Sick Leave') { if (inPeriod) t.sickIn += 1; else t.sickBefore += 1; }
+      else if (row.status === 'Annual Leave') { if (inPeriod) t.annualIn += 1; else t.annualBefore += 1; }
+    }
+
+    const unpaidLeaveDaysFor = (therapistId) => {
+      const t = ytdMap[therapistId];
+      const overCap = (before, inPeriod, cap) =>
+        Math.max(0, before + inPeriod - cap) - Math.max(0, before - cap);
+      return overCap(t.sickBefore, t.sickIn, SICK_LEAVE_PAID_CAP_DAYS)
+        + overCap(t.annualBefore, t.annualIn, ANNUAL_LEAVE_PAID_CAP_DAYS);
+    };
 
     // Fetch completed+paid bookings in the period to compute service revenue.
     let bookingQuery = supabase
@@ -7691,8 +8141,9 @@ export async function generatePayroll({ branchId, periodMonth }) {
       const salary = comp?.monthly_salary != null ? Number(comp.monthly_salary) : 0;
       const rate = comp?.commission_rate != null ? Number(comp.commission_rate) : 0;
       const att = attMap[t.id];
+      const unpaidLeaveDays = unpaidLeaveDaysFor(t.id);
       const perDay = daysInMonth > 0 ? salary / daysInMonth : 0;
-      const deduction = Math.round(perDay * (att.absent + 0.5 * att.halfDay) * 100) / 100;
+      const deduction = Math.round(perDay * (att.absent + 0.5 * att.halfDay + unpaidLeaveDays) * 100) / 100;
       const serviceRev = serviceRevenueMap[t.id] || 0;
       const svcCommission = Math.round(serviceRev * (rate / 100) * 100) / 100;
       const refCommission = referralCommissionMap[t.id] || 0;
@@ -7711,6 +8162,7 @@ export async function generatePayroll({ branchId, periodMonth }) {
         absent_days: att.absent,
         half_days: att.halfDay,
         leave_days: att.leave,
+        unpaid_leave_days: unpaidLeaveDays,
         attendance_deduction: deduction,
         service_revenue: serviceRev,
         service_commission: svcCommission,

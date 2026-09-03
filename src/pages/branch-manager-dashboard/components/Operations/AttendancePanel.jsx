@@ -60,9 +60,9 @@ const ATTENDANCE_OPTIONS = [
   { value: '', label: 'Not Marked' },
   { value: 'Present', label: 'Present' },
   { value: 'Absent', label: 'Absent' },
-  { value: 'Leave', label: 'Leave' },
-  { value: '1st-Half Day', label: '1st-Half Day' },
-  { value: '2nd-Half Day', label: '2nd-Half Day' },
+  { value: 'Annual Leave', label: 'Annual Leave' },
+  { value: 'Sick Leave', label: 'Sick Leave' },
+  { value: 'Day Off', label: 'Day Off' },
 ];
 
 const STATUS_FILTER_OPTIONS = [
@@ -70,9 +70,9 @@ const STATUS_FILTER_OPTIONS = [
   { value: '', label: 'Not Marked' },
   { value: 'Present', label: 'Present' },
   { value: 'Absent', label: 'Absent' },
-  { value: 'Leave', label: 'Leave' },
-  { value: '1st-Half Day', label: '1st-Half Day' },
-  { value: '2nd-Half Day', label: '2nd-Half Day' },
+  { value: 'Annual Leave', label: 'Annual Leave' },
+  { value: 'Sick Leave', label: 'Sick Leave' },
+  { value: 'Day Off', label: 'Day Off' },
 ];
 
 const STAFF_TYPE_OPTIONS = [
@@ -118,6 +118,7 @@ const AttendancePanel = ({ branchId }) => {
   const [extendError, setExtendError] = useState(null);
   const [extending, setExtending] = useState(false);
   const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
+  const [transferMode, setTransferMode] = useState('temporary'); // 'temporary' | 'permanent'
   const [transferToBranch, setTransferToBranch] = useState('');
   const [transferStartDate, setTransferStartDate] = useState('');
   const [transferStartTime, setTransferStartTime] = useState('');
@@ -412,6 +413,7 @@ const AttendancePanel = ({ branchId }) => {
       : null;
 
     setTransferTarget({ therapistId: t.therapistId, therapistName: t.therapistName, activeTransfer, completedTransfer });
+    setTransferMode('temporary');
     setTransferToBranch('');
     setTransferStartDate(selectedDate);
     setTransferStartTime('');
@@ -453,30 +455,39 @@ const AttendancePanel = ({ branchId }) => {
     await loadData();
   };
 
-  const isTransferFormComplete =
-    !!transferToBranch &&
-    !!transferStartDate &&
-    !!transferStartTime &&
-    !!transferDurationUnit &&
-    !!transferDurationValue &&
-    Number(transferDurationValue) > 0;
+  const isPermanentTransfer = transferMode === 'permanent';
+
+  const isTransferFormComplete = isPermanentTransfer
+    ? !!transferToBranch && !!transferStartDate
+    : !!transferToBranch &&
+      !!transferStartDate &&
+      !!transferStartTime &&
+      !!transferDurationUnit &&
+      !!transferDurationValue &&
+      Number(transferDurationValue) > 0;
 
   const handleTransfer = async () => {
     if (!transferToBranch) {
       setTransferError('Select a destination branch.');
       return;
     }
-    if (!transferStartDate || !transferStartTime) {
-      setTransferError('Select a start date and time.');
+    if (!transferStartDate) {
+      setTransferError('Select a start date.');
       return;
     }
-    if (!transferDurationUnit) {
-      setTransferError('Select a duration unit.');
-      return;
-    }
-    if (!transferDurationValue || Number(transferDurationValue) <= 0) {
-      setTransferError('Enter a valid duration.');
-      return;
+    if (!isPermanentTransfer) {
+      if (!transferStartTime) {
+        setTransferError('Select a start time.');
+        return;
+      }
+      if (!transferDurationUnit) {
+        setTransferError('Select a duration unit.');
+        return;
+      }
+      if (!transferDurationValue || Number(transferDurationValue) <= 0) {
+        setTransferError('Enter a valid duration.');
+        return;
+      }
     }
 
     setTransferring(true);
@@ -486,9 +497,10 @@ const AttendancePanel = ({ branchId }) => {
     const result = await transferTherapist({
       therapistId: transferTarget.therapistId,
       toBranchId: transferToBranch,
-      startTime: transferStartTime,
-      durationValue: Number(transferDurationValue),
-      durationUnit: transferDurationUnit,
+      permanent: isPermanentTransfer,
+      startTime: isPermanentTransfer ? null : transferStartTime,
+      durationValue: isPermanentTransfer ? null : Number(transferDurationValue),
+      durationUnit: isPermanentTransfer ? null : transferDurationUnit,
       note: transferNote.trim() || null,
       effectiveDate: transferStartDate,
     });
@@ -500,13 +512,15 @@ const AttendancePanel = ({ branchId }) => {
     }
 
     const name = transferTarget.therapistName;
-    const revertPreview = computeRevertPreview(transferStartDate, transferStartTime, transferDurationValue, transferDurationUnit);
+    const revertPreview = isPermanentTransfer
+      ? null
+      : computeRevertPreview(transferStartDate, transferStartTime, transferDurationValue, transferDurationUnit);
     setTransferTarget(null);
     setTransferring(false);
     showToast(
       isFuture
         ? `Transfer scheduled for ${name} on ${formatPrettyDate(transferStartDate)}${revertPreview ? `, returns around ${revertPreview}` : ''}.`
-        : `${name} transferred${revertPreview ? `, returns around ${revertPreview}` : ''}.`
+        : `${name} transferred${revertPreview ? `, returns around ${revertPreview}` : isPermanentTransfer ? ' permanently.' : '.'}`
     );
     await loadData();
   };
@@ -601,7 +615,7 @@ const AttendancePanel = ({ branchId }) => {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <SummaryCard
             icon="UserCheck"
             iconBg="bg-success/10"
@@ -620,15 +634,8 @@ const AttendancePanel = ({ branchId }) => {
             icon="CalendarOff"
             iconBg="bg-warning/10"
             iconColor="text-warning"
-            label="Leave"
+            label="Leave / Day Off"
             value={summary.leaveCount}
-          />
-          <SummaryCard
-            icon="Clock"
-            iconBg="bg-accent/10"
-            iconColor="text-accent"
-            label="Half-Day"
-            value={summary.halfDayCount}
           />
           <SummaryCard
             icon="Percent"
@@ -762,7 +769,7 @@ const AttendancePanel = ({ branchId }) => {
                           <span className={`md:hidden inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium ${
                             edit.status === 'Present' ? 'bg-success/10 text-success' :
                             edit.status === 'Absent' ? 'bg-error/10 text-error' :
-                            edit.status === 'Leave' ? 'bg-warning/10 text-warning' :
+                            (edit.status === 'Annual Leave' || edit.status === 'Sick Leave') ? 'bg-warning/10 text-warning' :
                             'bg-accent/10 text-accent'
                           }`}>
                             {edit.status}
@@ -798,8 +805,8 @@ const AttendancePanel = ({ branchId }) => {
                     valueClassName={
                       edit.status === 'Present' ? 'text-success' :
                       edit.status === 'Absent' ? 'text-error' :
-                      edit.status === 'Leave' ? 'text-warning' :
-                      (edit.status === '1st-Half Day' || edit.status === '2nd-Half Day') ? 'text-accent' :
+                      (edit.status === 'Annual Leave' || edit.status === 'Sick Leave') ? 'text-warning' :
+                      edit.status === 'Day Off' ? 'text-accent' :
                       'text-text-tertiary'
                     }
                   />
@@ -970,8 +977,33 @@ const AttendancePanel = ({ branchId }) => {
                   </div>
                 )}
 
+                <div className="flex rounded-spa border border-border p-0.5 bg-background w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setTransferMode('temporary')}
+                    className={`px-3 py-1.5 rounded text-sm font-body font-body-medium transition-colors ${
+                      transferMode === 'temporary' ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    Temporary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTransferMode('permanent')}
+                    className={`px-3 py-1.5 rounded text-sm font-body font-body-medium transition-colors ${
+                      transferMode === 'permanent' ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    Permanent
+                  </button>
+                </div>
+
                 <p className="font-body text-sm text-text-secondary">
-                  Move <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> to another branch for a set duration. They'll automatically return to their current branch once it elapses.
+                  {isPermanentTransfer ? (
+                    <>Move <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> to another branch permanently. They'll stay there until transferred again.</>
+                  ) : (
+                    <>Move <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> to another branch for a set duration. They'll automatically return to their current branch once it elapses.</>
+                  )}
                 </p>
 
                 {transferError && (
@@ -991,7 +1023,7 @@ const AttendancePanel = ({ branchId }) => {
                   onChange={setTransferToBranch}
                 />
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className={isPermanentTransfer ? '' : 'grid grid-cols-2 gap-3'}>
                   <div className="space-y-1">
                     <label className="block font-body font-body-medium text-sm text-text-primary">Start Date</label>
                     <input
@@ -1001,38 +1033,42 @@ const AttendancePanel = ({ branchId }) => {
                       className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
-                    <input
-                      type="time"
-                      value={transferStartTime}
-                      onChange={(e) => setTransferStartTime(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                  </div>
+                  {!isPermanentTransfer && (
+                    <div className="space-y-1">
+                      <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
+                      <input
+                        type="time"
+                        value={transferStartTime}
+                        onChange={(e) => setTransferStartTime(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Select
-                    label="Duration Unit"
-                    placeholder="Select unit..."
-                    options={DURATION_UNIT_OPTIONS}
-                    value={transferDurationUnit}
-                    onChange={setTransferDurationUnit}
-                  />
-                  <div className="space-y-1">
-                    <label className="block font-body font-body-medium text-sm text-text-primary">Duration</label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={transferDurationValue}
-                      onChange={(e) => setTransferDurationValue(e.target.value)}
-                      placeholder="e.g. 2"
+                {!isPermanentTransfer && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Select
+                      label="Duration Unit"
+                      placeholder="Select unit..."
+                      options={DURATION_UNIT_OPTIONS}
+                      value={transferDurationUnit}
+                      onChange={setTransferDurationUnit}
                     />
+                    <div className="space-y-1">
+                      <label className="block font-body font-body-medium text-sm text-text-primary">Duration</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={transferDurationValue}
+                        onChange={(e) => setTransferDurationValue(e.target.value)}
+                        placeholder="e.g. 2"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {isTransferFormComplete && (
+                {!isPermanentTransfer && isTransferFormComplete && (
                   <p className="font-caption text-xs text-text-tertiary">
                     Will automatically move back to the current branch around{' '}
                     <span className="font-body-medium text-text-secondary">

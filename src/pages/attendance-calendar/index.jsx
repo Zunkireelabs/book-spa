@@ -27,14 +27,19 @@ function getDatesInRange(startDate, endDate) {
   return dates;
 }
 
+// Legacy 'Leave' (pre-migration-147 rows) is shown the same as the new leave types it was
+// split into — we can't retroactively tell whether an old 'Leave' entry was sick or annual.
 function cellStyle(status) {
   switch (status) {
-    case 'Present':      return { bg: 'bg-success',    title: 'Present' };
-    case 'Absent':       return { bg: 'bg-error',      title: 'Absent' };
-    case 'Leave':        return { bg: 'bg-warning',    title: 'Leave' };
-    case '1st-Half Day': return { bg: 'bg-primary/60', title: '1st Half Day' };
-    case '2nd-Half Day': return { bg: 'bg-primary/60', title: '2nd Half Day' };
-    default:             return { bg: 'bg-border/50',  title: 'No record' };
+    case 'Present':                      return { bg: 'bg-success',    title: 'Present' };
+    case 'Absent':                       return { bg: 'bg-error',      title: 'Absent' };
+    case 'Leave':
+    case 'Annual Leave':                 return { bg: 'bg-warning',    title: status };
+    case 'Sick Leave':                   return { bg: 'bg-warning/70', title: 'Sick Leave' };
+    case 'Day Off':                      return { bg: 'bg-primary/60', title: 'Day Off' };
+    case '1st-Half Day':                 return { bg: 'bg-accent/60',  title: '1st Half Day' };
+    case '2nd-Half Day':                 return { bg: 'bg-accent/60',  title: '2nd Half Day' };
+    default:                             return { bg: 'bg-border/50', title: 'No record' };
   }
 }
 
@@ -71,12 +76,15 @@ function CalendarMonth({ year, month, attendanceByDate, today, large = false }) 
   const dayStyle = (d) => {
     const status = attendanceByDate[isoOf(d)];
     switch (status) {
-      case 'Present':      return { bg: '#D1FAE5', fg: '#065F46' };
-      case 'Absent':       return { bg: '#FEE2E2', fg: '#991B1B' };
-      case 'Leave':        return { bg: '#FFEDD5', fg: '#9A3412' };
+      case 'Present':                      return { bg: '#D1FAE5', fg: '#065F46' };
+      case 'Absent':                       return { bg: '#FEE2E2', fg: '#991B1B' };
+      case 'Leave':
+      case 'Annual Leave':
+      case 'Sick Leave':                   return { bg: '#FFEDD5', fg: '#9A3412' };
+      case 'Day Off':                      return { bg: '#E0E7FF', fg: '#3730A3' };
       case '1st-Half Day':
-      case '2nd-Half Day': return { bg: '#DBEAFE', fg: '#1E40AF' };
-      default:             return { bg: null, fg: '#374151' };
+      case '2nd-Half Day':                 return { bg: '#DBEAFE', fg: '#1E40AF' };
+      default:                             return { bg: null, fg: '#374151' };
     }
   };
 
@@ -318,12 +326,15 @@ const AttendanceCalendarPage = () => {
 
     const cellColor = (status) => {
       switch (status) {
-        case 'Present':      return '#10B981';
-        case 'Absent':       return '#DC2626';
-        case 'Leave':        return '#D97706';
+        case 'Present':                      return '#10B981';
+        case 'Absent':                        return '#DC2626';
+        case 'Leave':
+        case 'Annual Leave':
+        case 'Sick Leave':                   return '#D97706';
+        case 'Day Off':                       return '#4338CA';
         case '1st-Half Day':
-        case '2nd-Half Day': return '#2D5A2799';
-        default:             return '#E1E3E5';
+        case '2nd-Half Day':                 return '#2D5A2799';
+        default:                              return '#E1E3E5';
       }
     };
 
@@ -366,11 +377,12 @@ const AttendanceCalendarPage = () => {
     }).join('');
 
     const legend = [
-      { label: 'Present',   color: '#10B981' },
-      { label: 'Absent',    color: '#DC2626' },
-      { label: 'Leave',     color: '#D97706' },
-      { label: 'Half Day',  color: '#2D5A2799' },
-      { label: 'No record', color: '#E1E3E5' },
+      { label: 'Present',      color: '#10B981' },
+      { label: 'Absent',       color: '#DC2626' },
+      { label: 'Leave',        color: '#D97706' },
+      { label: 'Day Off',      color: '#4338CA' },
+      { label: 'Half Day',     color: '#2D5A2799' },
+      { label: 'No record',    color: '#E1E3E5' },
     ].map(l => `
       <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6B7280;">
         <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${l.color};flex-shrink:0;"></span>
@@ -717,6 +729,7 @@ const AttendanceCalendarPage = () => {
                 { label: 'Present',   bg: '#D1FAE5', fg: '#065F46' },
                 { label: 'Absent',    bg: '#FEE2E2', fg: '#991B1B' },
                 { label: 'Leave',     bg: '#FFEDD5', fg: '#9A3412' },
+                { label: 'Day Off',   bg: '#E0E7FF', fg: '#3730A3' },
                 { label: 'Half Day',  bg: '#DBEAFE', fg: '#1E40AF' },
               ].map((l) => (
                 <span key={l.label} className="inline-flex items-center gap-1.5 font-body text-xs text-text-secondary">
@@ -762,7 +775,8 @@ const AttendanceCalendarPage = () => {
                 { label: 'Present',   cls: 'bg-success' },
                 { label: 'Absent',    cls: 'bg-error' },
                 { label: 'Leave',     cls: 'bg-warning' },
-                { label: 'Half Day',  cls: 'bg-primary/60' },
+                { label: 'Day Off',   cls: 'bg-primary/60' },
+                { label: 'Half Day',  cls: 'bg-accent/60' },
                 { label: 'No record', cls: 'bg-border/50' },
               ].map((l) => (
                 <span key={l.label} className="inline-flex items-center gap-1.5 font-body text-xs text-text-secondary">
