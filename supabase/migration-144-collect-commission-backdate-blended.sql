@@ -87,13 +87,19 @@ BEGIN
     END IF;
   ELSE
     -- No open rate for this org. Still guard against an out-of-order/
-    -- overlapping insert if closed history exists.
+    -- overlapping insert if MULTIPLE closed segments exist — same row-count
+    -- exception as the open-row branch above (a sole row, open or closed,
+    -- has no earlier history to conflict with, so backdating past it is
+    -- unambiguous; only >1 rows makes the ordering matter).
     SELECT * INTO v_latest FROM public.org_commission_rates
      WHERE org_id = p_org_id
      ORDER BY effective_from DESC LIMIT 1;
     IF FOUND AND p_effective_from < v_latest.effective_from THEN
-      RAISE EXCEPTION 'new effective_from (%) cannot be before the most recent rate''s effective_from (%) — earlier history already exists for this org',
-        p_effective_from, v_latest.effective_from USING ERRCODE = '22007';
+      SELECT count(*) INTO v_row_count FROM public.org_commission_rates WHERE org_id = p_org_id;
+      IF v_row_count > 1 THEN
+        RAISE EXCEPTION 'new effective_from (%) cannot be before the most recent rate''s effective_from (%) — earlier history already exists for this org',
+          p_effective_from, v_latest.effective_from USING ERRCODE = '22007';
+      END IF;
     END IF;
   END IF;
 
