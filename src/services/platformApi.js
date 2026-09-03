@@ -19,6 +19,11 @@ export const collectCommission = ({ orgId, periodStart, periodEnd, ratePercent, 
     p_actual_amount: actualAmount === '' || actualAmount == null ? null : Number(actualAmount),
   }).then(unwrap);
 
+export const previewBlendedCommission = (orgId, periodStart, periodEnd) =>
+  supabasePlatform.rpc('platform_preview_blended_commission', {
+    p_org_id: orgId, p_period_start: periodStart, p_period_end: periodEnd,
+  }).then(unwrap);
+
 export const getOrgBookings = (orgId, from, to) =>
   supabasePlatform.rpc('platform_get_org_bookings', { p_org_id: orgId, p_from: from, p_to: to }).then(unwrap);
 

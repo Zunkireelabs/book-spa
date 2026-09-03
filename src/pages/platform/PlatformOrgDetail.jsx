@@ -5,7 +5,7 @@ import PlatformNav from './components/PlatformNav';
 import {
   listRates, listCollections, collectCommission, getOrgBookings,
   getOrgMembershipDeposits, getOrgVoucherSales,
-  getRevenueRollup, formatNPR,
+  getRevenueRollup, previewBlendedCommission, formatNPR,
 } from 'services/platformApi';
 import { getTodayISO, toISO } from 'utils/periodPresets';
 import { exportRowsToExcel, exportSheetsToExcel } from 'utils/exportExcel';
@@ -210,6 +210,26 @@ const PlatformOrgDetail = () => {
   const commissionBase = wizBasis === 'vat_exclusive' ? grossSales / (1 + wizVatNum / 100) : grossSales;
   const computedCommission = commissionBase * wizRateNum / 100;
 
+  // True when this period would hit platform_collect_commission's backdate
+  // guard (migration-123/144) — Period Start predates the currently-open
+  // rate AND there's more than one historical rate segment, so the flat
+  // Basis/VAT%/Cut% inputs above don't apply: the backend will blend each
+  // overlapping segment's own rate instead of the typed-in one.
+  const willBlend = !!activeRate && wizFrom < activeRate.effective_from && rates.length > 1;
+
+  const [blendedPreview, setBlendedPreview] = useState(null);
+  const [blendedPreviewLoading, setBlendedPreviewLoading] = useState(false);
+  useEffect(() => {
+    if (!willBlend) { setBlendedPreview(null); return; }
+    let alive = true;
+    setBlendedPreviewLoading(true);
+    previewBlendedCommission(orgId, wizFrom, wizTo)
+      .then((res) => { if (alive) setBlendedPreview(res); })
+      .catch((e) => { if (alive) setError(e.message || 'Failed to preview blended commission'); })
+      .finally(() => { if (alive) setBlendedPreviewLoading(false); });
+    return () => { alive = false; };
+  }, [willBlend, orgId, wizFrom, wizTo]);
+
   const buildCollectionSummaryRows = (list) => list.map((c) => {
     const vatExclBase = c.gross_sales == null ? null
       : c.commission_basis === 'vat_exclusive' ? c.gross_sales / (1 + Number(c.vat_rate_percent || 0) / 100)
@@ -392,22 +412,32 @@ const PlatformOrgDetail = () => {
                 </div>
               </dl>
 
-              <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
-                <div className="w-64">
-                  <span className="font-body text-sm text-text-secondary">Basis</span>
-                  <CustomSelect value={wizBasis} onChange={setWizBasis} options={BASIS_OPTIONS} />
+              {willBlend ? (
+                <p className="font-body text-xs text-text-secondary pt-2 border-t border-border">
+                  This period starts before the org's current rate ({activeRate.effective_from}) and
+                  spans multiple historical rate changes — commission will be calculated per rate
+                  segment automatically. Basis/VAT%/Cut% don't apply here.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
+                  <div className="w-64">
+                    <span className="font-body text-sm text-text-secondary">Basis</span>
+                    <CustomSelect value={wizBasis} onChange={setWizBasis} options={BASIS_OPTIONS} />
+                  </div>
+                  <label className="font-body text-sm text-text-secondary">VAT %
+                    <input type="number" step="0.01" value={wizVat} onChange={(e) => setWizVat(e.target.value)}
+                      className={`block border rounded-spa px-2 py-1 w-20 ${wizVatNum > VAT_RATE_MAX ? 'border-error' : 'border-border'}`} />
+                    {wizVatNum > VAT_RATE_MAX && (
+                      <span className="block text-xs text-error mt-0.5">Max {VAT_RATE_MAX}%</span>
+                    )}
+                  </label>
+                  <label className="font-body text-sm text-text-secondary">Cut %
+                    <input type="number" step="0.01" value={wizRate} onChange={(e) => setWizRate(e.target.value)}
+                      className="block border border-border rounded-spa px-2 py-1 w-24" />
+                  </label>
                 </div>
-                <label className="font-body text-sm text-text-secondary">VAT %
-                  <input type="number" step="0.01" value={wizVat} onChange={(e) => setWizVat(e.target.value)}
-                    className={`block border rounded-spa px-2 py-1 w-20 ${wizVatNum > VAT_RATE_MAX ? 'border-error' : 'border-border'}`} />
-                  {wizVatNum > VAT_RATE_MAX && (
-                    <span className="block text-xs text-error mt-0.5">Max {VAT_RATE_MAX}%</span>
-                  )}
-                </label>
-                <label className="font-body text-sm text-text-secondary">Cut %
-                  <input type="number" step="0.01" value={wizRate} onChange={(e) => setWizRate(e.target.value)}
-                    className="block border border-border rounded-spa px-2 py-1 w-24" />
-                </label>
+              )}
+              <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-border">
                 <label className="font-body text-sm text-text-secondary">Actual amount collected (if different)
                   <input type="number" step="0.01" placeholder="Use computed" value={wizActualAmount}
                     onChange={(e) => setWizActualAmount(e.target.value)}
@@ -422,21 +452,30 @@ const PlatformOrgDetail = () => {
               <div className="flex items-center justify-between pt-2 border-t border-border">
                 <div>
                   <p className="font-body text-xs text-text-secondary">Commission ({wizFrom} → {wizTo})</p>
-                  <p className="font-data text-lg font-heading-semibold text-text-primary">{formatNPR(computedCommission)}</p>
+                  <p className="font-data text-lg font-heading-semibold text-text-primary">
+                    {willBlend
+                      ? (blendedPreviewLoading ? 'Loading…' : formatNPR(blendedPreview?.amount))
+                      : formatNPR(computedCommission)}
+                  </p>
+                  {willBlend && <p className="font-body text-xs text-text-secondary">Blended across historical rate periods</p>}
                   {wizActualAmount !== '' && (
                     <p className="font-body text-xs text-text-secondary">Will record actual: {formatNPR(Number(wizActualAmount))}</p>
                   )}
                 </div>
                 {!confirming ? (
                   <button type="button" onClick={() => setConfirming(true)}
-                    disabled={!wizRateNum || Number.isNaN(wizVatNum) || wizRateNum < 0 || wizVatNum < 0 || wizVatNum > VAT_RATE_MAX}
+                    disabled={willBlend
+                      ? (blendedPreviewLoading || blendedPreview == null)
+                      : (!wizRateNum || Number.isNaN(wizVatNum) || wizRateNum < 0 || wizVatNum < 0 || wizVatNum > VAT_RATE_MAX)}
                     className="bg-primary text-white rounded-spa px-4 py-2 font-body text-sm disabled:opacity-40">
                     Collect Commission
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
                     <span className="font-body text-sm text-text-secondary">
-                      Record {wizActualAmount !== '' ? formatNPR(Number(wizActualAmount)) : formatNPR(computedCommission)} at {wizRateNum}% · {wizBasis === 'vat_exclusive' ? `VAT-excl @ ${wizVatNum}%` : 'VAT-incl'}?
+                      {willBlend
+                        ? `Record ${wizActualAmount !== '' ? formatNPR(Number(wizActualAmount)) : formatNPR(blendedPreview?.amount)} (blended across historical rates)?`
+                        : `Record ${wizActualAmount !== '' ? formatNPR(Number(wizActualAmount)) : formatNPR(computedCommission)} at ${wizRateNum}% · ${wizBasis === 'vat_exclusive' ? `VAT-excl @ ${wizVatNum}%` : 'VAT-incl'}?`}
                     </span>
                     <button type="button" onClick={() => setConfirming(false)} disabled={collecting}
                       className="rounded-spa px-3 py-1.5 border border-border font-body text-sm text-text-secondary">
