@@ -25,6 +25,7 @@ import {
   getCustomerOutstandingBalance,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
+import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -1243,6 +1244,16 @@ function isTransferBlockedSlot(therapist, day, hour, minute) {
   return therapist.transferredOut ? insideWindow : !insideWindow;
 }
 
+// Whether a (day, hour, minute) slot for a therapist falls at/after their recorded
+// check-out for that specific day. `checkedOutByTherapistAndDate` is the
+// "<therapistId>_<date>" -> raw check_out_time map from getCalendarBookings.
+function isCheckedOutBlockedSlot(checkedOutByTherapistAndDate, therapistId, day, hour, minute) {
+  const checkOutTime = checkedOutByTherapistAndDate?.[`${therapistId}_${day}`];
+  if (!checkOutTime) return false;
+  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return isAfterCheckout(checkOutTime, day, slotTime);
+}
+
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
@@ -1650,6 +1661,10 @@ const OperationalCalendar = ({ branchId }) => {
         showToast('This therapist is temporarily transferred to another branch during this time and is not bookable here right now.', 'error');
         return;
       }
+      if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, effectiveTargetColId, newDate, hour, minute)) {
+        showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
+        return;
+      }
     }
 
     if (isCrossColumn) {
@@ -1878,6 +1893,10 @@ const OperationalCalendar = ({ branchId }) => {
       const t = calendarData?.therapists?.find(th => th.id === slotInfo.colId);
       if (isTransferBlockedSlot(t, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
         showToast('This therapist is temporarily transferred to another branch during this time and is not bookable here right now.', 'error');
+        return;
+      }
+      if (isCheckedOutBlockedSlot(calendarData?.checkedOutByTherapistAndDate, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute)) {
+        showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
         return;
       }
     }
@@ -2567,6 +2586,7 @@ const OperationalCalendar = ({ branchId }) => {
                   bookings={calendarData.bookings}
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
+                  checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}

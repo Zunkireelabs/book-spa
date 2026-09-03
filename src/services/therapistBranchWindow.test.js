@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTherapistBranchAt, toKathmanduDate } from './therapistBranchWindow';
+import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout } from './therapistBranchWindow';
 
 const BRANCH_A = 'branch-a';
 const BRANCH_B = 'branch-b';
@@ -108,5 +108,29 @@ describe('computeTherapistBranchAt', () => {
     expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-05', '10:00:00'))).toBe(BRANCH_B);
     expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-10', '12:00:00'))).toBe(BRANCH_C);
     expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-11', '10:00:00'))).toBe(BRANCH_B);
+  });
+});
+
+describe('isAfterCheckout', () => {
+  it('is false when the therapist has not checked out at all', () => {
+    expect(isAfterCheckout(null, '2026-09-10', '17:30')).toBe(false);
+    expect(isAfterCheckout(undefined, '2026-09-10', '17:30')).toBe(false);
+  });
+
+  it('is false for a booking time before the check-out time', () => {
+    const checkOutTime = '2026-09-10T17:00:00+05:45';
+    expect(isAfterCheckout(checkOutTime, '2026-09-10', '16:30')).toBe(false);
+  });
+
+  it('is true for a booking time at or after the check-out time', () => {
+    const checkOutTime = '2026-09-10T17:00:00+05:45';
+    expect(isAfterCheckout(checkOutTime, '2026-09-10', '17:00')).toBe(true);
+    expect(isAfterCheckout(checkOutTime, '2026-09-10', '18:00')).toBe(true);
+  });
+
+  it('is false for the same clock time on a different (earlier) date than the check-out', () => {
+    // Guards against comparing time-of-day only and ignoring the date.
+    const checkOutTime = '2026-09-10T17:00:00+05:45';
+    expect(isAfterCheckout(checkOutTime, '2026-09-09', '18:00')).toBe(false);
   });
 });

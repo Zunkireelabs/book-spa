@@ -565,6 +565,7 @@ const CalendarGrid = ({
   bookings,
   branchHours,
   attendanceMap,
+  checkedOutByTherapistAndDate,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -901,6 +902,17 @@ const CalendarGrid = ({
     };
   };
 
+  // A therapist who's already checked out is blocked from their check-out time through
+  // the rest of THAT specific day only — other days on the same column stay bookable.
+  const getCheckoutBlockRange = (col, day) => {
+    const checkOutTime = checkedOutByTherapistAndDate?.[`${col.id}_${day}`];
+    if (!checkOutTime) return null;
+    const parts = toKathmanduParts(checkOutTime);
+    if (!parts || parts.date !== day) return null;
+    if (parts.time <= openHourStr) return { fromTime: openHourStr, toTime: closeHourStr };
+    return { fromTime: parts.time, toTime: closeHourStr };
+  };
+
   // Current time
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
@@ -1192,6 +1204,30 @@ const CalendarGrid = ({
               </div>
             );
           });
+        })()}
+
+        {/* Checked-out overlay: therapist has already clocked out for this specific day,
+            so the rest of that day's column is blocked. Distinct color from the transfer
+            overlay above so staff can tell the two reasons apart at a glance. */}
+        {(() => {
+          const range = getCheckoutBlockRange(col, day);
+          if (!range) return null;
+          const blockTop = timeToTop(range.fromTime);
+          const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
+          return (
+            <div
+              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+              style={{
+                top: blockTop,
+                height: blockHeight,
+                backgroundColor: 'rgba(100,116,139,0.35)',
+              }}
+            >
+              <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-slate-600 border border-slate-700/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
+                Checked out
+              </span>
+            </div>
+          );
         })()}
 
         {/* Booking cards with overlap handling */}

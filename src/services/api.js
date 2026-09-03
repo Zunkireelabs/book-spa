@@ -3,7 +3,7 @@ import { transformMembership, transformMemberships } from './bookingTransformers
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
-import { computeTherapistBranchAt, toKathmanduDate } from './therapistBranchWindow';
+import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout } from './therapistBranchWindow';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -1710,16 +1710,26 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       }
 
       if (booking.date) {
-        const { data: absentRecords } = await supabase
+        const { data: attendanceRecords } = await supabase
           .from('therapist_attendance')
-          .select('therapist_id, status')
+          .select('therapist_id, status, check_out_time')
           .in('therapist_id', ids)
-          .eq('date', booking.date)
-          .in('status', ['Absent', ...LEAVE_LIKE_ATTENDANCE_STATUSES]);
-        const absent = (absentRecords || []).find(Boolean);
+          .eq('date', booking.date);
+
+        const absent = (attendanceRecords || []).find(a =>
+          a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)
+        );
         if (absent) {
           const absentTherapist = (therapistsData || []).find(t => t.id === absent.therapist_id);
           return { data: null, error: { code: 'THERAPIST_ABSENT', message: `Cannot assign ${absentTherapist?.name || 'therapist'}: marked as ${absent.status} for this date.` } };
+        }
+
+        const checkedOut = (attendanceRecords || []).find(a =>
+          isAfterCheckout(a.check_out_time, booking.date, booking.start_time)
+        );
+        if (checkedOut) {
+          const checkedOutTherapist = (therapistsData || []).find(t => t.id === checkedOut.therapist_id);
+          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `Cannot assign ${checkedOutTherapist?.name || 'therapist'}: already checked out for this date.` } };
         }
       }
 
@@ -2602,6 +2612,16 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
           if (effectiveBranch !== booking.branch_id) {
             return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
           }
+
+          const { data: attRow } = await supabase
+            .from('therapist_attendance')
+            .select('check_out_time')
+            .eq('therapist_id', newTherapistId)
+            .eq('date', newDate)
+            .maybeSingle();
+          if (isAfterCheckout(attRow?.check_out_time, newDate, newStartTime)) {
+            return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `${therapist.name} already checked out for this date.` } };
+          }
         }
         updatePayload.therapist_id = newTherapistId;
         updatePayload.therapist_name_snapshot = therapist?.name || null;
@@ -2625,6 +2645,16 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
         const effectiveBranch = computeTherapistBranchAt(transferRows || [], currentTherapist.branch_id, atDate);
         if (effectiveBranch !== booking.branch_id) {
           return { data: null, error: { code: 'INVALID_THERAPIST', message: `${currentTherapist.name} is not available in this branch at this time (transferred elsewhere for this date). Reassign or choose a different date.` } };
+        }
+
+        const { data: attRow } = await supabase
+          .from('therapist_attendance')
+          .select('check_out_time')
+          .eq('therapist_id', booking.therapist_id)
+          .eq('date', newDate)
+          .maybeSingle();
+        if (isAfterCheckout(attRow?.check_out_time, newDate, newStartTime)) {
+          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `${currentTherapist.name} already checked out for this date. Reassign or choose a different time.` } };
         }
       }
     }
@@ -3988,7 +4018,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // 2. Fetch therapists, rooms, and any staffers currently transferred OUT of this
     //    branch (they still show as a column here — booking creation is already
     //    blocked for them since their branch_id now points elsewhere — see migration-145).
-    const [therapistsResult, roomsResult, transferredOutResult, transferredInResult] = await Promise.all([
+    const [therapistsResult, roomsResult, transferredOutResult, transferredInResult, checkedOutResult] = await Promise.all([
       supabase
         .from('therapists')
         .select('id, name, gender, specialties, position, is_service_staff, display_order')
@@ -4033,12 +4063,31 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('reverted', false)
         .eq('is_permanent', false)
         .not('revert_at', 'is', null),
+      // Therapists who've already checked out (for real, not just marked absent/leave) on
+      // some date in this range — the calendar blocks the rest of that day's column for
+      // them, same as a transfer-out window, so a booking can't be dropped onto someone
+      // who's already gone home. Only Present/Half-day rows can have a check_out_time.
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, date, check_out_time')
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .not('check_out_time', 'is', null),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
     if (roomsResult.error) throw roomsResult.error;
     if (transferredOutResult.error) throw transferredOutResult.error;
     if (transferredInResult.error) throw transferredInResult.error;
+    if (checkedOutResult.error) throw checkedOutResult.error;
+
+    // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
+    // can block each affected day's column independently.
+    const checkedOutByTherapistAndDate = {};
+    (checkedOutResult.data || []).forEach(row => {
+      checkedOutByTherapistAndDate[`${row.therapist_id}_${row.date}`] = row.check_out_time;
+    });
 
     const activeTherapistIds = new Set((therapistsResult.data || []).map(t => t.id));
     const transferredOutTherapists = (transferredOutResult.data || [])
@@ -4109,6 +4158,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         therapists: mergedTherapists,
         rooms: roomsResult.data || [],
         bookings: bookings || [],
+        checkedOutByTherapistAndDate,
       },
       error: null,
     };
@@ -4357,16 +4407,26 @@ export async function createBooking({
       }
 
       if (date) {
-        const { data: absentRecords } = await supabase
+        const { data: attendanceRecords } = await supabase
           .from('therapist_attendance')
-          .select('therapist_id, status')
+          .select('therapist_id, status, check_out_time')
           .in('therapist_id', allTherapistIds)
-          .eq('date', date)
-          .in('status', ['Absent', ...LEAVE_LIKE_ATTENDANCE_STATUSES]);
-        const absent = (absentRecords || []).find(Boolean);
+          .eq('date', date);
+
+        const absent = (attendanceRecords || []).find(a =>
+          a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)
+        );
         if (absent) {
           const absentTherapist = therapistsData.find(t => t.id === absent.therapist_id);
           return { data: null, error: { code: 'THERAPIST_ABSENT', message: `${absentTherapist?.name || 'Therapist'} is marked as ${absent.status} on this date.` } };
+        }
+
+        const checkedOut = (attendanceRecords || []).find(a =>
+          isAfterCheckout(a.check_out_time, date, startTime)
+        );
+        if (checkedOut) {
+          const checkedOutTherapist = therapistsData.find(t => t.id === checkedOut.therapist_id);
+          return { data: null, error: { code: 'THERAPIST_CHECKED_OUT', message: `${checkedOutTherapist?.name || 'Therapist'} already checked out for this date.` } };
         }
       }
 
