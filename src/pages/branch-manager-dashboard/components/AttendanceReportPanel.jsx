@@ -35,12 +35,15 @@ function getDatesInRange(startDate, endDate) {
 // Return display config for an attendance status.
 function statusCell(status) {
   switch (status) {
-    case 'Present':      return { bg: 'bg-success',     title: 'Present' };
-    case 'Absent':       return { bg: 'bg-error',       title: 'Absent' };
-    case 'Leave':        return { bg: 'bg-warning',     title: 'Leave' };
-    case '1st-Half Day': return { bg: 'bg-primary/60',  title: '1st Half Day' };
-    case '2nd-Half Day': return { bg: 'bg-primary/60',  title: '2nd Half Day' };
-    default:             return { bg: 'bg-border/50',   title: 'No record' };
+    case 'Present':                      return { bg: 'bg-success',    title: 'Present' };
+    case 'Absent':                       return { bg: 'bg-error',      title: 'Absent' };
+    case 'Leave':
+    case 'Annual Leave':
+    case 'Sick Leave':                   return { bg: 'bg-warning',    title: status };
+    case 'Day Off':                      return { bg: 'bg-primary/60', title: 'Day Off' };
+    case '1st-Half Day':                 return { bg: 'bg-accent/60',  title: '1st Half Day' };
+    case '2nd-Half Day':                 return { bg: 'bg-accent/60',  title: '2nd Half Day' };
+    default:                             return { bg: 'bg-border/50', title: 'No record' };
   }
 }
 
@@ -105,7 +108,8 @@ const AttendanceGrid = ({ rankedStaff, data }) => {
           { label: 'Present', cls: 'bg-success' },
           { label: 'Absent', cls: 'bg-error' },
           { label: 'Leave', cls: 'bg-warning' },
-          { label: 'Half Day', cls: 'bg-primary/60' },
+          { label: 'Day Off', cls: 'bg-primary/60' },
+          { label: 'Half Day', cls: 'bg-accent/60' },
           { label: 'No record', cls: 'bg-border/50' },
         ].map((l) => (
           <span key={l.label} className="inline-flex items-center gap-1.5 font-body text-xs text-text-secondary">
