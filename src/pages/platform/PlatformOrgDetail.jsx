@@ -8,7 +8,7 @@ import {
   getRevenueRollup, formatNPR,
 } from 'services/platformApi';
 import { getTodayISO, toISO } from 'utils/periodPresets';
-import { exportRowsToExcel } from 'utils/exportExcel';
+import { exportRowsToExcel, exportSheetsToExcel } from 'utils/exportExcel';
 
 const BASIS_OPTIONS = [
   { value: 'vat_inclusive', label: 'VAT inclusive (rate on full amount)' },
@@ -241,23 +241,53 @@ const PlatformOrgDetail = () => {
   // Single-period detail export — itemized bookings/memberships/vouchers for
   // THAT historical period's own dates, fetched on demand (not already in
   // state, since only the currently-selected Period is loaded live).
+  // Itemized bookings/memberships/vouchers for an arbitrary historical period
+  // (not the currently-selected Period — fetched fresh for whatever dates a
+  // past collection row covers).
+  const fetchPeriodDetailRows = async (periodStart, periodEnd) => {
+    const [b, md, vs] = await Promise.all([
+      getOrgBookings(orgId, periodStart, periodEnd),
+      getOrgMembershipDeposits(orgId, periodStart, periodEnd),
+      getOrgVoucherSales(orgId, periodStart, periodEnd),
+    ]);
+    return [...toBookingRows(b || []), ...toMembershipRows(md || []), ...toVoucherRows(vs || [])]
+      .sort((r1, r2) => (r1.date < r2.date ? 1 : r1.date > r2.date ? -1 : 0))
+      .map((r) => ({ Date: r.date, Type: r.type, Branch: r.branch_name, Description: r.description, Amount: r.amount }));
+  };
+
   const [detailExportingId, setDetailExportingId] = useState(null);
   const handleExportRowDetail = async (c) => {
     setDetailExportingId(c.id);
     try {
-      const [b, md, vs] = await Promise.all([
-        getOrgBookings(orgId, c.period_start, c.period_end),
-        getOrgMembershipDeposits(orgId, c.period_start, c.period_end),
-        getOrgVoucherSales(orgId, c.period_start, c.period_end),
-      ]);
-      const rows = [...toBookingRows(b || []), ...toMembershipRows(md || []), ...toVoucherRows(vs || [])]
-        .sort((r1, r2) => (r1.date < r2.date ? 1 : r1.date > r2.date ? -1 : 0))
-        .map((r) => ({ Date: r.date, Type: r.type, Branch: r.branch_name, Description: r.description, Amount: r.amount }));
+      const rows = await fetchPeriodDetailRows(c.period_start, c.period_end);
       exportRowsToExcel(`commission-detail-${orgId}-${c.period_start}_to_${c.period_end}`, rows, 'Detail');
     } catch (e) {
       setError(e.message || 'Detail export failed');
     } finally {
       setDetailExportingId(null);
+    }
+  };
+
+  // Every period's itemized detail in one workbook — one sheet per period
+  // (fetched in parallel) plus a Summary sheet up front for context.
+  const [allDetailExporting, setAllDetailExporting] = useState(false);
+  const handleExportAllDetail = async () => {
+    setAllDetailExporting(true);
+    try {
+      const perPeriod = await Promise.all(
+        collections.map(async (c) => ({
+          name: `${c.period_start}_${c.period_end}`,
+          rows: await fetchPeriodDetailRows(c.period_start, c.period_end),
+        }))
+      );
+      exportSheetsToExcel(`commission-detail-all-${orgId}`, [
+        { name: 'Summary', rows: buildCollectionSummaryRows(collections) },
+        ...perPeriod,
+      ]);
+    } catch (e) {
+      setError(e.message || 'Detail export failed');
+    } finally {
+      setAllDetailExporting(false);
     }
   };
 
@@ -416,10 +446,16 @@ const PlatformOrgDetail = () => {
         <section className="bg-surface rounded-spa-lg shadow-spa-resting p-4 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="font-heading font-heading-semibold text-text-primary">Collection history</h3>
-            <button type="button" onClick={handleExportAllSummary} disabled={collections.length === 0}
-              className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
-              Export All (Summary)
-            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={handleExportAllSummary} disabled={collections.length === 0}
+                className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
+                Export All (Summary)
+              </button>
+              <button type="button" onClick={handleExportAllDetail} disabled={collections.length === 0 || allDetailExporting}
+                className="font-body text-sm rounded-spa px-3 py-1.5 border border-border text-text-secondary disabled:opacity-40">
+                {allDetailExporting ? 'Loading…' : 'Export All (Detail)'}
+              </button>
+            </div>
           </div>
           {collections.length === 0 ? (
             <p className="text-text-secondary font-body text-sm">Nothing collected yet.</p>
