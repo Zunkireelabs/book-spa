@@ -6,7 +6,7 @@
 -- extending modifies the existing in-flight loan; a brand-new transfer_therapist() call is used
 -- once a loan has completed (reverted) and the therapist is needed again later.
 --
--- Builds on migration-141 (required-duration transfers + revert_at/reverted columns).
+-- Builds on migration-145 (required-duration transfers + revert_at/reverted columns).
 --
 -- Reversible: DROP FUNCTION IF EXISTS public.extend_staff_transfer(uuid, integer, text);
 
@@ -93,5 +93,5 @@ GRANT EXECUTE ON FUNCTION public.extend_staff_transfer(uuid, integer, text) TO a
 
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('142', 'extend-staff-transfer')
+VALUES ('146', 'extend-staff-transfer')
 ON CONFLICT (version) DO NOTHING;

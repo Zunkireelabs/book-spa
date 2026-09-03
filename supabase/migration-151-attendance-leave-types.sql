@@ -4,7 +4,7 @@
 -- Present/Absent/Annual Leave/Sick Leave/Day Off. Existing 'Leave', '1st-Half Day' and
 -- '2nd-Half Day' rows are left untouched (no backfill/reinterpretation of historical data — we
 -- can't know which past 'Leave' entries were sick vs. annual) and those three values stay valid
--- in the enum so old rows keep displaying correctly; the app-layer entry forms (migration-146's
+-- in the enum so old rows keep displaying correctly; the app-layer entry forms (migration-150's
 -- sibling changes) simply stop offering them for new records.
 --
 -- Payroll/booking-assignment treatment: Annual Leave, Sick Leave and Day Off are all "not
@@ -31,5 +31,5 @@ ALTER TYPE public.attendance_status ADD VALUE IF NOT EXISTS 'Day Off';
 
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('147', 'attendance-leave-types')
+VALUES ('151', 'attendance-leave-types')
 ON CONFLICT (version) DO NOTHING;

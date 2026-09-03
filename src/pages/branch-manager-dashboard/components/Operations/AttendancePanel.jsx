@@ -36,7 +36,7 @@ const DURATION_UNIT_OPTIONS = [
 ];
 
 // Client-side estimate only, for the modal's preview line — the server independently
-// computes the authoritative revert_at (migration-141's transfer_therapist()).
+// computes the authoritative revert_at (migration-145's transfer_therapist()).
 function computeRevertPreview(dateStr, timeStr, value, unit) {
   if (!dateStr || !timeStr || !value || !unit) return null;
   const start = new Date(`${dateStr}T${timeStr}`);

@@ -5,18 +5,18 @@
 -- require a start time + duration and auto-revert. This restores Permanent as a second mode,
 -- selected via a new p_permanent flag on transfer_therapist():
 --
---   - p_permanent = false (default): unchanged from migration-141/143/145 — start time and
+--   - p_permanent = false (default): unchanged from migration-145/147/149 — start time and
 --     duration are required, revert_at is computed, and the staffer auto-reverts to their
 --     original branch when it elapses.
 --   - p_permanent = true: behaves like the pre-141 model — no start time/duration required,
 --     no revert_at, no auto-revert; the staffer simply moves to the destination branch (either
 --     immediately or on p_effective_date if that's in the future) and stays there.
 --
--- Builds on migration-141/142/143/145.
+-- Builds on migration-145/146/147/149.
 --
 -- Reversible:
 --   ALTER TABLE public.staff_transfers DROP COLUMN IF EXISTS is_permanent;
---   -- then re-run migration-145's CREATE OR REPLACE body for transfer_therapist()
+--   -- then re-run migration-149's CREATE OR REPLACE body for transfer_therapist()
 --   DROP FUNCTION IF EXISTS public.transfer_therapist(uuid, uuid, time, integer, text, text, date, boolean);
 
 -- 1. New column ------------------------------------------------------------------
@@ -160,5 +160,5 @@ GRANT EXECUTE ON FUNCTION public.transfer_therapist(uuid, uuid, time, integer, t
 
 -- 3. Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('146', 'permanent-transfer-option')
+VALUES ('150', 'permanent-transfer-option')
 ON CONFLICT (version) DO NOTHING;

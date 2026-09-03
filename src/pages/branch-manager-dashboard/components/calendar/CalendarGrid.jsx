@@ -1141,7 +1141,7 @@ const CalendarGrid = ({
         />
 
         {/* Filled/blocked overlay while this therapist is unavailable HERE due to a
-            transfer (migration-141): transferredOut shows the window they're AWAY;
+            transfer (migration-145): transferredOut shows the window they're AWAY;
             transferredIn shows everything EXCEPT their visiting window (they're only
             actually here for that slice, even though branch_id points here for the
             whole active period). pointer-events-none so clicks still reach the

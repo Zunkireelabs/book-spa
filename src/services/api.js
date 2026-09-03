@@ -1520,7 +1520,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
 
       // A therapist currently on a temporary transfer has branch_id pointing at the
       // destination branch, not this booking's branch — block assigning them here
-      // until they're auto-reverted (migration-141).
+      // until they're auto-reverted (migration-145).
       const wrongBranch = (therapistsData || []).find(t => t.branch_id !== booking.branch_id);
       if (wrongBranch) {
         return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch right now (may be temporarily transferred elsewhere).` } };
@@ -2406,7 +2406,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
         }
         // A therapist currently on a temporary transfer has branch_id pointing at the
         // destination branch, not this booking's branch — block reassigning to them
-        // here until they're auto-reverted (migration-141).
+        // here until they're auto-reverted (migration-145).
         if (therapist && therapist.branch_id !== booking.branch_id) {
           return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch right now (may be temporarily transferred elsewhere).` } };
         }
@@ -3744,7 +3744,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     // 2. Fetch therapists, rooms, and any staffers currently transferred OUT of this
     //    branch (they still show as a column here — booking creation is already
-    //    blocked for them since their branch_id now points elsewhere — see migration-141).
+    //    blocked for them since their branch_id now points elsewhere — see migration-145).
     const [therapistsResult, roomsResult, transferredOutResult, transferredInResult] = await Promise.all([
       supabase
         .from('therapists')
@@ -3760,7 +3760,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('is_active', true)
         .order('display_order')
         .order('name'),
-      // is_permanent = false: a Permanent transfer (migration-146) is a plain reassignment
+      // is_permanent = false: a Permanent transfer (migration-150) is a plain reassignment
       // with no revert — the staffer should just appear as a normal column at their new
       // branch, not as a "transferred out/visiting" overlay.
       supabase
@@ -3795,7 +3795,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         ...t.therapist,
         // therapist.display_order now reflects their DESTINATION branch's ordering
         // (overwritten the moment the transfer applied) — from_display_order is the
-        // position they held HERE, captured before that overwrite (migration-145).
+        // position they held HERE, captured before that overwrite (migration-149).
         // Falling back to the live value only if that capture is missing (legacy rows).
         display_order: t.from_display_order ?? t.therapist.display_order,
         transferredOut: true,
@@ -4834,7 +4834,7 @@ export async function deleteTherapist({ therapistId }) {
  * duration, auto-reverts) or Permanent (no duration, stays until transferred again).
  * Authorization + the audit row are enforced server-side by the SECURITY DEFINER
  * transfer_therapist() function (migration-039, required-duration form added in
- * migration-141, permanent option restored in migration-146): only an admin, or the
+ * migration-145, permanent option restored in migration-150): only an admin, or the
  * manager of the staffer's CURRENT branch, may transfer.
  */
 export async function transferTherapist({
@@ -5000,7 +5000,7 @@ export async function cancelScheduledTransfer(transferId) {
  * Push an ACTIVE (applied, not yet reverted) transfer's revert_at further out —
  * "Add Extra Time" — without creating a second transfer row. Only the destination
  * branch's manager (whoever currently has the staffer) or an admin may do this;
- * enforced server-side by extend_staff_transfer() (migration-142). Fails cleanly if
+ * enforced server-side by extend_staff_transfer() (migration-146). Fails cleanly if
  * the transfer has already auto-reverted (race-safe — checked atomically server-side).
  */
 export async function extendStaffTransfer({ transferId, additionalValue, additionalUnit }) {
@@ -6452,7 +6452,7 @@ export async function getRiskIndicators({ branchId, date }) {
 const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Annual Leave', 'Sick Leave', 'Day Off'];
 
 // Statuses that mean the staffer isn't working that day — not deducted from salary (see
-// migration-147) and block booking assignment for the date, same as the legacy 'Leave' value
+// migration-151) and block booking assignment for the date, same as the legacy 'Leave' value
 // (kept in the DB enum for historical rows but no longer offered as an entry option).
 export const LEAVE_LIKE_ATTENDANCE_STATUSES = ['Leave', 'Annual Leave', 'Sick Leave', 'Day Off'];
 
