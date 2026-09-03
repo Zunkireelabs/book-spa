@@ -9,6 +9,12 @@ import {
   finalizePayroll,
 } from '../../../../services/api';
 
+// Display-only mirror of services/api.js's SICK_LEAVE_PAID_CAP_DAYS/ANNUAL_LEAVE_PAID_CAP_DAYS
+// (the actual deduction is computed server-side) — keep these two numbers in sync if the policy
+// changes.
+const SICK_LEAVE_CAP = 14;
+const ANNUAL_LEAVE_CAP = 18;
+
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 }
@@ -267,7 +273,7 @@ const RunPayrollPanel = ({ branchId }) => {
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = [
       'Staff', 'Month', 'Salary', 'Days In Month',
-      'Present', 'Absent', 'Half Days', 'Leave',
+      'Present', 'Absent', 'Half Days', 'Leave', 'Unpaid Leave (over cap)',
       'Attendance Deduction', 'Service Revenue', 'Service Commission',
       'Referral Commission', 'Net Pay',
     ];
@@ -277,7 +283,7 @@ const RunPayrollPanel = ({ branchId }) => {
       csv += [
         esc(i.therapistName), esc(month),
         esc(i.monthlySalary), esc(i.daysInMonth),
-        esc(i.presentDays), esc(i.absentDays), esc(i.halfDays), esc(i.leaveDays),
+        esc(i.presentDays), esc(i.absentDays), esc(i.halfDays), esc(i.leaveDays), esc(i.unpaidLeaveDays),
         esc(i.attendanceDeduction), esc(i.serviceRevenue), esc(i.serviceCommission),
         esc(i.referralCommission), esc(i.netPay),
       ].join(',') + '\n';
@@ -412,7 +418,7 @@ const RunPayrollPanel = ({ branchId }) => {
                   <th className="text-left px-4 py-3 font-body font-body-medium text-text-secondary whitespace-nowrap">Staff</th>
                   <th className="text-right px-3 py-3 font-body font-body-medium text-text-secondary whitespace-nowrap">Base Salary</th>
                   <th className="text-right px-3 py-3 font-body font-body-medium text-text-secondary whitespace-nowrap">
-                    <span title="Present / Absent / Half / Leave">P/A/H/L</span>
+                    <span title="Present / Absent / Half / Leave (Sick + Annual + Day Off)">P/A/H/L</span>
                   </th>
                   <th className="text-right px-3 py-3 font-body font-body-medium text-text-secondary whitespace-nowrap">Deduction</th>
                   <th className="text-right px-3 py-3 font-body font-body-medium text-text-secondary whitespace-nowrap">Svc Revenue</th>
@@ -437,6 +443,14 @@ const RunPayrollPanel = ({ branchId }) => {
                     </td>
                     <td className="px-3 py-3 text-right font-data text-text-secondary whitespace-nowrap">
                       {item.presentDays}/{item.absentDays}/{item.halfDays}/{item.leaveDays}
+                      {item.unpaidLeaveDays > 0 && (
+                        <span
+                          className="ml-1 text-[11px] text-error font-body font-body-medium"
+                          title={`${item.unpaidLeaveDays} leave day(s) beyond the paid cap (${SICK_LEAVE_CAP} sick / ${ANNUAL_LEAVE_CAP} annual per year) — deducted like Absent`}
+                        >
+                          ({item.unpaidLeaveDays} unpaid)
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-right font-data text-error whitespace-nowrap">
                       {item.attendanceDeduction > 0 ? `−${formatNPR(item.attendanceDeduction)}` : '—'}
@@ -476,7 +490,8 @@ const RunPayrollPanel = ({ branchId }) => {
           {isFinalized
             ? `Finalized on ${new Date(runData.run.finalizedAt).toLocaleDateString('en-GB')}.`
             : `Draft — generated ${new Date(runData.run.generatedAt).toLocaleDateString('en-GB')}. You can regenerate until finalized.`}
-          {' '}Attendance deduction = salary ÷ {runData.items[0]?.daysInMonth ?? '—'} days × (absent + 0.5 × half-days). Leave is not deducted.
+          {' '}Attendance deduction = salary ÷ {runData.items[0]?.daysInMonth ?? '—'} days × (absent + 0.5 × half-days + unpaid leave days).
+          Day Off and the first {SICK_LEAVE_CAP} Sick / {ANNUAL_LEAVE_CAP} Annual Leave days per calendar year are paid; leave beyond those caps is deducted like Absent.
         </p>
       )}
     </div>

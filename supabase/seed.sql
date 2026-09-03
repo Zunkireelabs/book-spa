@@ -108,4 +108,48 @@ INSERT INTO therapists (id, branch_id, name, gender, specialties, org_id, displa
   ('dcde9082-c1e4-44b0-96aa-f52e0d831336', 'b0000000-0000-0000-0000-000000000001', 'SIRMAYA GURUNG', 'Female', ARRAY[]::text[], '00000000-0000-0000-0000-000000000001', 32, 'Housekeeping', false, true),
   ('9aaf9234-83a6-4905-9c60-0ceaea168fbd', 'b0000000-0000-0000-0000-000000000001', 'YAMSARA ALE MAGAR', 'Female', ARRAY[]::text[], '00000000-0000-0000-0000-000000000001', 33, 'Therapist', true, true);
 
+-- 5. ADMIN LOGIN (local dev only — PIN login needs the cloud-only pin-login Edge
+--    Function, see supabase/LOCAL_DEV.md, so use email/password against
+--    /nuad-thai-spa/login):
+--      admin@local.test / LocalAdmin123
+--    email matches the existing (previously undocumented, ad hoc) admin@local.test /
+--    manager@local.test / staff@local.test convention some local DBs already have.
+--    ON CONFLICT makes this idempotent against both a fresh bootstrap and one of
+--    those pre-existing ad hoc rows (known password either way).
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO auth.users (
+  id, instance_id, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data,
+  aud, role, created_at, updated_at,
+  confirmation_token, recovery_token
+) VALUES (
+  'e0000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000000',
+  'admin@local.test',
+  crypt('LocalAdmin123', gen_salt('bf')),
+  now(),
+  '{"provider": "email", "providers": ["email"]}',
+  '{"full_name": "Local Admin"}',
+  'authenticated', 'authenticated', now(), now(),
+  '', ''
+)
+ON CONFLICT (email) WHERE is_sso_user = false
+DO UPDATE SET encrypted_password = EXCLUDED.encrypted_password, email_confirmed_at = EXCLUDED.email_confirmed_at;
+
+INSERT INTO auth.identities (
+  id, user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at
+)
+SELECT
+  u.id, u.id, 'admin@local.test', 'email',
+  jsonb_build_object('sub', u.id::text, 'email', 'admin@local.test'),
+  now(), now(), now()
+FROM auth.users u WHERE u.email = 'admin@local.test'
+ON CONFLICT (provider_id, provider) DO NOTHING;
+
+INSERT INTO users (id, email, full_name, role, org_id, pin, is_active)
+SELECT u.id, 'admin@local.test', 'Local Admin', 'admin', '00000000-0000-0000-0000-000000000001', '1111', true
+FROM auth.users u WHERE u.email = 'admin@local.test'
+ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role, pin = EXCLUDED.pin, is_active = EXCLUDED.is_active;
+
 -- SEED DATA COMPLETE

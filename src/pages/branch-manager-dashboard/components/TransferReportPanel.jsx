@@ -89,7 +89,7 @@ const TransferReportPanel = () => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Status', 'Reverts At', 'Transferred By', 'Remarks'];
+    const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Type', 'Status', 'Reverts At', 'Transferred By', 'Remarks'];
     let csv = header.join(',') + '\n';
     filtered.forEach((t) => {
       csv += [
@@ -98,6 +98,7 @@ const TransferReportPanel = () => {
         esc(t.fromBranch),
         esc(t.toBranch),
         esc(formatDateOnly(t.effectiveDate)),
+        esc(t.isPermanent ? 'Permanent' : 'Temporary'),
         esc(t.applied ? 'Applied' : 'Scheduled'),
         esc(t.revertAt ? (t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}` : formatDateTime(t.revertAt)) : '—'),
         esc(t.transferredBy),
@@ -188,6 +189,7 @@ const TransferReportPanel = () => {
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">{staffLabel}</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">From → To</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Effective Date</th>
+                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Type</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Reverts At</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Transferred By</th>
@@ -203,6 +205,13 @@ const TransferReportPanel = () => {
                       {t.fromBranch} <span className="text-text-tertiary">→</span> {t.toBranch}
                     </td>
                     <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">{formatDateOnly(t.effectiveDate)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
+                        t.isPermanent ? 'bg-secondary/10 text-secondary' : 'bg-primary/10 text-primary'
+                      }`}>
+                        {t.isPermanent ? 'Permanent' : 'Temporary'}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
                         t.applied ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
