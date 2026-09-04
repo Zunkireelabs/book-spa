@@ -99,6 +99,29 @@ describe('computeTherapistBranchAt', () => {
     expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-16', '10:00:00'))).toBe(BRANCH_A);
   });
 
+  it('treats a non-permanent transfer with no revert_at as indefinite, not already-closed (legacy pre-migration-145 rows)', () => {
+    // Every transfer made before migration-145 added start_time/duration/revert_at
+    // has is_permanent=false (the column's default) but no revert mechanism at all —
+    // it's permanent in effect, matching the therapist's live therapists.branch_id.
+    const transfers = [
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-02', start_time: null, revert_at: null }),
+    ];
+    const before = toKathmanduDate('2026-09-01', '10:00:00');
+    const after = toKathmanduDate('2026-09-04', '13:30:00');
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, before)).toBe(BRANCH_A);
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, after)).toBe(BRANCH_B);
+  });
+
+  it('resolves a legacy indefinite transfer followed by a genuine later temporary transfer', () => {
+    const transfers = [
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-02', start_time: null, revert_at: null }),
+      temp({ from: BRANCH_B, to: BRANCH_C, effective_date: '2026-09-10', start_time: '09:00:00', revert_at: '2026-09-10T17:00:00+05:45' }),
+    ];
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-05', '10:00:00'))).toBe(BRANCH_B);
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-10', '12:00:00'))).toBe(BRANCH_C);
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-11', '10:00:00'))).toBe(BRANCH_B);
+  });
+
   it('handles a permanent transfer followed later by a temporary one from the new home branch', () => {
     const transfers = [
       permanent({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-01', start_time: '00:00:00' }),
