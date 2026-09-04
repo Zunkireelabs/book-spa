@@ -7,7 +7,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 }
 
-const AdjustmentModal = ({ membership, onClose, onSuccess }) => {
+const AdjustmentModal = ({ membership, branchId, onClose, onSuccess }) => {
   const [direction, setDirection] = useState('credit');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
@@ -44,6 +44,7 @@ const AdjustmentModal = ({ membership, onClose, onSuccess }) => {
       membershipId: membership.id,
       amount: signedAmount,
       notes: notes.trim(),
+      branchId,
     });
     setSubmitting(false);
     if (rpcError) {

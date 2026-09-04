@@ -21,7 +21,7 @@ function firstLeafValue(tree) {
   return undefined;
 }
 
-const RenewModal = ({ membership, onClose, onSuccess }) => {
+const RenewModal = ({ membership, branchId, onClose, onSuccess }) => {
   const { profile } = useAuth();
   const { paymentMethods } = useOrg();
   const orgId = profile?.org_id;
@@ -70,6 +70,7 @@ const RenewModal = ({ membership, onClose, onSuccess }) => {
       paymentMode,
       tierId: tierChanged ? tierId : null,
       notes: notes.trim() || null,
+      branchId,
     });
     setSubmitting(false);
     if (rpcError) {
