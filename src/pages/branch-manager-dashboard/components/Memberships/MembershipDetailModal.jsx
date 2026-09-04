@@ -52,7 +52,7 @@ function perkUsedInCurrentCycle(m) {
   return true;
 }
 
-const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChanged }) => {
+const MembershipDetailModal = ({ membershipId, isAdmin = false, branchId, onClose, onChanged }) => {
   const [m, setMembership] = useState(null);
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -320,6 +320,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
       {showTopUp && m && (
         <TopUpModal
           membership={m}
+          branchId={branchId}
           onClose={() => setShowTopUp(false)}
           onSuccess={() => { setShowTopUp(false); handleAnyChange(); }}
         />
@@ -328,6 +329,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
       {showRenew && m && (
         <RenewModal
           membership={m}
+          branchId={branchId}
           onClose={() => setShowRenew(false)}
           onSuccess={() => { setShowRenew(false); handleAnyChange(); }}
         />
@@ -336,6 +338,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
       {showExtend && m && (
         <ExtendMembershipModal
           membership={m}
+          branchId={branchId}
           onClose={() => setShowExtend(false)}
           onSuccess={() => { setShowExtend(false); handleAnyChange(); }}
         />
@@ -344,6 +347,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
       {showBirthday && m && (
         <BirthdayPerkModal
           membership={m}
+          branchId={branchId}
           onClose={() => setShowBirthday(false)}
           onSuccess={() => { setShowBirthday(false); handleAnyChange(); }}
         />
@@ -352,6 +356,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, onClose, onChang
       {showAdjust && m && isAdmin && (
         <AdjustmentModal
           membership={m}
+          branchId={branchId}
           onClose={() => setShowAdjust(false)}
           onSuccess={() => { setShowAdjust(false); handleAnyChange(); }}
         />

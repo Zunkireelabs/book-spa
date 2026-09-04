@@ -119,19 +119,22 @@ const TodayInsightsPanel = ({ branchId, period }) => {
       <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-3">
           <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Sold (value in)</span>
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-700">Memberships</span>
-              <span className="text-sm font-semibold text-gray-900">
-                {data.membershipSold.count} · {formatNPR(data.membershipSold.value)}
-              </span>
-            </div>
-            <p className="text-[11px] text-gray-400">org-wide</p>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">Memberships</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {data.membershipSold.count} · {formatNPR(data.membershipSold.value)}
+            </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-700">Gift Vouchers</span>
             <span className="text-sm font-semibold text-gray-900">
               {data.voucherDistributed.count} · {formatNPR(data.voucherDistributed.value)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">Packages</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {data.packageSold.count} · {formatNPR(data.packageSold.value)}
             </span>
           </div>
         </div>
@@ -148,6 +151,12 @@ const TodayInsightsPanel = ({ branchId, period }) => {
             <span className="text-sm text-gray-700">Gift Vouchers</span>
             <span className="text-sm font-semibold text-gray-900">
               {data.voucherClaimed.count} · {formatNPR(data.voucherClaimed.value)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">Packages</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {data.packageRedeemed.count} sessions
             </span>
           </div>
         </div>
