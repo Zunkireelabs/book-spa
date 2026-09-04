@@ -164,6 +164,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
       initialDeposit: depositNum,
       paymentMode,
       notes: notes.trim() || null,
+      branchId,
     });
     setSubmitting(false);
 
