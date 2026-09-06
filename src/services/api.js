@@ -4191,6 +4191,37 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     if (bookingsError) throw bookingsError;
 
+    // A PERMANENTLY transferred-out therapist gets no proactive column above (by design —
+    // see the is_permanent=false filter comment), but a booking made before/at the transfer
+    // can still reference them at this branch. Without a column, CalendarGrid's
+    // isTherapistVisible() can't place it and it silently falls into "Unassigned". Add a
+    // column ONLY for therapists an actual booking here demands, not preemptively.
+    const knownTherapistIds = new Set(mergedTherapists.map(t => t.id));
+    const orphanTherapistIds = [...new Set(
+      (bookings || [])
+        .map(b => b.therapist_id)
+        .filter(id => id && !knownTherapistIds.has(id))
+    )];
+
+    let finalTherapists = mergedTherapists;
+    if (orphanTherapistIds.length > 0) {
+      const { data: orphanTherapists, error: orphanError } = await supabase
+        .from('therapists')
+        .select('id, name, gender, specialties, position, is_service_staff, display_order')
+        .in('id', orphanTherapistIds);
+      if (orphanError) throw orphanError;
+
+      finalTherapists = [
+        ...mergedTherapists,
+        ...(orphanTherapists || []).map(t => ({
+          ...t,
+          transferredOut: true,
+          returnsAt: null,
+          transferStartAt: null,
+        })),
+      ].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
+    }
+
     return {
       data: {
         branchHours: {
@@ -4198,7 +4229,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           closeTime: branch.close_time || '21:00:00',
           timezone: branch.timezone || 'Asia/Kathmandu',
         },
-        therapists: mergedTherapists,
+        therapists: finalTherapists,
         rooms: roomsResult.data || [],
         bookings: bookings || [],
         checkedOutByTherapistAndDate,
