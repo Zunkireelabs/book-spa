@@ -4194,12 +4194,21 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // A PERMANENTLY transferred-out therapist gets no proactive column above (by design —
     // see the is_permanent=false filter comment), but a booking made before/at the transfer
     // can still reference them at this branch. Without a column, CalendarGrid's
-    // isTherapistVisible() can't place it and it silently falls into "Unassigned". Add a
-    // column ONLY for therapists an actual booking here demands, not preemptively.
+    // isTherapistVisible() can't place it and it silently falls into "Unassigned" (or, for a
+    // shared/multi-therapist booking, silently drops that co-therapist's copy entirely — see
+    // CalendarGrid.jsx's isTherapistVisible skip in the booking_therapists loop). Scan both
+    // storage representations (flat therapist_id AND the booking_therapists junction, same
+    // "two representations of the same fact" duality resolveSingleTherapist documents) so
+    // both single- and multi-therapist bookings, and legacy rows that only ever populated the
+    // junction table, all get a column. Add one ONLY for therapists an actual booking here
+    // demands, not preemptively.
     const knownTherapistIds = new Set(mergedTherapists.map(t => t.id));
     const orphanTherapistIds = [...new Set(
       (bookings || [])
-        .map(b => b.therapist_id)
+        .flatMap(b => [
+          b.therapist_id,
+          ...(b.booking_therapists || []).map(bt => bt.therapist_id),
+        ])
         .filter(id => id && !knownTherapistIds.has(id))
     )];
 
