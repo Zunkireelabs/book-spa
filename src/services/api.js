@@ -1,5 +1,5 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
-import { transformMembership, transformMemberships } from './bookingTransformers';
+import { transformMembership, transformMemberships, toTitleCase } from './bookingTransformers';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
@@ -755,7 +755,7 @@ export async function setDueHolder({ bookingId, dueHolderName }) {
     if (booking.is_locked) {
       return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
     }
-    const name = (dueHolderName || '').trim() || null;
+    const name = toTitleCase(dueHolderName) || null;
     const { error: updateError } = await supabase
       .from('bookings')
       .update({ due_holder_name: name })
@@ -1850,6 +1850,7 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
 
 export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy }) {
   try {
+    customerName = toTitleCase(customerName);
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
@@ -4234,6 +4235,7 @@ export async function createBooking({
   customerAccountId,
 }) {
   try {
+    customerName = toTitleCase(customerName);
     const resolvedBranchId = resolveBranchId(branchId);
 
     // 1. Fetch service for duration + price
@@ -4940,6 +4942,7 @@ export async function fetchTherapistsForManagement(branchId) {
 
 export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId }) {
   try {
+    name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -5001,6 +5004,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
 
 export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff }) {
   try {
+    name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -8630,6 +8634,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     if (!orgId || !branchId || !fullName) {
       return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
     }
+    fullName = toTitleCase(fullName);
     // Canonical E.164 so the same number always resolves to the same customer
     // regardless of formatting / country code. See src/utils/phone.js.
     const normalizedPhone = toE164(phone);
@@ -9387,6 +9392,7 @@ export async function issueVoucher({
   customerId = null, tenders = [], voucherCode = null,
 }) {
   try {
+    guestName = toTitleCase(guestName);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -9536,6 +9542,7 @@ export async function claimVoucher({
   serviceClaimed = null, branchClaimedId, notes = null,
 }) {
   try {
+    guestNameUsedBy = toTitleCase(guestNameUsedBy);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -9894,6 +9901,7 @@ export async function issuePackage({
   sessionsTotal = null, remarks = null,
 }) {
   try {
+    guestName = toTitleCase(guestName);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
