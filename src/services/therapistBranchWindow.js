@@ -50,12 +50,16 @@ export function computeTherapistBranchAt(transfers, fallbackBranchId, atDate) {
 
   for (const w of windows) {
     if (w.startAt > atDate) continue; // not in effect yet at atDate
-    if (w.isPermanent) {
+    if (w.isPermanent || !w.endAt) {
+      // No scheduled end means open-ended toward toBranchId — either an explicit
+      // permanent transfer, or a system-generated "returned" history row (inserted by
+      // apply_due_staff_reverts()/revert_staff_transfer_now() with no revert_at). Both
+      // represent a completed, indefinite move, not a still-open temporary window.
       branch = w.toBranchId;
-    } else if (w.endAt && atDate < w.endAt) {
+    } else if (atDate < w.endAt) {
       branch = w.toBranchId; // inside the temporary visiting window
     } else {
-      branch = w.fromBranchId; // window hasn't started yet or has already closed
+      branch = w.fromBranchId; // window has already closed
     }
   }
 
