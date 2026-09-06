@@ -15,6 +15,7 @@ import {
   cancelScheduledTransfer,
   fetchAllBranches,
   extendStaffTransfer,
+  revertStaffTransferNow,
   fetchTherapistTransferStatus,
 } from '../../../../services/api';
 
@@ -125,6 +126,8 @@ const AttendancePanel = ({ branchId }) => {
   const [extendDurationValue, setExtendDurationValue] = useState('');
   const [extendError, setExtendError] = useState(null);
   const [extending, setExtending] = useState(false);
+  const [revertError, setRevertError] = useState(null);
+  const [reverting, setReverting] = useState(false);
   const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
   const [transferMode, setTransferMode] = useState('temporary'); // 'temporary' | 'permanent'
   const [transferToBranch, setTransferToBranch] = useState('');
@@ -432,6 +435,7 @@ const AttendancePanel = ({ branchId }) => {
     setExtendDurationUnit('');
     setExtendDurationValue('');
     setExtendError(null);
+    setRevertError(null);
   };
 
   const isExtendFormComplete = !!extendDurationUnit && !!extendDurationValue && Number(extendDurationValue) > 0;
@@ -460,6 +464,28 @@ const AttendancePanel = ({ branchId }) => {
     setTransferTarget(null);
     setExtending(false);
     showToast(`Extended ${name}'s transfer — now returns ${new Date(result.data.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`);
+    await loadData();
+  };
+
+  const handleReturnNow = async () => {
+    setReverting(true);
+    setRevertError(null);
+
+    const result = await revertStaffTransferNow({
+      transferId: transferTarget.activeTransfer.id,
+    });
+
+    if (result.error) {
+      setRevertError(result.error.message || 'Failed to mark returned.');
+      setReverting(false);
+      return;
+    }
+
+    const name = transferTarget.therapistName;
+    const homeBranch = transferTarget.activeTransfer.fromBranch;
+    setTransferTarget(null);
+    setReverting(false);
+    showToast(`${name} is back — now bookable at ${homeBranch}.`);
     await loadData();
   };
 
@@ -889,13 +915,13 @@ const AttendancePanel = ({ branchId }) => {
 
       {/* Transfer Modal */}
       {transferTarget && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !transferring && !extending && setTransferTarget(null)}>
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !transferring && !extending && !reverting && setTransferTarget(null)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
                 {transferTarget.activeTransfer ? `Active Transfer — ${staffLabel}` : `Transfer ${staffLabel}`}
               </h3>
-              <button onClick={() => !transferring && !extending && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
+              <button onClick={() => !transferring && !extending && !reverting && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
                 <Icon name="X" size={20} className="text-text-secondary" />
               </button>
             </div>
@@ -934,10 +960,10 @@ const AttendancePanel = ({ branchId }) => {
                   </div>
                 </div>
 
-                {extendError && (
+                {(extendError || revertError) && (
                   <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
                     <Icon name="AlertCircle" size={16} />
-                    <span>{extendError}</span>
+                    <span>{extendError || revertError}</span>
                   </div>
                 )}
 
@@ -962,8 +988,11 @@ const AttendancePanel = ({ branchId }) => {
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={extending}>Close</Button>
-                  <Button variant="primary" size="sm" onClick={handleExtendTransfer} loading={extending} disabled={!isExtendFormComplete}>
+                  <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={extending || reverting}>Close</Button>
+                  <Button variant="outline" size="sm" onClick={handleReturnNow} loading={reverting} disabled={extending}>
+                    Mark Returned Early
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={handleExtendTransfer} loading={extending} disabled={!isExtendFormComplete || reverting}>
                     Add Extra Time
                   </Button>
                 </div>

@@ -5336,6 +5336,31 @@ export async function extendStaffTransfer({ transferId, additionalValue, additio
 }
 
 /**
+ * End an ACTIVE (applied, not yet reverted) transfer right now — "Mark Returned Early" —
+ * instead of waiting for the scheduled revert_at / the apply_due_staff_reverts() cron tick.
+ * Only the destination branch's manager (whoever currently has the staffer) or an admin may
+ * do this; enforced server-side by revert_staff_transfer_now() (migration-156). Fails cleanly
+ * if the transfer has already ended (race-safe — checked atomically server-side).
+ */
+export async function revertStaffTransferNow({ transferId }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('revert_staff_transfer_now', {
+      p_transfer_id: transferId,
+    });
+
+    if (error) throw error;
+    capture('staff_transfer_reverted_early', { transfer_id: transferId });
+    return { data: { revertedAt: data }, error: null };
+  } catch (error) {
+    console.error('[API] revertStaffTransferNow error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
  * For each therapist currently AT branchId, the single most recent staff_transfers
  * row (either direction), used by the Attendance panel to decide what the Transfer
  * button should open: a blank create form, the ACTIVE transfer (destination's view,
