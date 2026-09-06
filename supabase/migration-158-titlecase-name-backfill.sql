@@ -9,6 +9,12 @@
 --
 -- Collapse-whitespace-then-initcap mirrors the JS helper closely enough for this
 -- app's plain first/last names; only rows that actually change are touched.
+--
+-- bookings.trg_enforce_booking_immutability RAISEs DAY_LOCKED on *any* UPDATE
+-- once is_locked = true (see schema.sql's enforce_booking_immutability()) — the
+-- same rule setDueHolder() already respects at the app layer. A cosmetic
+-- casing backfill isn't worth overriding that, so both bookings UPDATEs below
+-- skip locked rows; their name casing is left as originally recorded.
 
 UPDATE public.customers
 SET full_name = initcap(regexp_replace(btrim(full_name), '\s+', ' ', 'g'))
@@ -18,11 +24,13 @@ WHERE full_name IS NOT NULL
 UPDATE public.bookings
 SET customer_name = initcap(regexp_replace(btrim(customer_name), '\s+', ' ', 'g'))
 WHERE customer_name IS NOT NULL
+  AND is_locked IS NOT TRUE
   AND customer_name IS DISTINCT FROM initcap(regexp_replace(btrim(customer_name), '\s+', ' ', 'g'));
 
 UPDATE public.bookings
 SET due_holder_name = initcap(regexp_replace(btrim(due_holder_name), '\s+', ' ', 'g'))
 WHERE due_holder_name IS NOT NULL
+  AND is_locked IS NOT TRUE
   AND due_holder_name IS DISTINCT FROM initcap(regexp_replace(btrim(due_holder_name), '\s+', ' ', 'g'));
 
 UPDATE public.therapists
