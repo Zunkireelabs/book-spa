@@ -20,6 +20,43 @@ function formatDateOnly(d) {
   });
 }
 
+// e.g. 90 -> "1h 30m", 45 -> "45m", 1500 -> "1d 1h"
+function formatDuration(minutes) {
+  const abs = Math.round(Math.abs(minutes));
+  if (abs < 1) return 'less than a minute';
+  const days = Math.floor(abs / 1440);
+  const hours = Math.floor((abs % 1440) / 60);
+  const mins = abs % 60;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (mins && !days) parts.push(`${mins}m`);
+  return parts.join(' ') || '0m';
+}
+
+// Return-completion rows synthesized by revert_staff_transfer_now() / apply_due_staff_reverts()
+// (migration-160/149/163) — these represent the return leg itself, not a new outbound transfer.
+// is_return_leg (migration-163) is the source of truth; the note-text match only covers rows
+// from before that column existed (or a DB not yet migrated to 163).
+const RETURN_LEG_NOTES = ['Returned early (marked by manager)', 'Auto-reverted after scheduled duration'];
+function isReturnLeg(t) {
+  return t.isReturnLeg ?? RETURN_LEG_NOTES.includes(t.note);
+}
+
+// Status shown for a transfer row: Active (not yet returned — either still scheduled
+// to apply, or applied and currently at the destination branch) -> Returned (this leg
+// has ended, whether by the return-leg row itself, or the original row once reverted).
+function transferStatus(t) {
+  if (isReturnLeg(t)) return 'Returned';
+  if (t.applied && t.reverted) return 'Returned';
+  return 'Active';
+}
+
+const STATUS_STYLES = {
+  Active: { className: 'bg-success/10 text-success', icon: 'PlayCircle' },
+  Returned: { className: 'bg-[#B45309]/10 text-[#B45309]', icon: 'CheckCircle' },
+};
+
 const TransferReportPanel = () => {
   const { staffLabel } = useIndustry();
   const today = getTodayISO();
@@ -92,6 +129,14 @@ const TransferReportPanel = () => {
     const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Type', 'Status', 'Reverts At', 'Transferred By', 'Remarks'];
     let csv = header.join(',') + '\n';
     filtered.forEach((t) => {
+      const earlyMinutes = t.revertAt && t.reverted && t.revertedAt
+        ? (new Date(t.revertAt).getTime() - new Date(t.revertedAt).getTime()) / 60000
+        : null;
+      const earlyLabel = earlyMinutes === null
+        ? ''
+        : earlyMinutes > 1 ? ` (${formatDuration(earlyMinutes)} early)`
+          : earlyMinutes < -1 ? ` (${formatDuration(earlyMinutes)} late)`
+            : ' (on time)';
       csv += [
         esc(formatDateTime(t.transferredAt)),
         esc(t.therapistName),
@@ -99,8 +144,10 @@ const TransferReportPanel = () => {
         esc(t.toBranch),
         esc(formatDateOnly(t.effectiveDate)),
         esc(t.isPermanent ? 'Permanent' : 'Temporary'),
-        esc(t.applied ? 'Applied' : 'Scheduled'),
-        esc(t.revertAt ? (t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}` : formatDateTime(t.revertAt)) : '—'),
+        esc(transferStatus(t)),
+        esc(t.revertAt
+          ? (t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}${earlyLabel}` : formatDateTime(t.revertAt))
+          : isReturnLeg(t) ? `Returned ${formatDateTime(t.transferredAt)}` : '—'),
         esc(t.transferredBy),
         esc(t.note || ''),
       ].join(',') + '\n';
@@ -213,20 +260,51 @@ const TransferReportPanel = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
-                        t.applied ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
-                      }`}>
-                        <Icon name={t.applied ? 'CheckCircle' : 'Clock'} size={12} />
-                        {t.applied ? 'Applied' : 'Scheduled'}
-                      </span>
+                      {(() => {
+                        const status = transferStatus(t);
+                        const style = STATUS_STYLES[status];
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${style.className}`}>
+                            <Icon name={style.icon} size={12} />
+                            {status}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {t.revertAt ? (
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
-                          t.reverted ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
-                        }`} title={t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}` : `Reverts ${formatDateTime(t.revertAt)}`}>
-                          <Icon name={t.reverted ? 'CheckCircle' : 'Clock'} size={12} />
-                          {t.reverted ? 'Reverted' : formatDateTime(t.revertAt)}
+                        (() => {
+                          const earlyMinutes = t.reverted && t.revertedAt
+                            ? (new Date(t.revertAt).getTime() - new Date(t.revertedAt).getTime()) / 60000
+                            : null;
+                          const earlyLabel = earlyMinutes === null
+                            ? null
+                            : earlyMinutes > 1
+                              ? `${formatDuration(earlyMinutes)} early`
+                              : earlyMinutes < -1
+                                ? `${formatDuration(earlyMinutes)} late`
+                                : 'on time';
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
+                                t.reverted ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
+                              }`}
+                              title={t.reverted
+                                ? `Scheduled ${formatDateTime(t.revertAt)} — Reverted ${formatDateTime(t.revertedAt)} (${earlyLabel})`
+                                : `Reverts ${formatDateTime(t.revertAt)}`}
+                            >
+                              <Icon name={t.reverted ? 'CheckCircle' : 'Clock'} size={12} />
+                              {t.reverted ? `Reverted${earlyLabel ? ` · ${earlyLabel}` : ''}` : formatDateTime(t.revertAt)}
+                            </span>
+                          );
+                        })()
+                      ) : isReturnLeg(t) ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium bg-success/10 text-success"
+                          title={`Returned ${formatDateTime(t.transferredAt)}`}
+                        >
+                          <Icon name="CheckCircle" size={12} />
+                          Returned {formatDateTime(t.transferredAt)}
                         </span>
                       ) : (
                         <span className="font-body text-sm text-text-tertiary">—</span>
