@@ -1014,10 +1014,10 @@ const CalendarGrid = ({
             <span className="w-2 h-2 rounded-full bg-warning flex-shrink-0" title="On Leave" />
           )}
           {col.transferredOut && (
-            <Icon name="ArrowRightLeft" size={11} className="text-secondary flex-shrink-0" title="Transferred out" />
+            <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title="Transferred out" />
           )}
           {col.transferredIn && (
-            <Icon name="ArrowRightLeft" size={11} className="text-primary flex-shrink-0" title="Visiting from another branch" />
+            <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title="Visiting from another branch" />
           )}
         </div>
         {col.subtitle && (
@@ -1026,12 +1026,12 @@ const CalendarGrid = ({
           </div>
         )}
         {col.transferredOut && (
-          <div className="text-[9px] font-caption text-secondary font-bold uppercase tracking-wider mt-0.5">
+          <div className="text-[9px] font-caption text-[#B45309] font-bold uppercase tracking-wider mt-0.5">
             Transferred{returnsAtLabel ? ` · back ${returnsAtLabel}` : ''}
           </div>
         )}
         {col.transferredIn && (
-          <div className="text-[9px] font-caption text-primary font-bold uppercase tracking-wider mt-0.5">
+          <div className="text-[9px] font-caption text-[#B45309] font-bold uppercase tracking-wider mt-0.5">
             Visiting{col.fromBranch ? ` · from ${col.fromBranch}` : ''}{returnsAtLabel ? ` · until ${returnsAtLabel}` : ''}
           </div>
         )}

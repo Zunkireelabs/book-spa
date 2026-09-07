@@ -128,6 +128,9 @@ const AttendancePanel = ({ branchId }) => {
   const [extending, setExtending] = useState(false);
   const [revertError, setRevertError] = useState(null);
   const [reverting, setReverting] = useState(false);
+  const [useCustomReturnTime, setUseCustomReturnTime] = useState(false);
+  const [customReturnDate, setCustomReturnDate] = useState('');
+  const [customReturnTime, setCustomReturnTime] = useState('');
   const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
   const [transferMode, setTransferMode] = useState('temporary'); // 'temporary' | 'permanent'
   const [transferToBranch, setTransferToBranch] = useState('');
@@ -165,6 +168,17 @@ const AttendancePanel = ({ branchId }) => {
       return matchesSearch && matchesStatus && matchesType;
     });
   }, [therapists, edits, searchQuery, statusFilter, staffTypeFilter]);
+
+  const isTransferredTherapist = useCallback((therapistId) => {
+    const status = transferStatusByTherapist[therapistId];
+    const activeIncomingTransfer = status?.applied && !status?.reverted && status?.revertAt && status?.toBranchId === branchId;
+    return !!pendingByTherapist[therapistId] || !!activeIncomingTransfer;
+  }, [pendingByTherapist, transferStatusByTherapist, branchId]);
+
+  const transferredCount = useMemo(
+    () => therapists.filter((t) => isTransferredTherapist(t.therapistId)).length,
+    [therapists, isTransferredTherapist]
+  );
 
   const allFilteredSelected = filteredTherapists.length > 0
     && filteredTherapists.every((t) => selectedIds.includes(t.therapistId));
@@ -436,6 +450,9 @@ const AttendancePanel = ({ branchId }) => {
     setExtendDurationValue('');
     setExtendError(null);
     setRevertError(null);
+    setUseCustomReturnTime(false);
+    setCustomReturnDate('');
+    setCustomReturnTime('');
   };
 
   const isExtendFormComplete = !!extendDurationUnit && !!extendDurationValue && Number(extendDurationValue) > 0;
@@ -468,11 +485,25 @@ const AttendancePanel = ({ branchId }) => {
   };
 
   const handleReturnNow = async () => {
+    let revertedAt = null;
+    if (useCustomReturnTime) {
+      if (!customReturnDate || !customReturnTime) {
+        setRevertError('Enter a return date and time.');
+        return;
+      }
+      revertedAt = new Date(`${customReturnDate}T${customReturnTime}`);
+      if (Number.isNaN(revertedAt.getTime()) || revertedAt > new Date()) {
+        setRevertError('Return time cannot be in the future.');
+        return;
+      }
+    }
+
     setReverting(true);
     setRevertError(null);
 
     const result = await revertStaffTransferNow({
       transferId: transferTarget.activeTransfer.id,
+      revertedAt,
     });
 
     if (result.error) {
@@ -649,7 +680,7 @@ const AttendancePanel = ({ branchId }) => {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <SummaryCard
             icon="UserCheck"
             iconBg="bg-success/10"
@@ -670,6 +701,13 @@ const AttendancePanel = ({ branchId }) => {
             iconColor="text-warning"
             label="Leave / Day Off"
             value={summary.leaveCount}
+          />
+          <SummaryCard
+            icon="ArrowRightLeft"
+            iconBg="bg-[#B45309]/10"
+            iconColor="text-[#B45309]"
+            label="Transferred"
+            value={transferredCount}
           />
           <SummaryCard
             icon="Percent"
@@ -793,8 +831,10 @@ const AttendancePanel = ({ branchId }) => {
                       disabled={dayLocked}
                       className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
                     />
-                    <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <Icon name="User" size={14} className="text-primary" />
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      isTransferredTherapist(t.therapistId) ? 'bg-[#B45309]/10' : 'bg-primary/10'
+                    }`}>
+                      <Icon name="User" size={14} className={isTransferredTherapist(t.therapistId) ? 'text-[#B45309]' : 'text-primary'} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -987,11 +1027,61 @@ const AttendancePanel = ({ branchId }) => {
                   </div>
                 </div>
 
+                <div className="border border-border rounded-spa p-3 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useCustomReturnTime}
+                      onChange={(e) => {
+                        setUseCustomReturnTime(e.target.checked);
+                        setRevertError(null);
+                        if (e.target.checked && !customReturnDate) {
+                          const now = new Date();
+                          setCustomReturnDate(now.toISOString().split('T')[0]);
+                          setCustomReturnTime(now.toTimeString().slice(0, 5));
+                        }
+                      }}
+                      disabled={reverting}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer"
+                    />
+                    <span className="font-body font-body-medium text-sm text-text-primary">
+                      They returned earlier — enter the actual time
+                    </span>
+                  </label>
+                  {useCustomReturnTime && (
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1">
+                        <label className="block font-body font-body-medium text-sm text-text-primary">Return Date</label>
+                        <input
+                          type="date"
+                          value={customReturnDate}
+                          max={today}
+                          onChange={(e) => setCustomReturnDate(e.target.value)}
+                          disabled={reverting}
+                          className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block font-body font-body-medium text-sm text-text-primary">Return Time</label>
+                        <input
+                          type="time"
+                          value={customReturnTime}
+                          onChange={(e) => setCustomReturnTime(e.target.value)}
+                          disabled={reverting}
+                          className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                      </div>
+                      <div className="col-span-2 flex justify-end pt-1">
+                        <Button variant="outline" size="sm" onClick={handleReturnNow} loading={reverting} disabled={extending}>
+                          Mark Returned Early
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-end gap-2 pt-2">
                   <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={extending || reverting}>Close</Button>
-                  <Button variant="outline" size="sm" onClick={handleReturnNow} loading={reverting} disabled={extending}>
-                    Mark Returned Early
-                  </Button>
                   <Button variant="primary" size="sm" onClick={handleExtendTransfer} loading={extending} disabled={!isExtendFormComplete || reverting}>
                     Add Extra Time
                   </Button>
