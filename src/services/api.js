@@ -5391,6 +5391,7 @@ export async function fetchTherapistTransferStatus(branchId) {
       .select(`
         id, therapist_id, from_branch_id, to_branch_id, transferred_at, effective_date,
         start_time, duration_value, duration_unit, revert_at, applied, reverted, reverted_at, is_permanent, note,
+        therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name)
       `)
@@ -5406,6 +5407,7 @@ export async function fetchTherapistTransferStatus(branchId) {
       map[t.therapist_id] = {
         id: t.id,
         therapistId: t.therapist_id,
+        therapistName: t.therapist?.name || '—',
         fromBranchId: t.from_branch_id,
         toBranchId: t.to_branch_id,
         fromBranch: t.fromBranch?.name || '—',

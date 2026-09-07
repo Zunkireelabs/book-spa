@@ -142,6 +142,8 @@ const AttendancePanel = ({ branchId }) => {
   const [transferError, setTransferError] = useState(null);
   const [transferring, setTransferring] = useState(false);
   const [cancellingTransfer, setCancellingTransfer] = useState(null);
+  const [cancellingActive, setCancellingActive] = useState(false);
+  const [cancelActiveError, setCancelActiveError] = useState(null);
 
   // Track local edits per therapist: { [therapistId]: { status, checkInTime, checkOutTime, notes, dirty } }
   const [edits, setEdits] = useState({});
@@ -178,6 +180,16 @@ const AttendancePanel = ({ branchId }) => {
   const transferredCount = useMemo(
     () => therapists.filter((t) => isTransferredTherapist(t.therapistId)).length,
     [therapists, isTransferredTherapist]
+  );
+
+  // Staff currently transferred AWAY from this branch — they no longer appear in `therapists`
+  // (their branch_id has moved), so this branch's manager otherwise has no way to see or cancel
+  // an active transfer they initiated.
+  const transferredOutList = useMemo(
+    () => Object.values(transferStatusByTherapist).filter(
+      (s) => s.applied && !s.reverted && s.revertAt && s.fromBranchId === branchId && s.toBranchId !== branchId
+    ),
+    [transferStatusByTherapist, branchId]
   );
 
   const allFilteredSelected = filteredTherapists.length > 0
@@ -430,7 +442,8 @@ const AttendancePanel = ({ branchId }) => {
 
   const openTransfer = (t) => {
     const latest = transferStatusByTherapist[t.therapistId] || null;
-    const activeTransfer = latest && latest.applied && !latest.reverted && latest.revertAt && latest.toBranchId === branchId
+    const activeTransfer = latest && latest.applied && !latest.reverted && latest.revertAt
+      && (latest.toBranchId === branchId || latest.fromBranchId === branchId)
       ? latest
       : null;
     const completedTransfer = !activeTransfer && latest && latest.reverted && latest.fromBranchId === branchId
@@ -453,6 +466,8 @@ const AttendancePanel = ({ branchId }) => {
     setUseCustomReturnTime(false);
     setCustomReturnDate('');
     setCustomReturnTime('');
+    setCancellingActive(false);
+    setCancelActiveError(null);
   };
 
   const isExtendFormComplete = !!extendDurationUnit && !!extendDurationValue && Number(extendDurationValue) > 0;
@@ -517,6 +532,32 @@ const AttendancePanel = ({ branchId }) => {
     setTransferTarget(null);
     setReverting(false);
     showToast(`${name} is back — now bookable at ${homeBranch}.`);
+    await loadData();
+  };
+
+  // Origin branch cancelling an active transfer they initiated — one click, right now. If the
+  // therapist is still booked at the destination branch, revert_staff_transfer_now() (server)
+  // blocks it and explains the conflicting booking's end time; the destination branch's manager
+  // then has to mark them returned once that booking finishes.
+  const handleCancelTransferNow = async () => {
+    setCancellingActive(true);
+    setCancelActiveError(null);
+
+    const result = await revertStaffTransferNow({
+      transferId: transferTarget.activeTransfer.id,
+      revertedAt: null,
+    });
+
+    if (result.error) {
+      setCancelActiveError(result.error.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to cancel transfer.');
+      setCancellingActive(false);
+      return;
+    }
+
+    const name = transferTarget.therapistName;
+    setTransferTarget(null);
+    setCancellingActive(false);
+    showToast(`${name}'s transfer cancelled — back at this branch now.`);
     await loadData();
   };
 
@@ -603,6 +644,12 @@ const AttendancePanel = ({ branchId }) => {
   };
 
   const dirtyCount = Object.values(edits).filter(e => e.dirty && e.status).length;
+
+  const isOriginCancelView = !!(
+    transferTarget?.activeTransfer
+    && transferTarget.activeTransfer.fromBranchId === branchId
+    && transferTarget.activeTransfer.toBranchId !== branchId
+  );
 
   // ── Loading state ──────────────────────────────────────────
   if (loading) {
@@ -717,6 +764,37 @@ const AttendancePanel = ({ branchId }) => {
             value={`${summary.attendanceRate}%`}
             highlight={summary.attendanceRate >= 80 ? 'text-success' : summary.attendanceRate >= 50 ? 'text-warning' : 'text-error'}
           />
+        </div>
+      )}
+
+      {/* Transferred Out — staff currently away at another branch, cancellable from here */}
+      {transferredOutList.length > 0 && (
+        <div className="bg-[#B45309]/5 border border-[#B45309]/20 rounded-spa-lg p-4 space-y-1">
+          <h3 className="font-heading font-heading-semibold text-sm text-[#B45309] flex items-center gap-2 mb-2">
+            <Icon name="ArrowRightLeft" size={16} />
+            Transferred Out ({transferredOutList.length})
+          </h3>
+          <div className="divide-y divide-[#B45309]/10">
+            {transferredOutList.map((s) => (
+              <div key={s.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2">
+                <div>
+                  <p className="font-body font-body-medium text-sm text-text-primary">{s.therapistName}</p>
+                  <p className="font-caption text-xs text-text-secondary">
+                    At {s.toBranch} since {formatPrettyDate(s.effectiveDate)}{s.startTime ? ` ${s.startTime.slice(0, 5)}` : ''}
+                    {' '}· scheduled back{' '}
+                    {new Date(s.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openTransfer({ therapistId: s.therapistId, therapistName: s.therapistName })}
+                >
+                  Cancel Transfer
+                </Button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -959,14 +1037,58 @@ const AttendancePanel = ({ branchId }) => {
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                {transferTarget.activeTransfer ? `Active Transfer — ${staffLabel}` : `Transfer ${staffLabel}`}
+                {isOriginCancelView ? 'Cancel Transfer' : transferTarget.activeTransfer ? `Active Transfer — ${staffLabel}` : `Transfer ${staffLabel}`}
               </h3>
-              <button onClick={() => !transferring && !extending && !reverting && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
+              <button onClick={() => !transferring && !extending && !reverting && !cancellingActive && setTransferTarget(null)} className="p-1 rounded hover:bg-background">
                 <Icon name="X" size={20} className="text-text-secondary" />
               </button>
             </div>
 
-            {transferTarget.activeTransfer ? (
+            {transferTarget.activeTransfer && isOriginCancelView ? (
+              <>
+                {/* ORIGIN branch cancelling a transfer it initiated — simple one-click return,
+                    no Add Extra Time (only the destination manager may extend). */}
+                <p className="font-body text-sm text-text-secondary">
+                  <span className="font-body-medium text-text-primary">"{transferTarget.therapistName}"</span> is currently transferred to{' '}
+                  <span className="font-body-medium text-text-primary">{transferTarget.activeTransfer.toBranch}</span>.
+                </p>
+
+                <div className="bg-primary/5 rounded-spa p-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Since</span>
+                    <span className="font-body-medium text-text-primary">
+                      {formatPrettyDate(transferTarget.activeTransfer.effectiveDate)} {transferTarget.activeTransfer.startTime?.slice(0, 5)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Scheduled return</span>
+                    <span className="font-body-medium text-accent">
+                      {new Date(transferTarget.activeTransfer.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+
+                {cancelActiveError && (
+                  <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                    <Icon name="AlertCircle" size={16} />
+                    <span>{cancelActiveError}</span>
+                  </div>
+                )}
+
+                <p className="font-caption text-xs text-text-tertiary">
+                  Cancelling brings {transferTarget.therapistName} back to this branch right now. If they're still
+                  booked at {transferTarget.activeTransfer.toBranch}, {transferTarget.activeTransfer.toBranch}'s manager
+                  will need to mark them returned once that booking finishes.
+                </p>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={() => setTransferTarget(null)} disabled={cancellingActive}>Close</Button>
+                  <Button variant="primary" size="sm" onClick={handleCancelTransferNow} loading={cancellingActive}>
+                    Cancel Transfer
+                  </Button>
+                </div>
+              </>
+            ) : transferTarget.activeTransfer ? (
               <>
                 {/* ACTIVE: show current transfer details + Add Extra Time. Cannot start a
                     new transfer for this staffer until this one resolves (server-enforced). */}
