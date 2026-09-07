@@ -1,30 +1,29 @@
--- Migration 158: block "Mark Returned Early" while a booking is still in the way
--- (additive, REVERSIBLE)
+-- Migration 163: is_return_leg column instead of note-text matching (additive, REVERSIBLE)
 --
--- revert_staff_transfer_now() (migration-156/157) moves a therapist's branch_id back to
--- from_branch_id immediately, with no check that they aren't mid-booking (or about to start
--- one) at the destination branch. A manager ending a transfer early — or entering a custom
--- past return time — could yank a therapist off a booking's branch while that booking is still
--- Confirmed/In-Progress there, orphaning it (the branch's calendar would show a booking for a
--- therapist who, per therapists.branch_id, is no longer at that branch).
+-- Both revert_staff_transfer_now() (migration-160/161/162) and apply_due_staff_reverts()
+-- (migration-149) insert a synthesized "return leg" row (destination -> origin) to record a
+-- transfer ending, distinguished from a real outbound transfer only by a hardcoded note string
+-- ('Returned early (marked by manager)' / 'Auto-reverted after scheduled duration'). The
+-- frontend (TransferReportPanel.jsx) exact-matches those two literals to tell return rows apart
+-- from real transfers — fragile, since a future wording change to either string would silently
+-- break that matching with no error, just wrong badges in the report.
 --
--- This adds a guard: if the therapist has any Confirmed/In-Progress booking at the destination
--- branch (v_rec.to_branch_id) whose end_datetime is after the return moment (v_now — "now" for
--- the instant path, or the manager-entered p_reverted_at for the custom-time path), the whole
--- function raises and nothing is written. The manager must wait until that booking's slot
--- finishes, then either use "Mark Returned Early" again (now unblocked) or enter that finish
--- time via the custom-return-time field.
+-- This adds a proper boolean column set explicitly at INSERT time by both functions, and
+-- backfills existing rows by the same note match (one-time, not an ongoing dependency).
 --
--- Also widens who may call this: previously only the destination branch's manager (or admin)
--- could end a transfer early. The ORIGIN branch's manager now can too — e.g. Thamel transfers a
--- therapist to Sanepa for 2 days, then Thamel wants to cancel that transfer and pull them back.
--- The booking guard above still applies either way, so a same-day booking at Sanepa still blocks
--- the return and surfaces its end time to whoever attempted it.
---
--- Builds on migration-156/157.
---
--- Reversible: re-run migration-157 verbatim to drop this guard (same signature, no booking check).
+-- Reversible: ALTER TABLE public.staff_transfers DROP COLUMN IF EXISTS is_return_leg;
+--             (and re-run migration-162/149 verbatim to drop the column writes)
 
+ALTER TABLE public.staff_transfers ADD COLUMN IF NOT EXISTS is_return_leg boolean NOT NULL DEFAULT false;
+
+UPDATE public.staff_transfers
+   SET is_return_leg = true
+ WHERE note IN ('Returned early (marked by manager)', 'Auto-reverted after scheduled duration')
+   AND is_return_leg = false;
+
+-- Redefine revert_staff_transfer_now() (byte-for-byte migration-162's body — booking guard +
+-- widened origin/destination-manager authorization — plus is_return_leg = true on the
+-- synthesized return row's INSERT).
 CREATE OR REPLACE FUNCTION public.revert_staff_transfer_now(
   p_transfer_id  uuid,
   p_reverted_at  timestamptz DEFAULT NULL
@@ -67,9 +66,6 @@ BEGIN
     RAISE EXCEPTION 'revert_staff_transfer_now: this transfer has already ended';
   END IF;
 
-  -- A manually-entered return time may only backdate to when this leg of the transfer
-  -- actually started, and may never be in the future or past the originally scheduled
-  -- automatic return (that's just letting it run its course, not "early").
   IF p_reverted_at IS NOT NULL THEN
     IF p_reverted_at > now() THEN
       RAISE EXCEPTION 'revert_staff_transfer_now: return time cannot be in the future';
@@ -121,8 +117,6 @@ BEGIN
       to_char(v_conflict.end_datetime AT TIME ZONE 'Asia/Kathmandu', 'DD Mon HH24:MI');
   END IF;
 
-  -- Prefer the captured original spot; fall back to append-at-end for legacy rows
-  -- (pre-145) that never captured one, or if that slot is somehow already taken.
   IF v_rec.from_display_order IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM public.therapists
     WHERE branch_id = v_rec.from_branch_id AND display_order = v_rec.from_display_order
@@ -142,14 +136,12 @@ BEGIN
 
   INSERT INTO public.staff_transfers
     (therapist_id, org_id, from_branch_id, to_branch_id, transferred_by, note,
-     effective_date, applied, start_time)
+     effective_date, applied, start_time, is_return_leg)
   VALUES
     (v_rec.therapist_id, v_rec.org_id, v_rec.to_branch_id, v_rec.from_branch_id, auth.uid(),
      'Returned early (marked by manager)', (v_now AT TIME ZONE 'Asia/Kathmandu')::date, true,
-     (v_now AT TIME ZONE 'Asia/Kathmandu')::time);
+     (v_now AT TIME ZONE 'Asia/Kathmandu')::time, true);
 
-  -- Atomic, race-safe: re-checks applied/reverted against the CURRENT row at UPDATE time, so
-  -- a concurrent apply_due_staff_reverts() tick between our SELECT and here is caught cleanly.
   UPDATE public.staff_transfers
      SET reverted = true, reverted_at = v_now
    WHERE id = p_transfer_id
@@ -170,7 +162,77 @@ REVOKE ALL ON FUNCTION public.revert_staff_transfer_now(uuid, timestamptz) FROM 
 REVOKE ALL ON FUNCTION public.revert_staff_transfer_now(uuid, timestamptz) FROM anon;
 GRANT EXECUTE ON FUNCTION public.revert_staff_transfer_now(uuid, timestamptz) TO authenticated;
 
+-- Redefine apply_due_staff_reverts() (byte-for-byte migration-149's body, plus
+-- is_return_leg = true on the synthesized return row's INSERT).
+CREATE OR REPLACE FUNCTION public.apply_due_staff_reverts()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_now            timestamptz := now();
+  v_rec            record;
+  v_new_order      int;
+  v_current_branch uuid;
+  v_count          int := 0;
+BEGIN
+  FOR v_rec IN
+    SELECT * FROM public.staff_transfers
+    WHERE revert_at IS NOT NULL AND applied = true AND reverted = false AND revert_at <= v_now
+    ORDER BY revert_at
+  LOOP
+    SELECT branch_id INTO v_current_branch
+    FROM public.therapists WHERE id = v_rec.therapist_id;
+
+    IF v_current_branch IS NULL THEN
+      UPDATE public.staff_transfers SET reverted = true, reverted_at = v_now WHERE id = v_rec.id;
+      CONTINUE;
+    END IF;
+
+    IF v_current_branch = v_rec.to_branch_id THEN
+      IF v_rec.from_display_order IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.therapists
+        WHERE branch_id = v_rec.from_branch_id AND display_order = v_rec.from_display_order
+          AND id <> v_rec.therapist_id
+      ) THEN
+        v_new_order := v_rec.from_display_order;
+      ELSE
+        SELECT COALESCE(max(display_order), -1) + 1 INTO v_new_order
+        FROM public.therapists WHERE branch_id = v_rec.from_branch_id;
+      END IF;
+
+      UPDATE public.therapists
+         SET branch_id = v_rec.from_branch_id, display_order = v_new_order
+       WHERE id = v_rec.therapist_id;
+
+      PERFORM public._sync_user_branch_for_transfer(v_rec.therapist_id, v_rec.org_id, v_rec.from_branch_id);
+
+      INSERT INTO public.staff_transfers
+        (therapist_id, org_id, from_branch_id, to_branch_id, transferred_by, note,
+         effective_date, applied, start_time, is_return_leg)
+      VALUES
+        (v_rec.therapist_id, v_rec.org_id, v_rec.to_branch_id, v_rec.from_branch_id, NULL,
+         'Auto-reverted after scheduled duration', (v_now AT TIME ZONE 'Asia/Kathmandu')::date, true,
+         (v_now AT TIME ZONE 'Asia/Kathmandu')::time, true);
+    ELSE
+      RAISE NOTICE 'apply_due_staff_reverts: therapist % no longer at % (transfer %); skipping auto-revert, marking resolved',
+        v_rec.therapist_id, v_rec.to_branch_id, v_rec.id;
+    END IF;
+
+    UPDATE public.staff_transfers SET reverted = true, reverted_at = v_now WHERE id = v_rec.id;
+    v_count := v_count + 1;
+  END LOOP;
+
+  RETURN v_count;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.apply_due_staff_reverts() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.apply_due_staff_reverts() FROM anon;
+REVOKE ALL ON FUNCTION public.apply_due_staff_reverts() FROM authenticated;
+
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('158', 'revert-staff-transfer-booking-guard')
+VALUES ('163', 'return-leg-column')
 ON CONFLICT (version) DO NOTHING;

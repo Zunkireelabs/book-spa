@@ -52,4 +52,4 @@ $$ LANGUAGE plpgsql
 SET search_path = public;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('155', 'online-capacity-created-by-fix') ON CONFLICT (version) DO NOTHING;
+VALUES ('159', 'online-capacity-created-by-fix') ON CONFLICT (version) DO NOTHING;

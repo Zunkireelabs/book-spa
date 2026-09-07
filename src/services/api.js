@@ -5345,10 +5345,11 @@ export async function extendStaffTransfer({ transferId, additionalValue, additio
 /**
  * End an ACTIVE (applied, not yet reverted) transfer right now — "Mark Returned Early" —
  * instead of waiting for the scheduled revert_at / the apply_due_staff_reverts() cron tick.
- * Only the destination branch's manager (whoever currently has the staffer) or an admin may
- * do this; enforced server-side by revert_staff_transfer_now() (migration-156, extended by
- * migration-157 to accept an optional custom return timestamp). Fails cleanly if the transfer
- * has already ended (race-safe — checked atomically server-side).
+ * The destination branch's manager (whoever currently has the staffer), the origin branch's
+ * manager, or an admin may do this; enforced server-side by revert_staff_transfer_now()
+ * (migration-160, extended by migration-161 to accept an optional custom return timestamp,
+ * migration-162 to widen authorization + guard against orphaning a live booking). Fails cleanly
+ * if the transfer has already ended (race-safe — checked atomically server-side).
  *
  * @param {string} transferId
  * @param {Date|string} [revertedAt] - When the staffer actually returned, if not "right now".

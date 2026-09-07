@@ -35,9 +35,9 @@ function formatDuration(minutes) {
 }
 
 // Return-completion rows synthesized by revert_staff_transfer_now() / apply_due_staff_reverts()
-// (migration-156/149/159) — these represent the return leg itself, not a new outbound transfer.
-// is_return_leg (migration-159) is the source of truth; the note-text match only covers rows
-// from before that column existed (or a DB not yet migrated to 159).
+// (migration-160/149/163) — these represent the return leg itself, not a new outbound transfer.
+// is_return_leg (migration-163) is the source of truth; the note-text match only covers rows
+// from before that column existed (or a DB not yet migrated to 163).
 const RETURN_LEG_NOTES = ['Returned early (marked by manager)', 'Auto-reverted after scheduled duration'];
 function isReturnLeg(t) {
   return t.isReturnLeg ?? RETURN_LEG_NOTES.includes(t.note);

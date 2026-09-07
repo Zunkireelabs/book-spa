@@ -1,17 +1,29 @@
--- Migration 157: allow a custom return time on "Mark Returned Early" (additive, REVERSIBLE)
+-- Migration 162: block "Mark Returned Early" while a booking is still in the way
+-- (additive, REVERSIBLE)
 --
--- revert_staff_transfer_now() (migration-156) always stamped reverted_at (and the synthesized
--- "returned early" transfer row's effective_date/start_time) with now() — there was no way for
--- a manager to say "they actually came back at 3:00 PM", only "they're back right this second".
--- This adds an optional p_reverted_at param: when supplied it's used instead of now() for the
--- three places migration-156 hardcoded v_now (the synthesized return-row's effective_date/
--- start_time, and staff_transfers.reverted_at); when omitted, behavior is identical to before
--- (defaults to now()). Existing 1-arg callers are unaffected.
+-- revert_staff_transfer_now() (migration-160/161) moves a therapist's branch_id back to
+-- from_branch_id immediately, with no check that they aren't mid-booking (or about to start
+-- one) at the destination branch. A manager ending a transfer early — or entering a custom
+-- past return time — could yank a therapist off a booking's branch while that booking is still
+-- Confirmed/In-Progress there, orphaning it (the branch's calendar would show a booking for a
+-- therapist who, per therapists.branch_id, is no longer at that branch).
 --
--- Reversible: DROP FUNCTION IF EXISTS public.revert_staff_transfer_now(uuid, timestamptz);
---             then re-run migration-156 to restore the 1-arg-only version.
-
-DROP FUNCTION IF EXISTS public.revert_staff_transfer_now(uuid);
+-- This adds a guard: if the therapist has any Confirmed/In-Progress booking at the destination
+-- branch (v_rec.to_branch_id) whose end_datetime is after the return moment (v_now — "now" for
+-- the instant path, or the manager-entered p_reverted_at for the custom-time path), the whole
+-- function raises and nothing is written. The manager must wait until that booking's slot
+-- finishes, then either use "Mark Returned Early" again (now unblocked) or enter that finish
+-- time via the custom-return-time field.
+--
+-- Also widens who may call this: previously only the destination branch's manager (or admin)
+-- could end a transfer early. The ORIGIN branch's manager now can too — e.g. Thamel transfers a
+-- therapist to Sanepa for 2 days, then Thamel wants to cancel that transfer and pull them back.
+-- The booking guard above still applies either way, so a same-day booking at Sanepa still blocks
+-- the return and surfaces its end time to whoever attempted it.
+--
+-- Builds on migration-160/161.
+--
+-- Reversible: re-run migration-161 verbatim to drop this guard (same signature, no booking check).
 
 CREATE OR REPLACE FUNCTION public.revert_staff_transfer_now(
   p_transfer_id  uuid,
@@ -31,6 +43,7 @@ DECLARE
   v_new_order         int;
   v_now               timestamptz := COALESCE(p_reverted_at, now());
   v_reverted_count    int;
+  v_conflict          record;
 BEGIN
   SELECT * INTO v_rec FROM public.staff_transfers WHERE id = p_transfer_id;
 
@@ -69,13 +82,16 @@ BEGIN
     END IF;
   END IF;
 
-  -- Authorization mirrors extend_staff_transfer(): the manager of the staffer's CURRENT
-  -- (destination) branch may act, since that's who is reporting them back.
+  -- Authorization: the manager of the staffer's CURRENT (destination) branch may act (mirrors
+  -- extend_staff_transfer()), since that's who is reporting them back — and so may the manager
+  -- of the ORIGIN branch (from_branch_id), since they're the one who sent the staffer away and
+  -- may want to cancel/recall that transfer.
   IF NOT (
     v_role = 'admin'
     OR (v_role = 'manager' AND v_rec.to_branch_id = v_caller_branch)
+    OR (v_role = 'manager' AND v_rec.from_branch_id = v_caller_branch)
   ) THEN
-    RAISE EXCEPTION 'revert_staff_transfer_now: only an admin or the destination branch''s manager may end this transfer';
+    RAISE EXCEPTION 'revert_staff_transfer_now: only an admin, the destination branch''s manager, or the origin branch''s manager may end this transfer';
   END IF;
 
   SELECT branch_id INTO v_current_branch
@@ -87,6 +103,22 @@ BEGIN
 
   IF v_current_branch IS DISTINCT FROM v_rec.to_branch_id THEN
     RAISE EXCEPTION 'revert_staff_transfer_now: therapist is no longer at the destination branch for this transfer';
+  END IF;
+
+  -- Booking guard: don't pull them off a booking that's still in progress or hasn't
+  -- started/finished yet at the branch they're currently at.
+  SELECT b.id, b.end_datetime INTO v_conflict
+  FROM public.bookings b
+  WHERE b.therapist_id = v_rec.therapist_id
+    AND b.branch_id = v_rec.to_branch_id
+    AND b.status IN ('Confirmed', 'In-Progress')
+    AND b.end_datetime > v_now
+  ORDER BY b.start_datetime
+  LIMIT 1;
+
+  IF v_conflict.id IS NOT NULL THEN
+    RAISE EXCEPTION 'revert_staff_transfer_now: still booked at this branch until % — wait until that booking finishes, then mark them returned (you can enter that exact time)',
+      to_char(v_conflict.end_datetime AT TIME ZONE 'Asia/Kathmandu', 'DD Mon HH24:MI');
   END IF;
 
   -- Prefer the captured original spot; fall back to append-at-end for legacy rows
@@ -140,5 +172,5 @@ GRANT EXECUTE ON FUNCTION public.revert_staff_transfer_now(uuid, timestamptz) TO
 
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('157', 'revert-staff-transfer-custom-time')
+VALUES ('162', 'revert-staff-transfer-booking-guard')
 ON CONFLICT (version) DO NOTHING;

@@ -1,4 +1,4 @@
--- Migration 156: end an ACTIVE staff transfer immediately ("Mark Returned Early")
+-- Migration 160: end an ACTIVE staff transfer immediately ("Mark Returned Early")
 -- (additive, REVERSIBLE)
 --
 -- Today the only way a transferred-out therapist becomes bookable at their home branch again
@@ -128,5 +128,5 @@ GRANT EXECUTE ON FUNCTION public.revert_staff_transfer_now(uuid) TO authenticate
 
 -- Record migration ---------------------------------------------------------
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('156', 'revert-staff-transfer-now')
+VALUES ('160', 'revert-staff-transfer-now')
 ON CONFLICT (version) DO NOTHING;
