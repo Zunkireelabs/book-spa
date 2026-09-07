@@ -1037,8 +1037,12 @@ const AttendancePanel = ({ branchId }) => {
                         setRevertError(null);
                         if (e.target.checked && !customReturnDate) {
                           const now = new Date();
-                          setCustomReturnDate(now.toISOString().split('T')[0]);
-                          setCustomReturnTime(now.toTimeString().slice(0, 5));
+                          // Use local date/time components for both fields — toISOString() is UTC and
+                          // can land on a different calendar day than toTimeString()'s local time near
+                          // midnight (e.g. Nepal is UTC+5:45), silently defaulting to the wrong day.
+                          const pad = (n) => String(n).padStart(2, '0');
+                          setCustomReturnDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+                          setCustomReturnTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
                         }
                       }}
                       disabled={reverting}

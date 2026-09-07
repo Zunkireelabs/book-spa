@@ -5206,6 +5206,7 @@ export async function fetchStaffTransfers() {
       .select(`
         id, transferred_at, effective_date, applied, note,
         start_time, duration_value, duration_unit, revert_at, reverted, reverted_at, is_permanent,
+        is_return_leg,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
         toBranch:branches!staff_transfers_to_branch_id_fkey(name),
@@ -5228,6 +5229,7 @@ export async function fetchStaffTransfers() {
       isPermanent: t.is_permanent,
       reverted: t.reverted,
       revertedAt: t.reverted_at,
+      isReturnLeg: t.is_return_leg,
       therapistName: t.therapist?.name || '—',
       fromBranch: t.fromBranch?.name || '—',
       toBranch: t.toBranch?.name || '—',
@@ -6843,33 +6845,26 @@ export async function fetchAttendance({ branchId, date }) {
 
     const targetDate = date || new Date().toISOString().split('T')[0];
 
-    // Parallel: active therapists + attendance records
+    // Parallel: active therapists + attendance records. Attendance is one record per
+    // (therapist_id, date) globally — not scoped by branch_id — so it's fetched unfiltered
+    // by branch (a status marked at a therapist's prior branch, before a same-day transfer,
+    // still shows up here) and joined in-memory against the branch-scoped therapist list below.
     let therapistsQuery = supabase
       .from('therapists')
       .select('id, name, is_service_staff')
       .eq('is_active', true)
       .order('name');
     therapistsQuery = withBranch(therapistsQuery, branchId);
-    const therapistsResult = await therapistsQuery;
+    const attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status, check_in_time, check_out_time, notes')
+      .eq('date', targetDate);
+    const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceQuery]);
     if (therapistsResult.error) throw therapistsResult.error;
+    if (attendanceResult.error) throw attendanceResult.error;
 
     const therapists = therapistsResult.data || [];
-    const therapistIds = therapists.map(t => t.id);
-
-    // Attendance is one record per (therapist_id, date) globally — not scoped by
-    // branch_id — so a status marked at a therapist's prior branch (before a
-    // same-day transfer) still shows up here. Filter by therapist_id instead of
-    // branch_id to avoid missing rows stamped with the old branch.
-    let attendanceRows = [];
-    if (therapistIds.length > 0) {
-      const attendanceResult = await supabase
-        .from('therapist_attendance')
-        .select('therapist_id, status, check_in_time, check_out_time, notes')
-        .eq('date', targetDate)
-        .in('therapist_id', therapistIds);
-      if (attendanceResult.error) throw attendanceResult.error;
-      attendanceRows = attendanceResult.data || [];
-    }
+    const attendanceRows = attendanceResult.data || [];
 
     // Index attendance by therapist_id
     const attendanceMap = {};
@@ -7011,29 +7006,25 @@ export async function fetchAttendanceSummary({ branchId, date }) {
 
     const targetDate = date || new Date().toISOString().split('T')[0];
 
-    // Parallel: active therapist count + attendance records
+    // Attendance is keyed by (therapist_id, date) globally, not branch_id, so it's fetched
+    // unfiltered by branch (in parallel with the therapist list) and joined in-memory against
+    // the resolved therapist_id set — a status marked pre-transfer still counts this way.
     let therapistsQuery = supabase
       .from('therapists')
       .select('id')
       .eq('is_active', true);
-    const therapistsResult = await therapistsQuery;
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    const attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status')
+      .eq('date', targetDate);
+    const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceQuery]);
     if (therapistsResult.error) throw therapistsResult.error;
+    if (attendanceResult.error) throw attendanceResult.error;
 
-    const therapistIds = (therapistsResult.data || []).map(t => t.id);
-    const totalTherapists = therapistIds.length;
-
-    // Attendance is keyed by (therapist_id, date) globally, not branch_id — filter
-    // by the resolved therapist_id list so a status marked pre-transfer still counts.
-    let records = [];
-    if (therapistIds.length > 0) {
-      const attendanceResult = await supabase
-        .from('therapist_attendance')
-        .select('status')
-        .eq('date', targetDate)
-        .in('therapist_id', therapistIds);
-      if (attendanceResult.error) throw attendanceResult.error;
-      records = attendanceResult.data || [];
-    }
+    const therapistIds = new Set((therapistsResult.data || []).map(t => t.id));
+    const totalTherapists = therapistIds.size;
+    const records = (attendanceResult.data || []).filter(r => therapistIds.has(r.therapist_id));
 
     let presentCount = 0;
     let absentCount = 0;
@@ -7081,30 +7072,27 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
       return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Start and end dates are required.' } };
     }
 
+    // Attendance is keyed by (therapist_id, date) globally, not branch_id, so it's fetched
+    // unfiltered by branch (in parallel with the therapist list) and joined in-memory against
+    // the resolved therapist_id set — a status marked pre-transfer still counts this way.
     let therapistsQuery = supabase
       .from('therapists')
       .select('id, name, is_service_staff')
       .eq('is_active', true)
       .order('name');
-    const therapistsResult = await therapistsQuery;
+    therapistsQuery = withBranch(therapistsQuery, branchId);
+    const attendanceQuery = supabase
+      .from('therapist_attendance')
+      .select('therapist_id, date, status')
+      .gte('date', startDate)
+      .lte('date', endDate);
+    const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceQuery]);
     if (therapistsResult.error) throw therapistsResult.error;
+    if (attendanceResult.error) throw attendanceResult.error;
 
     const therapists = therapistsResult.data || [];
-    const therapistIds = therapists.map(t => t.id);
-
-    // Attendance is keyed by (therapist_id, date) globally, not branch_id — filter
-    // by the resolved therapist_id list so a status marked pre-transfer still counts.
-    let records = [];
-    if (therapistIds.length > 0) {
-      const attendanceResult = await supabase
-        .from('therapist_attendance')
-        .select('therapist_id, date, status')
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .in('therapist_id', therapistIds);
-      if (attendanceResult.error) throw attendanceResult.error;
-      records = attendanceResult.data || [];
-    }
+    const therapistIdSet = new Set(therapists.map(t => t.id));
+    const records = (attendanceResult.data || []).filter(r => therapistIdSet.has(r.therapist_id));
 
     const emptyCounts = () => ({ present: 0, absent: 0, leave: 0, halfDay: 0, marked: 0 });
     const bump = (acc, status) => {
