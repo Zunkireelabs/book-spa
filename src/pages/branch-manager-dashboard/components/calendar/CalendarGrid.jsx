@@ -889,14 +889,19 @@ const CalendarGrid = ({
   // e.g. a 15:45-18:45 transfer only shades that slice, leaving the rest of the day bookable.
   const openHourStr = `${String(openHour).padStart(2, '0')}:00`;
   const closeHourStr = `${String(closeHour).padStart(2, '0')}:00`;
+  // `phase` distinguishes "hasn't started yet" from "already ended" — both used to collapse to
+  // the same `null` return, which made transferredIn treat an ALREADY-RETURNED visitor exactly
+  // like a NOT-YET-ARRIVED one and block their entire column for every day after their return,
+  // not just before it (see the call sites below for how each phase is actually used).
   const getTransferBlockRange = (col, day) => {
     if (!col.transferredOut && !col.transferredIn) return null;
     const start = toKathmanduParts(col.transferStartAt);
     const end = toKathmanduParts(col.returnsAt);
-    if (!end) return { fromTime: openHourStr, toTime: closeHourStr };
-    if (start && day < start.date) return null;
-    if (day > end.date) return null;
+    if (!end) return { phase: 'during', fromTime: openHourStr, toTime: closeHourStr };
+    if (start && day < start.date) return { phase: 'before' };
+    if (day > end.date) return { phase: 'after' };
     return {
+      phase: 'during',
       fromTime: start && day === start.date ? start.time : openHourStr,
       toTime: day === end.date ? end.time : closeHourStr,
     };
@@ -1161,7 +1166,7 @@ const CalendarGrid = ({
             Sits below the booking cards (rendered after) so cards stay visible. */}
         {col.transferredOut && (() => {
           const range = getTransferBlockRange(col, day);
-          if (!range) return null;
+          if (!range || range.phase !== 'during') return null;
           const blockTop = timeToTop(range.fromTime);
           const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
           return (
@@ -1183,12 +1188,14 @@ const CalendarGrid = ({
         {col.transferredIn && (() => {
           const bookableWindow = getTransferBlockRange(col, day);
           const segments = [];
-          if (!bookableWindow) {
+          if (bookableWindow?.phase === 'before') {
+            // Hasn't arrived yet on this day — not actually here at all.
             segments.push({ from: openHourStr, to: closeHourStr });
-          } else {
+          } else if (bookableWindow?.phase === 'during') {
             if (bookableWindow.fromTime > openHourStr) segments.push({ from: openHourStr, to: bookableWindow.fromTime });
             if (bookableWindow.toTime < closeHourStr) segments.push({ from: bookableWindow.toTime, to: closeHourStr });
           }
+          // phase === 'after': already returned home as of this day — nothing to block here.
           return segments.map((seg, i) => {
             const segTop = timeToTop(seg.from);
             const segHeight = Math.max(timeToHeight(seg.from, seg.to), 20);

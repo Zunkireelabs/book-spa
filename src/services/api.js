@@ -5429,6 +5429,33 @@ export async function extendStaffTransfer({ transferId, additionalValue, additio
 }
 
 /**
+ * Move an ACTIVE (applied, not yet reverted) transfer's scheduled return to a new, still-FUTURE
+ * date/time — e.g. a 2-day transfer that only turns out to be needed for 1 day, so the manager
+ * wants the staffer back tomorrow instead of waiting the full original duration. Distinct from
+ * revertStaffTransferNow(), which only records a return that already happened (a past time).
+ * The destination branch's manager, the origin branch's manager, or an admin may do this;
+ * enforced server-side by reschedule_staff_transfer_return() (migration-165).
+ */
+export async function rescheduleStaffTransferReturn({ transferId, newRevertAt }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('reschedule_staff_transfer_return', {
+      p_transfer_id: transferId,
+      p_new_revert_at: new Date(newRevertAt).toISOString(),
+    });
+
+    if (error) throw error;
+    capture('staff_transfer_return_rescheduled', { transfer_id: transferId });
+    return { data: { revertAt: data }, error: null };
+  } catch (error) {
+    console.error('[API] rescheduleStaffTransferReturn error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
  * End an ACTIVE (applied, not yet reverted) transfer right now — "Mark Returned Early" —
  * instead of waiting for the scheduled revert_at / the apply_due_staff_reverts() cron tick.
  * The destination branch's manager (whoever currently has the staffer), the origin branch's
@@ -6978,6 +7005,43 @@ export async function fetchAttendance({ branchId, date }) {
     return { data: merged, error: null };
   } catch (error) {
     console.error('[API] fetchAttendance error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch today's attendance record for an arbitrary set of therapist IDs, regardless of their
+ * current branch_id — for staff who've been transferred OUT of the branch viewing them (they no
+ * longer match a branch-scoped fetchAttendance() query, but they may still have checked in
+ * earlier today before the transfer took effect, or at their new branch since).
+ */
+export async function fetchAttendanceByTherapistIds({ therapistIds, date }) {
+  try {
+    if (!therapistIds || therapistIds.length === 0) return { data: {}, error: null };
+
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('therapist_attendance')
+      .select('therapist_id, status, check_in_time, check_out_time, notes')
+      .eq('date', targetDate)
+      .in('therapist_id', therapistIds);
+
+    if (error) throw error;
+
+    const map = {};
+    (data || []).forEach(row => {
+      map[row.therapist_id] = {
+        status: row.status || null,
+        checkInTime: formatTimeKathmandu(row.check_in_time),
+        checkOutTime: formatTimeKathmandu(row.check_out_time),
+        notes: row.notes || null,
+      };
+    });
+
+    return { data: map, error: null };
+  } catch (error) {
+    console.error('[API] fetchAttendanceByTherapistIds error:', error.message);
     return { data: null, error };
   }
 }
