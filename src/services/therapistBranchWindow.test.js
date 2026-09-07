@@ -185,6 +185,7 @@ describe('resolveOrphanTransferWindow', () => {
       transferredIn: true,
       returnsAt: '2026-09-06T18:30:00+05:45',
       transferStartAt: '2026-09-06T16:30:00+05:45',
+      fromBranch: null,
     });
   });
 
@@ -222,10 +223,11 @@ describe('resolveOrphanTransferWindow', () => {
       transferredIn: true,
       returnsAt: '2026-09-06T18:30:00+05:45',
       transferStartAt: '2026-09-06T16:30:00+05:45',
+      fromBranch: null,
     });
   });
 
-  it('picks the most recently transferred_at row when more than one matches', () => {
+  it('picks the most recently transferred_at row when more than one matches (no range supplied)', () => {
     const transfers = [
       { from_branch_id: BRANCH_A, to_branch_id: BRANCH_B, is_permanent: false, is_return_leg: false, revert_at: '2026-09-06T17:00:00+05:45', effective_date: '2026-09-06', start_time: '15:00:00', transferred_at: '2026-09-06T14:00:00+05:45' },
       { from_branch_id: BRANCH_A, to_branch_id: BRANCH_B, is_permanent: false, is_return_leg: false, revert_at: '2026-09-06T18:30:00+05:45', effective_date: '2026-09-06', start_time: '16:30:00', transferred_at: '2026-09-06T16:10:00+05:45' },
@@ -234,6 +236,39 @@ describe('resolveOrphanTransferWindow', () => {
       transferredIn: true,
       returnsAt: '2026-09-06T18:30:00+05:45',
       transferStartAt: '2026-09-06T16:30:00+05:45',
+      fromBranch: null,
+    });
+  });
+
+  it('returns null for a window that ended before the requested range (stale window, not adopted)', () => {
+    // Real transfer that happened and fully closed on 2026-09-01 — the calendar is now
+    // being rendered for 2026-09-06. Adopting this window would make the Calendar's
+    // ghost-column filter (calendar/index.jsx) drop the orphan column entirely, since its
+    // returnsAt date (09-01) is already before the day being viewed (09-06) — exactly the
+    // "booking vanishes into Unassigned" regression this range-awareness prevents.
+    const transfers = [
+      temp({ from: BRANCH_B, to: BRANCH_A, effective_date: '2026-09-01', start_time: '10:00:00', revert_at: '2026-09-01T12:00:00+05:45' }),
+    ];
+    const rangeStart = toKathmanduDate('2026-09-06', '00:00:00');
+    const rangeEnd = toKathmanduDate('2026-09-06', '23:59:59');
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_A, rangeStart, rangeEnd)).toBeNull();
+  });
+
+  it('picks the window overlapping the requested range over a more-recently-created non-overlapping one', () => {
+    const transfers = [
+      // Overlaps the viewed day (09-06) — this is the one that should win.
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-06', start_time: '16:30:00', revert_at: '2026-09-06T18:30:00+05:45' }),
+      // Created later (transferred_at 09-10 > 09-06), but its OWN window is a future day
+      // that does not overlap the range being rendered — must lose despite being "more recent."
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-10', start_time: '09:00:00', revert_at: '2026-09-10T11:00:00+05:45' }),
+    ];
+    const rangeStart = toKathmanduDate('2026-09-06', '00:00:00');
+    const rangeEnd = toKathmanduDate('2026-09-06', '23:59:59');
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_B, rangeStart, rangeEnd)).toEqual({
+      transferredIn: true,
+      returnsAt: '2026-09-06T18:30:00+05:45',
+      transferStartAt: '2026-09-06T16:30:00+05:45',
+      fromBranch: null,
     });
   });
 });

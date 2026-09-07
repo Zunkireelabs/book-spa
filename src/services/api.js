@@ -4222,7 +4222,14 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       // Also fetch each orphan therapist's real staff_transfers history so a booking left
       // behind by a TEMPORARY transfer (already ended, or permanent-looking only because the
       // normal/temp-transfer queries above don't cover it) can shade its real window instead
-      // of blocking the whole column all day — see resolveOrphanTransferWindow.
+      // of blocking the whole column all day — see resolveOrphanTransferWindow. Only a window
+      // that overlaps [rangeStart, rangeEnd] is adopted (passed below) — an older, already-
+      // stale window must NOT be adopted here, since the Calendar's ghost-column filter drops
+      // any transferred column whose returnsAt date has already passed as of the day being
+      // viewed, which would make the orphan booking vanish instead of shading correctly.
+      const rangeStart = toKathmanduDate(startDate, '00:00:00');
+      const rangeEnd = toKathmanduDate(endDate, '23:59:59');
+
       const [orphanTherapistsResult, orphanTransfersResult] = await Promise.all([
         supabase
           .from('therapists')
@@ -4230,7 +4237,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           .in('id', orphanTherapistIds),
         supabase
           .from('staff_transfers')
-          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at')
+          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
           .in('therapist_id', orphanTherapistIds),
       ]);
       if (orphanTherapistsResult.error) throw orphanTherapistsResult.error;
@@ -4244,13 +4251,16 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       finalTherapists = [
         ...mergedTherapists,
         ...(orphanTherapistsResult.data || []).map(t => {
-          const window = resolveOrphanTransferWindow(orphanTransfersByTherapist[t.id], resolvedBranchId);
+          const transferWindow = resolveOrphanTransferWindow(
+            orphanTransfersByTherapist[t.id], resolvedBranchId, rangeStart, rangeEnd
+          );
           return {
             ...t,
-            transferredOut: window ? !!window.transferredOut : true,
-            transferredIn: window ? !!window.transferredIn : false,
-            returnsAt: window ? window.returnsAt : null,
-            transferStartAt: window ? window.transferStartAt : null,
+            transferredOut: transferWindow ? !!transferWindow.transferredOut : true,
+            transferredIn: transferWindow ? !!transferWindow.transferredIn : false,
+            returnsAt: transferWindow ? transferWindow.returnsAt : null,
+            transferStartAt: transferWindow ? transferWindow.transferStartAt : null,
+            fromBranch: transferWindow?.fromBranch || null,
           };
         }),
       ].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
