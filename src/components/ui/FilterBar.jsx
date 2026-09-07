@@ -38,9 +38,9 @@ const FilterBar = ({
   const hasFilterRow = presets.length > 0 || !!dateRange || filters.length > 0;
   const showMeta = !!resultCount || (hasActiveFilters && !!onClear);
 
-  // Mobile "Custom" mode — toggled when the user picks Custom from the preset
-  // dropdown. Date inputs only render on mobile while this is true (or while
-  // the parent already reports applyActive — i.e. a custom range is in effect).
+  // "Custom" mode (below the lg breakpoint) — toggled when the user picks Custom
+  // from the preset dropdown. Date inputs only render below lg while this is true
+  // (or while the parent already reports applyActive — i.e. a custom range is in effect).
   const [mobileCustomOpen, setMobileCustomOpen] = useState(false);
   const isMobileCustomMode = mobileCustomOpen || !!dateRange?.applyActive;
   // Synthetic "Custom" option appended to the mobile preset dropdown when a
@@ -77,7 +77,7 @@ const FilterBar = ({
   // Mobile preset dropdown — declared once so it can render either in the
   // search row (when a top row exists) or in the filter row (when it doesn't).
   const mobilePresetDropdown = presets.length > 0 && (
-    <div className="sm:hidden w-[110px] flex-shrink-0">
+    <div className="lg:hidden w-[160px] flex-shrink-0">
       <CustomSelect
         size="sm"
         value={presetMobileValue}
@@ -140,13 +140,13 @@ const FilterBar = ({
         </div>
       )}
 
-      {/* Row 2 — preset pills (desktop), date range + Apply, filter dropdowns.
-          On mobile, only renders when in Custom mode or filters[] is non-empty. */}
+      {/* Row 2 — preset pills (wide desktop, lg+), date range + Apply, filter dropdowns.
+          Below lg, only renders when in Custom mode or filters[] is non-empty. */}
       {hasFilterRow && (
-        <div className={`${showFilterRowMobile ? 'flex' : 'hidden sm:flex'} flex-wrap items-center gap-2 p-3`}>
-          {/* Preset pill buttons — desktop only */}
+        <div className={`${showFilterRowMobile ? 'flex' : 'hidden lg:flex'} flex-wrap items-center gap-2 p-3`}>
+          {/* Preset pill buttons — wide desktop only (lg+) */}
           {presets.length > 0 && (
-            <div className="hidden sm:flex flex-wrap items-center gap-2">
+            <div className="hidden lg:flex flex-wrap items-center gap-2">
               {presets.map((p) => (
                 <button
                   key={p.label}
@@ -169,11 +169,11 @@ const FilterBar = ({
           {!hasTopRow && mobilePresetDropdown}
 
           {/* Date range inputs.
-              Desktop (sm+): always shown next to the preset pills.
-              Mobile (<sm): only shown when the user picked "Custom" in the dropdown
-                            or a custom range is already applied. */}
+              Wide desktop (lg+): always shown next to the preset pills.
+              Below lg: only shown when the user picked "Custom" in the dropdown
+                        or a custom range is already applied. */}
           {dateRange && (
-            <div className={`${isMobileCustomMode ? 'flex' : 'hidden'} sm:flex items-center flex-wrap gap-1 sm:gap-2 flex-1 min-w-0`}>
+            <div className={`${isMobileCustomMode ? 'flex' : 'hidden'} lg:flex items-center flex-wrap gap-1 sm:gap-2 flex-1 min-w-0`}>
               <input
                 type="date"
                 value={dateRange.from}

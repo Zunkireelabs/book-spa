@@ -99,6 +99,22 @@ describe('computeTherapistBranchAt', () => {
     expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-16', '10:00:00'))).toBe(BRANCH_A);
   });
 
+  it('treats a returned-history row (temporary, no revert_at) as open-ended toward its toBranchId — covers apply_due_staff_reverts()/revert_staff_transfer_now() writing a completion row with revert_at left null', () => {
+    const transfers = [
+      // Original loan: A -> B, scheduled to revert at 12:00.
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-10', start_time: '09:00:00', revert_at: '2026-09-10T12:00:00+05:45' }),
+      // System-generated "returned early" completion row: B -> A, no revert_at (not a
+      // real temporary window — a point-in-time, indefinite move back).
+      temp({ from: BRANCH_B, to: BRANCH_A, effective_date: '2026-09-10', start_time: '10:30:00', revert_at: null }),
+    ];
+
+    // Right after the early return, still before the ORIGINAL scheduled revert_at (12:00) —
+    // must already be back home, not stuck at the destination until 12:00.
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-10', '11:00:00'))).toBe(BRANCH_A);
+    // Well after, on a later date — still home.
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-15', '09:00:00'))).toBe(BRANCH_A);
+  });
+
   it('treats a non-permanent transfer with no revert_at as indefinite, not already-closed (legacy pre-migration-145 rows)', () => {
     // Every transfer made before migration-145 added start_time/duration/revert_at
     // has is_permanent=false (the column's default) but no revert mechanism at all —
