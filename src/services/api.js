@@ -3,7 +3,7 @@ import { transformMembership, transformMemberships, toTitleCase } from './bookin
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
-import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout } from './therapistBranchWindow';
+import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -4219,20 +4219,50 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     let finalTherapists = mergedTherapists;
     if (orphanTherapistIds.length > 0) {
-      const { data: orphanTherapists, error: orphanError } = await supabase
-        .from('therapists')
-        .select('id, name, gender, specialties, position, is_service_staff, display_order')
-        .in('id', orphanTherapistIds);
-      if (orphanError) throw orphanError;
+      // Also fetch each orphan therapist's real staff_transfers history so a booking left
+      // behind by a TEMPORARY transfer (already ended, or permanent-looking only because the
+      // normal/temp-transfer queries above don't cover it) can shade its real window instead
+      // of blocking the whole column all day — see resolveOrphanTransferWindow. Only a window
+      // that overlaps [rangeStart, rangeEnd] is adopted (passed below) — an older, already-
+      // stale window must NOT be adopted here, since the Calendar's ghost-column filter drops
+      // any transferred column whose returnsAt date has already passed as of the day being
+      // viewed, which would make the orphan booking vanish instead of shading correctly.
+      const rangeStart = toKathmanduDate(startDate, '00:00:00');
+      const rangeEnd = toKathmanduDate(endDate, '23:59:59');
+
+      const [orphanTherapistsResult, orphanTransfersResult] = await Promise.all([
+        supabase
+          .from('therapists')
+          .select('id, name, gender, specialties, position, is_service_staff, display_order')
+          .in('id', orphanTherapistIds),
+        supabase
+          .from('staff_transfers')
+          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+          .in('therapist_id', orphanTherapistIds),
+      ]);
+      if (orphanTherapistsResult.error) throw orphanTherapistsResult.error;
+      if (orphanTransfersResult.error) throw orphanTransfersResult.error;
+
+      const orphanTransfersByTherapist = {};
+      (orphanTransfersResult.data || []).forEach(t => {
+        (orphanTransfersByTherapist[t.therapist_id] ??= []).push(t);
+      });
 
       finalTherapists = [
         ...mergedTherapists,
-        ...(orphanTherapists || []).map(t => ({
-          ...t,
-          transferredOut: true,
-          returnsAt: null,
-          transferStartAt: null,
-        })),
+        ...(orphanTherapistsResult.data || []).map(t => {
+          const transferWindow = resolveOrphanTransferWindow(
+            orphanTransfersByTherapist[t.id], resolvedBranchId, rangeStart, rangeEnd
+          );
+          return {
+            ...t,
+            transferredOut: transferWindow ? !!transferWindow.transferredOut : true,
+            transferredIn: transferWindow ? !!transferWindow.transferredIn : false,
+            returnsAt: transferWindow ? transferWindow.returnsAt : null,
+            transferStartAt: transferWindow ? transferWindow.transferStartAt : null,
+            fromBranch: transferWindow?.fromBranch || null,
+          };
+        }),
       ].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
     }
 

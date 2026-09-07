@@ -73,6 +73,69 @@ export function computeTherapistBranchAt(transfers, fallbackBranchId, atDate) {
 }
 
 /**
+ * Given a therapist's staff_transfers rows (raw DB shape, any applied/reverted status),
+ * finds the one relevant to `branchId` and describes it the way the Calendar's orphan-column
+ * fallback (getCalendarBookings, api.js) needs: which direction relative to branchId, and the
+ * real [start, end] window — instead of the caller's default "unknown window, block the whole
+ * column all day."
+ *
+ * Only considers non-permanent, non-return-leg rows with a real revert_at (the same "genuinely
+ * a temporary window" signal already used by the transferredOut/transferredIn queries in
+ * getCalendarBookings) that touch branchId on either side AND overlap [rangeStart, rangeEnd]
+ * when that range is supplied. The overlap requirement matters: getCalendarBookings'
+ * filteredTherapists ghost-column filter (calendar/index.jsx) drops any transferredIn/
+ * transferredOut column whose returnsAt date has already passed as of the day being viewed —
+ * so adopting a STALE window (one that closed before the requested range even starts) would
+ * make the orphan column vanish from the day being rendered instead of shading it, silently
+ * re-opening the exact "booking falls into Unassigned" bug this whole mechanism exists to
+ * prevent. When more than one candidate overlaps the range, picks the most recently created
+ * (transferred_at) among those. When none overlap, returns null — the caller's conservative
+ * block-everything default is correct there, not a stale, irrelevant window.
+ *
+ * @param {Array} transfers - raw staff_transfers rows for one therapist: each with
+ *   from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date,
+ *   start_time, transferred_at.
+ * @param {string} branchId - the branch whose calendar is being rendered.
+ * @param {Date} [rangeStart] - Kathmandu-local instant the requested calendar range starts at
+ *   (e.g. toKathmanduDate(startDate, '00:00:00')). Omit to keep every touching window as a
+ *   candidate (matches pre-range-aware behavior).
+ * @param {Date} [rangeEnd] - Kathmandu-local instant the requested calendar range ends at.
+ *   Both rangeStart and rangeEnd must be supplied together to filter by overlap.
+ * @returns {{transferredOut: true, returnsAt: string, transferStartAt: string|null}
+ *   | {transferredIn: true, returnsAt: string, transferStartAt: string|null, fromBranch: string|null}
+ *   | null} null when no matching, range-relevant temporary window exists — caller keeps its
+ *   block-everything default, which is correct for a truly permanent/unknown/stale case.
+ */
+export function resolveOrphanTransferWindow(transfers, branchId, rangeStart, rangeEnd) {
+  const overlapsRange = (t) => {
+    if (!rangeStart || !rangeEnd) return true;
+    const start = t.effective_date && t.start_time
+      ? new Date(`${t.effective_date}T${normalizeTime(t.start_time)}+05:45`)
+      : null;
+    const end = new Date(t.revert_at);
+    return (!start || start < rangeEnd) && end > rangeStart;
+  };
+
+  const relevant = (transfers || [])
+    .filter((t) => t && !t.is_permanent && !t.is_return_leg && t.revert_at
+      && (t.from_branch_id === branchId || t.to_branch_id === branchId)
+      && overlapsRange(t))
+    .sort((a, b) => new Date(b.transferred_at) - new Date(a.transferred_at));
+
+  const t = relevant[0];
+  if (!t) return null;
+
+  const transferStartAt = t.effective_date && t.start_time
+    ? `${t.effective_date}T${normalizeTime(t.start_time)}+05:45`
+    : null;
+
+  if (t.to_branch_id === branchId) {
+    return { transferredIn: true, returnsAt: t.revert_at, transferStartAt, fromBranch: t.fromBranch?.name || null };
+  }
+  return { transferredOut: true, returnsAt: t.revert_at, transferStartAt };
+}
+
+/**
  * Whether a booking's date/start_time falls at or after a therapist's already-recorded
  * check-out for that date — i.e. they've clocked out and shouldn't be booked into any
  * slot from that point through the rest of the day.
