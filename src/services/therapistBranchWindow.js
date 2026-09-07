@@ -73,6 +73,47 @@ export function computeTherapistBranchAt(transfers, fallbackBranchId, atDate) {
 }
 
 /**
+ * Given a therapist's staff_transfers rows (raw DB shape, any applied/reverted status),
+ * finds the one relevant to `branchId` and describes it the way the Calendar's orphan-column
+ * fallback (getCalendarBookings, api.js) needs: which direction relative to branchId, and the
+ * real [start, end] window — instead of the caller's default "unknown window, block the whole
+ * column all day."
+ *
+ * Only considers non-permanent, non-return-leg rows with a real revert_at (the same "genuinely
+ * a temporary window" signal already used by the transferredOut/transferredIn queries in
+ * getCalendarBookings) that touch branchId on either side. When more than one matches, picks
+ * the most recently created (transferred_at) — the transfer that caused the orphan booking in
+ * the first place is the common case.
+ *
+ * @param {Array} transfers - raw staff_transfers rows for one therapist: each with
+ *   from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date,
+ *   start_time, transferred_at.
+ * @param {string} branchId - the branch whose calendar is being rendered.
+ * @returns {{transferredOut: true, returnsAt: string, transferStartAt: string|null}
+ *   | {transferredIn: true, returnsAt: string, transferStartAt: string|null}
+ *   | null} null when no matching temporary window exists — caller keeps its
+ *   block-everything default, which is correct for a truly permanent/unknown case.
+ */
+export function resolveOrphanTransferWindow(transfers, branchId) {
+  const relevant = (transfers || [])
+    .filter((t) => t && !t.is_permanent && !t.is_return_leg && t.revert_at
+      && (t.from_branch_id === branchId || t.to_branch_id === branchId))
+    .sort((a, b) => new Date(b.transferred_at) - new Date(a.transferred_at));
+
+  const t = relevant[0];
+  if (!t) return null;
+
+  const transferStartAt = t.effective_date && t.start_time
+    ? `${t.effective_date}T${normalizeTime(t.start_time)}+05:45`
+    : null;
+
+  if (t.to_branch_id === branchId) {
+    return { transferredIn: true, returnsAt: t.revert_at, transferStartAt };
+  }
+  return { transferredOut: true, returnsAt: t.revert_at, transferStartAt };
+}
+
+/**
  * Whether a booking's date/start_time falls at or after a therapist's already-recorded
  * check-out for that date — i.e. they've clocked out and shouldn't be booked into any
  * slot from that point through the rest of the day.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout } from './therapistBranchWindow';
+import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 
 const BRANCH_A = 'branch-a';
 const BRANCH_B = 'branch-b';
@@ -10,9 +10,11 @@ function temp({ from, to, effective_date, start_time, revert_at }) {
     from_branch_id: from,
     to_branch_id: to,
     is_permanent: false,
+    is_return_leg: false,
     effective_date,
     start_time,
     revert_at,
+    transferred_at: `${effective_date}T${start_time}+05:45`,
   };
 }
 
@@ -171,5 +173,67 @@ describe('isAfterCheckout', () => {
     // Guards against comparing time-of-day only and ignoring the date.
     const checkOutTime = '2026-09-10T17:00:00+05:45';
     expect(isAfterCheckout(checkOutTime, '2026-09-09', '18:00')).toBe(false);
+  });
+});
+
+describe('resolveOrphanTransferWindow', () => {
+  it('returns a transferredIn window when branchId is the destination', () => {
+    const transfers = [
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-06', start_time: '16:30:00', revert_at: '2026-09-06T18:30:00+05:45' }),
+    ];
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_B)).toEqual({
+      transferredIn: true,
+      returnsAt: '2026-09-06T18:30:00+05:45',
+      transferStartAt: '2026-09-06T16:30:00+05:45',
+    });
+  });
+
+  it('returns a transferredOut window when branchId is the origin', () => {
+    const transfers = [
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-06', start_time: '16:30:00', revert_at: '2026-09-06T18:30:00+05:45' }),
+    ];
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_A)).toEqual({
+      transferredOut: true,
+      returnsAt: '2026-09-06T18:30:00+05:45',
+      transferStartAt: '2026-09-06T16:30:00+05:45',
+    });
+  });
+
+  it('returns null for a permanent transfer touching branchId (caller keeps its conservative block-everything default)', () => {
+    const transfers = [
+      { from_branch_id: BRANCH_A, to_branch_id: BRANCH_B, is_permanent: true, is_return_leg: false, revert_at: null, effective_date: '2026-09-06', start_time: '16:30:00', transferred_at: '2026-09-06T16:30:00+05:45' },
+    ];
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_B)).toBeNull();
+  });
+
+  it('returns null when no transfer touches branchId at all', () => {
+    const transfers = [
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-06', start_time: '16:30:00', revert_at: '2026-09-06T18:30:00+05:45' }),
+    ];
+    expect(resolveOrphanTransferWindow(transfers, 'some-other-branch-id')).toBeNull();
+  });
+
+  it('ignores synthesized return-leg rows and picks the real outbound transfer', () => {
+    const transfers = [
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-06', start_time: '16:30:00', revert_at: '2026-09-06T18:30:00+05:45' }),
+      { from_branch_id: BRANCH_B, to_branch_id: BRANCH_A, is_permanent: false, is_return_leg: true, revert_at: null, effective_date: '2026-09-06', start_time: '18:30:00', transferred_at: '2026-09-06T18:30:00+05:45' },
+    ];
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_B)).toEqual({
+      transferredIn: true,
+      returnsAt: '2026-09-06T18:30:00+05:45',
+      transferStartAt: '2026-09-06T16:30:00+05:45',
+    });
+  });
+
+  it('picks the most recently transferred_at row when more than one matches', () => {
+    const transfers = [
+      { from_branch_id: BRANCH_A, to_branch_id: BRANCH_B, is_permanent: false, is_return_leg: false, revert_at: '2026-09-06T17:00:00+05:45', effective_date: '2026-09-06', start_time: '15:00:00', transferred_at: '2026-09-06T14:00:00+05:45' },
+      { from_branch_id: BRANCH_A, to_branch_id: BRANCH_B, is_permanent: false, is_return_leg: false, revert_at: '2026-09-06T18:30:00+05:45', effective_date: '2026-09-06', start_time: '16:30:00', transferred_at: '2026-09-06T16:10:00+05:45' },
+    ];
+    expect(resolveOrphanTransferWindow(transfers, BRANCH_B)).toEqual({
+      transferredIn: true,
+      returnsAt: '2026-09-06T18:30:00+05:45',
+      transferStartAt: '2026-09-06T16:30:00+05:45',
+    });
   });
 });
