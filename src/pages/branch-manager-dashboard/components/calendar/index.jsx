@@ -1229,19 +1229,27 @@ function isTransferBlockedSlot(therapist, day, hour, minute) {
   const end = toKathmanduParts(therapist.returnsAt);
   if (!end) return true; // unknown revert time — block conservatively
 
-  let insideWindow;
+  // 'before' (hasn't started yet) and 'after' (already ended) both used to collapse to the same
+  // "outside the window" signal, which made transferredIn block an ALREADY-RETURNED visitor's
+  // slots on every later day exactly like a not-yet-arrived one — they're opposite cases.
+  let phase;
   if (start && day < start.date) {
-    insideWindow = false;
+    phase = 'before';
   } else if (day > end.date) {
-    insideWindow = false;
+    phase = 'after';
   } else {
-    const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-    const fromTime = start && day === start.date ? start.time : '00:00';
-    const toTime = day === end.date ? end.time : '23:59';
-    insideWindow = slotTime >= fromTime && slotTime < toTime;
+    phase = 'during';
   }
 
-  return therapist.transferredOut ? insideWindow : !insideWindow;
+  if (therapist.transferredOut) return phase === 'during';
+  // transferredIn: blocked before arrival or outside the visiting slice; never after they've
+  // already returned home.
+  if (phase === 'after') return false;
+  if (phase === 'before') return true;
+  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  const fromTime = start && day === start.date ? start.time : '00:00';
+  const toTime = day === end.date ? end.time : '23:59';
+  return !(slotTime >= fromTime && slotTime < toTime);
 }
 
 // Whether a (day, hour, minute) slot for a therapist falls at/after their recorded
@@ -1304,6 +1312,16 @@ const OperationalCalendar = ({ branchId }) => {
     if (!calendarData?.therapists) return [];
     let list = calendarData.therapists;
     list = list.filter(t => !attendanceMap[t.id]);
+    // A transferredIn/transferredOut column whose window has already closed as of the day
+    // being viewed is a ghost — the staffer is already back where they belong (or the DB just
+    // hasn't caught up yet via the cron), so don't render them here at all rather than an
+    // empty/fully-bookable column with a stale "Visiting"/"Transferred" badge.
+    list = list.filter(t => {
+      if (!t.transferredIn && !t.transferredOut) return true;
+      const end = toKathmanduParts(t.returnsAt);
+      if (!end) return true;
+      return currentDate <= end.date;
+    });
     if (showServiceOnly) {
       list = list.filter(t => t.is_service_staff !== false);
     }
@@ -1311,7 +1329,7 @@ const OperationalCalendar = ({ branchId }) => {
       list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
     }
     return list;
-  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap]);
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap, currentDate]);
 
   // Close position dropdown on outside click
   useEffect(() => {
