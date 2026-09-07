@@ -1,5 +1,5 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
-import { transformMembership, transformMemberships } from './bookingTransformers';
+import { transformMembership, transformMemberships, toTitleCase } from './bookingTransformers';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
@@ -757,7 +757,7 @@ export async function setDueHolder({ bookingId, dueHolderName }) {
     if (booking.is_locked) {
       return { data: null, error: { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' } };
     }
-    const name = (dueHolderName || '').trim() || null;
+    const name = toTitleCase(dueHolderName) || null;
     const { error: updateError } = await supabase
       .from('bookings')
       .update({ due_holder_name: name })
@@ -1852,6 +1852,7 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
 
 export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy }) {
   try {
+    customerName = toTitleCase(customerName);
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
@@ -2971,10 +2972,6 @@ export async function getTodayInsights(branchId, from, to) {
           card += amount;
         } else if (WALLET_MODES.has(p.payment_mode)) {
           wallet += amount;
-          if (p.payment_mode === 'Membership') {
-            membershipRedeemed.count += 1;
-            membershipRedeemed.value += amount;
-          }
         } else if (DIGITAL_MODES.has(p.payment_mode)) {
           digital += amount;
         } else {
@@ -3012,24 +3009,68 @@ export async function getTodayInsights(branchId, from, to) {
       value: (issued || []).reduce((sum, v) => sum + Number(v.total_amount_issued), 0),
     };
 
-    // 5. Memberships sold (deposits) in range — org-scoped via RLS (no branch column on
-    // membership_transactions), so do NOT withBranch() this query. rangeEnd is a Nepal calendar
-    // date; the exclusive upper bound is the next day's Nepal midnight (+05:45).
+    // 5. Memberships sold (deposits) in range, branch-scoped (migration-156).
+    // rangeEnd is a Nepal calendar date; the exclusive upper bound is the next
+    // day's Nepal midnight (+05:45).
     const nextDayBoundary = new Date(`${rangeEnd}T00:00:00+05:45`);
     nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
-    const { data: deposits, error: depositsError } = await supabase
+    let depositsQuery = supabase
       .from('membership_transactions')
       .select('amount, created_at')
       .eq('kind', 'deposit')
       .gte('created_at', `${rangeStart}T00:00:00+05:45`)
       .lt('created_at', nextDayBoundary.toISOString());
+    depositsQuery = withBranch(depositsQuery, branchId);
+    const { data: deposits, error: depositsError } = await depositsQuery;
     if (depositsError) throw depositsError;
     const membershipSold = {
       count: (deposits || []).length,
       value: (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0),
     };
 
-    // 6. Staff utilization (reuse existing intelligence function)
+    // 5b. Memberships redeemed (deductions) in range, branch-scoped — direct
+    // ledger filter, consistent with Sold (migration-156).
+    let deductionsQuery = supabase
+      .from('membership_transactions')
+      .select('amount, created_at')
+      .eq('kind', 'deduction')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    deductionsQuery = withBranch(deductionsQuery, branchId);
+    const { data: deductions, error: deductionsError } = await deductionsQuery;
+    if (deductionsError) throw deductionsError;
+    membershipRedeemed = {
+      count: (deductions || []).length,
+      value: (deductions || []).reduce((sum, d) => sum + Math.abs(Number(d.amount)), 0),
+    };
+
+    // 6. Packages sold (issued) in range, branch-scoped.
+    let packagesIssuedQuery = supabase
+      .from('packages')
+      .select('paid_amount')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    packagesIssuedQuery = withBranch(packagesIssuedQuery, branchId);
+    const { data: packagesIssued, error: packagesIssuedError } = await packagesIssuedQuery;
+    if (packagesIssuedError) throw packagesIssuedError;
+    const packageSold = {
+      count: (packagesIssued || []).length,
+      value: (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0),
+    };
+
+    // 7. Packages redeemed (sessions used) in range, branch-scoped. No per-redemption
+    // currency amount — sessions are counted, not priced individually.
+    let packageRedemptionsQuery = supabase
+      .from('package_redemptions')
+      .select('id')
+      .gte('redeemed_date', rangeStart)
+      .lte('redeemed_date', rangeEnd);
+    packageRedemptionsQuery = withBranch(packageRedemptionsQuery, branchId);
+    const { data: packagesRedeemed, error: packagesRedeemedError } = await packageRedemptionsQuery;
+    if (packagesRedeemedError) throw packagesRedeemedError;
+    const packageRedeemed = { count: (packagesRedeemed || []).length };
+
+    // 8. Staff utilization (reuse existing intelligence function)
     const { data: utilization, error: utilizationError } = await getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd });
     if (utilizationError) throw utilizationError;
 
@@ -3044,6 +3085,8 @@ export async function getTodayInsights(branchId, from, to) {
         membershipSold,
         voucherClaimed,
         voucherDistributed,
+        packageSold,
+        packageRedeemed,
         staffUtilization: {
           avgPercent: utilization?.summary?.avgTherapistUtilization ?? 0,
           therapists: utilization?.therapistUtilization ?? [],
@@ -4153,6 +4196,46 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     if (bookingsError) throw bookingsError;
 
+    // A PERMANENTLY transferred-out therapist gets no proactive column above (by design —
+    // see the is_permanent=false filter comment), but a booking made before/at the transfer
+    // can still reference them at this branch. Without a column, CalendarGrid's
+    // isTherapistVisible() can't place it and it silently falls into "Unassigned" (or, for a
+    // shared/multi-therapist booking, silently drops that co-therapist's copy entirely — see
+    // CalendarGrid.jsx's isTherapistVisible skip in the booking_therapists loop). Scan both
+    // storage representations (flat therapist_id AND the booking_therapists junction, same
+    // "two representations of the same fact" duality resolveSingleTherapist documents) so
+    // both single- and multi-therapist bookings, and legacy rows that only ever populated the
+    // junction table, all get a column. Add one ONLY for therapists an actual booking here
+    // demands, not preemptively.
+    const knownTherapistIds = new Set(mergedTherapists.map(t => t.id));
+    const orphanTherapistIds = [...new Set(
+      (bookings || [])
+        .flatMap(b => [
+          b.therapist_id,
+          ...(b.booking_therapists || []).map(bt => bt.therapist_id),
+        ])
+        .filter(id => id && !knownTherapistIds.has(id))
+    )];
+
+    let finalTherapists = mergedTherapists;
+    if (orphanTherapistIds.length > 0) {
+      const { data: orphanTherapists, error: orphanError } = await supabase
+        .from('therapists')
+        .select('id, name, gender, specialties, position, is_service_staff, display_order')
+        .in('id', orphanTherapistIds);
+      if (orphanError) throw orphanError;
+
+      finalTherapists = [
+        ...mergedTherapists,
+        ...(orphanTherapists || []).map(t => ({
+          ...t,
+          transferredOut: true,
+          returnsAt: null,
+          transferStartAt: null,
+        })),
+      ].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
+    }
+
     return {
       data: {
         branchHours: {
@@ -4160,7 +4243,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           closeTime: branch.close_time || '21:00:00',
           timezone: branch.timezone || 'Asia/Kathmandu',
         },
-        therapists: mergedTherapists,
+        therapists: finalTherapists,
         rooms: roomsResult.data || [],
         bookings: bookings || [],
         checkedOutByTherapistAndDate,
@@ -4197,6 +4280,7 @@ export async function createBooking({
   customerAccountId,
 }) {
   try {
+    customerName = toTitleCase(customerName);
     const resolvedBranchId = resolveBranchId(branchId);
 
     // 1. Fetch service for duration + price
@@ -4903,6 +4987,7 @@ export async function fetchTherapistsForManagement(branchId) {
 
 export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId }) {
   try {
+    name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -4964,6 +5049,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
 
 export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff }) {
   try {
+    name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -8627,6 +8713,7 @@ export async function findOrCreateCustomer({ orgId, branchId, fullName, phone, e
     if (!orgId || !branchId || !fullName) {
       return { data: null, error: { code: 'INVALID_INPUT', message: 'Org, branch, and name are required.' } };
     }
+    fullName = toTitleCase(fullName);
     // Canonical E.164 so the same number always resolves to the same customer
     // regardless of formatting / country code. See src/utils/phone.js.
     const normalizedPhone = toE164(phone);
@@ -9125,7 +9212,7 @@ export async function getCustomerMembershipTransactions(membershipId) {
   }
 }
 
-export async function enrollMember({ customerId, tierId, initialDeposit, paymentMode, notes = null }) {
+export async function enrollMember({ customerId, tierId, initialDeposit, paymentMode, notes = null, branchId = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9136,6 +9223,7 @@ export async function enrollMember({ customerId, tierId, initialDeposit, payment
       p_initial_deposit: initialDeposit,
       p_payment_mode: paymentMode,
       p_notes: notes,
+      p_branch_id: isOverallBranch(branchId) ? null : branchId,
     });
     if (error) throw error;
     capture('staff_membership_enrolled', { tier_id: tierId, initial_deposit: initialDeposit, payment_mode: paymentMode });
@@ -9146,7 +9234,7 @@ export async function enrollMember({ customerId, tierId, initialDeposit, payment
   }
 }
 
-export async function topUpMembership({ membershipId, amount, paymentMode, notes = null }) {
+export async function topUpMembership({ membershipId, amount, paymentMode, notes = null, branchId = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9159,6 +9247,7 @@ export async function topUpMembership({ membershipId, amount, paymentMode, notes
       p_booking_id: null,
       p_payment_id: null,
       p_notes: notes,
+      p_branch_id: isOverallBranch(branchId) ? null : branchId,
     });
     if (error) throw error;
     capture('staff_membership_topup', { membership_id: membershipId, amount, payment_mode: paymentMode });
@@ -9172,7 +9261,7 @@ export async function topUpMembership({ membershipId, amount, paymentMode, notes
 // Renews a depleted/lapsed membership: records the deposit AND starts a fresh
 // validity cycle from today (optionally on a different tier) -- unlike
 // topUpMembership, which just adds to the balance without touching dates.
-export async function renewMembership({ membershipId, amount, paymentMode, tierId = null, notes = null }) {
+export async function renewMembership({ membershipId, amount, paymentMode, tierId = null, notes = null, branchId = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9183,6 +9272,7 @@ export async function renewMembership({ membershipId, amount, paymentMode, tierI
       p_payment_mode: paymentMode,
       p_tier_id: tierId,
       p_notes: notes,
+      p_branch_id: isOverallBranch(branchId) ? null : branchId,
     });
     if (error) throw error;
     capture('staff_membership_renewed', { membership_id: membershipId, amount, payment_mode: paymentMode, tier_id: tierId });
@@ -9197,7 +9287,7 @@ export async function renewMembership({ membershipId, amount, paymentMode, tierI
 // the expiry date forward. Unlike renewMembership, this never touches balance/
 // total_deposited/tier -- the existing wallet balance is simply made usable
 // again. Only valid while the membership is actually lapsed (enforced in the RPC).
-export async function extendMembership({ membershipId, newExpiryDate, notes = null }) {
+export async function extendMembership({ membershipId, newExpiryDate, notes = null, branchId = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9206,6 +9296,7 @@ export async function extendMembership({ membershipId, newExpiryDate, notes = nu
       p_membership_id: membershipId,
       p_new_expiry_date: newExpiryDate,
       p_notes: notes,
+      p_branch_id: isOverallBranch(branchId) ? null : branchId,
     });
     if (error) throw error;
     capture('staff_membership_extended', { membership_id: membershipId, new_expiry_date: newExpiryDate });
@@ -9242,7 +9333,7 @@ export async function deductMembership({ membershipId, amount, bookingId = null,
   }
 }
 
-export async function giftBirthdayPerk({ membershipId, notes = null }) {
+export async function giftBirthdayPerk({ membershipId, notes = null, branchId = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9255,6 +9346,7 @@ export async function giftBirthdayPerk({ membershipId, notes = null }) {
       p_booking_id: null,
       p_payment_id: null,
       p_notes: notes,
+      p_branch_id: isOverallBranch(branchId) ? null : branchId,
     });
     if (error) throw error;
     capture('staff_membership_birthday_perk', { membership_id: membershipId });
@@ -9267,7 +9359,7 @@ export async function giftBirthdayPerk({ membershipId, notes = null }) {
 
 // Admin-only correction (positive OR negative amount). The DB CHECK enforces a non-zero
 // value, and the SECURITY DEFINER fn enforces the role + required note.
-export async function adjustMembership({ membershipId, amount, notes }) {
+export async function adjustMembership({ membershipId, amount, notes, branchId = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9280,6 +9372,7 @@ export async function adjustMembership({ membershipId, amount, notes }) {
       p_booking_id: null,
       p_payment_id: null,
       p_notes: notes,
+      p_branch_id: isOverallBranch(branchId) ? null : branchId,
     });
     if (error) throw error;
     capture('staff_membership_adjusted', { membership_id: membershipId, amount });
@@ -9378,6 +9471,7 @@ export async function issueVoucher({
   customerId = null, tenders = [], voucherCode = null,
 }) {
   try {
+    guestName = toTitleCase(guestName);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -9527,6 +9621,7 @@ export async function claimVoucher({
   serviceClaimed = null, branchClaimedId, notes = null,
 }) {
   try {
+    guestNameUsedBy = toTitleCase(guestNameUsedBy);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -9885,6 +9980,7 @@ export async function issuePackage({
   sessionsTotal = null, remarks = null,
 }) {
   try {
+    guestName = toTitleCase(guestName);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 

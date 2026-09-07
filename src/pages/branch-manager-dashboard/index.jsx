@@ -641,7 +641,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'reward-catalog' && CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) && <RewardCatalogPanel />}
               {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
-              {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel />}
+              {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
               {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
               {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}

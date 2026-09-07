@@ -7,7 +7,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 }
 
-const TopUpModal = ({ membership, onClose, onSuccess }) => {
+const TopUpModal = ({ membership, branchId, onClose, onSuccess }) => {
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
   const [notes, setNotes] = useState('');
@@ -37,6 +37,7 @@ const TopUpModal = ({ membership, onClose, onSuccess }) => {
       amount: amountNum,
       paymentMode,
       notes: notes.trim() || null,
+      branchId,
     });
     setSubmitting(false);
     if (rpcError) {

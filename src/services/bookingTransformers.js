@@ -11,6 +11,20 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
+// Normalize a person's name to Title Case (customers, therapists, due-holders).
+// Lowercases each word then capitalizes its first letter, preserving hyphens/
+// apostrophes within a word (e.g. "mary-jane o'brien" -> "Mary-Jane O'Brien").
+export function toTitleCase(str) {
+  if (!str) return str;
+  return str
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/[a-zÀ-ɏ]+/gi, (word) =>
+      word.replace(/(^|[-'])([a-z])/g, (m, sep, letter) => sep + letter.toUpperCase())
+    );
+}
+
 // Map lowercase UI statuses back to Title-Case DB values for API calls
 const STATUS_TO_DB = {
   'pending': 'Pending',

@@ -24,7 +24,7 @@ function suggestedExpiry(validityDays) {
   return d.toISOString().slice(0, 10);
 }
 
-const ExtendMembershipModal = ({ membership, onClose, onSuccess }) => {
+const ExtendMembershipModal = ({ membership, branchId, onClose, onSuccess }) => {
   const [newExpiryDate, setNewExpiryDate] = useState(() => suggestedExpiry(membership.tierValidityDays));
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -50,6 +50,7 @@ const ExtendMembershipModal = ({ membership, onClose, onSuccess }) => {
       membershipId: membership.id,
       newExpiryDate,
       notes: notes.trim() || null,
+      branchId,
     });
     setSubmitting(false);
     if (rpcError) {

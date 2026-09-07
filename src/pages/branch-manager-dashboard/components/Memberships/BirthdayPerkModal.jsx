@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { giftBirthdayPerk } from '../../../../services/api';
 
-const BirthdayPerkModal = ({ membership, onClose, onSuccess }) => {
+const BirthdayPerkModal = ({ membership, branchId, onClose, onSuccess }) => {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -20,6 +20,7 @@ const BirthdayPerkModal = ({ membership, onClose, onSuccess }) => {
     const { error: rpcError } = await giftBirthdayPerk({
       membershipId: membership.id,
       notes: notes.trim() || null,
+      branchId,
     });
     setSubmitting(false);
     if (rpcError) {

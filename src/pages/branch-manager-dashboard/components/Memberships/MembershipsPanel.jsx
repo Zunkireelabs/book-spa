@@ -30,7 +30,7 @@ function formatDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-const MembershipsPanel = () => {
+const MembershipsPanel = ({ branchId }) => {
   const { profile } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -298,6 +298,7 @@ const MembershipsPanel = () => {
         <MembershipDetailModal
           membershipId={selectedId}
           isAdmin={profile?.role === 'admin'}
+          branchId={branchId}
           onClose={() => setSelectedId(null)}
           onChanged={loadData}
         />
