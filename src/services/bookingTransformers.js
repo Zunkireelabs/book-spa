@@ -40,6 +40,26 @@ export function toDbStatus(uiStatus) {
   return STATUS_TO_DB[uiStatus] || uiStatus;
 }
 
+/**
+ * Removes bookings from `previousDue` (getCustomerOutstandingBalance's result shape, keyed by
+ * `.bookingId`) that are already present in `related` (fetchRelatedUnpaidBookings's raw-row
+ * result shape, keyed by `.id`) — both key names refer to the same underlying bookings.id UUID.
+ *
+ * Why this exists: BookingActionModal.jsx's Payment tab independently fetches "Related
+ * Services" (matched by customer name + exact date) and "Previous Due" (matched by phone,
+ * across all dates). A real booking_group_id sibling that's unpaid always satisfies BOTH
+ * queries' criteria, so without this dedup it gets listed — and summed into the Grand Total —
+ * twice.
+ *
+ * @param {Array} previousDue - getCustomerOutstandingBalance()'s `data.bookings` array.
+ * @param {Array} related - fetchRelatedUnpaidBookings()'s `data` array.
+ * @returns {Array} previousDue entries whose bookingId doesn't appear in related, order preserved.
+ */
+export function excludeRelatedFromPreviousDue(previousDue, related) {
+  const relatedIds = new Set((related || []).map(r => r.id));
+  return (previousDue || []).filter(pd => !relatedIds.has(pd.bookingId));
+}
+
 export function transformBooking(dbBooking) {
   const therapist = dbBooking.therapist
     ? {
