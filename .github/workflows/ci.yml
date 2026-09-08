@@ -47,6 +47,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm test
+
       - run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
