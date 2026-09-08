@@ -7,6 +7,7 @@ import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
+import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 
@@ -170,32 +171,43 @@ const BookingActionModal = ({
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
     if ((activeTab === 'payment' || activeTab === 'discount') && booking) {
-      fetchRelatedUnpaidBookings({
+      const relatedPromise = fetchRelatedUnpaidBookings({
         customerName: booking.customerName,
         date: booking.date,
         excludeBookingId: booking.bookingId,
-      }).then(result => {
-        setRelatedBookings(result.data || []);
+      });
+      const duePromise = (activeTab === 'payment' && booking?.customerPhone)
+        ? getCustomerOutstandingBalance({
+            customerPhone: booking.customerPhone,
+            branchId,
+            excludeBookingId: booking.bookingId,
+          })
+        : Promise.resolve({ data: { bookings: [] } });
+
+      Promise.all([relatedPromise, duePromise]).then(([relatedResult, dueResult]) => {
+        const related = relatedResult.data || [];
+        setRelatedBookings(related);
         setSelectedDiscountIds(new Set([booking.bookingId]));
         setSelectedApprover('');
         setDiscountSuccess(false);
         setRowDiscountOverrides({});
-      });
-    }
-    if (activeTab === 'payment' && booking?.customerPhone) {
-      getCustomerOutstandingBalance({
-        customerPhone: booking.customerPhone,
-        branchId,
-        excludeBookingId: booking.bookingId,
-      }).then(result => {
-        const bookings = result.data?.bookings || [];
-        setPreviousDueBookings(bookings);
-        // Auto-bundled by default — staff can uncheck individual items.
-        setSelectedPreviousDueIds(new Set(bookings.map(b => b.bookingId)));
+
+        if (activeTab === 'payment') {
+          // Exclude any booking already shown under "Related Services" — a real
+          // booking_group_id sibling that's unpaid always also matches
+          // getCustomerOutstandingBalance's phone-wide criteria, so without this it would be
+          // double-counted in the Grand Total (see BK-20260908-0011/-0012 incident).
+          const bookings = excludeRelatedFromPreviousDue(dueResult.data?.bookings, related);
+          setPreviousDueBookings(bookings);
+          // Auto-bundled by default — staff can uncheck individual items.
+          setSelectedPreviousDueIds(new Set(bookings.map(b => b.bookingId)));
+        }
       }).catch(err => {
-        console.error('[BookingActionModal] getCustomerOutstandingBalance failed:', err.message);
-        setPreviousDueBookings([]);
-        setSelectedPreviousDueIds(new Set());
+        console.error('[BookingActionModal] related/previous-due bookings fetch failed:', err.message);
+        if (activeTab === 'payment') {
+          setPreviousDueBookings([]);
+          setSelectedPreviousDueIds(new Set());
+        }
       });
     } else if (activeTab === 'payment') {
       setPreviousDueBookings([]);

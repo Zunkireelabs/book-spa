@@ -69,7 +69,7 @@ npm run serve
 docker build --build-arg VITE_SUPABASE_URL=... --build-arg VITE_SUPABASE_ANON_KEY=... -t bookspa .
 ```
 
-**No test runner or linter configured.** Testing libraries (`@testing-library/*`) are installed as devDependencies but there is no `test` or `lint` script in package.json. Use `npm run build` as the primary validation gate.
+**`npm test` (vitest) runs the test suite** — a small but growing set of unit tests for pure logic modules (`src/services/*.test.js`). **No linter is configured.** Use `npm run build` as the primary validation gate for anything not covered by a unit test.
 
 ---
 
