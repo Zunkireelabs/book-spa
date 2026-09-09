@@ -3,7 +3,9 @@
 // transfer plus an already-reverted-today one for the same therapist) is NOT itself
 // globally sorted, so dedupeTransfersByKey's "last wins" would pick whichever query's
 // block happened to be concatenated last, not the chronologically latest row. Sort the
-// combined array with this first. Missing date/time sorts first (empty string).
+// combined array with this first. Real rows always have both fields (query-level NOT
+// NULL filters guarantee it); a missing value falls back to '' and sorts by wherever
+// 'T' lands relative to digit characters — not a meaningful contract, just non-throwing.
 export function sortTransfersByTime(rows) {
   return [...rows].sort((a, b) => {
     const aKey = `${a.effective_date || ''}T${a.start_time || ''}`;
