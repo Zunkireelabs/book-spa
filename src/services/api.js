@@ -308,11 +308,18 @@ export async function fetchBookingCreator(bookingId) {
 
 export const PAYMENT_MODES = ['Cash', 'Card', 'MobileBanking', 'Cheque', 'Esewa', 'Khalti', 'Membership'];
 
+// Wallet payment modes are internal credit only (Membership/Referral/Voucher balances) —
+// like SessionPackage, their value was already recognized as revenue when the
+// membership/voucher/referral credit was originally purchased or earned, not when it's
+// later spent down. Shared by getTodayInsights, getDailySummary, and
+// getDailyOperationalReport so all three revenue calculations agree on what to exclude.
+const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
+
 // Bucket key ('cash' | 'card' | 'fonepay') for the simple 3-way cash/card/other
 // split used by getDailySummary() and getDailyOperationalReport() (both the
 // booking-payments and voucher-payments loops in each). Not used by
 // getTodayInsights(), which needs a richer wallet/digital breakdown via its own
-// CARD_MODES/WALLET_MODES/DIGITAL_MODES sets further down this file.
+// CARD_MODES/DIGITAL_MODES sets further down this file (WALLET_MODES above is shared).
 function classifyPaymentMode(mode) {
   if (mode === 'Cash') return 'cash';
   if (mode.includes('Card')) return 'card';
@@ -2836,11 +2843,10 @@ export async function getDailySummary(branchId, date) {
         // update_booking_payment_status() can settle the booking (see
         // recordPayment), but that value was already recognized as revenue
         // when the package itself was purchased — it isn't cash collected
-        // today, so it's excluded here (this scoped fix intentionally does
-        // NOT touch classifyPaymentMode/Membership/VoucherWallet, which have
-        // this same "already-recognized-elsewhere" property but are a
-        // pre-existing gap outside this fix's scope).
-        if (p.payment_mode === 'SessionPackage') continue;
+        // today, so it's excluded here. Wallet modes (Membership/Referral/Voucher
+        // balances, WALLET_MODES) have this identical "already-recognized-elsewhere"
+        // property and are excluded the same way.
+        if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         netRevenue += amount;
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
@@ -2912,15 +2918,14 @@ export async function getDailySummary(branchId, date) {
 // Payment-mode bucketing for the Today's Insights panel. Bank-card processors keep the
 // legacy 'Card' string check plus the named custom bank methods (migration-052 relaxed
 // payment_mode to a free string, so orgs can add more bank names later — this list covers
-// what's configured today). Wallet is internal credit only (Membership/Referral/Voucher
-// balances); Digital is external non-card electronic payment. SessionPackage
-// (migration-141) is skipped entirely before bucketing, not treated as wallet — its value
-// was already recognized as revenue when the package was purchased, so per the
-// cash-based-reconciliation policy it must not be counted as money collected today in any
+// what's configured today). Digital is external non-card electronic payment. SessionPackage
+// (migration-141) and wallet modes (WALLET_MODES, defined near classifyPaymentMode above) are
+// both skipped entirely before bucketing — their value was already recognized as revenue
+// when the package/membership/voucher was originally purchased, so per the
+// cash-based-reconciliation policy neither is counted as money collected today in any
 // bucket, including totalSales. See getDailySummary/getDailyOperationalReport for the same
 // 'today' semantics (bookings.date, not payment created_at) and the same exclusion policy.
 const CARD_MODES = new Set(['Card', 'Nabil', 'GlobalIME', 'NICAsia']);
-const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher']);
 const DIGITAL_MODES = new Set(['Esewa', 'Khalti', 'MobileBanking', 'Cheque']);
 
 export async function getTodayInsights(branchId, from, to) {
@@ -2959,20 +2964,19 @@ export async function getTodayInsights(branchId, from, to) {
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
-        // SessionPackage rows (migration-141) are never counted as money
-        // collected today — that value was already recognized as revenue
-        // when the package itself was purchased (same policy as
-        // getDailySummary/getDailyOperationalReport). Skip entirely, don't
-        // fold into totalSales or any bucket.
-        if (p.payment_mode === 'SessionPackage') continue;
+        // SessionPackage rows (migration-141) and wallet-mode rows (Membership/Referral/
+        // Voucher balances) are never counted as money collected today — that value was
+        // already recognized as revenue when the package/membership/voucher was originally
+        // purchased or earned (same policy as getDailySummary/getDailyOperationalReport).
+        // Skip entirely, don't fold into totalSales or any bucket — the "Redeemed" figures
+        // shown elsewhere on the dashboard (membershipRedeemed etc.) are where this belongs.
+        if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         totalSales += amount;
         if (p.payment_mode === 'Cash') {
           cash += amount;
         } else if (CARD_MODES.has(p.payment_mode) || p.payment_mode.includes('Card')) {
           card += amount;
-        } else if (WALLET_MODES.has(p.payment_mode)) {
-          wallet += amount;
         } else if (DIGITAL_MODES.has(p.payment_mode)) {
           digital += amount;
         } else {
@@ -3346,17 +3350,17 @@ export async function getDailyOperationalReport(branchId, date) {
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
         // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections.
-        // Excludes SessionPackage rows (migration-141) — same policy as getDailySummary:
-        // that value was already recognized as revenue when the package itself was
-        // purchased, so it isn't cash collected today. Without this exclusion,
-        // getDailyOperationalReport would disagree with getDailySummary (whose
-        // netRevenue is what closeDay persists) on any day with a SessionPackage
-        // redemption.
+        // Excludes SessionPackage rows (migration-141) and wallet-mode rows (WALLET_MODES:
+        // Membership/Referral/Voucher balances) — same policy as getDailySummary: that value
+        // was already recognized as revenue when the package/membership/voucher was
+        // originally purchased or earned, so it isn't cash collected today. Without this
+        // exclusion, getDailyOperationalReport would disagree with getDailySummary (whose
+        // netRevenue is what closeDay persists) on any day with such a redemption.
         // Folds in voucherSalesTotal so the live branch matches what the closed
         // snapshot already includes (closeDay persists getDailySummary()'s
         // voucher-inclusive netRevenue).
         netRevenue: paymentRows
-          .filter(p => p.payment_mode !== 'SessionPackage')
+          .filter(p => p.payment_mode !== 'SessionPackage' && !WALLET_MODES.has(p.payment_mode))
           .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
       };
     }
@@ -3373,8 +3377,9 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       paymentBreakdown = { cash: 0, card: 0, fonepay: 0 };
       for (const p of paymentRows) {
-        // SessionPackage rows are never money collected today — see netRevenue above.
-        if (p.payment_mode === 'SessionPackage') continue;
+        // SessionPackage and wallet-mode rows are never money collected today — see
+        // netRevenue above.
+        if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         paymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
       }
