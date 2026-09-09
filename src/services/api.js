@@ -4108,7 +4108,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       // everything OUTSIDE that window (they're only really here for that slice of time).
       supabase
         .from('staff_transfers')
-        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
         .eq('to_branch_id', resolvedBranchId)
         .eq('applied', true)
         .eq('reverted', false)
@@ -4132,7 +4132,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .lte('effective_date', endDate),
       supabase
         .from('staff_transfers')
-        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
         .eq('to_branch_id', resolvedBranchId)
         .eq('applied', true)
         .eq('reverted', true)
@@ -4185,8 +4185,10 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
       }));
 
+    const inRows = [...(transferredInResult.data || []), ...(revertedInResult.data || [])];
+
     const transferredInById = {};
-    [...(transferredInResult.data || []), ...(revertedInResult.data || [])].forEach(t => {
+    inRows.forEach(t => {
       transferredInById[t.therapist_id] = {
         fromBranch: t.fromBranch?.name || null,
         returnsAt: t.revert_at,
@@ -4198,10 +4200,25 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t
     );
 
+    // A visitor who has ALREADY reverted home is no longer in therapistsResult (their
+    // branch_id points home again), so transferredInById above can't tag an existing row —
+    // build a real column for them instead, the same way transferredOutTherapists already
+    // does for therapists who are away. Without this, a branch's calendar has no record at
+    // all that the visit happened once it's over, even on the same day.
+    const transferredInTherapists = inRows
+      .filter(t => t.therapist && !activeTherapistIds.has(t.therapist.id))
+      .map(t => ({
+        ...t.therapist,
+        transferredIn: true,
+        fromBranch: t.fromBranch?.name || null,
+        returnsAt: t.revert_at,
+        transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
+      }));
+
     // Slot the transferred-out column back into its ORIGINAL position among the branch's
     // normal columns (by the preserved origin display_order, then name) instead of always
     // appending it at the end.
-    const mergedTherapists = [...normalTherapists, ...transferredOutTherapists]
+    const mergedTherapists = [...normalTherapists, ...transferredOutTherapists, ...transferredInTherapists]
       .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
 
     // 3. Fetch bookings in date range, excluding Cancelled and No Show
