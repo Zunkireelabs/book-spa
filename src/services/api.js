@@ -4066,7 +4066,10 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // 2. Fetch therapists, rooms, and any staffers currently transferred OUT of this
     //    branch (they still show as a column here — booking creation is already
     //    blocked for them since their branch_id now points elsewhere — see migration-145).
-    const [therapistsResult, roomsResult, transferredOutResult, transferredInResult, checkedOutResult] = await Promise.all([
+    const [
+      therapistsResult, roomsResult, transferredOutResult, transferredInResult,
+      revertedOutResult, revertedInResult, checkedOutResult,
+    ] = await Promise.all([
       supabase
         .from('therapists')
         .select('id, name, gender, specialties, position, is_service_staff, display_order')
@@ -4111,6 +4114,32 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('reverted', false)
         .eq('is_permanent', false)
         .not('revert_at', 'is', null),
+      // Same two queries again, but for transfers that have ALREADY reverted within the
+      // viewed date range — without this, a transfer's shaded [start, revert_at] window
+      // vanishes from the calendar the instant it reverts, even on the same day it
+      // happened (getTransferBlockRange below is already date/time-range-aware and would
+      // render this correctly — it just never receives the flag once `reverted` flips).
+      // Bounded to [startDate, endDate] so this can't resurrect arbitrarily old transfers.
+      supabase
+        .from('staff_transfers')
+        .select('id, revert_at, effective_date, start_time, from_display_order, therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
+        .eq('from_branch_id', resolvedBranchId)
+        .eq('applied', true)
+        .eq('reverted', true)
+        .eq('is_permanent', false)
+        .not('revert_at', 'is', null)
+        .gte('effective_date', startDate)
+        .lte('effective_date', endDate),
+      supabase
+        .from('staff_transfers')
+        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+        .eq('to_branch_id', resolvedBranchId)
+        .eq('applied', true)
+        .eq('reverted', true)
+        .eq('is_permanent', false)
+        .not('revert_at', 'is', null)
+        .gte('effective_date', startDate)
+        .lte('effective_date', endDate),
       // Therapists who've already checked out (for real, not just marked absent/leave) on
       // some date in this range — the calendar blocks the rest of that day's column for
       // them, same as a transfer-out window, so a booking can't be dropped onto someone
@@ -4128,6 +4157,8 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (roomsResult.error) throw roomsResult.error;
     if (transferredOutResult.error) throw transferredOutResult.error;
     if (transferredInResult.error) throw transferredInResult.error;
+    if (revertedOutResult.error) throw revertedOutResult.error;
+    if (revertedInResult.error) throw revertedInResult.error;
     if (checkedOutResult.error) throw checkedOutResult.error;
 
     // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
@@ -4138,7 +4169,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     });
 
     const activeTherapistIds = new Set((therapistsResult.data || []).map(t => t.id));
-    const transferredOutTherapists = (transferredOutResult.data || [])
+    const transferredOutTherapists = [...(transferredOutResult.data || []), ...(revertedOutResult.data || [])]
       .filter(t => t.therapist && !activeTherapistIds.has(t.therapist.id))
       .map(t => ({
         ...t.therapist,
@@ -4155,7 +4186,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       }));
 
     const transferredInById = {};
-    (transferredInResult.data || []).forEach(t => {
+    [...(transferredInResult.data || []), ...(revertedInResult.data || [])].forEach(t => {
       transferredInById[t.therapist_id] = {
         fromBranch: t.fromBranch?.name || null,
         returnsAt: t.revert_at,
