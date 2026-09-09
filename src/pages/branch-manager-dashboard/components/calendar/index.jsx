@@ -26,6 +26,7 @@ import {
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
+import { isSlotInsideTransferWindow } from '../../../../services/transferSlotWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -1227,29 +1228,10 @@ function isTransferBlockedSlot(therapist, day, hour, minute) {
   if (!therapist?.transferredOut && !therapist?.transferredIn) return false;
   const start = toKathmanduParts(therapist.transferStartAt);
   const end = toKathmanduParts(therapist.returnsAt);
-  if (!end) return true; // unknown revert time — block conservatively
-
-  // 'before' (hasn't started yet) and 'after' (already ended) both used to collapse to the same
-  // "outside the window" signal, which made transferredIn block an ALREADY-RETURNED visitor's
-  // slots on every later day exactly like a not-yet-arrived one — they're opposite cases.
-  let phase;
-  if (start && day < start.date) {
-    phase = 'before';
-  } else if (day > end.date) {
-    phase = 'after';
-  } else {
-    phase = 'during';
-  }
-
-  if (therapist.transferredOut) return phase === 'during';
-  // transferredIn: blocked before arrival or outside the visiting slice; never after they've
-  // already returned home.
-  if (phase === 'after') return false;
-  if (phase === 'before') return true;
-  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  const fromTime = start && day === start.date ? start.time : '00:00';
-  const toTime = day === end.date ? end.time : '23:59';
-  return !(slotTime >= fromTime && slotTime < toTime);
+  const insideWindow = isSlotInsideTransferWindow(day, hour, minute, start, end);
+  // transferredOut: blocked WHILE the window is active (they're away).
+  // transferredIn: blocked OUTSIDE the window (they're only actually visiting for that slice).
+  return therapist.transferredOut ? insideWindow : !insideWindow;
 }
 
 // Whether a (day, hour, minute) slot for a therapist falls at/after their recorded
