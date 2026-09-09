@@ -26,6 +26,7 @@ import {
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
+import { getTransferWindowPhase, isWithinTransferDaySlice } from '../../../../services/transferSlotWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -1229,27 +1230,16 @@ function isTransferBlockedSlot(therapist, day, hour, minute) {
   const end = toKathmanduParts(therapist.returnsAt);
   if (!end) return true; // unknown revert time — block conservatively
 
-  // 'before' (hasn't started yet) and 'after' (already ended) both used to collapse to the same
-  // "outside the window" signal, which made transferredIn block an ALREADY-RETURNED visitor's
-  // slots on every later day exactly like a not-yet-arrived one — they're opposite cases.
-  let phase;
-  if (start && day < start.date) {
-    phase = 'before';
-  } else if (day > end.date) {
-    phase = 'after';
-  } else {
-    phase = 'during';
+  const phase = getTransferWindowPhase(day, start, end);
+  if (therapist.transferredOut) {
+    if (phase !== 'during') return false;
+    return isWithinTransferDaySlice(day, hour, minute, start, end);
   }
-
-  if (therapist.transferredOut) return phase === 'during';
   // transferredIn: blocked before arrival or outside the visiting slice; never after they've
-  // already returned home.
-  if (phase === 'after') return false;
+  // already returned home ('before' and 'after' are NOT symmetric for this direction).
   if (phase === 'before') return true;
-  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  const fromTime = start && day === start.date ? start.time : '00:00';
-  const toTime = day === end.date ? end.time : '23:59';
-  return !(slotTime >= fromTime && slotTime < toTime);
+  if (phase === 'after') return false;
+  return !isWithinTransferDaySlice(day, hour, minute, start, end);
 }
 
 // Whether a (day, hour, minute) slot for a therapist falls at/after their recorded
