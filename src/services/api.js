@@ -1,5 +1,6 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase } from './bookingTransformers';
+import { dedupeTransfersByKey } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
@@ -4101,7 +4102,9 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('applied', true)
         .eq('reverted', false)
         .eq('is_permanent', false)
-        .not('revert_at', 'is', null),
+        .not('revert_at', 'is', null)
+        .order('effective_date', { ascending: true })
+        .order('start_time', { ascending: true }),
       // Staffers currently visiting THIS branch on a temporary transfer — they already
       // appear normally in therapistsResult above (branch_id points here); this tags them
       // with where they're from + their actual visiting window, so the calendar can block
@@ -4113,7 +4116,9 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('applied', true)
         .eq('reverted', false)
         .eq('is_permanent', false)
-        .not('revert_at', 'is', null),
+        .not('revert_at', 'is', null)
+        .order('effective_date', { ascending: true })
+        .order('start_time', { ascending: true }),
       // Same two queries again, but for transfers that have ALREADY reverted within the
       // viewed date range — without this, a transfer's shaded [start, revert_at] window
       // vanishes from the calendar the instant it reverts, even on the same day it
@@ -4129,7 +4134,9 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('is_permanent', false)
         .not('revert_at', 'is', null)
         .gte('effective_date', startDate)
-        .lte('effective_date', endDate),
+        .lte('effective_date', endDate)
+        .order('effective_date', { ascending: true })
+        .order('start_time', { ascending: true }),
       supabase
         .from('staff_transfers')
         .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
@@ -4139,7 +4146,9 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('is_permanent', false)
         .not('revert_at', 'is', null)
         .gte('effective_date', startDate)
-        .lte('effective_date', endDate),
+        .lte('effective_date', endDate)
+        .order('effective_date', { ascending: true })
+        .order('start_time', { ascending: true }),
       // Therapists who've already checked out (for real, not just marked absent/leave) on
       // some date in this range — the calendar blocks the rest of that day's column for
       // them, same as a transfer-out window, so a booking can't be dropped onto someone
@@ -4169,7 +4178,15 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     });
 
     const activeTherapistIds = new Set((therapistsResult.data || []).map(t => t.id));
-    const transferredOutTherapists = [...(transferredOutResult.data || []), ...(revertedOutResult.data || [])]
+    // Rows are ordered ascending by effective_date/start_time (see the .order() calls above),
+    // so keeping the LAST row per therapist id keeps their most recent transfer — this collapses
+    // a therapist who round-tripped more than once in the viewed range down to a single calendar
+    // column instead of one column per round trip.
+    const dedupedOutRows = dedupeTransfersByKey(
+      [...(transferredOutResult.data || []), ...(revertedOutResult.data || [])],
+      t => t.therapist?.id
+    );
+    const transferredOutTherapists = dedupedOutRows
       .filter(t => t.therapist && !activeTherapistIds.has(t.therapist.id))
       .map(t => ({
         ...t.therapist,
@@ -4185,7 +4202,12 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
       }));
 
-    const inRows = [...(transferredInResult.data || []), ...(revertedInResult.data || [])];
+    // Same dedup as the out-side: rows are ordered ascending, so the last row per
+    // therapist_id is their most recent transfer into this branch.
+    const inRows = dedupeTransfersByKey(
+      [...(transferredInResult.data || []), ...(revertedInResult.data || [])],
+      t => t.therapist_id
+    );
 
     const transferredInById = {};
     inRows.forEach(t => {
