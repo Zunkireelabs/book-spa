@@ -26,7 +26,7 @@ import {
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
-import { isSlotInsideTransferWindow } from '../../../../services/transferSlotWindow';
+import { getTransferWindowPhase, isWithinTransferDaySlice } from '../../../../services/transferSlotWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -1228,10 +1228,18 @@ function isTransferBlockedSlot(therapist, day, hour, minute) {
   if (!therapist?.transferredOut && !therapist?.transferredIn) return false;
   const start = toKathmanduParts(therapist.transferStartAt);
   const end = toKathmanduParts(therapist.returnsAt);
-  const insideWindow = isSlotInsideTransferWindow(day, hour, minute, start, end);
-  // transferredOut: blocked WHILE the window is active (they're away).
-  // transferredIn: blocked OUTSIDE the window (they're only actually visiting for that slice).
-  return therapist.transferredOut ? insideWindow : !insideWindow;
+  if (!end) return true; // unknown revert time — block conservatively
+
+  const phase = getTransferWindowPhase(day, start, end);
+  if (therapist.transferredOut) {
+    if (phase !== 'during') return false;
+    return isWithinTransferDaySlice(day, hour, minute, start, end);
+  }
+  // transferredIn: blocked before arrival or outside the visiting slice; never after they've
+  // already returned home ('before' and 'after' are NOT symmetric for this direction).
+  if (phase === 'before') return true;
+  if (phase === 'after') return false;
+  return !isWithinTransferDaySlice(day, hour, minute, start, end);
 }
 
 // Whether a (day, hour, minute) slot for a therapist falls at/after their recorded
