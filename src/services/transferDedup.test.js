@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dedupeTransfersByKey } from './transferDedup';
+import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 
 describe('dedupeTransfersByKey', () => {
   it('returns rows unchanged when every key is unique', () => {
@@ -51,5 +51,48 @@ describe('dedupeTransfersByKey', () => {
       { therapist: { id: 't1' }, start: '14:00' },
       { therapist: { id: 't2' }, start: '10:00' },
     ]);
+  });
+
+  it('picks the chronologically LATEST row, not just the last one in a two-block concatenation', () => {
+    // Reproduces the real getCalendarBookings shape: a still-LIVE transfer (from the live
+    // query, listed FIRST in the concatenation) can be chronologically AFTER an
+    // already-reverted transfer for the same therapist earlier today (from the
+    // reverted-today query, listed SECOND) — per-query .order() alone can't fix this,
+    // rows must be globally sorted before dedupe or the stale row wins.
+    const liveRow = { therapist_id: 't1', effective_date: '2026-09-09', start_time: '15:00:00', label: 'live-3pm' };
+    const revertedTodayRow = { therapist_id: 't1', effective_date: '2026-09-09', start_time: '09:00:00', label: 'reverted-9am' };
+    const rows = sortTransfersByTime([liveRow, revertedTodayRow]);
+    const result = dedupeTransfersByKey(rows, r => r.therapist_id);
+    expect(result).toEqual([liveRow]);
+  });
+});
+
+describe('sortTransfersByTime', () => {
+  it('sorts ascending by effective_date then start_time', () => {
+    const rows = [
+      { effective_date: '2026-09-09', start_time: '15:00:00', label: 'c' },
+      { effective_date: '2026-09-08', start_time: '20:00:00', label: 'a' },
+      { effective_date: '2026-09-09', start_time: '09:00:00', label: 'b' },
+    ];
+    expect(sortTransfersByTime(rows).map(r => r.label)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('does not mutate the input array', () => {
+    const rows = [
+      { effective_date: '2026-09-09', start_time: '15:00:00' },
+      { effective_date: '2026-09-08', start_time: '09:00:00' },
+    ];
+    const rowsCopy = JSON.parse(JSON.stringify(rows));
+    sortTransfersByTime(rows);
+    expect(rows).toEqual(rowsCopy);
+  });
+
+  it('does not throw on a missing effective_date/start_time (defensive — real rows always have both)', () => {
+    const rows = [
+      { effective_date: '2026-09-09', start_time: '09:00:00', label: 'has-date' },
+      { effective_date: null, start_time: null, label: 'no-date' },
+    ];
+    expect(() => sortTransfersByTime(rows)).not.toThrow();
+    expect(sortTransfersByTime(rows).map(r => r.label).sort()).toEqual(['has-date', 'no-date']);
   });
 });

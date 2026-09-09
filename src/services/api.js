@@ -1,6 +1,6 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase } from './bookingTransformers';
-import { dedupeTransfersByKey } from './transferDedup';
+import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
@@ -4178,12 +4178,13 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     });
 
     const activeTherapistIds = new Set((therapistsResult.data || []).map(t => t.id));
-    // Rows are ordered ascending by effective_date/start_time (see the .order() calls above),
-    // so keeping the LAST row per therapist id keeps their most recent transfer — this collapses
-    // a therapist who round-tripped more than once in the viewed range down to a single calendar
-    // column instead of one column per round trip.
+    // Each query is individually ordered ascending, but concatenating two separately-ordered
+    // result sets is NOT itself globally sorted (a still-live transfer can be chronologically
+    // AFTER an already-reverted-today one for the same therapist) — sort the combined array
+    // before deduping so "last row per therapist id" reliably means their most recent transfer,
+    // collapsing a round-tripped-more-than-once therapist down to a single calendar column.
     const dedupedOutRows = dedupeTransfersByKey(
-      [...(transferredOutResult.data || []), ...(revertedOutResult.data || [])],
+      sortTransfersByTime([...(transferredOutResult.data || []), ...(revertedOutResult.data || [])]),
       t => t.therapist?.id
     );
     const transferredOutTherapists = dedupedOutRows
@@ -4202,10 +4203,9 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
       }));
 
-    // Same dedup as the out-side: rows are ordered ascending, so the last row per
-    // therapist_id is their most recent transfer into this branch.
+    // Same dedup + global sort as the out-side.
     const inRows = dedupeTransfersByKey(
-      [...(transferredInResult.data || []), ...(revertedInResult.data || [])],
+      sortTransfersByTime([...(transferredInResult.data || []), ...(revertedInResult.data || [])]),
       t => t.therapist_id
     );
 

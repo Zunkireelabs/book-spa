@@ -1,3 +1,17 @@
+// Sorts ascending by effective_date, then start_time. A per-query .order() only sorts
+// WITHIN that query — concatenating two separately-ordered result sets (e.g. a still-live
+// transfer plus an already-reverted-today one for the same therapist) is NOT itself
+// globally sorted, so dedupeTransfersByKey's "last wins" would pick whichever query's
+// block happened to be concatenated last, not the chronologically latest row. Sort the
+// combined array with this first. Missing date/time sorts first (empty string).
+export function sortTransfersByTime(rows) {
+  return [...rows].sort((a, b) => {
+    const aKey = `${a.effective_date || ''}T${a.start_time || ''}`;
+    const bKey = `${b.effective_date || ''}T${b.start_time || ''}`;
+    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+  });
+}
+
 // A therapist transferred out and back more than once within the same viewed range
 // would otherwise produce two rows for the same id — two calendar columns for one
 // person, or an undefined "which window wins." Rows must already be given in the
