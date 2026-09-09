@@ -20,6 +20,14 @@ function formatDateOnly(d) {
   });
 }
 
+// The actual moment the transfer took effect (Kathmandu wall clock) — distinct from
+// `transferredAt`, which is just when the row was logged/created and can lag the real
+// event by hours if entered retroactively.
+function formatTransferTime(effectiveDate, startTime) {
+  if (!effectiveDate || !startTime) return '—';
+  return formatDateTime(`${effectiveDate}T${startTime}+05:45`);
+}
+
 // e.g. 90 -> "1h 30m", 45 -> "45m", 1500 -> "1d 1h"
 function formatDuration(minutes) {
   const abs = Math.round(Math.abs(minutes));
@@ -126,7 +134,7 @@ const TransferReportPanel = () => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Recorded', 'Staff', 'From', 'To', 'Effective Date', 'Type', 'Status', 'Reverts At', 'Transferred By', 'Remarks'];
+    const header = ['Transferred At', 'Staff', 'From', 'To', 'Effective Date', 'Type', 'Status', 'Scheduled Return', 'Returned At', 'Transferred By', 'Remarks'];
     let csv = header.join(',') + '\n';
     filtered.forEach((t) => {
       const earlyMinutes = t.revertAt && t.reverted && t.revertedAt
@@ -138,16 +146,17 @@ const TransferReportPanel = () => {
           : earlyMinutes < -1 ? ` (${formatDuration(earlyMinutes)} late)`
             : ' (on time)';
       csv += [
-        esc(formatDateTime(t.transferredAt)),
+        esc(formatTransferTime(t.effectiveDate, t.startTime)),
         esc(t.therapistName),
         esc(t.fromBranch),
         esc(t.toBranch),
         esc(formatDateOnly(t.effectiveDate)),
         esc(t.isPermanent ? 'Permanent' : 'Temporary'),
         esc(transferStatus(t)),
-        esc(t.revertAt
-          ? (t.reverted ? `Reverted ${formatDateTime(t.revertedAt)}${earlyLabel}` : formatDateTime(t.revertAt))
-          : isReturnLeg(t) ? `Returned ${formatDateTime(t.transferredAt)}` : '—'),
+        esc(t.revertAt ? formatDateTime(t.revertAt) : '—'),
+        esc(t.reverted
+          ? `${formatDateTime(t.revertedAt)}${earlyLabel}`
+          : isReturnLeg(t) ? formatDateTime(t.transferredAt) : '—'),
         esc(t.transferredBy),
         esc(t.note || ''),
       ].join(',') + '\n';
@@ -232,13 +241,14 @@ const TransferReportPanel = () => {
             <table className="w-full">
               <thead>
                 <tr className="bg-background border-b border-border">
-                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Recorded</th>
+                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Transferred At</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">{staffLabel}</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">From → To</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Effective Date</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Type</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
-                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Reverts At</th>
+                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Scheduled Return</th>
+                  <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Returned At</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Transferred By</th>
                   <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Remarks</th>
                 </tr>
@@ -246,7 +256,7 @@ const TransferReportPanel = () => {
               <tbody>
                 {filtered.map(t => (
                   <tr key={t.id} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
-                    <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">{formatDateTime(t.transferredAt)}</td>
+                    <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">{formatTransferTime(t.effectiveDate, t.startTime)}</td>
                     <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{t.therapistName}</td>
                     <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
                       {t.fromBranch} <span className="text-text-tertiary">→</span> {t.toBranch}
@@ -271,6 +281,9 @@ const TransferReportPanel = () => {
                         );
                       })()}
                     </td>
+                    <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">
+                      {t.revertAt ? formatDateTime(t.revertAt) : '—'}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {t.revertAt ? (
                         (() => {
@@ -284,17 +297,18 @@ const TransferReportPanel = () => {
                               : earlyMinutes < -1
                                 ? `${formatDuration(earlyMinutes)} late`
                                 : 'on time';
-                          return (
+                          return t.reverted ? (
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${
-                                t.reverted ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
-                              }`}
-                              title={t.reverted
-                                ? `Scheduled ${formatDateTime(t.revertAt)} — Reverted ${formatDateTime(t.revertedAt)} (${earlyLabel})`
-                                : `Reverts ${formatDateTime(t.revertAt)}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium bg-success/10 text-success"
+                              title={`Scheduled ${formatDateTime(t.revertAt)} — Reverted ${formatDateTime(t.revertedAt)} (${earlyLabel})`}
                             >
-                              <Icon name={t.reverted ? 'CheckCircle' : 'Clock'} size={12} />
-                              {t.reverted ? `Reverted${earlyLabel ? ` · ${earlyLabel}` : ''}` : formatDateTime(t.revertAt)}
+                              <Icon name="CheckCircle" size={12} />
+                              {formatDateTime(t.revertedAt)}{earlyLabel ? ` · ${earlyLabel}` : ''}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium bg-accent/10 text-accent">
+                              <Icon name="Clock" size={12} />
+                              Not yet
                             </span>
                           );
                         })()
@@ -304,7 +318,7 @@ const TransferReportPanel = () => {
                           title={`Returned ${formatDateTime(t.transferredAt)}`}
                         >
                           <Icon name="CheckCircle" size={12} />
-                          Returned {formatDateTime(t.transferredAt)}
+                          {formatDateTime(t.transferredAt)}
                         </span>
                       ) : (
                         <span className="font-body text-sm text-text-tertiary">—</span>

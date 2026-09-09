@@ -63,7 +63,7 @@ function computeRevertPreview(dateStr, timeStr, value, unit) {
     revert = new Date(start.getTime() + n * msPerUnit[unit]);
   }
   return revert.toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
   });
 }
 
@@ -555,7 +555,7 @@ const AttendancePanel = ({ branchId }) => {
     const name = transferTarget.therapistName;
     setTransferTarget(null);
     setExtending(false);
-    showToast(`Extended ${name}'s transfer — now returns ${new Date(result.data.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`);
+    showToast(`Extended ${name}'s transfer — now returns ${new Date(result.data.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`);
     await loadData();
   };
 
@@ -592,7 +592,7 @@ const AttendancePanel = ({ branchId }) => {
     setTransferTarget(null);
     setReverting(false);
     showToast(isFuture
-      ? `${name}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`
+      ? `${name}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`
       : `${name} is back — now bookable at ${transferTarget.activeTransfer.fromBranch}.`);
     await loadData();
   };
@@ -1131,7 +1131,7 @@ const AttendancePanel = ({ branchId }) => {
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Scheduled return</span>
                     <span className="font-body-medium text-accent">
-                      {new Date(transferTarget.activeTransfer.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(transferTarget.activeTransfer.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
                     </span>
                   </div>
                 </div>
@@ -1245,7 +1245,7 @@ const AttendancePanel = ({ branchId }) => {
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Current return</span>
                     <span className="font-body-medium text-accent">
-                      {new Date(transferTarget.activeTransfer.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(transferTarget.activeTransfer.revertAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1371,7 +1371,7 @@ const AttendancePanel = ({ branchId }) => {
                       Returned to <span className="font-body-medium">{transferTarget.completedTransfer.fromBranch}</span> from{' '}
                       {transferTarget.completedTransfer.toBranch} at{' '}
                       {transferTarget.completedTransfer.revertedAt
-                        ? new Date(transferTarget.completedTransfer.revertedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                        ? new Date(transferTarget.completedTransfer.revertedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
                         : '—'}.
                     </p>
                   </div>
@@ -1435,7 +1435,7 @@ const AttendancePanel = ({ branchId }) => {
                   </div>
                   {!isPermanentTransfer && (
                     <div className="space-y-1">
-                      <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
+                      <label className="block font-body font-body-medium text-sm text-text-primary">Transfer Time</label>
                       <input
                         type="time"
                         value={transferStartTime}
