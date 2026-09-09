@@ -44,9 +44,6 @@ function formatCreatedAt(iso) {
   });
 }
 
-// Rooms that are self-service experiences — no therapist needed (Thamel branch hotfix)
-const THERAPIST_OPTIONAL_ROOM_NAMES = ['JACUZZI', 'SAUNA', 'STEAM'];
-
 // Status badge styles
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -75,7 +72,7 @@ const BookingActionModal = ({
   defaultNewBookingMode,
   userRole = 'staff'
 }) => {
-  const { branchId, branchName } = useBranch();
+  const { branchId } = useBranch();
   const [activeTab, setActiveTab] = useState('details');
   const [selectedTherapists, setSelectedTherapists] = useState([]);
   const [therapistSearch, setTherapistSearch] = useState('');
@@ -563,10 +560,10 @@ const BookingActionModal = ({
   // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
   const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
 
-  // Thamel hotfix: Jacuzzi/Sauna/Steam are self-service rooms — no therapist needed
+  // Self-service rooms (Jacuzzi/Sauna/Steam) don't need a therapist to start — driven by
+  // rooms.requires_therapist, not a hardcoded room/branch list.
   const selectedRoomObj = rooms.find(r => r.id === selectedRoom);
-  const isTherapistOptional = branchName?.trim().toLowerCase() === 'thamel'
-    && THERAPIST_OPTIONAL_ROOM_NAMES.includes(selectedRoomObj?.name?.trim().toUpperCase());
+  const isTherapistOptional = selectedRoomObj?.requires_therapist === false;
 
   const nextStatuses = getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).

@@ -161,7 +161,7 @@ export async function fetchRooms(branchId) {
   try {
     const { data, error } = await supabase
       .from('rooms')
-      .select('id, name, amenities, floor, capacity')
+      .select('id, name, amenities, floor, capacity, requires_therapist')
       .eq('branch_id', branchId)
       .eq('is_active', true)
       .order('name');
