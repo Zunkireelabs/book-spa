@@ -21,6 +21,7 @@ import {
   updateTherapistOrder,
   updateRoomOrder,
   updateTherapistTime,
+  resizeSharedBookingTime,
   applyDiscount,
   getCustomerOutstandingBalance,
 } from '../../../../services/api';
@@ -2146,17 +2147,31 @@ const OperationalCalendar = ({ branchId }) => {
     const newStartTime = `${String(Math.floor(newStartMins / 60)).padStart(2, '0')}:${String(newStartMins % 60).padStart(2, '0')}`;
     const newEndTime = `${String(Math.floor(newEndMins / 60)).padStart(2, '0')}:${String(newEndMins % 60).padStart(2, '0')}`;
 
-    const result = await updateTherapistTime({
-      bookingId: booking.bookingId || booking.id,
-      therapistId: booking._colTherapistId,
-      startTime: newStartTime,
-      endTime: newEndTime,
-    });
+    // Same default-vs-independent gate as the drag handler above: resizing an
+    // explicitly Cmd/Ctrl-selected card moves only that therapist; otherwise the
+    // whole shared booking (every co-therapist + the canonical bookings row)
+    // resizes together, so one resize can never silently desync a co-therapist
+    // from the rest of the booking (see resizeSharedBookingTime in api.js).
+    const selectedBookings = getSelectedBookingsRef.current();
+    const draggedKey = `${booking.id}__${booking._colTherapistId}`;
+    const isPartOfSelection = selectedBookings.length > 0 && selectedBookings.some(b => `${b.id}__${b._colTherapistId}` === draggedKey);
+
+    const bookingId = booking.bookingId || booking.id;
+    const result = isPartOfSelection
+      ? await updateTherapistTime({
+          bookingId,
+          therapistId: booking._colTherapistId,
+          startTime: newStartTime,
+          endTime: newEndTime,
+        })
+      : await resizeSharedBookingTime({ bookingId, startTime: newStartTime, endTime: newEndTime });
 
     if (result.error) {
       showToast(result.error.message || 'Failed to resize.', 'error');
+    } else if (isPartOfSelection) {
+      showToast(`Resized ${booking.therapistName || 'therapist'} independently to ${newStartTime} – ${newEndTime}`, 'success');
     } else {
-      showToast(`Updated to ${newStartTime} – ${newEndTime}`, 'success');
+      showToast(`Resized to ${newStartTime} – ${newEndTime}`, 'success');
     }
     refreshCalendar();
   }, [refreshCalendar]);

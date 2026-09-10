@@ -1858,6 +1858,34 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
   }
 }
 
+// Resizes a shared booking's time for ALL assigned therapists at once, plus the
+// parent bookings row — the calendar's default (non-Cmd) resize gesture. Keeps
+// every booking_therapists row and the canonical bookings.start_time/end_time in
+// agreement, unlike updateTherapistTime (which only ever touches one therapist's
+// row and is reserved for the explicit Cmd/Ctrl-selected independent-resize case).
+// Without this, resizing one therapist's card silently desyncs it from the rest
+// of the booking with no warning — see calendar/index.jsx handleBookingResize.
+export async function resizeSharedBookingTime({ bookingId, startTime, endTime }) {
+  try {
+    const { error: therapistsError } = await supabase
+      .from('booking_therapists')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('booking_id', bookingId);
+    if (therapistsError) throw therapistsError;
+
+    const { error: bookingError } = await supabase
+      .from('bookings')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('id', bookingId);
+    if (bookingError) throw bookingError;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] resizeSharedBookingTime error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy }) {
   try {
     customerName = toTitleCase(customerName);
