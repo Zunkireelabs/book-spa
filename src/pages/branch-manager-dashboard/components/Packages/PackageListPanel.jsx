@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchPackages } from '../../../../services/api';
 import PackageDetailModal from './PackageDetailModal';
+
+const SORT_OPTIONS = [
+  { value: 'latest', label: 'Latest first' },
+  { value: 'oldest', label: 'Oldest first' },
+];
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -38,6 +44,7 @@ const PackageListPanel = () => {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('latest');
   const [selectedId, setSelectedId] = useState(null);
 
   const loadData = useCallback(async () => {
@@ -76,8 +83,10 @@ const PackageListPanel = () => {
         p.issuedByName.toLowerCase().includes(q)
       );
     }
-    return [...rows].sort((a, b) => a.guestName.localeCompare(b.guestName));
-  }, [packages, search, statusFilter]);
+    return [...rows].sort((a, b) => sortOrder === 'latest'
+      ? new Date(b.issuedDate || 0) - new Date(a.issuedDate || 0)
+      : new Date(a.issuedDate || 0) - new Date(b.issuedDate || 0));
+  }, [packages, search, statusFilter, sortOrder]);
 
   // Matches whatever's currently visible (search + status filter) — the
   // Total row would otherwise silently disagree with the rows above it.
@@ -176,6 +185,13 @@ const PackageListPanel = () => {
         <span className="font-caption font-caption-normal text-xs text-text-tertiary">
           {filtered.length} package{filtered.length !== 1 ? 's' : ''}
         </span>
+        <CustomSelect
+          value={sortOrder}
+          onChange={setSortOrder}
+          options={SORT_OPTIONS}
+          size="sm"
+          className="w-40"
+        />
       </div>
 
       {/* Package list */}
