@@ -326,6 +326,39 @@ function classifyPaymentMode(mode) {
   return 'fonepay'; // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
 }
 
+// Membership top-ups and package purchases on [date] — new cash in from selling
+// a wallet-style product. Mirrors the voucher-sale pattern (voucherSalesTotal)
+// already folded into getDailySummary/getDailyOperationalReport: recognized as
+// revenue exactly once, on the day the customer actually pays, and excluded again
+// via WALLET_MODES/'SessionPackage' on the day it's later redeemed against a
+// booking — so neither figure double-counts the other.
+async function getWalletProductSalesForDate(branchId, date) {
+  const nextDayBoundary = new Date(`${date}T00:00:00+05:45`);
+  nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
+
+  let depositsQuery = supabase
+    .from('membership_transactions')
+    .select('amount')
+    .eq('kind', 'deposit')
+    .gte('created_at', `${date}T00:00:00+05:45`)
+    .lt('created_at', nextDayBoundary.toISOString());
+  depositsQuery = withBranch(depositsQuery, branchId);
+  const { data: deposits, error: depositsError } = await depositsQuery;
+  if (depositsError) throw depositsError;
+  const membershipSoldTotal = (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0);
+
+  let packagesQuery = supabase
+    .from('packages')
+    .select('paid_amount')
+    .eq('issued_date', date);
+  packagesQuery = withBranch(packagesQuery, branchId);
+  const { data: packagesIssued, error: packagesError } = await packagesQuery;
+  if (packagesError) throw packagesError;
+  const packageSoldTotal = (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0);
+
+  return { membershipSoldTotal, packageSoldTotal };
+}
+
 // Persists the org's admin-configured payment method list (organizations.settings
 // .paymentMethods) via a SECURITY DEFINER RPC scoped to just that key — see
 // migration-052-custom-payment-methods.sql. Each entry is either a plain string
@@ -782,9 +815,17 @@ export async function setDueHolder({ bookingId, dueHolderName }) {
 // from/to are ISO dates (inclusive); omit for all-time.
 export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   try {
+    // payments is embedded (FK payments_booking_id_fkey) instead of fetched via a
+    // second query keyed on `.in('booking_id', bookingIds)`. With "All Time" (no
+    // date filter) a busy branch can have 1000+ outstanding bookings; a bare
+    // booking-ID .in() list that large builds a URL long enough to get rejected
+    // upstream of PostgREST with a bare 400 "Bad Request" (no detail) — confirmed
+    // against prod (Lazimpat, all-time: 1095 outstanding bookings, failing
+    // consistently above ~500-700 IDs). Embedding returns everything in one
+    // request regardless of dataset size, so there's no ceiling to hit again.
     let query = supabase
       .from('bookings')
-      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot')
+      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot, payments(amount)')
       .in('payment_status', ['unpaid', 'partial'])
       .not('status', 'in', '("Cancelled","No Show")');
     if (from) query = query.gte('date', from);
@@ -794,22 +835,10 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     if (error) throw error;
 
     const all = bookings || [];
-    const bookingIds = all.map(b => b.id);
-    const paidMap = {};
-    if (bookingIds.length > 0) {
-      const { data: payments, error: payError } = await supabase
-        .from('payments')
-        .select('booking_id, amount')
-        .in('booking_id', bookingIds);
-      if (payError) throw payError;
-      for (const p of (payments || [])) {
-        paidMap[p.booking_id] = (paidMap[p.booking_id] || 0) + Number(p.amount);
-      }
-    }
 
     const groups = {};
     for (const b of all) {
-      const collected = paidMap[b.id] || 0;
+      const collected = (b.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
       const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
       if (due <= 0) continue;
       const rawName = (b.due_holder_name || '').trim();
@@ -1858,6 +1887,44 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
   }
 }
 
+// Resizes a shared booking's time for ALL assigned therapists at once, plus the
+// parent bookings row — the calendar's default (non-Cmd) resize gesture. Keeps
+// every booking_therapists row and the canonical bookings.start_time/end_time in
+// agreement, unlike updateTherapistTime (which only ever touches one therapist's
+// row and is reserved for the explicit Cmd/Ctrl-selected independent-resize case).
+// Without this, resizing one therapist's card silently desyncs it from the rest
+// of the booking with no warning — see calendar/index.jsx handleBookingResize.
+export async function resizeSharedBookingTime({ bookingId, startTime, endTime }) {
+  try {
+    // bookings is ground truth (same order/failure policy as rescheduleBooking):
+    // update it first and fail loudly if it errors. booking_therapists is synced
+    // second, best-effort — if that write fails, bookings is still correct and
+    // every reader outside the calendar (receipts, reschedule dialogs) is fine;
+    // only the calendar's per-column display would lag until the next successful
+    // write. Updating booking_therapists FIRST would risk the opposite and worse
+    // failure: every therapist's row moved but bookings left stale, recreating
+    // the exact class of desync this function exists to prevent.
+    const { error: bookingError } = await supabase
+      .from('bookings')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('id', bookingId);
+    if (bookingError) throw bookingError;
+
+    const { error: therapistsError } = await supabase
+      .from('booking_therapists')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('booking_id', bookingId);
+    if (therapistsError) {
+      console.error('[API] resizeSharedBookingTime booking_therapists sync error:', therapistsError.message);
+    }
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] resizeSharedBookingTime error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy }) {
   try {
     customerName = toTitleCase(customerName);
@@ -2881,6 +2948,11 @@ export async function getDailySummary(branchId, date) {
       }
     }
 
+    // 4c. Membership top-ups + package sales collected today — same
+    // recognized-once-at-sale-time policy as vouchers above.
+    const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
+    netRevenue += membershipSoldTotal + packageSoldTotal;
+
     // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
     let existingReport = null;
     if (!overall) {
@@ -3341,6 +3413,7 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       // Live compute — revenue from payments only
       const paidBookings = all.filter(b => b.payment_status === 'paid');
+      const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
 
       totals = {
         totalBookings: all.length,
@@ -3356,12 +3429,12 @@ export async function getDailyOperationalReport(branchId, date) {
         // originally purchased or earned, so it isn't cash collected today. Without this
         // exclusion, getDailyOperationalReport would disagree with getDailySummary (whose
         // netRevenue is what closeDay persists) on any day with such a redemption.
-        // Folds in voucherSalesTotal so the live branch matches what the closed
-        // snapshot already includes (closeDay persists getDailySummary()'s
-        // voucher-inclusive netRevenue).
+        // Folds in voucherSalesTotal + membershipSoldTotal + packageSoldTotal so the live
+        // branch matches what the closed snapshot already includes (closeDay persists
+        // getDailySummary()'s sold-inclusive netRevenue).
         netRevenue: paymentRows
           .filter(p => p.payment_mode !== 'SessionPackage' && !WALLET_MODES.has(p.payment_mode))
-          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
+          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal + membershipSoldTotal + packageSoldTotal,
       };
     }
 
@@ -3605,10 +3678,11 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
     closedNet += Number(r.net_revenue);
   }
 
-  // 2. Fetch paid bookings in range
+  // 2. Count of paid bookings in range (display only — revenue math for open
+  // dates is payment-mode-aware and computed per date below, not from this).
   let bookingsQuery = supabase
     .from('bookings')
-    .select('date, base_amount, discount_amount, final_amount')
+    .select('date')
     .eq('payment_status', 'paid')
     .gte('date', startDate)
     .lte('date', endDate);
@@ -3619,13 +3693,30 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
 
   const paidBookings = (bookings || []).length;
 
-  // 3. Compute live revenue for open dates only
+  // 3. Live revenue for open (not-yet-closed) dates in range — delegates to
+  // getDailySummary per date, the exact function closeDay() persists into
+  // daily_reports, so live and closed totals can never disagree. This also
+  // means the redemption-exclusion / sold-on-purchase-day policy (WALLET_MODES,
+  // membership/voucher/package sales — see getDailySummary) lives in one place
+  // instead of being reimplemented here against raw booking amounts.
+  const openDates = [];
+  // Bare date-only strings parse as UTC midnight (unlike a 'T00:00:00' suffix,
+  // which parses as browser-local time) — staff run this from Nepal (+05:45),
+  // so a local-time parse here would silently shift every date back by one day.
+  for (let d = new Date(startDate); d <= new Date(endDate); d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().split('T')[0];
+    if (!closedDates.has(iso)) openDates.push(iso);
+  }
+
   let liveGross = 0, liveDiscount = 0, liveNet = 0;
-  for (const b of (bookings || [])) {
-    if (!closedDates.has(b.date)) {
-      liveGross += Number(b.base_amount);
-      liveDiscount += Number(b.discount_amount);
-      liveNet += Number(b.final_amount);
+  if (openDates.length > 0) {
+    const summaries = await Promise.all(openDates.map(d => getDailySummary(branchId, d)));
+    for (const { data: summary, error: summaryError } of summaries) {
+      if (summaryError) throw summaryError;
+      if (!summary) continue;
+      liveGross += summary.grossRevenue;
+      liveDiscount += summary.totalDiscounts;
+      liveNet += summary.netRevenue;
     }
   }
 
