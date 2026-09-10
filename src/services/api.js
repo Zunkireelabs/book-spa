@@ -3666,7 +3666,10 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
   // membership/voucher/package sales — see getDailySummary) lives in one place
   // instead of being reimplemented here against raw booking amounts.
   const openDates = [];
-  for (let d = new Date(`${startDate}T00:00:00`); d <= new Date(`${endDate}T00:00:00`); d.setDate(d.getDate() + 1)) {
+  // Bare date-only strings parse as UTC midnight (unlike a 'T00:00:00' suffix,
+  // which parses as browser-local time) — staff run this from Nepal (+05:45),
+  // so a local-time parse here would silently shift every date back by one day.
+  for (let d = new Date(startDate); d <= new Date(endDate); d.setUTCDate(d.getUTCDate() + 1)) {
     const iso = d.toISOString().split('T')[0];
     if (!closedDates.has(iso)) openDates.push(iso);
   }
