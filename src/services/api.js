@@ -1867,17 +1867,27 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
 // of the booking with no warning — see calendar/index.jsx handleBookingResize.
 export async function resizeSharedBookingTime({ bookingId, startTime, endTime }) {
   try {
-    const { error: therapistsError } = await supabase
-      .from('booking_therapists')
-      .update({ start_time: startTime, end_time: endTime })
-      .eq('booking_id', bookingId);
-    if (therapistsError) throw therapistsError;
-
+    // bookings is ground truth (same order/failure policy as rescheduleBooking):
+    // update it first and fail loudly if it errors. booking_therapists is synced
+    // second, best-effort — if that write fails, bookings is still correct and
+    // every reader outside the calendar (receipts, reschedule dialogs) is fine;
+    // only the calendar's per-column display would lag until the next successful
+    // write. Updating booking_therapists FIRST would risk the opposite and worse
+    // failure: every therapist's row moved but bookings left stale, recreating
+    // the exact class of desync this function exists to prevent.
     const { error: bookingError } = await supabase
       .from('bookings')
       .update({ start_time: startTime, end_time: endTime })
       .eq('id', bookingId);
     if (bookingError) throw bookingError;
+
+    const { error: therapistsError } = await supabase
+      .from('booking_therapists')
+      .update({ start_time: startTime, end_time: endTime })
+      .eq('booking_id', bookingId);
+    if (therapistsError) {
+      console.error('[API] resizeSharedBookingTime booking_therapists sync error:', therapistsError.message);
+    }
 
     return { data: { success: true }, error: null };
   } catch (error) {
