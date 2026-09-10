@@ -815,9 +815,17 @@ export async function setDueHolder({ bookingId, dueHolderName }) {
 // from/to are ISO dates (inclusive); omit for all-time.
 export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   try {
+    // payments is embedded (FK payments_booking_id_fkey) instead of fetched via a
+    // second query keyed on `.in('booking_id', bookingIds)`. With "All Time" (no
+    // date filter) a busy branch can have 1000+ outstanding bookings; a bare
+    // booking-ID .in() list that large builds a URL long enough to get rejected
+    // upstream of PostgREST with a bare 400 "Bad Request" (no detail) — confirmed
+    // against prod (Lazimpat, all-time: 1095 outstanding bookings, failing
+    // consistently above ~500-700 IDs). Embedding returns everything in one
+    // request regardless of dataset size, so there's no ceiling to hit again.
     let query = supabase
       .from('bookings')
-      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot')
+      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot, payments(amount)')
       .in('payment_status', ['unpaid', 'partial'])
       .not('status', 'in', '("Cancelled","No Show")');
     if (from) query = query.gte('date', from);
@@ -827,22 +835,10 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     if (error) throw error;
 
     const all = bookings || [];
-    const bookingIds = all.map(b => b.id);
-    const paidMap = {};
-    if (bookingIds.length > 0) {
-      const { data: payments, error: payError } = await supabase
-        .from('payments')
-        .select('booking_id, amount')
-        .in('booking_id', bookingIds);
-      if (payError) throw payError;
-      for (const p of (payments || [])) {
-        paidMap[p.booking_id] = (paidMap[p.booking_id] || 0) + Number(p.amount);
-      }
-    }
 
     const groups = {};
     for (const b of all) {
-      const collected = paidMap[b.id] || 0;
+      const collected = (b.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
       const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
       if (due <= 0) continue;
       const rawName = (b.due_holder_name || '').trim();
