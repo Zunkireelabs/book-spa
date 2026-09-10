@@ -326,6 +326,39 @@ function classifyPaymentMode(mode) {
   return 'fonepay'; // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
 }
 
+// Membership top-ups and package purchases on [date] — new cash in from selling
+// a wallet-style product. Mirrors the voucher-sale pattern (voucherSalesTotal)
+// already folded into getDailySummary/getDailyOperationalReport: recognized as
+// revenue exactly once, on the day the customer actually pays, and excluded again
+// via WALLET_MODES/'SessionPackage' on the day it's later redeemed against a
+// booking — so neither figure double-counts the other.
+async function getWalletProductSalesForDate(branchId, date) {
+  const nextDayBoundary = new Date(`${date}T00:00:00+05:45`);
+  nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
+
+  let depositsQuery = supabase
+    .from('membership_transactions')
+    .select('amount')
+    .eq('kind', 'deposit')
+    .gte('created_at', `${date}T00:00:00+05:45`)
+    .lt('created_at', nextDayBoundary.toISOString());
+  depositsQuery = withBranch(depositsQuery, branchId);
+  const { data: deposits, error: depositsError } = await depositsQuery;
+  if (depositsError) throw depositsError;
+  const membershipSoldTotal = (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0);
+
+  let packagesQuery = supabase
+    .from('packages')
+    .select('paid_amount')
+    .eq('issued_date', date);
+  packagesQuery = withBranch(packagesQuery, branchId);
+  const { data: packagesIssued, error: packagesError } = await packagesQuery;
+  if (packagesError) throw packagesError;
+  const packageSoldTotal = (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0);
+
+  return { membershipSoldTotal, packageSoldTotal };
+}
+
 // Persists the org's admin-configured payment method list (organizations.settings
 // .paymentMethods) via a SECURITY DEFINER RPC scoped to just that key — see
 // migration-052-custom-payment-methods.sql. Each entry is either a plain string
@@ -2881,6 +2914,11 @@ export async function getDailySummary(branchId, date) {
       }
     }
 
+    // 4c. Membership top-ups + package sales collected today — same
+    // recognized-once-at-sale-time policy as vouchers above.
+    const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
+    netRevenue += membershipSoldTotal + packageSoldTotal;
+
     // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
     let existingReport = null;
     if (!overall) {
@@ -3341,6 +3379,7 @@ export async function getDailyOperationalReport(branchId, date) {
     } else {
       // Live compute — revenue from payments only
       const paidBookings = all.filter(b => b.payment_status === 'paid');
+      const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
 
       totals = {
         totalBookings: all.length,
@@ -3356,12 +3395,12 @@ export async function getDailyOperationalReport(branchId, date) {
         // originally purchased or earned, so it isn't cash collected today. Without this
         // exclusion, getDailyOperationalReport would disagree with getDailySummary (whose
         // netRevenue is what closeDay persists) on any day with such a redemption.
-        // Folds in voucherSalesTotal so the live branch matches what the closed
-        // snapshot already includes (closeDay persists getDailySummary()'s
-        // voucher-inclusive netRevenue).
+        // Folds in voucherSalesTotal + membershipSoldTotal + packageSoldTotal so the live
+        // branch matches what the closed snapshot already includes (closeDay persists
+        // getDailySummary()'s sold-inclusive netRevenue).
         netRevenue: paymentRows
           .filter(p => p.payment_mode !== 'SessionPackage' && !WALLET_MODES.has(p.payment_mode))
-          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal,
+          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal + membershipSoldTotal + packageSoldTotal,
       };
     }
 
@@ -3605,10 +3644,11 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
     closedNet += Number(r.net_revenue);
   }
 
-  // 2. Fetch paid bookings in range
+  // 2. Count of paid bookings in range (display only — revenue math for open
+  // dates is payment-mode-aware and computed per date below, not from this).
   let bookingsQuery = supabase
     .from('bookings')
-    .select('date, base_amount, discount_amount, final_amount')
+    .select('date')
     .eq('payment_status', 'paid')
     .gte('date', startDate)
     .lte('date', endDate);
@@ -3619,13 +3659,30 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
 
   const paidBookings = (bookings || []).length;
 
-  // 3. Compute live revenue for open dates only
+  // 3. Live revenue for open (not-yet-closed) dates in range — delegates to
+  // getDailySummary per date, the exact function closeDay() persists into
+  // daily_reports, so live and closed totals can never disagree. This also
+  // means the redemption-exclusion / sold-on-purchase-day policy (WALLET_MODES,
+  // membership/voucher/package sales — see getDailySummary) lives in one place
+  // instead of being reimplemented here against raw booking amounts.
+  const openDates = [];
+  // Bare date-only strings parse as UTC midnight (unlike a 'T00:00:00' suffix,
+  // which parses as browser-local time) — staff run this from Nepal (+05:45),
+  // so a local-time parse here would silently shift every date back by one day.
+  for (let d = new Date(startDate); d <= new Date(endDate); d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().split('T')[0];
+    if (!closedDates.has(iso)) openDates.push(iso);
+  }
+
   let liveGross = 0, liveDiscount = 0, liveNet = 0;
-  for (const b of (bookings || [])) {
-    if (!closedDates.has(b.date)) {
-      liveGross += Number(b.base_amount);
-      liveDiscount += Number(b.discount_amount);
-      liveNet += Number(b.final_amount);
+  if (openDates.length > 0) {
+    const summaries = await Promise.all(openDates.map(d => getDailySummary(branchId, d)));
+    for (const { data: summary, error: summaryError } of summaries) {
+      if (summaryError) throw summaryError;
+      if (!summary) continue;
+      liveGross += summary.grossRevenue;
+      liveDiscount += summary.totalDiscounts;
+      liveNet += summary.netRevenue;
     }
   }
 

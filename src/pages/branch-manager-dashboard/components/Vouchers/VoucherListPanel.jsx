@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchVouchers } from '../../../../services/api';
 import VoucherDetailModal from './VoucherDetailModal';
+
+const SORT_OPTIONS = [
+  { value: 'latest', label: 'Latest first' },
+  { value: 'oldest', label: 'Oldest first' },
+];
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -35,6 +41,7 @@ const VoucherListPanel = () => {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('latest');
   const [selectedId, setSelectedId] = useState(null);
 
   const loadData = useCallback(async () => {
@@ -72,8 +79,10 @@ const VoucherListPanel = () => {
         v.issuedByName.toLowerCase().includes(q)
       );
     }
-    return [...rows].sort((a, b) => a.guestName.localeCompare(b.guestName));
-  }, [vouchers, search, statusFilter]);
+    return [...rows].sort((a, b) => sortOrder === 'latest'
+      ? new Date(b.issuedDate || 0) - new Date(a.issuedDate || 0)
+      : new Date(a.issuedDate || 0) - new Date(b.issuedDate || 0));
+  }, [vouchers, search, statusFilter, sortOrder]);
 
   // Matches whatever's currently visible (search + status filter) — the
   // Total row would otherwise silently disagree with the rows above it.
@@ -171,6 +180,13 @@ const VoucherListPanel = () => {
         <span className="font-caption font-caption-normal text-xs text-text-tertiary">
           {filtered.length} voucher{filtered.length !== 1 ? 's' : ''}
         </span>
+        <CustomSelect
+          value={sortOrder}
+          onChange={setSortOrder}
+          options={SORT_OPTIONS}
+          size="sm"
+          className="w-40"
+        />
       </div>
 
       {/* Voucher list */}

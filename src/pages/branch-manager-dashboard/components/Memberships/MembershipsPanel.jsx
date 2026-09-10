@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
+import CustomSelect from '../../../../components/ui/CustomSelect';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { fetchMemberships } from '../../../../services/api';
 import EnrollMemberModal from './EnrollMemberModal';
 import MembershipDetailModal from './MembershipDetailModal';
 import TiersModal from './TiersModal';
+
+const SORT_OPTIONS = [
+  { value: 'latest', label: 'Latest first' },
+  { value: 'oldest', label: 'Oldest first' },
+];
 
 const STATUS_CONFIG = {
   active:   { label: 'Active',   pill: 'bg-success/10 text-success',   icon: 'CheckCircle2' },
@@ -37,6 +43,7 @@ const MembershipsPanel = ({ branchId }) => {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('latest');
   const [showEnroll, setShowEnroll] = useState(false);
   const [showTiers, setShowTiers] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -70,8 +77,10 @@ const MembershipsPanel = ({ branchId }) => {
         }
         return true;
       })
-      .sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
-  }, [rows, search, statusFilter]);
+      .sort((a, b) => sortOrder === 'latest'
+        ? new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+        : new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  }, [rows, search, statusFilter, sortOrder]);
 
   const summary = useMemo(() => ({
     all: rows.length,
@@ -175,6 +184,13 @@ const MembershipsPanel = ({ branchId }) => {
         <span className="font-caption font-caption-normal text-xs text-text-tertiary">
           {filtered.length} member{filtered.length !== 1 ? 's' : ''}
         </span>
+        <CustomSelect
+          value={sortOrder}
+          onChange={setSortOrder}
+          options={SORT_OPTIONS}
+          size="sm"
+          className="w-40"
+        />
         <div className="ml-auto flex items-center space-x-2">
           {profile?.role === 'admin' && (
             <button
