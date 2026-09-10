@@ -1931,7 +1931,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, service_id, date, start_time, branch_id, base_amount, discount_amount, final_amount, customer_name, customer_phone, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -1958,6 +1958,64 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     }
     if (customerPhone !== undefined) {
       updatePayload.customer_phone = toE164(customerPhone);
+
+      // Editing the phone here previously only touched this cosmetic snapshot,
+      // never bookings.customer_id — so the booking could display a corrected
+      // name/phone while staying silently linked to the WRONG customer record
+      // underneath (caught twice in prod: two different real customers both
+      // named "Thinley Yanchen", one holding a Premium Club Membership, the
+      // other not — a phone edit here left customer_id pointed at the wrong
+      // one both times). Re-resolve customer_id the same way booking creation
+      // does, so the link can never drift from what's actually displayed.
+      const { data: branch, error: branchError } = await supabase
+        .from('branches')
+        .select('org_id')
+        .eq('id', booking.branch_id)
+        .single();
+      if (branchError) throw branchError;
+      const normalizedPhone = toE164(customerPhone);
+
+      if (updatePayload.customer_name) {
+        // Name was explicitly (re)typed alongside the phone — findOrCreateCustomer's
+        // "refresh stale fields on match" behavior is exactly what's wanted here,
+        // same as booking creation.
+        const { data: resolved, error: resolveError } = await findOrCreateCustomer({
+          orgId: branch.org_id,
+          branchId: booking.branch_id,
+          fullName: updatePayload.customer_name,
+          phone: customerPhone,
+        });
+        if (resolveError) return { data: null, error: resolveError };
+        updatePayload.customer_id = resolved.customerId;
+      } else {
+        // Phone changed but name didn't come with it — a plain lookup, NOT
+        // findOrCreateCustomer, because that would overwrite whatever real
+        // customer this phone belongs to with this booking's OLD (possibly
+        // stale/wrong) name snapshot. Link to the matched customer as-is;
+        // only fall back to creating a new one (safe to name from the
+        // booking's snapshot, since nothing existing gets overwritten).
+        const { data: existing, error: lookupError } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('org_id', branch.org_id)
+          .eq('phone', normalizedPhone)
+          .limit(1)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+
+        if (existing) {
+          updatePayload.customer_id = existing.id;
+        } else {
+          const { data: resolved, error: resolveError } = await findOrCreateCustomer({
+            orgId: branch.org_id,
+            branchId: booking.branch_id,
+            fullName: booking.customer_name,
+            phone: customerPhone,
+          });
+          if (resolveError) return { data: null, error: resolveError };
+          updatePayload.customer_id = resolved.customerId;
+        }
+      }
     }
     if (specialRequests !== undefined) {
       updatePayload.special_requests = specialRequests || null;
