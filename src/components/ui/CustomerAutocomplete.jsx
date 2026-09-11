@@ -157,7 +157,7 @@ const CustomerAutocomplete = ({
                 </span>
                 {m && (
                   <span
-                    title={`${m.tierName || m.membershipNumber}${m.status !== 'active' ? ` · ${m.status}` : ''}`}
+                    title={[m.tierName, m.membershipNumber, m.status !== 'active' ? m.status : null].filter(Boolean).join(' · ')}
                     className={`flex-shrink-0 max-w-[6.5rem] truncate inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide ${pillClass}`}
                   >
                     {m.tierName || m.membershipNumber}
