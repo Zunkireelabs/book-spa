@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getTodayInsights } from '../../../services/api';
 import { PERIOD_PRESETS } from '../../../utils/periodPresets';
-import { humanizePaymentMethod } from '../../../services/paymentMethods';
+import { buildPaymentMethodTree } from '../../../services/paymentMethods';
+import { useOrg } from '../../../contexts/OrgContext';
 
 const PERIOD_LABELS = { ...Object.fromEntries(PERIOD_PRESETS.map(p => [p.id, p.label])), daily: 'Today' };
 function periodLabel(period) {
@@ -19,14 +20,13 @@ function formatNPR(amount, compact = false) {
   return `NPR ${num.toLocaleString('en-IN')}`;
 }
 
-const PAYMENT_SEGMENTS = [
-  { key: 'cash', label: 'Cash', barClass: 'bg-primary', dotClass: 'bg-primary' },
-  { key: 'card', label: 'Card', barClass: 'bg-accent', dotClass: 'bg-accent' },
-  { key: 'digital', label: 'Digital', barClass: 'bg-secondary', dotClass: 'bg-secondary' },
-  { key: 'wallet', label: 'Wallet', barClass: 'bg-gray-400', dotClass: 'bg-gray-400' },
-];
+// Cycled by position across whichever of the org's configured payment methods
+// actually collected money today — the set/order varies per org, so this can't
+// be a fixed semantic palette (green=cash etc.) like the old hardcoded 4 buckets.
+const SEGMENT_COLORS = ['bg-primary', 'bg-accent', 'bg-secondary', 'bg-success', 'bg-warning', 'bg-error', 'bg-gray-400'];
 
 const TodayInsightsPanel = ({ branchId, period }) => {
+  const { paymentMethods } = useOrg();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -89,6 +89,28 @@ const TodayInsightsPanel = ({ branchId, period }) => {
   const totalSales = Number(data.totalSales) || 0;
   const hasSales = totalSales > 0;
 
+  // Build one row per configured top-level payment method (Cash, Card, Digital
+  // Wallet, MobileBanking, Cheque, ...) — mirrors Setup > Payment Methods
+  // exactly, instead of a hardcoded Cash/Card/Digital/Wallet guess. A method
+  // nobody used today (total 0) is dropped rather than shown as dead weight.
+  const modeTotals = data.paymentModeTotals || {};
+  const paymentRows = buildPaymentMethodTree(paymentMethods)
+    .map((node) => {
+      const subMethods = node.subMethods || [];
+      const isGroup = subMethods.length > 0;
+      const subEntries = isGroup
+        ? subMethods
+          .map((s) => [s.label, Number(modeTotals[s.value]) || 0])
+          .filter(([, amount]) => amount > 0)
+          .sort((a, b) => b[1] - a[1])
+        : [];
+      const total = isGroup
+        ? subEntries.reduce((sum, [, amount]) => sum + amount, 0)
+        : Number(modeTotals[node.value]) || 0;
+      return { key: node.value, label: node.label, total, subEntries };
+    })
+    .filter((row) => row.total > 0);
+
   const utilizationPercent = Math.max(0, Math.min(100, Number(data.staffUtilization.avgPercent) || 0));
   const therapistCount = data.staffUtilization.therapists.length;
 
@@ -105,11 +127,10 @@ const TodayInsightsPanel = ({ branchId, period }) => {
 
         {hasSales ? (
           <div className="w-full h-2.5 rounded-full overflow-hidden bg-gray-100 flex">
-            {PAYMENT_SEGMENTS.map(seg => {
-              const value = Number(data[seg.key]) || 0;
-              const pct = (value / totalSales) * 100;
+            {paymentRows.map((row, i) => {
+              const pct = (row.total / totalSales) * 100;
               if (pct <= 0) return null;
-              return <div key={seg.key} className={seg.barClass} style={{ width: `${pct}%` }} />;
+              return <div key={row.key} className={SEGMENT_COLORS[i % SEGMENT_COLORS.length]} style={{ width: `${pct}%` }} />;
             })}
           </div>
         ) : (
@@ -117,31 +138,29 @@ const TodayInsightsPanel = ({ branchId, period }) => {
         )}
 
         <div className="flex flex-col gap-1">
-          {PAYMENT_SEGMENTS.map(seg => {
-            const total = Number(data[seg.key]) || 0;
-            const breakdown = data.paymentModeBreakdown?.[seg.key] || {};
-            const subEntries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
-            const expandable = total > 0 && subEntries.length > 0;
-            const isOpen = expanded.has(seg.key);
+          {paymentRows.map((row, i) => {
+            const dotClass = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
+            const expandable = row.subEntries.length > 0;
+            const isOpen = expanded.has(row.key);
             return (
-              <div key={seg.key}>
+              <div key={row.key}>
                 <button
                   type="button"
-                  onClick={() => expandable && toggleExpanded(seg.key)}
+                  onClick={() => expandable && toggleExpanded(row.key)}
                   disabled={!expandable}
                   className={`flex items-center gap-1.5 text-xs text-gray-600 ${expandable ? 'cursor-pointer hover:text-gray-900' : 'cursor-default'}`}
                 >
-                  <span className={`w-2 h-2 rounded-full ${seg.dotClass}`} />
-                  <span>{seg.label} {formatNPR(total, true)}</span>
+                  <span className={`w-2 h-2 rounded-full ${dotClass}`} />
+                  <span>{row.label} {formatNPR(row.total, true)}</span>
                   {expandable && (
                     <Icon name={isOpen ? 'ChevronDown' : 'ChevronRight'} size={12} className="text-gray-400" />
                   )}
                 </button>
                 {expandable && isOpen && (
                   <div className="ml-3.5 mt-1 mb-1.5 space-y-1 border-l border-gray-100 pl-2.5">
-                    {subEntries.map(([mode, amount]) => (
-                      <div key={mode} className="flex items-center justify-between gap-4 text-xs text-gray-500">
-                        <span>{humanizePaymentMethod(mode)}</span>
+                    {row.subEntries.map(([label, amount]) => (
+                      <div key={label} className="flex items-center justify-between gap-4 text-xs text-gray-500">
+                        <span>{label}</span>
                         <span className="font-medium text-gray-700">{formatNPR(amount, true)}</span>
                       </div>
                     ))}
