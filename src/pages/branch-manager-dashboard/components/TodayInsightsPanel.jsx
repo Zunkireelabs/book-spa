@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import { getTodayInsights } from '../../../services/api';
 import { PERIOD_PRESETS } from '../../../utils/periodPresets';
+import { humanizePaymentMethod } from '../../../services/paymentMethods';
 
 const PERIOD_LABELS = { ...Object.fromEntries(PERIOD_PRESETS.map(p => [p.id, p.label])), daily: 'Today' };
 function periodLabel(period) {
@@ -29,6 +30,16 @@ const TodayInsightsPanel = ({ branchId, period }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(new Set());
+
+  const toggleExpanded = (key) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const loadInsights = useCallback(async () => {
     if (!branchId) return;
@@ -105,13 +116,40 @@ const TodayInsightsPanel = ({ branchId, period }) => {
           <div className="w-full h-2.5 rounded-full bg-gray-100" />
         )}
 
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-          {PAYMENT_SEGMENTS.map(seg => (
-            <div key={seg.key} className="flex items-center gap-1.5 text-xs text-gray-600">
-              <span className={`w-2 h-2 rounded-full ${seg.dotClass}`} />
-              <span>{seg.label} {formatNPR(data[seg.key], true)}</span>
-            </div>
-          ))}
+        <div className="flex flex-col gap-1">
+          {PAYMENT_SEGMENTS.map(seg => {
+            const total = Number(data[seg.key]) || 0;
+            const breakdown = data.paymentModeBreakdown?.[seg.key] || {};
+            const subEntries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+            const expandable = total > 0 && subEntries.length > 0;
+            const isOpen = expanded.has(seg.key);
+            return (
+              <div key={seg.key}>
+                <button
+                  type="button"
+                  onClick={() => expandable && toggleExpanded(seg.key)}
+                  disabled={!expandable}
+                  className={`flex items-center gap-1.5 text-xs text-gray-600 ${expandable ? 'cursor-pointer hover:text-gray-900' : 'cursor-default'}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${seg.dotClass}`} />
+                  <span>{seg.label} {formatNPR(total, true)}</span>
+                  {expandable && (
+                    <Icon name={isOpen ? 'ChevronDown' : 'ChevronRight'} size={12} className="text-gray-400" />
+                  )}
+                </button>
+                {expandable && isOpen && (
+                  <div className="ml-3.5 mt-1 mb-1.5 space-y-1 border-l border-gray-100 pl-2.5">
+                    {subEntries.map(([mode, amount]) => (
+                      <div key={mode} className="flex items-center justify-between gap-4 text-xs text-gray-500">
+                        <span>{humanizePaymentMethod(mode)}</span>
+                        <span className="font-medium text-gray-700">{formatNPR(amount, true)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
