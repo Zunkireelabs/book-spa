@@ -165,6 +165,21 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
   const membershipOverWallet = membershipUsable && membershipCommitted > membership.balance;
 
+  // Once a linked member's wallet can cover the voucher total, default the
+  // tender to Membership — staff have to notice a fully-cash form and
+  // switch it on their own otherwise, which is easy to miss (matches
+  // PaymentModal.jsx's identical auto-fill for booking checkout). Only
+  // fires while the tender is still untouched (pristine: single Cash row,
+  // no amount typed yet), so it never overwrites a choice staff already made.
+  useEffect(() => {
+    if (!membershipUsable || membership.balance < totalAmount || totalAmount <= 0) return;
+    const pristine = tenders.length === 1 && tenders[0].paymentMode === 'Cash' && !(Number(tenders[0].amount) > 0);
+    if (pristine) {
+      setTenders([{ amount: String(totalAmount), paymentMode: 'Membership' }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [membershipUsable, membership?.balance, totalAmount]);
+
   // Round each tender to 2dp before summing — matches the RPC's per-tender
   // numeric(10,2) cast (rounds each amount, then sums), so a value like
   // 33.333 can't sum-then-round to a "Fully collected" state client-side
