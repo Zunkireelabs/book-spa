@@ -3130,6 +3130,44 @@ export async function getTodayInsights(branchId, from, to) {
       }
     }
 
+    // 2b. Voucher sales collected in range — same cash-in-drawer money as
+    // booking payments, so it folds into totalSales/cash/card/digital here
+    // too. Previously only tracked via voucherDistributed's count/value below,
+    // which never fed into the payment mix — a voucher sale was invisible in
+    // Total Sales and the Cash/Card/Digital bars on this Dashboard panel, even
+    // though getDailySummary/getDailyOperationalReport already fold the exact
+    // same voucher_payments rows into their own totals. Mirrors that fold-in.
+    let vouchersInRangeQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    vouchersInRangeQuery = withBranch(vouchersInRangeQuery, branchId, 'branch_id');
+    const { data: vouchersInRange, error: vouchersInRangeError } = await vouchersInRangeQuery;
+    if (vouchersInRangeError) throw vouchersInRangeError;
+
+    const voucherIdsInRange = (vouchersInRange || []).map(v => v.id);
+    if (voucherIdsInRange.length > 0) {
+      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
+        .from('voucher_payments')
+        .select('amount, payment_mode')
+        .in('voucher_id', voucherIdsInRange);
+      if (voucherPaymentsError) throw voucherPaymentsError;
+
+      for (const p of (voucherPayments || [])) {
+        if (WALLET_MODES.has(p.payment_mode)) continue;
+        const amount = Number(p.amount);
+        totalSales += amount;
+        if (p.payment_mode === 'Cash') {
+          cash += amount;
+        } else if (CARD_MODES.has(p.payment_mode) || p.payment_mode.includes('Card')) {
+          card += amount;
+        } else {
+          digital += amount;
+        }
+      }
+    }
+
     // 3. Gift vouchers claimed in range (redemption ledger)
     let claimsQuery = supabase
       .from('voucher_claims')
