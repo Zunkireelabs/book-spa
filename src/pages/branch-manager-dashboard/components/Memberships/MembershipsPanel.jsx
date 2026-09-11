@@ -239,6 +239,7 @@ const MembershipsPanel = ({ branchId }) => {
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Tier</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Branch</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Deposited</th>
+                  <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Wallet Balance</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Expires</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Status</th>
                 </tr>
@@ -274,6 +275,9 @@ const MembershipsPanel = ({ branchId }) => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-data font-data-normal text-sm text-text-secondary">{formatNPR(m.cycleDeposited)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-data font-data-medium text-sm text-primary">{formatNPR(m.balance)}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-caption font-caption-normal text-xs text-text-secondary">

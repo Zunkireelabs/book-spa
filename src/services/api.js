@@ -3099,6 +3099,15 @@ export async function getTodayInsights(branchId, from, to) {
     let totalSales = 0;
     let cash = 0, card = 0, digital = 0, wallet = 0;
     let membershipRedeemed = { count: 0, value: 0 };
+    // Per-mode detail within each bucket (e.g. card: { Visa: 1200, Mastercard: 800 })
+    // — lets the Dashboard expand a bucket to show which specific sub-methods
+    // contributed, instead of only the collapsed bucket total.
+    const modeBreakdown = { cash: {}, card: {}, digital: {}, wallet: {} };
+    const classifyMode = (mode) => {
+      if (mode === 'Cash') return 'cash';
+      if (CARD_MODES.has(mode) || mode.includes('Card')) return 'card';
+      return 'digital'; // DIGITAL_MODES + any unrecognized custom mode
+    };
 
     if (settledBookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
@@ -3117,16 +3126,47 @@ export async function getTodayInsights(branchId, from, to) {
         if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         totalSales += amount;
-        if (p.payment_mode === 'Cash') {
-          cash += amount;
-        } else if (CARD_MODES.has(p.payment_mode) || p.payment_mode.includes('Card')) {
-          card += amount;
-        } else if (DIGITAL_MODES.has(p.payment_mode)) {
-          digital += amount;
-        } else {
-          // Unrecognized custom mode — treat as digital/other rather than drop it.
-          digital += amount;
-        }
+        const bucket = classifyMode(p.payment_mode);
+        if (bucket === 'cash') cash += amount;
+        else if (bucket === 'card') card += amount;
+        else digital += amount;
+        modeBreakdown[bucket][p.payment_mode] = (modeBreakdown[bucket][p.payment_mode] || 0) + amount;
+      }
+    }
+
+    // 2b. Voucher sales collected in range — same cash-in-drawer money as
+    // booking payments, so it folds into totalSales/cash/card/digital here
+    // too. Previously only tracked via voucherDistributed's count/value below,
+    // which never fed into the payment mix — a voucher sale was invisible in
+    // Total Sales and the Cash/Card/Digital bars on this Dashboard panel, even
+    // though getDailySummary/getDailyOperationalReport already fold the exact
+    // same voucher_payments rows into their own totals. Mirrors that fold-in.
+    let vouchersInRangeQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    vouchersInRangeQuery = withBranch(vouchersInRangeQuery, branchId, 'branch_id');
+    const { data: vouchersInRange, error: vouchersInRangeError } = await vouchersInRangeQuery;
+    if (vouchersInRangeError) throw vouchersInRangeError;
+
+    const voucherIdsInRange = (vouchersInRange || []).map(v => v.id);
+    if (voucherIdsInRange.length > 0) {
+      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
+        .from('voucher_payments')
+        .select('amount, payment_mode')
+        .in('voucher_id', voucherIdsInRange);
+      if (voucherPaymentsError) throw voucherPaymentsError;
+
+      for (const p of (voucherPayments || [])) {
+        if (WALLET_MODES.has(p.payment_mode)) continue;
+        const amount = Number(p.amount);
+        totalSales += amount;
+        const bucket = classifyMode(p.payment_mode);
+        if (bucket === 'cash') cash += amount;
+        else if (bucket === 'card') card += amount;
+        else digital += amount;
+        modeBreakdown[bucket][p.payment_mode] = (modeBreakdown[bucket][p.payment_mode] || 0) + amount;
       }
     }
 
@@ -3230,6 +3270,7 @@ export async function getTodayInsights(branchId, from, to) {
         card,
         digital,
         wallet,
+        paymentModeBreakdown: modeBreakdown,
         membershipRedeemed,
         membershipSold,
         voucherClaimed,
