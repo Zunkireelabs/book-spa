@@ -4,11 +4,15 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
+import MembershipWalletCard from '../../../../components/ui/MembershipWalletCard';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchVoucherTypes, issueVoucher, createVoucherType, fetchMembershipForCustomer } from '../../../../services/api';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
+import { MEMBERSHIP_ENABLED } from '../../../../lib/featureFlags';
+
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
 const VOUCHER_TYPE_CATEGORIES = [
   { value: 'spa', label: 'Spa' },
@@ -150,6 +154,17 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   const removeTender = (i) => removeTenderRow(setTenders, i);
   const updateTender = (i, patch) => updateTenderRow(setTenders, i, patch);
 
+  // The Membership option is only offered once a customer is linked AND their
+  // wallet has balance — mirrors PaymentModal.jsx's booking-checkout logic.
+  const membershipUsable = !!(MEMBERSHIP_ENABLED && linkedCustomerId && membership && membership.balance > 0 && membership.status !== 'depleted');
+  const membershipLeaf = membershipUsable ? { value: 'Membership', label: 'Membership' } : null;
+  const membershipCommitted = useMemo(() => {
+    if (!membershipUsable) return 0;
+    return round2(tenders.reduce((s, t) => s + (t.paymentMode === 'Membership' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0));
+  }, [tenders, membershipUsable]);
+  const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
+  const membershipOverWallet = membershipUsable && membershipCommitted > membership.balance;
+
   // Round each tender to 2dp before summing — matches the RPC's per-tender
   // numeric(10,2) cast (rounds each amount, then sums), so a value like
   // 33.333 can't sum-then-round to a "Fully collected" state client-side
@@ -200,6 +215,12 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
     if (!issuedDate || !expiryDate) { setError('Issued and expiry dates are required.'); return; }
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
     if (tenderRemaining !== 0) { setError('Payment amount must equal the voucher total.'); return; }
+    const hasMembershipTender = tenders.some((t) => t.paymentMode === 'Membership' && Number(t.amount) > 0);
+    if (hasMembershipTender && !linkedCustomerId) { setError('Link a customer account to pay by Membership.'); return; }
+    if (hasMembershipTender && membershipCommitted > (membership?.balance || 0)) {
+      setError(`Membership tenders total ${formatNPR(membershipCommitted)} but the wallet balance is only ${formatNPR(membership?.balance || 0)}.`);
+      return;
+    }
 
     setSubmitting(true);
     // Guest Info is one column — a phone number takes priority (it's what
@@ -512,6 +533,8 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
                 </p>
               )}
 
+              {membership && <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Issued date</label>
@@ -547,40 +570,54 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
                     + Add method
                   </button>
                 </div>
-                {tenders.map((t, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="w-36 flex-shrink-0">
-                      <PaymentMethodSelector
-                        paymentMethods={paymentMethods}
-                        value={t.paymentMode}
-                        onChange={(v) => updateTender(i, { paymentMode: v })}
-                        size="md"
-                      />
+                {tenders.map((t, i) => {
+                  const isMembership = t.paymentMode === 'Membership';
+                  const overWallet = isMembership && Number(t.amount) > (membership?.balance || 0);
+                  return (
+                  <div key={i}>
+                    <div className="flex items-center gap-2">
+                      <div className="w-36 flex-shrink-0">
+                        <PaymentMethodSelector
+                          paymentMethods={paymentMethods}
+                          value={t.paymentMode}
+                          onChange={(v) => updateTender(i, { paymentMode: v })}
+                          extraLeaf={membershipLeaf}
+                          size="md"
+                        />
+                      </div>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={t.amount}
+                          onChange={(e) => updateTender(i, { amount: e.target.value })}
+                          placeholder="0"
+                          className="w-full h-10 pl-11 pr-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                        />
+                      </div>
+                      {tenders.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTender(i)}
+                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                          aria-label="Remove method"
+                        >
+                          <Icon name="X" size={14} />
+                        </button>
+                      )}
                     </div>
-                    <div className="relative flex-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={t.amount}
-                        onChange={(e) => updateTender(i, { amount: e.target.value })}
-                        placeholder="0"
-                        className="w-full h-10 pl-11 pr-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                      />
-                    </div>
-                    {tenders.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeTender(i)}
-                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                        aria-label="Remove method"
-                      >
-                        <Icon name="X" size={14} />
-                      </button>
+                    {isMembership && (
+                      <p className={`mt-1 font-caption text-[11px] ml-[9.5rem] ${overWallet ? 'text-error' : 'text-text-tertiary'}`}>
+                        {overWallet
+                          ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
+                          : `Wallet available: ${formatNPR(walletRemaining)}`}
+                      </p>
                     )}
                   </div>
-                ))}
+                  );
+                })}
                 <p className={`font-caption text-xs ${tenderRemaining === 0 ? 'text-success' : 'text-warning'}`}>
                   {tenderRemaining === 0 ? 'Fully collected.' : `Remaining to collect: ${formatNPR(tenderRemaining)}`}
                 </p>
@@ -615,7 +652,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
               </button>
               <button
                 type="submit"
-                disabled={submitting || loadingTypes || isOverall || tenderRemaining !== 0}
+                disabled={submitting || loadingTypes || isOverall || tenderRemaining !== 0 || membershipOverWallet}
                 className="px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 disabled:opacity-50 spa-transition-fast inline-flex items-center space-x-1.5"
               >
                 {submitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}

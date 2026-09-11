@@ -3009,6 +3009,10 @@ export async function getDailySummary(branchId, date) {
       if (voucherPaymentsError) throw voucherPaymentsError;
 
       for (const p of (voucherPayments || [])) {
+        // Membership-tendered voucher sales are a wallet deduction, not new
+        // cash collected today — same "already-recognized-elsewhere" policy
+        // as the booking-payments loop above (WALLET_MODES).
+        if (WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         netRevenue += amount;
@@ -3434,6 +3438,9 @@ export async function getDailyOperationalReport(branchId, date) {
       if (voucherPaymentsError) throw voucherPaymentsError;
 
       for (const p of (voucherPayments || [])) {
+        // Membership-tendered voucher sales are a wallet deduction, not new
+        // cash collected today — same policy as the booking paymentRows loop below.
+        if (WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         voucherPaymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
