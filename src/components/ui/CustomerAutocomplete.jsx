@@ -149,7 +149,7 @@ const CustomerAutocomplete = ({
                   focusedIndex === index ? 'bg-gray-100' : ''
                 } hover:bg-gray-50`}
               >
-                <span className="min-w-0 truncate">
+                <span className="flex-1 min-w-0 truncate">
                   <span className="font-medium text-text-primary">{customer.full_name}</span>
                   {customer.phone && (
                     <span className="ml-2 text-text-secondary">{customer.phone}</span>
@@ -157,8 +157,8 @@ const CustomerAutocomplete = ({
                 </span>
                 {m && (
                   <span
-                    title={m.membershipNumber || undefined}
-                    className={`flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide ${pillClass}`}
+                    title={`${m.tierName || m.membershipNumber}${m.status !== 'active' ? ` · ${m.status}` : ''}`}
+                    className={`flex-shrink-0 max-w-[6.5rem] truncate inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide ${pillClass}`}
                   >
                     {m.tierName || m.membershipNumber}
                     {m.status !== 'active' && ` · ${m.status}`}
