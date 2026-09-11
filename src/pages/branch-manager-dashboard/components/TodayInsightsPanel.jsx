@@ -94,7 +94,9 @@ const TodayInsightsPanel = ({ branchId, period }) => {
   // exactly, instead of a hardcoded Cash/Card/Digital/Wallet guess. A method
   // nobody used today (total 0) is dropped rather than shown as dead weight.
   const modeTotals = data.paymentModeTotals || {};
-  const paymentRows = buildPaymentMethodTree(paymentMethods)
+  const tree = buildPaymentMethodTree(paymentMethods);
+  const knownModes = new Set(tree.flatMap((node) => [node.value, ...(node.subMethods || []).map((s) => s.value)]));
+  const paymentRows = tree
     .map((node) => {
       const subMethods = node.subMethods || [];
       const isGroup = subMethods.length > 0;
@@ -110,6 +112,22 @@ const TodayInsightsPanel = ({ branchId, period }) => {
       return { key: node.value, label: node.label, total, subEntries };
     })
     .filter((row) => row.total > 0);
+
+  // Fallback for any payment_mode not in the org's CURRENT configured tree — e.g.
+  // a method renamed/removed in Setup > Payment Methods after older payments were
+  // already recorded against it. Without this, that money stays in totalSales but
+  // silently vanishes from the bar/legend, making them under-sum the header total.
+  const otherEntries = Object.entries(modeTotals)
+    .filter(([mode, amount]) => amount > 0 && !knownModes.has(mode))
+    .sort((a, b) => b[1] - a[1]);
+  if (otherEntries.length > 0) {
+    paymentRows.push({
+      key: '__other__',
+      label: 'Other',
+      total: otherEntries.reduce((sum, [, amount]) => sum + amount, 0),
+      subEntries: otherEntries,
+    });
+  }
 
   const utilizationPercent = Math.max(0, Math.min(100, Number(data.staffUtilization.avgPercent) || 0));
   const therapistCount = data.staffUtilization.therapists.length;
