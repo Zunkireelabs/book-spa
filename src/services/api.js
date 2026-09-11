@@ -318,8 +318,9 @@ const WALLET_MODES = new Set(['Membership', 'ReferralWallet', 'VoucherWallet', '
 // Bucket key ('cash' | 'card' | 'fonepay') for the simple 3-way cash/card/other
 // split used by getDailySummary() and getDailyOperationalReport() (both the
 // booking-payments and voucher-payments loops in each). Not used by
-// getTodayInsights(), which needs a richer wallet/digital breakdown via its own
-// CARD_MODES/DIGITAL_MODES sets further down this file (WALLET_MODES above is shared).
+// getTodayInsights(), which returns a flat per-payment_mode total instead so the
+// Dashboard can group by the org's own configured payment-method tree
+// (WALLET_MODES above is shared across all three functions).
 function classifyPaymentMode(mode) {
   if (mode === 'Cash') return 'cash';
   if (mode.includes('Card')) return 'card';
@@ -3069,9 +3070,6 @@ export async function getDailySummary(branchId, date) {
 // cash-based-reconciliation policy neither is counted as money collected today in any
 // bucket, including totalSales. See getDailySummary/getDailyOperationalReport for the same
 // 'today' semantics (bookings.date, not payment created_at) and the same exclusion policy.
-const CARD_MODES = new Set(['Card', 'Nabil', 'GlobalIME', 'NICAsia']);
-const DIGITAL_MODES = new Set(['Esewa', 'Khalti', 'MobileBanking', 'Cheque']);
-
 export async function getTodayInsights(branchId, from, to) {
   try {
     if (!branchId) {
@@ -3095,19 +3093,13 @@ export async function getTodayInsights(branchId, from, to) {
       .filter(b => ['paid', 'partial'].includes(b.payment_status))
       .map(b => b.id);
 
-    // 2. Bucket today's payments by mode
+    // 2. Total today's payments per actual payment_mode — kept flat (not bucketed
+    // into any fixed Cash/Card/Digital classification) so the Dashboard can group
+    // rows by the org's own configured payment-method tree (Setup > Payment
+    // Methods) instead of a hardcoded guess at what counts as "digital".
     let totalSales = 0;
-    let cash = 0, card = 0, digital = 0, wallet = 0;
     let membershipRedeemed = { count: 0, value: 0 };
-    // Per-mode detail within each bucket (e.g. card: { Visa: 1200, Mastercard: 800 })
-    // — lets the Dashboard expand a bucket to show which specific sub-methods
-    // contributed, instead of only the collapsed bucket total.
-    const modeBreakdown = { cash: {}, card: {}, digital: {}, wallet: {} };
-    const classifyMode = (mode) => {
-      if (mode === 'Cash') return 'cash';
-      if (CARD_MODES.has(mode) || mode.includes('Card')) return 'card';
-      return 'digital'; // DIGITAL_MODES + any unrecognized custom mode
-    };
+    const modeTotals = {}; // { 'Cash': 17600, 'Nabil Card': 16200, 'MobileBanking': 31860, ... }
 
     if (settledBookingIds.length > 0) {
       const { data: payments, error: paymentsError } = await supabase
@@ -3126,11 +3118,7 @@ export async function getTodayInsights(branchId, from, to) {
         if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         totalSales += amount;
-        const bucket = classifyMode(p.payment_mode);
-        if (bucket === 'cash') cash += amount;
-        else if (bucket === 'card') card += amount;
-        else digital += amount;
-        modeBreakdown[bucket][p.payment_mode] = (modeBreakdown[bucket][p.payment_mode] || 0) + amount;
+        modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
       }
     }
 
@@ -3162,11 +3150,7 @@ export async function getTodayInsights(branchId, from, to) {
         if (WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         totalSales += amount;
-        const bucket = classifyMode(p.payment_mode);
-        if (bucket === 'cash') cash += amount;
-        else if (bucket === 'card') card += amount;
-        else digital += amount;
-        modeBreakdown[bucket][p.payment_mode] = (modeBreakdown[bucket][p.payment_mode] || 0) + amount;
+        modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
       }
     }
 
@@ -3266,11 +3250,7 @@ export async function getTodayInsights(branchId, from, to) {
     return {
       data: {
         totalSales,
-        cash,
-        card,
-        digital,
-        wallet,
-        paymentModeBreakdown: modeBreakdown,
+        paymentModeTotals: modeTotals,
         membershipRedeemed,
         membershipSold,
         voucherClaimed,
