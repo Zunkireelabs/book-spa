@@ -3009,6 +3009,10 @@ export async function getDailySummary(branchId, date) {
       if (voucherPaymentsError) throw voucherPaymentsError;
 
       for (const p of (voucherPayments || [])) {
+        // Membership-tendered voucher sales are a wallet deduction, not new
+        // cash collected today — same "already-recognized-elsewhere" policy
+        // as the booking-payments loop above (WALLET_MODES).
+        if (WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         netRevenue += amount;
@@ -3434,6 +3438,9 @@ export async function getDailyOperationalReport(branchId, date) {
       if (voucherPaymentsError) throw voucherPaymentsError;
 
       for (const p of (voucherPayments || [])) {
+        // Membership-tendered voucher sales are a wallet deduction, not new
+        // cash collected today — same policy as the booking paymentRows loop below.
+        if (WALLET_MODES.has(p.payment_mode)) continue;
         const amount = Number(p.amount);
         voucherSalesTotal += amount;
         voucherPaymentBreakdown[classifyPaymentMode(p.payment_mode)] += amount;
@@ -9366,7 +9373,7 @@ export async function fetchMembershipLedgerReport() {
     const { data, error } = await supabase
       .from('membership_transactions')
       .select(`
-        id, membership_id, kind, amount, notes, created_at, booking_id,
+        id, membership_id, kind, amount, notes, created_at, booking_id, voucher_payment_id,
         membership:memberships (
           membership_number,
           customer:customers ( full_name ),
@@ -9400,7 +9407,11 @@ export async function fetchMembershipLedgerReport() {
           memberName: row.membership?.customer?.full_name || '—',
           cardNo: row.membership?.membership_number || '—',
           tierName: row.membership?.tier?.name || '—',
-          service: row.booking?.service_name_snapshot || row.notes || 'Other',
+          // Voucher-purchase deductions have no booking to name a service from —
+          // notes carries the per-voucher code (e.g. "Voucher purchase: NT 4326-0041"),
+          // which would fragment this report into one bogus "service" per voucher
+          // instead of grouping as a single recognizable category.
+          service: row.voucher_payment_id ? 'Voucher purchase' : (row.booking?.service_name_snapshot || row.notes || 'Other'),
           amountUsed: Math.abs(Number(row.amount || 0)),
           remainingBalance: newBalance,
         });
