@@ -9862,7 +9862,17 @@ export async function issueVoucher({
       // See migration-139-voucher-manual-code.sql.
       p_voucher_code: voucherCode,
     });
-    if (error) throw error;
+    if (error) {
+      // Cosmetic only — the RPC (issue_voucher, migration-170) is still the
+      // sole authority on whether tenders are actually required (depends on
+      // the resolved total); this just swaps its raw "issue_voucher: ..."
+      // exception text for the friendlier client-facing wording that used to
+      // come from this wrapper's own (now-removed) redundant check.
+      if (error.message?.includes('at least one payment tender is required')) {
+        return { data: null, error: { code: 'TENDERS_REQUIRED', message: 'At least one payment tender is required.' } };
+      }
+      throw error;
+    }
     capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
     return { data, error: null };
   } catch (error) {
