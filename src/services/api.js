@@ -9835,11 +9835,14 @@ export async function issueVoucher({
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (!Array.isArray(tenders) || tenders.length === 0) {
-      return { data: null, error: { code: 'TENDERS_REQUIRED', message: 'At least one payment tender is required.' } };
-    }
-
-    const cleanedTenders = tenders
+    // Whether an empty tenders array is valid depends on the voucher's actual
+    // total (actualPrice minus discount) — a 100%-discounted voucher has
+    // nothing to collect, so [] is correct there. That's the RPC's call to
+    // make (issue_voucher, migration-170): it knows the resolved total,
+    // this wrapper doesn't (actualPrice can be null here, falling back to
+    // the voucher type's standard_price server-side). Don't duplicate/guess
+    // that check here — let the RPC be the single source of truth.
+    const cleanedTenders = (Array.isArray(tenders) ? tenders : [])
       .filter((t) => Number(t.amount) > 0 && t.paymentMode)
       .map((t) => ({ amount: Number(t.amount), payment_mode: t.paymentMode }));
 
