@@ -9835,11 +9835,14 @@ export async function issueVoucher({
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (!Array.isArray(tenders) || tenders.length === 0) {
-      return { data: null, error: { code: 'TENDERS_REQUIRED', message: 'At least one payment tender is required.' } };
-    }
-
-    const cleanedTenders = tenders
+    // Whether an empty tenders array is valid depends on the voucher's actual
+    // total (actualPrice minus discount) — a 100%-discounted voucher has
+    // nothing to collect, so [] is correct there. That's the RPC's call to
+    // make (issue_voucher, migration-170): it knows the resolved total,
+    // this wrapper doesn't (actualPrice can be null here, falling back to
+    // the voucher type's standard_price server-side). Don't duplicate/guess
+    // that check here — let the RPC be the single source of truth.
+    const cleanedTenders = (Array.isArray(tenders) ? tenders : [])
       .filter((t) => Number(t.amount) > 0 && t.paymentMode)
       .map((t) => ({ amount: Number(t.amount), payment_mode: t.paymentMode }));
 
@@ -9859,7 +9862,17 @@ export async function issueVoucher({
       // See migration-139-voucher-manual-code.sql.
       p_voucher_code: voucherCode,
     });
-    if (error) throw error;
+    if (error) {
+      // Cosmetic only — the RPC (issue_voucher, migration-170) is still the
+      // sole authority on whether tenders are actually required (depends on
+      // the resolved total); this just swaps its raw "issue_voucher: ..."
+      // exception text for the friendlier client-facing wording that used to
+      // come from this wrapper's own (now-removed) redundant check.
+      if (error.message?.includes('at least one payment tender is required')) {
+        return { data: null, error: { code: 'TENDERS_REQUIRED', message: 'At least one payment tender is required.' } };
+      }
+      throw error;
+    }
     capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
     return { data, error: null };
   } catch (error) {
