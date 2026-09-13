@@ -43,8 +43,20 @@ export function computeTherapistBranchAt(transfers, fallbackBranchId, atDate) {
       isPermanent: !!t.is_permanent,
       startAt: toKathmanduDate(t.effective_date, t.start_time),
       endAt: t.revert_at ? new Date(t.revert_at) : null,
+      // When this transfer was actually recorded — used to order which of several
+      // already-open windows is authoritative (see sort below), separate from
+      // `startAt` (the transfer's declared effective start, which can be backdated
+      // earlier in the day than a still-open prior window it's meant to supersede).
+      transferredAt: t.transferred_at ? new Date(t.transferred_at) : null,
     }))
-    .sort((a, b) => a.startAt - b.startAt);
+    // Precedence among windows already in effect at `atDate` must follow the order
+    // transfers were actually CREATED, not their declared start time — otherwise a
+    // transfer created later today with an earlier-in-the-day start_time (e.g. "09:00",
+    // a common default) can be silently overridden by an already-open indefinite window
+    // (e.g. a system-generated return-leg) that merely happens to declare a later
+    // start_time, even though it was created first. Falls back to startAt ordering when
+    // transferred_at wasn't selected by the caller (defensive, keeps old callers working).
+    .sort((a, b) => (a.transferredAt ?? a.startAt) - (b.transferredAt ?? b.startAt));
 
   let branch = windows.length > 0 ? windows[0].fromBranchId : fallbackBranchId;
 
