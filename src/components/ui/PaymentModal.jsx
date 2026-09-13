@@ -412,7 +412,7 @@ const PaymentModal = ({
     for (const pb of additionalBookings) {
       const need = bookingRemaining(pb);
       if (poolRemaining() + 0.001 >= need) {
-        additionalAllocations.push({ bookingId: pb.bookingId, tenders: take(need) });
+        additionalAllocations.push({ bookingId: pb.bookingId, bookingNumber: pb.bookingNumber, tenders: take(need) });
       }
     }
     return { primaryTenders, additionalAllocations };
