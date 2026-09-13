@@ -95,6 +95,76 @@ export function getRoomCapacity(room) {
   return room?.capacity ?? 1;
 }
 
+/**
+ * Bulk-validate a set of room ids belong to a branch and are active. Used for
+ * per-therapist room overrides (couple bookings with each person in a separate
+ * room) in createBooking/assignTherapist — mirrors the single-room validation
+ * those functions already do for the primary room.
+ */
+async function validateRoomsForBranch(roomIds, branchId) {
+  const ids = [...new Set(roomIds.filter(Boolean))];
+  if (ids.length === 0) return { rooms: new Map(), error: null };
+
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('id, name, is_active, capacity')
+    .in('id', ids)
+    .eq('branch_id', branchId);
+  if (error) return { rooms: new Map(), error };
+
+  const rooms = new Map((data || []).map(r => [r.id, r]));
+  const missing = ids.find(id => !rooms.has(id));
+  if (missing) {
+    return { rooms, error: { code: 'INVALID_ROOM', message: 'Selected room is not available in this branch.' } };
+  }
+  const inactive = data.find(r => !r.is_active);
+  if (inactive) {
+    return { rooms, error: { code: 'ROOM_INACTIVE', message: `${inactive.name} is not active.` } };
+  }
+  return { rooms, error: null };
+}
+
+/**
+ * Capacity check for a per-therapist room override, mirroring the primary-room
+ * overlap query createBooking already runs — must union bookings.room_id matches
+ * (someone's primary room) with other booking_therapists.room_id matches (another
+ * companion's override room), since either can occupy the same override room.
+ */
+async function checkOverrideRoomCapacity({ room, branchId, date, startTime, endTime, excludeBookingId }) {
+  const capacity = getRoomCapacity(room);
+
+  let primaryQuery = supabase
+    .from('bookings')
+    .select('id')
+    .eq('room_id', room.id)
+    .eq('branch_id', branchId)
+    .eq('date', date)
+    .not('status', 'in', '("Cancelled","No Show")')
+    .lt('start_time', endTime)
+    .gt('end_time', startTime);
+  if (excludeBookingId) primaryQuery = primaryQuery.neq('id', excludeBookingId);
+  const { data: primaryOverlaps } = await primaryQuery;
+
+  const { data: companionRows } = await supabase
+    .from('booking_therapists')
+    .select('id, booking_id, start_time, end_time, bookings(branch_id, date, status)')
+    .eq('room_id', room.id);
+
+  const companionOverlaps = (companionRows || []).filter(bt =>
+    bt.booking_id !== excludeBookingId &&
+    bt.bookings?.branch_id === branchId &&
+    bt.bookings?.date === date &&
+    !['Cancelled', 'No Show'].includes(bt.bookings?.status) &&
+    bt.start_time < endTime && bt.end_time > startTime
+  );
+
+  const occupied = (primaryOverlaps || []).length + companionOverlaps.length;
+  if (occupied >= capacity) {
+    return { code: 'ROOM_FULL', message: `${room.name} is fully booked at this time (capacity: ${capacity}).` };
+  }
+  return null;
+}
+
 function validateBookingMutation(booking) {
   if (booking.is_locked) {
     return { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' };
@@ -1683,7 +1753,7 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   }
 }
 
-export async function assignTherapist({ bookingId, therapistIds = [], roomId }) {
+export async function assignTherapist({ bookingId, therapistIds = [], roomId, therapistRoomOverrides, companionName, companionPhone }) {
   try {
     // Support legacy single therapistId param
     const ids = Array.isArray(therapistIds) ? therapistIds.filter(Boolean) : (therapistIds ? [therapistIds] : []);
@@ -1782,6 +1852,8 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       therapist_id: primaryId,
       therapist_name_snapshot: therapistNameSnapshot,
     };
+    if (companionName !== undefined) updatePayload.companion_name = companionName?.trim() || null;
+    if (companionPhone !== undefined) updatePayload.companion_phone = companionPhone ? toE164(companionPhone) : null;
 
     // 6. Room assignment (if roomId provided)
     if (roomId !== undefined) {
@@ -1823,10 +1895,38 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       throw updateError;
     }
 
-    // 8. Sync junction table: preserve per-therapist times where possible
-    const { data: existingBt } = await supabase.from('booking_therapists').select('therapist_id, start_time, end_time').eq('booking_id', bookingId);
+    // 7a. Validate + capacity-check any per-therapist room overrides (couple bookings
+    // with each person in a separate room) before touching the junction table, so a
+    // full override room fails fast rather than after the primary update already committed.
+    const overrideEntries = therapistRoomOverrides
+      ? Object.entries(therapistRoomOverrides).filter(([tid, rid]) => rid && ids.includes(tid))
+      : [];
+    if (overrideEntries.length > 0) {
+      const { rooms: overrideRooms, error: overrideRoomError } = await validateRoomsForBranch(
+        overrideEntries.map(([, rid]) => rid),
+        booking.branch_id
+      );
+      if (overrideRoomError) return { data: null, error: overrideRoomError };
+
+      const { data: bkForCapacity } = await supabase.from('bookings').select('date, start_time, end_time').eq('id', bookingId).single();
+      for (const [, overrideRoomId] of overrideEntries) {
+        const capacityError = await checkOverrideRoomCapacity({
+          room: overrideRooms.get(overrideRoomId),
+          branchId: booking.branch_id,
+          date: bkForCapacity?.date,
+          startTime: bkForCapacity?.start_time,
+          endTime: bkForCapacity?.end_time,
+          excludeBookingId: bookingId,
+        });
+        if (capacityError) return { data: null, error: capacityError };
+      }
+    }
+
+    // 8. Sync junction table: preserve per-therapist times AND room overrides where possible —
+    // this delete+reinsert cycle previously dropped room_id silently on every reassignment.
+    const { data: existingBt } = await supabase.from('booking_therapists').select('therapist_id, start_time, end_time, room_id').eq('booking_id', bookingId);
     const existingTimeMap = {};
-    (existingBt || []).forEach(bt => { existingTimeMap[bt.therapist_id] = { start_time: bt.start_time, end_time: bt.end_time }; });
+    (existingBt || []).forEach(bt => { existingTimeMap[bt.therapist_id] = { start_time: bt.start_time, end_time: bt.end_time, room_id: bt.room_id }; });
 
     await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
 
@@ -1838,6 +1938,9 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
         therapist_id: tid,
         start_time: existingTimeMap[tid]?.start_time || bk?.start_time || null,
         end_time: existingTimeMap[tid]?.end_time || bk?.end_time || null,
+        room_id: therapistRoomOverrides?.[tid] !== undefined
+          ? (therapistRoomOverrides[tid] || null)
+          : (existingTimeMap[tid]?.room_id || null),
       }));
       const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
       if (junctionError) {
@@ -4221,7 +4324,7 @@ export async function fetchBookingById(bookingId) {
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
         payments(amount, payment_mode, created_at),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name, gender))
+        booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
       .eq('id', bookingId)
       .single();
@@ -4447,7 +4550,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         therapist:therapists(id, name),
         room:rooms(id, name),
         creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name)),
+        booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name)),
         payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
@@ -4561,6 +4664,9 @@ export async function createBooking({
   therapistId,
   therapistIds,
   roomId,
+  therapistRoomOverrides,
+  companionName,
+  companionPhone,
   bookingGroupId,
   referringCustomerId,
   referringRewardType,
@@ -4815,6 +4921,32 @@ export async function createBooking({
       therapistNameSnapshot = primary?.name || null;
     }
 
+    // 7a2. Validate + capacity-check per-therapist room overrides (couple bookings with
+    // each person in a separate room). Done before the main insert so a full override
+    // room fails fast with a friendly error instead of creating a booking with a
+    // companion silently left unassigned.
+    const overrideEntries = therapistRoomOverrides
+      ? Object.entries(therapistRoomOverrides).filter(([tid, rid]) => rid && allTherapistIds.includes(tid))
+      : [];
+    if (overrideEntries.length > 0) {
+      const { rooms: overrideRooms, error: overrideRoomError } = await validateRoomsForBranch(
+        overrideEntries.map(([, rid]) => rid),
+        resolvedBranchId
+      );
+      if (overrideRoomError) return { data: null, error: overrideRoomError };
+
+      for (const [, overrideRoomId] of overrideEntries) {
+        const capacityError = await checkOverrideRoomCapacity({
+          room: overrideRooms.get(overrideRoomId),
+          branchId: resolvedBranchId,
+          date,
+          startTime,
+          endTime,
+        });
+        if (capacityError) return { data: null, error: capacityError };
+      }
+    }
+
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
     // Capture who created it (null for anonymous customer self-booking).
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -4831,6 +4963,8 @@ export async function createBooking({
         customer_phone: toE164(customerPhone),
         customer_gender: customerGender || null,
         customer_account_id: customerAccountId || null,
+        companion_name: companionName?.trim() || null,
+        companion_phone: companionPhone ? toE164(companionPhone) : null,
         date: date,
         start_time: startTime,
         base_amount: Number(service.price_npr),
@@ -4902,6 +5036,7 @@ export async function createBooking({
         therapist_id: tid,
         start_time: booking.start_time,
         end_time: booking.end_time,
+        room_id: therapistRoomOverrides?.[tid] || null,
       }));
       const { error: btError } = await supabase.from('booking_therapists').insert(rows);
       if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
