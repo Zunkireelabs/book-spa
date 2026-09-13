@@ -784,6 +784,13 @@ const CalendarGrid = ({
       const startTime = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
       const endTime = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
       const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
+      // Couple in separate rooms: each therapist's effective room is their own
+      // booking_therapists.room_id override, falling back to the booking's primary
+      // room. >1 distinct effective room means this booking needs a card in each.
+      const effectiveRoomIds = columnMode === 'room' && b.booking_therapists?.length > 0
+        ? [...new Set(b.booking_therapists.map(bt => bt.room_id || b.room_id).filter(Boolean))]
+        : [];
+      const isRoomShared = columnMode === 'room' && effectiveRoomIds.length > 1;
       const { id: visibleTherapistId, name: therapistName } = isShared
         ? { id: null, name: b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ') }
         : resolveSingleTherapist(b, therapistMap);
@@ -838,6 +845,23 @@ const CalendarGrid = ({
             endTime: bt.end_time || endTime,
             _bookingStartTime: startTime,
             _bookingEndTime: endTime,
+          });
+        });
+      } else if (isRoomShared) {
+        // Place a card in each distinct room the couple's therapists are actually
+        // in — companions sharing an override room render as ONE card, mirroring
+        // how the single-room case renders one card per room.
+        const columnOrder = columns.map(c => c.id);
+        const leftmostRoomId = columnOrder.find(cid => effectiveRoomIds.includes(cid));
+
+        effectiveRoomIds.forEach(rid => {
+          if (!map[bookingDate][rid]) map[bookingDate][rid] = [];
+          map[bookingDate][rid].push({
+            ...baseEntry,
+            _colRoomId: rid,
+            _isFaded: rid !== leftmostRoomId,
+            isRoomShared: true,
+            roomName: roomMap[rid] || null,
           });
         });
       } else {

@@ -52,6 +52,11 @@ function isTimeLocked(booking) {
 
 // Check if booking can be dragged
 export function canDragBooking(booking) {
+  // A couple booking exploded into two room columns (isRoomShared) has no
+  // per-companion drag target yet — a plain drag would move bookings.room_id
+  // only, desyncing it from the companion's booking_therapists.room_id
+  // override. Reassign rooms via BookingActionModal instead.
+  if (booking.isRoomShared) return false;
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
   // Cannot drag paid bookings
@@ -197,8 +202,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       className={`absolute left-1 right-1 rounded-md overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${isSelected ? 'ring-2 ring-violet-500 ring-offset-1' : ''}`}
-      data-booking-id={booking.isShared ? booking.bookingId : undefined}
-      data-shared={booking.isShared ? 'true' : undefined}
+      data-booking-id={(booking.isShared || booking.isRoomShared) ? booking.bookingId : undefined}
+      data-shared={(booking.isShared || booking.isRoomShared) ? 'true' : undefined}
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
