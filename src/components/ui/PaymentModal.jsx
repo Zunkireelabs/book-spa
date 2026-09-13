@@ -409,14 +409,37 @@ const PaymentModal = ({
 
     const primaryTenders = take(remaining);
     const additionalAllocations = [];
+    // Bundled bookings the pool couldn't cover — either the staff deliberately
+    // under-tendered (leftover > 0, expected) or, if leftover is 0, the pool
+    // still fell short of covering everything (an inconsistency that must
+    // block submission rather than silently drop the booking — see
+    // BK-20260913-0037, where a bundled Jacuzzi payment vanished unnoticed).
+    const skippedBookings = [];
     for (const pb of additionalBookings) {
       const need = bookingRemaining(pb);
       if (poolRemaining() + 0.001 >= need) {
-        additionalAllocations.push({ bookingId: pb.bookingId, tenders: take(need) });
+        additionalAllocations.push({ bookingId: pb.bookingId, bookingNumber: pb.bookingNumber, tenders: take(need) });
+      } else {
+        skippedBookings.push({ bookingId: pb.bookingId, bookingNumber: pb.bookingNumber, need });
       }
     }
-    return { primaryTenders, additionalAllocations };
+    return { primaryTenders, additionalAllocations, skippedBookings };
   };
+
+  const cleanedTendersPreview = useMemo(() => tenders
+    .filter(t => Number(t.amount) > 0)
+    .filter(t => t.paymentMode !== 'SessionPackage' || !!t.packageId)
+    .map(t => ({ amount: round2(t.amount), paymentMode: t.paymentMode })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tenders]);
+
+  // Live preview so staff see which bundled bookings would be left unpaid
+  // BEFORE submitting, instead of finding out after the fact.
+  const skippedBookingsPreview = useMemo(
+    () => allocateTenders(cleanedTendersPreview).skippedBookings,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cleanedTendersPreview, remaining, additionalBookings]
+  );
 
   const handleSubmit = async () => {
     if (referralRewardBlocksPayment) {
@@ -465,7 +488,14 @@ const PaymentModal = ({
         ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
         ...(t.paymentMode === 'SessionPackage' ? { packageId: t.packageId } : {}),
       }));
-    const { primaryTenders, additionalAllocations } = allocateTenders(cleanedTenders);
+    const { primaryTenders, additionalAllocations, skippedBookings } = allocateTenders(cleanedTenders);
+    // Safety net: nothing should be left unallocated when the staff entered
+    // the full amount due. If it happens anyway (stale balance, rounding),
+    // block rather than silently drop a bundled booking's payment.
+    if (skippedBookings.length > 0 && leftover <= 0.001) {
+      setError(`Could not allocate payment to: ${skippedBookings.map(s => s.bookingNumber || s.bookingId).join(', ')}. Please re-check the entered amounts and try again.`);
+      return;
+    }
     const result = await onConfirm({
       tenders: primaryTenders,
       additionalAllocations,
@@ -544,6 +574,15 @@ const PaymentModal = ({
               </div>
             </div>
           </div>
+
+          {skippedBookingsPreview.length > 0 && (
+            <div className="flex items-start space-x-2 px-3 py-2.5 rounded-spa bg-warning/5 border border-warning/20">
+              <Icon name="AlertTriangle" size={14} className="text-warning flex-shrink-0 mt-0.5" />
+              <span className="font-body font-body-normal text-xs sm:text-sm text-warning">
+                Entered amount won't cover: {skippedBookingsPreview.map(s => s.bookingNumber || s.bookingId).join(', ')} — {skippedBookingsPreview.length > 1 ? 'these will' : 'this will'} stay unpaid.
+              </span>
+            </div>
+          )}
 
           <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />
 
