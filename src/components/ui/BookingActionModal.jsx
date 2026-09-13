@@ -521,14 +521,23 @@ const BookingActionModal = ({
   const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
+    setActionError(null);
     try {
       const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes });
       if (result?.error) return result;
 
-      // Pay each bundled previous-due booking with its own allocated tenders
-      // (PaymentModal splits the entered amount across bookings and methods).
+      // Pay each bundled previous-due/related booking with its own allocated
+      // tenders (PaymentModal splits the entered amount across bookings and
+      // methods). The parent above already succeeded — a failure here must be
+      // surfaced, not swallowed, since staff would otherwise see "Paid" on the
+      // parent and wrongly assume the whole bundle settled (see BK-20260913-0037
+      // incident: a bundled Jacuzzi payment failed silently and stayed unpaid).
+      const failedAllocations = [];
       for (const alloc of (additionalAllocations || [])) {
-        await onRecordPayment(alloc.bookingId, { tenders: alloc.tenders, notes: paymentNotes });
+        const allocResult = await onRecordPayment(alloc.bookingId, { tenders: alloc.tenders, notes: paymentNotes });
+        if (allocResult?.error) {
+          failedAllocations.push(alloc.bookingNumber || alloc.bookingId);
+        }
       }
 
       // Stay open on the Payment tab (rather than closing the whole modal) so
@@ -536,6 +545,9 @@ const BookingActionModal = ({
       // the updated wallet amount, instead of having to reopen the booking.
       setShowPaymentModal(false);
       setSelectedPreviousDueIds(new Set());
+      if (failedAllocations.length > 0) {
+        setActionError(`Payment recorded for this booking, but failed for: ${failedAllocations.join(', ')}. Open ${failedAllocations.length > 1 ? 'those bookings' : 'that booking'} directly and record payment again.`);
+      }
       return result;
     } finally {
       setPaymentSubmitting(false);
@@ -1893,6 +1905,13 @@ const BookingActionModal = ({
                   </div>
                 )}
 
+                {actionError && (
+                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                    <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                    <span className="font-body font-body-normal text-xs text-error">{actionError}</span>
+                  </div>
+                )}
+
                 {/* Payment status */}
                 <div className="flex items-center justify-between px-1">
                   <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
@@ -2187,6 +2206,7 @@ const BookingActionModal = ({
           additionalBookings={[
             ...relatedBookings.map(rb => ({
               bookingId: rb.id,
+              bookingNumber: rb.booking_number,
               service: rb.service?.name,
               base_amount: rb.base_amount,
               discount_amount: rb.discount_amount,
