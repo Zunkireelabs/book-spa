@@ -28,7 +28,57 @@ ALTER TABLE booking_therapists
 CREATE INDEX IF NOT EXISTS idx_booking_therapists_room
   ON booking_therapists(room_id) WHERE room_id IS NOT NULL;
 
--- 3. Capacity enforcement for override rooms. Occupancy must union both bookings.room_id matches
+-- 3. check_room_capacity() (migration-130) only ever counted bookings.room_id matches — it has
+-- no idea a room can also be occupied by someone else's booking_therapists.room_id override.
+-- Without this fix, a brand-new PRIMARY booking could silently double-book a room that's
+-- already full via an override (confirmed by testing: inserting a primary booking into a room
+-- already holding a companion override succeeded when it should have been blocked). Redefine it
+-- to union both occupancy sources, same as the new trigger below does for the reverse direction.
+CREATE OR REPLACE FUNCTION check_room_capacity()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_capacity integer;
+  v_occupied integer;
+BEGIN
+  IF NEW.room_id IS NULL OR NEW.status IN ('Cancelled', 'No Show') THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext(NEW.room_id::text || NEW.date::text));
+
+  SELECT capacity INTO v_capacity FROM rooms WHERE id = NEW.room_id;
+
+  SELECT
+    (SELECT count(*)
+       FROM bookings b
+       WHERE b.room_id = NEW.room_id
+         AND b.status NOT IN ('Cancelled', 'No Show')
+         AND (TG_OP = 'INSERT' OR b.id != NEW.id)
+         AND tstzrange(b.start_datetime, b.end_datetime) && tstzrange(NEW.start_datetime, NEW.end_datetime))
+    +
+    (SELECT count(*)
+       FROM booking_therapists bt
+       JOIN bookings b2 ON b2.id = bt.booking_id
+       WHERE bt.room_id = NEW.room_id
+         AND b2.status NOT IN ('Cancelled', 'No Show')
+         AND bt.booking_id != NEW.id
+         AND tstzrange(
+               (b2.date + COALESCE(bt.start_time, b2.start_time)) AT TIME ZONE 'Asia/Kathmandu',
+               (b2.date + COALESCE(bt.end_time, b2.end_time)) AT TIME ZONE 'Asia/Kathmandu'
+             ) && tstzrange(NEW.start_datetime, NEW.end_datetime))
+  INTO v_occupied;
+
+  IF v_occupied >= COALESCE(v_capacity, 1) THEN
+    RAISE EXCEPTION 'ROOM_AT_CAPACITY: Room is fully booked for this time range.'
+      USING ERRCODE = 'P0003';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+SET search_path = public;
+
+-- 4. Capacity enforcement for override rooms. Occupancy must union both bookings.room_id matches
 -- (the primary-room case, already covered by check_room_capacity but re-counted here for rooms
 -- used as an override) and other booking_therapists.room_id matches, since either can occupy an
 -- override room. Time window comes from the parent booking's date + this row's own start_time/
