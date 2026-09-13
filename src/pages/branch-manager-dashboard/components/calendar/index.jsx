@@ -113,6 +113,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [specialRequests, setSpecialRequests] = useState('');
   const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
   const [roomId, setRoomId] = useState('');
+  // Couple in separate rooms (individual mode, not the group-booking flow): per-companion
+  // (non-primary therapist) room override, plus their name/phone.
+  const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
+  const [companionName, setCompanionName] = useState('');
+  const [companionPhone, setCompanionPhone] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   // Group booking state (Individual = default, behaves exactly as before)
@@ -226,6 +231,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
+    setTherapistRoomOverrides({});
+    setCompanionName('');
+    setCompanionPhone('');
     setBookingDate(slotInfo?.day || '');
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
@@ -475,6 +483,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           specialRequests: specialRequests.trim() || null,
           therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
           roomId: roomId || null,
+          therapistRoomOverrides: selectedTherapistIds.length > 1
+            ? Object.fromEntries(
+                selectedTherapistIds.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || roomId || null])
+              )
+            : undefined,
+          companionName: selectedTherapistIds.length > 1 ? (companionName.trim() || null) : undefined,
+          companionPhone: selectedTherapistIds.length > 1 ? (companionPhone.trim() || null) : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -753,6 +768,57 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 </div>
               </div>
             </div>
+
+            {/* Couple in separate rooms — surfaced only when 2+ therapists are selected. */}
+            {selectedTherapistIds.length > 1 && (
+              <div className="space-y-2 p-3 border border-border rounded-spa bg-background">
+                <p className="font-body font-body-medium text-sm text-text-primary">
+                  Couple — separate rooms &amp; companion (optional)
+                </p>
+                <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                  Leave a companion's room unset to keep them in the room selected above.
+                </p>
+                <div className="space-y-1.5">
+                  {selectedTherapistIds.slice(1).map((tid) => {
+                    const t = (therapists || []).find(th => th.id === tid);
+                    return (
+                      <div key={tid} className="flex items-center gap-2">
+                        <span className="font-body font-body-medium text-xs text-text-primary w-24 truncate flex-shrink-0">
+                          {t?.full_name || t?.name || 'Companion'}
+                        </span>
+                        <CustomSelect
+                          value={therapistRoomOverrides[tid] || ''}
+                          onChange={(val) => setTherapistRoomOverrides(prev => ({ ...prev, [tid]: val }))}
+                          options={[
+                            { value: '', label: 'Same room as above' },
+                            ...(rooms || []).map(r => ({ value: r.id, label: r.name })),
+                          ]}
+                          placeholder="Same room as above"
+                          size="sm"
+                          className="flex-1"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={companionName}
+                    onChange={(e) => setCompanionName(e.target.value)}
+                    placeholder="Companion's name (optional)"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <input
+                    type="tel"
+                    value={companionPhone}
+                    onChange={(e) => setCompanionPhone(e.target.value)}
+                    placeholder="Companion's phone (optional)"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Customer name */}
             <div>
@@ -2026,6 +2092,9 @@ const OperationalCalendar = ({ branchId }) => {
       specialRequests: formData.specialRequests,
       therapistIds: formData.therapistIds || (formData.therapistId ? [formData.therapistId] : null),
       roomId: formData.roomId || 'none',
+      therapistRoomOverrides: formData.therapistRoomOverrides,
+      companionName: formData.companionName,
+      companionPhone: formData.companionPhone,
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,
@@ -2110,9 +2179,16 @@ const OperationalCalendar = ({ branchId }) => {
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
-    const result = await assignTherapist({ bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined });
+    const result = await assignTherapist({
+      bookingId,
+      therapistIds: ids,
+      roomId: roomId !== undefined ? (roomId || null) : undefined,
+      therapistRoomOverrides,
+      companionName,
+      companionPhone,
+    });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
