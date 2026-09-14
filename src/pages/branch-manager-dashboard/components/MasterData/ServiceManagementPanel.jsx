@@ -21,7 +21,7 @@ const ServiceManagementPanel = () => {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingService, setEditingService] = useState(null);
-  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa' });
+  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa', isCouple: false });
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [formError, setFormError] = useState(null);
@@ -85,7 +85,7 @@ const ServiceManagementPanel = () => {
 
   const handleOpenCreate = () => {
     setEditingService(null);
-    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: categories[0]?.name || 'Spa' });
+    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: categories[0]?.name || 'Spa', isCouple: false });
     setImageFile(null);
     setImagePreview(null);
     setFormError(null);
@@ -101,6 +101,7 @@ const ServiceManagementPanel = () => {
       description: service.description || '',
       imageUrl: service.image_url || '',
       category: service.category || 'Spa',
+      isCouple: !!service.is_couple,
     });
     setImageFile(null);
     setImagePreview(service.image_url || null);
@@ -178,6 +179,7 @@ const ServiceManagementPanel = () => {
         description: formData.description.trim() || null,
         imageUrl: finalImageUrl,
         category: formData.category,
+        isCouple: formData.isCouple,
       });
     } else {
       result = await createService({
@@ -187,6 +189,7 @@ const ServiceManagementPanel = () => {
         description: formData.description.trim() || null,
         imageUrl: finalImageUrl,
         category: formData.category,
+        isCouple: formData.isCouple,
       });
     }
 
@@ -457,6 +460,22 @@ const ServiceManagementPanel = () => {
                   />
                 </div>
               </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isCouple}
+                  onChange={(e) => setFormData({ ...formData, isCouple: e.target.checked })}
+                  className="text-primary focus:ring-primary w-4 h-4 rounded"
+                />
+                <span className="font-body font-body-medium text-sm text-text-primary">
+                  Couple service (priced for two)
+                </span>
+              </label>
+              <p className="font-caption font-caption-normal text-xs text-text-secondary -mt-2">
+                Shows the companion room/name/phone option when staff assign 2 therapists, and is
+                excluded from the calendar's Group-booking service pickers (double-charges there).
+              </p>
 
               <div className="space-y-1">
                 <label className="block font-body font-body-medium text-sm text-text-primary">Description</label>
