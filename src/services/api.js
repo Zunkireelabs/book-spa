@@ -201,7 +201,7 @@ export async function fetchServices(branchId) {
 
     const { data, error } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -6062,7 +6062,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -6125,7 +6125,7 @@ export async function uploadServiceImage(file) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category }) {
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6159,10 +6159,11 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         description: description || null,
         image_url: imageUrl || null,
         category: category || 'Spa',
+        is_couple: !!isCouple,
         is_active: true,
         org_id: profile.org_id,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
       .single();
 
     if (error) throw error;
@@ -6173,7 +6174,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category }) {
+export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6193,6 +6194,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     if (description !== undefined) updatePayload.description = description;
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
+    if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -6203,7 +6205,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active')
       .single();
 
     if (error) {
