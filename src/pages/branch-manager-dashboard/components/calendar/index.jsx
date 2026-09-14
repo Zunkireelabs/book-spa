@@ -1002,7 +1002,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     onChange={(val) => setGroupServiceId(val)}
                     options={[
                       { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                      ...(services || []).map((s) => ({
+                      // Couple services are priced once for the pair, but this flow creates one
+                      // independent booking per person -- picking one here would double-charge.
+                      // Book those via Individual + 2 therapists instead.
+                      ...(services || []).filter(s => !s.is_couple).map((s) => ({
                         value: s.id,
                         label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
                       })),
@@ -1120,7 +1123,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                         onChange={(val) => setPerson(idx, { serviceId: val })}
                         options={[
                           { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                          ...(services || []).map((s) => ({
+                          // Same reasoning as the shared-service picker above -- couple services
+                          // billed to one person's row here would still be a mis-charge.
+                          ...(services || []).filter(s => !s.is_couple).map((s) => ({
                             value: s.id,
                             label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
                           })),
