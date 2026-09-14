@@ -1329,9 +1329,9 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Section 2b: Couple in separate rooms — surfaced only when 2+ therapists
-                    are selected, so single-therapist bookings see no extra clutter. */}
-                {selectedTherapists.length > 1 && (
+                {/* Section 2b: Couple in separate rooms — surfaced only for a couple-flagged
+                    service with 2+ therapists selected, not any multi-therapist assignment. */}
+                {selectedTherapists.length > 1 && currentServiceObj?.is_couple && (
                   <div className="space-y-3">
                     <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                       Couple — separate rooms &amp; companion (optional)

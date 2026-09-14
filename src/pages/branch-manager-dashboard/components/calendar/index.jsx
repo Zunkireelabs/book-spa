@@ -769,8 +769,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             </div>
 
-            {/* Couple in separate rooms — surfaced only when 2+ therapists are selected. */}
-            {selectedTherapistIds.length > 1 && (
+            {/* Couple in separate rooms — surfaced only for a couple-flagged service with 2+
+                therapists selected, not any multi-therapist assignment. */}
+            {selectedTherapistIds.length > 1 && (services || []).find(s => s.id === serviceId)?.is_couple && (
               <div className="space-y-2 p-3 border border-border rounded-spa bg-background">
                 <p className="font-body font-body-medium text-sm text-text-primary">
                   Couple — separate rooms &amp; companion (optional)
