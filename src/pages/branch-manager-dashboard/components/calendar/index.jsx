@@ -2312,6 +2312,21 @@ const OperationalCalendar = ({ branchId }) => {
     return { error: null };
   };
 
+  // Tail-only counterpart to handleRecordPayment, for the atomic
+  // recordGroupPayment path (migration-177, BookingActionModal) — the write
+  // itself already happened in one transaction covering every booking in
+  // the bundle, so this just does the same refresh/toast handleRecordPayment
+  // does, once, instead of once per booking.
+  const handleGroupPaymentRecorded = () => {
+    showToast('Payment recorded successfully');
+    refreshCalendar();
+    if (selectedBooking) {
+      fetchBookingById(selectedBooking.bookingId).then((refreshed) => {
+        if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+      });
+    }
+  };
+
   // ── Therapist/room column reorder ────────────────────────────
   // Gates both onTherapistReorder and onRoomReorder below. Branch-scoped:
   // staff can rearrange columns for their own branch only.
@@ -2826,6 +2841,7 @@ const OperationalCalendar = ({ branchId }) => {
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        onGroupPaymentRecorded={handleGroupPaymentRecorded}
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
