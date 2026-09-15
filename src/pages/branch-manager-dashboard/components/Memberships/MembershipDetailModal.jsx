@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
+import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQuickEdit';
 import { fetchMembership, fetchMembershipTransactions } from '../../../../services/api';
 import TopUpModal from './TopUpModal';
 import RenewModal from './RenewModal';
@@ -155,7 +156,16 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, branchId, onClos
                 <p className="font-caption text-xs text-text-tertiary">
                   {m.customerPhone || '—'}
                   {m.customerGender && <span> · {m.customerGender}</span>}
+                  {m.customerEmail && <span> · {m.customerEmail}</span>}
                 </p>
+                {m.customerId && (
+                  <CustomerContactQuickEdit
+                    customerId={m.customerId}
+                    email={m.customerEmail}
+                    phone={m.customerPhone}
+                    onSaved={reload}
+                  />
+                )}
                 <div className="flex items-center space-x-2 pt-1">
                   <span className="font-body font-body-medium text-sm text-text-primary">{m.tierName}</span>
                   <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${cfg.pill}`}>
