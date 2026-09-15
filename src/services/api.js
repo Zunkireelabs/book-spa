@@ -4691,11 +4691,26 @@ export async function createBooking({
     // 1. Fetch service for duration + price
     const { data: service, error: serviceError } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr')
+      .select('id, name, duration_minutes, price_npr, is_couple')
       .eq('id', serviceId)
       .single();
 
     if (serviceError) throw serviceError;
+
+    // Group-booking creates one independent bookings row per person, each carrying the
+    // full service price -- a couple service (priced once for the pair) picked there
+    // would double-charge. The calendar's group-booking service pickers already filter
+    // is_couple services out of their options, but that's client-side only; enforce it
+    // here too in case a value was selected before the service list refreshed.
+    if (bookingGroupId && service.is_couple) {
+      return {
+        data: null,
+        error: {
+          code: 'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP',
+          message: `${service.name} is a couple service and can't be booked as a group booking — use a single booking with 2 therapists instead.`,
+        },
+      };
+    }
 
     // 2. Compute end time for overlap check
     const endTime = addMinutesToTime(startTime, service.duration_minutes);
