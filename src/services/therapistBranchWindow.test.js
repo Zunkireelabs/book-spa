@@ -140,6 +140,29 @@ describe('computeTherapistBranchAt', () => {
     expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-11', '10:00:00'))).toBe(BRANCH_B);
   });
 
+  it('prefers a transfer created LATER over an already-open indefinite window whose declared start_time is earlier in the day (BK-20260913 Manisha Tamang incident)', () => {
+    const transfers = [
+      // System-generated return-leg: created at 09:00 NPT when an earlier visit
+      // auto-reverted. Indefinite (no revert_at). Its declared start_time (10:00)
+      // happens to land AFTER the next transfer's declared start_time (09:00) even
+      // though it was created FIRST.
+      { from_branch_id: BRANCH_B, to_branch_id: BRANCH_A, is_permanent: false, is_return_leg: true, revert_at: null, effective_date: '2026-09-13', start_time: '10:00:00', transferred_at: '2026-09-13T09:00:00+05:45' },
+      // Genuine new transfer, created LATER the same day (15:41), sending the
+      // therapist back to BRANCH_B until 21:00 — but its start_time (09:00) is
+      // backdated earlier in the day than the return-leg's start_time.
+      temp({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-13', start_time: '09:00:00', revert_at: '2026-09-13T21:00:00+05:45' }),
+    ];
+
+    // While the new transfer is open (its window hasn't closed yet), it must win —
+    // the therapist reads as being at BRANCH_B, not bounced back to BRANCH_A by the
+    // older (but later-declared-start) return-leg.
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-13', '18:55:00'))).toBe(BRANCH_B);
+
+    // After the new transfer's window closes (21:00), falls back to the origin branch
+    // it declares (BRANCH_A) — the return-leg's own home-base state.
+    expect(computeTherapistBranchAt(transfers, BRANCH_A, toKathmanduDate('2026-09-13', '22:00:00'))).toBe(BRANCH_A);
+  });
+
   it('handles a permanent transfer followed later by a temporary one from the new home branch', () => {
     const transfers = [
       permanent({ from: BRANCH_A, to: BRANCH_B, effective_date: '2026-09-01', start_time: '00:00:00' }),

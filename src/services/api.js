@@ -1799,7 +1799,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
       const atDate = toKathmanduDate(booking.date, booking.start_time);
       const { data: transferRows } = await supabase
         .from('staff_transfers')
-        .select('therapist_id, from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at')
+        .select('therapist_id, from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at, transferred_at')
         .in('therapist_id', ids);
 
       const transfersByTherapist = {};
@@ -2862,7 +2862,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
         if (therapist) {
           const { data: transferRows } = await supabase
             .from('staff_transfers')
-            .select('from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at')
+            .select('from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at, transferred_at')
             .eq('therapist_id', newTherapistId);
           const atDate = toKathmanduDate(newDate, newStartTime);
           const effectiveBranch = computeTherapistBranchAt(transferRows || [], therapist.branch_id, atDate);
@@ -2896,7 +2896,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       if (currentTherapist) {
         const { data: transferRows } = await supabase
           .from('staff_transfers')
-          .select('from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at')
+          .select('from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at, transferred_at')
           .eq('therapist_id', booking.therapist_id);
         const atDate = toKathmanduDate(newDate, newStartTime);
         const effectiveBranch = computeTherapistBranchAt(transferRows || [], currentTherapist.branch_id, atDate);
