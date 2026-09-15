@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
+import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQuickEdit';
 import { fetchPackage, fetchPackageRedemptions } from '../../../../services/api';
 
 function formatNPR(amount) {
@@ -132,6 +133,21 @@ const PackageDetailModal = ({ packageId, onClose, onChanged: _onChanged }) => {
                   <div className="col-span-2">
                     <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Remarks</p>
                     <p className="font-body text-sm text-text-secondary">{pkg.remarks}</p>
+                  </div>
+                )}
+                {pkg.customerId && (
+                  <div className="col-span-2 pt-1 border-t border-border/60">
+                    <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Customer contact</p>
+                    <p className="font-body text-sm text-text-secondary mb-1.5">
+                      {pkg.customerEmail || 'No email on file'}
+                      {pkg.customerPhone ? ` · ${pkg.customerPhone}` : ''}
+                    </p>
+                    <CustomerContactQuickEdit
+                      customerId={pkg.customerId}
+                      email={pkg.customerEmail}
+                      phone={pkg.customerPhone}
+                      onSaved={loadData}
+                    />
                   </div>
                 )}
               </div>

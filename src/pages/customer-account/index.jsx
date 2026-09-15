@@ -5,14 +5,16 @@ import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 import {
   getCustomerBookingHistory, getCustomerMembership, getCustomerMembershipTransactions,
-  getCustomerVouchers, getCustomerReferralStats,
+  getCustomerVouchers, getCustomerPackages, getCustomerReferralStats,
 } from 'services/api';
 import { transformBooking } from 'services/bookingTransformers';
 import { formatPhoneDisplay } from 'utils/phone';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, CUSTOMER_REFERRALS_ENABLED } from 'lib/featureFlags';
 import CustomerMembershipSection from 'components/ui/CustomerMembershipSection';
 import CustomerVouchersSection from 'components/ui/CustomerVouchersSection';
+import CustomerPackagesSection from 'components/ui/CustomerPackagesSection';
 import CustomerReferralStats from 'components/ui/CustomerReferralStats';
+import CustomerProfileEditModal from 'components/ui/CustomerProfileEditModal';
 
 const STATUS_BADGE = {
   pending: 'bg-warning/10 text-warning',
@@ -87,6 +89,7 @@ const CustomerAccount = () => {
   const [membership, setMembership] = useState(null);
   const [membershipTransactions, setMembershipTransactions] = useState([]);
   const [vouchers, setVouchers] = useState([]);
+  const [packages, setPackages] = useState([]);
   const [referralStats, setReferralStats] = useState(null);
   const hasRedirected = useRef(false);
 
@@ -149,6 +152,17 @@ const CustomerAccount = () => {
   }, [customerProfile?.customer_id]);
 
   useEffect(() => {
+    if (!customerProfile?.customer_id) return;
+
+    let cancelled = false;
+    getCustomerPackages(customerProfile.customer_id).then(({ data }) => {
+      if (!cancelled) setPackages(data || []);
+    });
+
+    return () => { cancelled = true; };
+  }, [customerProfile?.customer_id]);
+
+  useEffect(() => {
     if (!CUSTOMER_REFERRALS_ENABLED || !customerProfile?.customer_id) return;
 
     let cancelled = false;
@@ -175,6 +189,8 @@ const CustomerAccount = () => {
     [vouchers]
   );
 
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+
   const handleSignOut = async () => {
     await signOut();
     navigate(`/${orgSlug}/book`);
@@ -196,15 +212,29 @@ const CustomerAccount = () => {
         <span className="font-heading font-heading-semibold text-lg text-text-primary tracking-tight">
           {orgName || 'Zennly'}
         </span>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
-        >
-          <Icon name="LogOut" size={16} />
-          Sign out
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowProfileEdit(true)}
+            className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <Icon name="UserCog" size={16} />
+            Edit profile
+          </button>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <Icon name="LogOut" size={16} />
+            Sign out
+          </button>
+        </div>
       </header>
+
+      {showProfileEdit && (
+        <CustomerProfileEditModal onClose={() => setShowProfileEdit(false)} />
+      )}
 
       <main className="max-w-4xl mx-auto px-5 py-10">
         {/* Hero greeting */}
@@ -294,6 +324,7 @@ const CustomerAccount = () => {
 
         <CustomerMembershipSection membership={membership} transactions={membershipTransactions} />
         <CustomerVouchersSection vouchers={vouchers} />
+        <CustomerPackagesSection packages={packages} />
         <CustomerReferralStats stats={referralStats} />
 
         {/* Bookings */}

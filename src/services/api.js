@@ -7026,6 +7026,33 @@ export async function fetchCustomerProfile(customerId) {
   }
 }
 
+// Staff-side: add/correct a customer's email or phone. Membership/voucher/
+// package customers are frequently enrolled phone-only, so they have no way
+// to reach the email-OTP-only customer portal until staff back-fill their
+// email — surfaced inline from MembershipDetailModal/VoucherDetailModal/
+// PackageDetailModal via CustomerContactQuickEdit. The RPC (migration-173)
+// also repair-links any customer_accounts row that signed up before this
+// email existed on the customer record.
+export async function updateCustomerContact(customerId, { email = null, phone = null } = {}) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const { data, error } = await supabase.rpc('staff_update_customer_contact', {
+      p_customer_id: customerId,
+      p_email: email,
+      p_phone: phone,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCustomerContact error:', error.message);
+    if (error.code === '23505') {
+      return { data: null, error: { code: 'DUPLICATE_PHONE', message: 'This phone number is already in use by another customer.' } };
+    }
+    return { data: null, error };
+  }
+}
+
 export async function getCustomerIntelligence({ branchId }) {
   try {
     if (!branchId) {
@@ -9521,7 +9548,7 @@ export async function fetchMembership(membershipId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender, date_of_birth ),
+        customer:customers ( id, full_name, phone, email, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('id', membershipId)
@@ -9709,7 +9736,7 @@ export async function fetchMembershipForCustomer(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender, date_of_birth ),
+        customer:customers ( id, full_name, phone, email, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
@@ -9738,7 +9765,7 @@ export async function getCustomerMembership(customerId) {
         total_deposited, balance,
         activation_date, expiry_date, birthday_perk_used_at,
         notes, created_by, created_at,
-        customer:customers ( id, full_name, phone, gender, date_of_birth ),
+        customer:customers ( id, full_name, phone, email, gender, date_of_birth ),
         tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
       `)
       .eq('customer_id', customerId)
@@ -10158,6 +10185,41 @@ export async function getCustomerVouchers(customerId) {
   }
 }
 
+// Customer-session counterpart of getActivePackagesForCustomer, but unscoped
+// to a single service — this is the full "my packages" list for /account,
+// not a booking-flow redemption picker. package_balances is a view, so it
+// can't be embedded via FK the way voucher_type is above — query then merge,
+// same two-step shape as getCustomerVouchers.
+export async function getCustomerPackages(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+
+    const { data: packages, error } = await supabaseCustomer
+      .from('packages')
+      .select(`
+        id, package_code, issued_date, expiry_date, paid_amount, sessions_total, remarks,
+        service_id, package_type:package_type_id ( id, name ), service:service_id ( id, name )
+      `)
+      .eq('customer_id', customerId)
+      .order('issued_date', { ascending: false });
+    if (error) throw error;
+    if (!packages || packages.length === 0) return { data: [], error: null };
+
+    const { data: balances, error: balanceError } = await supabaseCustomer
+      .from('package_balances')
+      .select('package_id, sessions_used, sessions_remaining, status, last_redeemed_date')
+      .in('package_id', packages.map((p) => p.id));
+    if (balanceError) throw balanceError;
+
+    const balanceByPackage = new Map((balances || []).map((b) => [b.package_id, b]));
+    const merged = packages.map((p) => ({ ...p, ...(balanceByPackage.get(p.id) || {}) }));
+    return { data: merged, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerPackages error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function getCustomerReferralStats(customerId) {
   try {
     if (!customerId) return { data: null, error: null };
@@ -10275,7 +10337,8 @@ export async function fetchVoucher(voucherId) {
           actual_price, discount_percent, total_amount_issued, remarks, created_at,
           branch:branches ( id, name ),
           voucher_type:voucher_types ( id, name, is_wallet ),
-          issuer:users!issued_by ( id, full_name )
+          issuer:users!issued_by ( id, full_name ),
+          customer:customers ( id, full_name, phone, email )
         `)
         .eq('id', voucherId)
         .single(),
@@ -10302,6 +10365,9 @@ export async function fetchVoucher(voucherId) {
         voucherTypeId: v.voucher_type?.id || null,
         voucherTypeName: v.voucher_type?.name || '—',
         isWallet: !!v.voucher_type?.is_wallet,
+        customerId: v.customer?.id || null,
+        customerPhone: v.customer?.phone || null,
+        customerEmail: v.customer?.email || null,
         actualPrice: Number(v.actual_price || 0),
         discountPercent: Number(v.discount_percent || 0),
         totalAmountIssued: Number(v.total_amount_issued || 0),
@@ -10658,7 +10724,7 @@ export async function fetchPackage(packageId) {
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
           issuer:users!issued_by ( id, full_name ),
-          customer:customers ( id, full_name, phone )
+          customer:customers ( id, full_name, phone, email )
         `)
         .eq('id', packageId)
         .single(),
@@ -10684,6 +10750,9 @@ export async function fetchPackage(packageId) {
         branchName: p.branch?.name || '—',
         packageTypeId: p.package_type?.id || null,
         packageTypeName: p.package_type?.name || '—',
+        customerId: p.customer?.id || null,
+        customerPhone: p.customer?.phone || null,
+        customerEmail: p.customer?.email || null,
         serviceName: p.service?.name || '—',
         serviceDurationMinutes: p.service?.duration_minutes || null,
         paidAmount: Number(p.paid_amount || 0),
