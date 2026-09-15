@@ -12,3 +12,22 @@ export function resolveJunctionRoomId({ index, therapistId, overridesMap, existi
   }
   return existingRoomId || null;
 }
+
+// Counts booking_therapists rows overlapping a time window for one room, matching what
+// the check_room_capacity()/check_booking_therapist_room_capacity() DB triggers
+// (migration-171) do in SQL. Falls back to the parent booking's own start_time/end_time
+// when the row's own are null, mirroring the triggers' COALESCE(bt.start_time,
+// b2.start_time) — without this fallback, a null-timed row would silently never count.
+export function countOverlappingRoomRows(rows, { branchId, date, startTime, endTime, excludeBookingId }) {
+  return (rows || []).filter(row => {
+    if (excludeBookingId && row.booking_id === excludeBookingId) return false;
+    const b = row.bookings || {};
+    if (b.branch_id !== branchId) return false;
+    if (b.date !== date) return false;
+    if (['Cancelled', 'No Show'].includes(b.status)) return false;
+    const rowStart = row.start_time || b.start_time;
+    const rowEnd = row.end_time || b.end_time;
+    if (!rowStart || !rowEnd) return false;
+    return rowStart < endTime && rowEnd > startTime;
+  }).length;
+}

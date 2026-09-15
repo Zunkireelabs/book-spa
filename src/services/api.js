@@ -5,7 +5,7 @@ import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
-import { resolveJunctionRoomId } from './roomOverrideHelpers';
+import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -148,18 +148,12 @@ async function checkOverrideRoomCapacity({ room, branchId, date, startTime, endT
 
   const { data: companionRows } = await supabase
     .from('booking_therapists')
-    .select('id, booking_id, start_time, end_time, bookings(branch_id, date, status)')
+    .select('booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
     .eq('room_id', room.id);
 
-  const companionOverlaps = (companionRows || []).filter(bt =>
-    bt.booking_id !== excludeBookingId &&
-    bt.bookings?.branch_id === branchId &&
-    bt.bookings?.date === date &&
-    !['Cancelled', 'No Show'].includes(bt.bookings?.status) &&
-    bt.start_time < endTime && bt.end_time > startTime
-  );
+  const companionCount = countOverlappingRoomRows(companionRows, { branchId, date, startTime, endTime, excludeBookingId });
 
-  const occupied = (primaryOverlaps || []).length + companionOverlaps.length;
+  const occupied = (primaryOverlaps || []).length + companionCount;
   if (occupied >= capacity) {
     return { code: 'ROOM_FULL', message: `${room.name} is fully booked at this time (capacity: ${capacity}).` };
   }
@@ -4741,7 +4735,11 @@ export async function createBooking({
           return { data: null, error: { code: 'ROOM_INACTIVE', message: 'Selected room is not active.' } };
         }
 
-        // Check room capacity — count overlapping bookings
+        // Check room capacity — count overlapping bookings. Must union bookings.room_id
+        // matches (someone's primary room) with booking_therapists.room_id matches
+        // (a companion's override room) — see migration-171's check_room_capacity(),
+        // which this JS pre-check must agree with or staff get told a room is free
+        // right before the stricter DB trigger rejects it.
         const capacity = getRoomCapacity(selectedRoom);
         const { data: roomOverlaps } = await supabase
           .from('bookings')
@@ -4753,7 +4751,15 @@ export async function createBooking({
           .lt('start_time', endTime)
           .gt('end_time', startTime);
 
-        if ((roomOverlaps || []).length >= capacity) {
+        const { data: companionOverlapRows } = await supabase
+          .from('booking_therapists')
+          .select('booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
+          .eq('room_id', roomId);
+        const companionOverlapCount = countOverlappingRoomRows(companionOverlapRows, {
+          branchId: resolvedBranchId, date, startTime, endTime,
+        });
+
+        if ((roomOverlaps || []).length + companionOverlapCount >= capacity) {
           return { data: null, error: { code: 'ROOM_FULL', message: `${selectedRoom.name} is fully booked at this time (capacity: ${capacity}).` } };
         }
 
@@ -4784,11 +4790,29 @@ export async function createBooking({
 
         if (overlapError) throw overlapError;
 
-        // 5. Count bookings per room and pick first with remaining capacity
+        // 5. Count bookings per room and pick first with remaining capacity. Also count
+        // booking_therapists.room_id occupancy (companion overrides) per candidate room —
+        // same reasoning as the explicit-room path above.
         const roomBookingCounts = {};
         (overlapping || []).forEach(b => {
           roomBookingCounts[b.room_id] = (roomBookingCounts[b.room_id] || 0) + 1;
         });
+
+        const { data: companionOverlapRowsAll } = await supabase
+          .from('booking_therapists')
+          .select('room_id, booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
+          .in('room_id', rooms.map(r => r.id));
+
+        rooms.forEach(r => {
+          const rowsForRoom = (companionOverlapRowsAll || []).filter(row => row.room_id === r.id);
+          const companionCount = countOverlappingRoomRows(rowsForRoom, {
+            branchId: resolvedBranchId, date, startTime, endTime,
+          });
+          if (companionCount > 0) {
+            roomBookingCounts[r.id] = (roomBookingCounts[r.id] || 0) + companionCount;
+          }
+        });
+
         availableRoom = rooms.find(r => {
           const capacity = getRoomCapacity(r);
           const used = roomBookingCounts[r.id] || 0;
