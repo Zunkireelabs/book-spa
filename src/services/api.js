@@ -829,6 +829,58 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
   }
 }
 
+// Tender modes that deduct from a wallet/voucher/package via their own
+// SECURITY DEFINER RPC (see recordPayment above) — record_group_payment_standard
+// (migration-177) explicitly rejects these, so a bundle containing any of
+// them must use the sequential recordPayment loop instead. Exported so
+// BookingActionModal can decide which path to take before submitting.
+export const EXOTIC_PAYMENT_MODES = ['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet', 'SessionPackage'];
+
+// Atomic counterpart to calling recordPayment once per booking: every
+// booking in `payments` is validated and its tenders inserted inside ONE
+// database transaction (record_group_payment_standard, migration-177) — all
+// or nothing, closing the partial-bundle failure mode a sequential loop of
+// recordPayment calls can't avoid (payments rows are immutable, so a
+// mid-loop failure can't be rolled back client-side). Only supports
+// standard tenders (not in EXOTIC_PAYMENT_MODES) — callers must check that
+// before choosing this over the sequential recordPayment loop.
+//
+// `payments`: [{ bookingId, tenders: [{amount, paymentMode}], dueHolderName, notes }]
+export async function recordGroupPayment(payments) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('record_group_payment_standard', {
+      p_payments: (payments || []).map((p) => ({
+        booking_id: p.bookingId,
+        tenders: (p.tenders || []).map((t) => ({ amount: Number(t.amount), payment_mode: t.paymentMode })),
+        due_holder_name: p.dueHolderName || null,
+        notes: p.notes || null,
+      })),
+    });
+    if (error) throw error;
+
+    capture('staff_group_payment_recorded', {
+      booking_count: (payments || []).length,
+      total_amount: (data || []).reduce((s, r) => s + Number(r.amount_paid || 0), 0),
+    });
+
+    return {
+      data: (data || []).map((r) => ({
+        bookingId: r.booking_id,
+        amountPaid: Number(r.amount_paid || 0),
+        amountDue: Number(r.amount_due || 0),
+        fullyPaid: !!r.fully_paid,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] recordGroupPayment error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Distinct previously-used due-holder names for the settlement typeahead.
 export async function fetchDueHolderNames(branchId) {
   try {
@@ -1962,22 +2014,58 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
   }
 }
 
-export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId }) {
+// bookingGroupId (bookings.booking_group_id, migration-030) is the real,
+// authoritative link between siblings created together as one group booking
+// — when present, match on it instead of the customer_name+date heuristic,
+// so bundling is exact rather than fuzzy-matched by name/date. Still scoped
+// to payment_status='unpaid' — this is "what to bundle into a payment", not
+// "everything in this group" (see fetchGroupBookings below for the latter).
+export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId, bookingGroupId }) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
-      .eq('customer_name', customerName)
-      .eq('date', date)
       .eq('payment_status', 'unpaid')
       .not('status', 'in', '("Cancelled","No Show")')
-      .neq('id', excludeBookingId)
-      .order('start_time');
+      .neq('id', excludeBookingId);
+
+    query = bookingGroupId
+      ? query.eq('booking_group_id', bookingGroupId)
+      : query.eq('customer_name', customerName).eq('date', date);
+
+    const { data, error } = await query.order('start_time');
 
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Every sibling in a group booking, regardless of payment_status — unlike
+// fetchRelatedUnpaidBookings above, this is purely for DISPLAY (so a sibling
+// that's already been paid never silently disappears from another sibling's
+// modal — see the BK-20260915-0025/-0026/-0027 incident, where paying 0025
+// made it drop out of every other sibling's "related" view since that query
+// filtered on payment_status='unpaid'). Never used to decide what to bundle
+// into a payment — only fetchRelatedUnpaidBookings governs that.
+export async function fetchGroupBookings({ bookingGroupId, excludeBookingId }) {
+  try {
+    if (!bookingGroupId) return { data: [], error: null };
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, booking_number, payment_status, status, final_amount, service:services(name)')
+      .eq('booking_group_id', bookingGroupId)
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId)
+      .order('booking_number');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchGroupBookings error:', error.message);
     return { data: [], error };
   }
 }
