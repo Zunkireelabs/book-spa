@@ -105,6 +105,7 @@ function formatTimeDisplay(time) {
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
   const [serviceId, setServiceId] = useState('');
+  const isCoupleService = (services || []).find(s => s.id === serviceId)?.is_couple || false;
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
@@ -113,6 +114,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [specialRequests, setSpecialRequests] = useState('');
   const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
   const [roomId, setRoomId] = useState('');
+  // Couple in separate rooms (individual mode, not the group-booking flow): per-companion
+  // (non-primary therapist) room override, plus their name/phone.
+  const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
+  const [companionName, setCompanionName] = useState('');
+  const [companionPhone, setCompanionPhone] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   // Group booking state (Individual = default, behaves exactly as before)
@@ -226,6 +232,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
+    setTherapistRoomOverrides({});
+    setCompanionName('');
+    setCompanionPhone('');
     setBookingDate(slotInfo?.day || '');
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
@@ -475,6 +484,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           specialRequests: specialRequests.trim() || null,
           therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
           roomId: roomId || null,
+          therapistRoomOverrides: isCoupleService && selectedTherapistIds.length > 1
+            ? Object.fromEntries(
+                selectedTherapistIds.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || roomId || null])
+              )
+            : undefined,
+          companionName: isCoupleService && selectedTherapistIds.length > 1 ? (companionName.trim() || null) : undefined,
+          companionPhone: isCoupleService && selectedTherapistIds.length > 1 ? (companionPhone.trim() || null) : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -754,6 +770,58 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             </div>
 
+            {/* Couple in separate rooms — surfaced only for a couple-flagged service with 2+
+                therapists selected, not any multi-therapist assignment. */}
+            {selectedTherapistIds.length > 1 && isCoupleService && (
+              <div className="space-y-2 p-3 border border-border rounded-spa bg-background">
+                <p className="font-body font-body-medium text-sm text-text-primary">
+                  Couple — separate rooms &amp; companion (optional)
+                </p>
+                <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                  Leave a companion's room unset to keep them in the room selected above.
+                </p>
+                <div className="space-y-1.5">
+                  {selectedTherapistIds.slice(1).map((tid) => {
+                    const t = (therapists || []).find(th => th.id === tid);
+                    return (
+                      <div key={tid} className="flex items-center gap-2">
+                        <span className="font-body font-body-medium text-xs text-text-primary w-24 truncate flex-shrink-0">
+                          {t?.full_name || t?.name || 'Companion'}
+                        </span>
+                        <CustomSelect
+                          value={therapistRoomOverrides[tid] || ''}
+                          onChange={(val) => setTherapistRoomOverrides(prev => ({ ...prev, [tid]: val }))}
+                          options={[
+                            { value: '', label: 'Same room as above' },
+                            ...(rooms || []).map(r => ({ value: r.id, label: r.name })),
+                          ]}
+                          placeholder="Same room as above"
+                          size="sm"
+                          className="flex-1"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={companionName}
+                    onChange={(e) => setCompanionName(e.target.value)}
+                    placeholder="Companion's name (optional)"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <input
+                    type="tel"
+                    value={companionPhone}
+                    onChange={(e) => setCompanionPhone(e.target.value)}
+                    placeholder="Companion's phone (optional)"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Customer name */}
             <div>
               <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
@@ -935,7 +1003,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     onChange={(val) => setGroupServiceId(val)}
                     options={[
                       { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                      ...(services || []).map((s) => ({
+                      // Couple services are priced once for the pair, but this flow creates one
+                      // independent booking per person -- picking one here would double-charge.
+                      // Book those via Individual + 2 therapists instead.
+                      ...(services || []).filter(s => !s.is_couple).map((s) => ({
                         value: s.id,
                         label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
                       })),
@@ -1053,7 +1124,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                         onChange={(val) => setPerson(idx, { serviceId: val })}
                         options={[
                           { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                          ...(services || []).map((s) => ({
+                          // Same reasoning as the shared-service picker above -- couple services
+                          // billed to one person's row here would still be a mis-charge.
+                          ...(services || []).filter(s => !s.is_couple).map((s) => ({
                             value: s.id,
                             label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
                           })),
@@ -2026,6 +2099,9 @@ const OperationalCalendar = ({ branchId }) => {
       specialRequests: formData.specialRequests,
       therapistIds: formData.therapistIds || (formData.therapistId ? [formData.therapistId] : null),
       roomId: formData.roomId || 'none',
+      therapistRoomOverrides: formData.therapistRoomOverrides,
+      companionName: formData.companionName,
+      companionPhone: formData.companionPhone,
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,
@@ -2033,7 +2109,11 @@ const OperationalCalendar = ({ branchId }) => {
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
     }
-    showToast('Booking created successfully');
+    if (result.data?._therapistAssignmentWarning) {
+      showToast(`Booking created, but: ${result.data._therapistAssignmentWarning}`, 'error');
+    } else {
+      showToast('Booking created successfully');
+    }
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
@@ -2110,11 +2190,22 @@ const OperationalCalendar = ({ branchId }) => {
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
-    const result = await assignTherapist({ bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined });
+    const result = await assignTherapist({
+      bookingId,
+      therapistIds: ids,
+      roomId: roomId !== undefined ? (roomId || null) : undefined,
+      therapistRoomOverrides,
+      companionName,
+      companionPhone,
+    });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
+      return;
+    }
+    if (result.data?.warning) {
+      showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
       return;
     }
     showToast('Assignment saved successfully');

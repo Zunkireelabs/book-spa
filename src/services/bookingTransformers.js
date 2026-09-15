@@ -79,6 +79,8 @@ export function transformBooking(dbBooking) {
         id: bt.therapist.id,
         name: bt.therapist.name,
         gender: bt.therapist.gender || null,
+        roomId: bt.room_id || null,
+        roomName: bt.room?.name || null,
       }));
   } else if (therapist) {
     therapists = [therapist];
@@ -104,6 +106,8 @@ export function transformBooking(dbBooking) {
     customerName: dbBooking.customer_name,
     customerEmail: dbBooking.customer_email || null,
     customerPhone: dbBooking.customer_phone || null,
+    companionName: dbBooking.companion_name || null,
+    companionPhone: dbBooking.companion_phone || null,
     service: dbBooking.service?.name || 'Unknown Service',
     duration: dbBooking.service
       ? `${dbBooking.service.duration_minutes} min`

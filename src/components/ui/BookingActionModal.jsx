@@ -77,6 +77,12 @@ const BookingActionModal = ({
   const [selectedTherapists, setSelectedTherapists] = useState([]);
   const [therapistSearch, setTherapistSearch] = useState('');
   const [selectedRoom, setSelectedRoom] = useState('');
+  // Per-companion (non-primary therapist) room override for couple bookings where each
+  // person is in a separate room — { [therapistId]: roomId }. Primary therapist (index 0
+  // of selectedTherapists) always uses selectedRoom above.
+  const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
+  const [companionName, setCompanionName] = useState('');
+  const [companionPhone, setCompanionPhone] = useState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -150,6 +156,13 @@ const BookingActionModal = ({
         : (booking.therapist?.id ? [booking.therapist.id] : []);
       setSelectedTherapists(ids);
       setSelectedRoom(booking.roomId || '');
+      const overrides = {};
+      (booking.therapists || []).forEach(t => {
+        if (t.roomId) overrides[t.id] = t.roomId;
+      });
+      setTherapistRoomOverrides(overrides);
+      setCompanionName(booking.companionName || '');
+      setCompanionPhone(booking.companionPhone || '');
     }
   }, [booking?.bookingId]);
 
@@ -491,7 +504,25 @@ const BookingActionModal = ({
     setActionError(null);
     try {
       if (onAssignTherapist) {
-        await onAssignTherapist(booking.bookingId, selectedTherapists, notes, selectedRoom || null);
+        // Overrides/companion info only make sense for a couple-flagged service with
+        // 2+ therapists selected -- gate on BOTH, not just therapist count, or this data
+        // ships even after the section that shows it has been hidden (e.g. staff picked
+        // 2 therapists on a couple service, then changed the service before saving).
+        const isCoupleAssignment = selectedTherapists.length > 1 && !!currentServiceObj?.is_couple;
+        const overridesToSend = isCoupleAssignment
+          ? Object.fromEntries(
+              selectedTherapists.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || selectedRoom || null])
+            )
+          : undefined;
+        await onAssignTherapist(
+          booking.bookingId,
+          selectedTherapists,
+          notes,
+          selectedRoom || null,
+          overridesToSend,
+          isCoupleAssignment ? (companionName.trim() || null) : undefined,
+          isCoupleAssignment ? (companionPhone.trim() || null) : undefined
+        );
       }
       onClose();
     } catch (error) {
@@ -1297,6 +1328,58 @@ const BookingActionModal = ({
                           </div>
                         </label>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Section 2b: Couple in separate rooms — surfaced only for a couple-flagged
+                    service with 2+ therapists selected, not any multi-therapist assignment. */}
+                {selectedTherapists.length > 1 && currentServiceObj?.is_couple && (
+                  <div className="space-y-3">
+                    <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                      Couple — separate rooms &amp; companion (optional)
+                    </h3>
+                    <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                      Leave a companion's room unset to keep them in the room selected above.
+                    </p>
+                    <div className="space-y-2">
+                      {selectedTherapists.slice(1).map((tid) => {
+                        const t = therapists.find(th => th.id === tid);
+                        return (
+                          <div key={tid} className="flex items-center gap-3">
+                            <span className="font-body font-body-medium text-sm text-text-primary w-32 truncate flex-shrink-0">
+                              {t?.name || 'Companion'}
+                            </span>
+                            <CustomSelect
+                              value={therapistRoomOverrides[tid] || ''}
+                              onChange={(val) => setTherapistRoomOverrides(prev => ({ ...prev, [tid]: val }))}
+                              options={[
+                                { value: '', label: 'Same room as above' },
+                                ...rooms.map(r => ({ value: r.id, label: r.name })),
+                              ]}
+                              placeholder="Same room as above"
+                              size="sm"
+                              className="flex-1"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={companionName}
+                        onChange={(e) => setCompanionName(e.target.value)}
+                        placeholder="Companion's name (optional)"
+                        className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                      <input
+                        type="tel"
+                        value={companionPhone}
+                        onChange={(e) => setCompanionPhone(e.target.value)}
+                        placeholder="Companion's phone (optional)"
+                        className="w-full px-3 py-2 bg-background border border-border rounded-spa text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
                     </div>
                   </div>
                 )}
