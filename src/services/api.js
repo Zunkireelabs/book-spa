@@ -5,6 +5,7 @@ import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
+import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -95,6 +96,70 @@ export function getRoomCapacity(room) {
   return room?.capacity ?? 1;
 }
 
+/**
+ * Bulk-validate a set of room ids belong to a branch and are active. Used for
+ * per-therapist room overrides (couple bookings with each person in a separate
+ * room) in createBooking/assignTherapist — mirrors the single-room validation
+ * those functions already do for the primary room.
+ */
+async function validateRoomsForBranch(roomIds, branchId) {
+  const ids = [...new Set(roomIds.filter(Boolean))];
+  if (ids.length === 0) return { rooms: new Map(), error: null };
+
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('id, name, is_active, capacity')
+    .in('id', ids)
+    .eq('branch_id', branchId);
+  if (error) return { rooms: new Map(), error };
+
+  const rooms = new Map((data || []).map(r => [r.id, r]));
+  const missing = ids.find(id => !rooms.has(id));
+  if (missing) {
+    return { rooms, error: { code: 'INVALID_ROOM', message: 'Selected room is not available in this branch.' } };
+  }
+  const inactive = data.find(r => !r.is_active);
+  if (inactive) {
+    return { rooms, error: { code: 'ROOM_INACTIVE', message: `${inactive.name} is not active.` } };
+  }
+  return { rooms, error: null };
+}
+
+/**
+ * Capacity check for a per-therapist room override, mirroring the primary-room
+ * overlap query createBooking already runs — must union bookings.room_id matches
+ * (someone's primary room) with other booking_therapists.room_id matches (another
+ * companion's override room), since either can occupy the same override room.
+ */
+async function checkOverrideRoomCapacity({ room, branchId, date, startTime, endTime, excludeBookingId }) {
+  const capacity = getRoomCapacity(room);
+
+  let primaryQuery = supabase
+    .from('bookings')
+    .select('id')
+    .eq('room_id', room.id)
+    .eq('branch_id', branchId)
+    .eq('date', date)
+    .not('status', 'in', '("Cancelled","No Show")')
+    .lt('start_time', endTime)
+    .gt('end_time', startTime);
+  if (excludeBookingId) primaryQuery = primaryQuery.neq('id', excludeBookingId);
+  const { data: primaryOverlaps } = await primaryQuery;
+
+  const { data: companionRows } = await supabase
+    .from('booking_therapists')
+    .select('booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
+    .eq('room_id', room.id);
+
+  const companionCount = countOverlappingRoomRows(companionRows, { branchId, date, startTime, endTime, excludeBookingId });
+
+  const occupied = (primaryOverlaps || []).length + companionCount;
+  if (occupied >= capacity) {
+    return { code: 'ROOM_FULL', message: `${room.name} is fully booked at this time (capacity: ${capacity}).` };
+  }
+  return null;
+}
+
 function validateBookingMutation(booking) {
   if (booking.is_locked) {
     return { code: 'DAY_LOCKED', message: 'This day has been closed. No further modifications allowed.' };
@@ -131,7 +196,7 @@ export async function fetchServices(branchId) {
 
     const { data, error } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -1683,7 +1748,7 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   }
 }
 
-export async function assignTherapist({ bookingId, therapistIds = [], roomId }) {
+export async function assignTherapist({ bookingId, therapistIds = [], roomId, therapistRoomOverrides, companionName, companionPhone }) {
   try {
     // Support legacy single therapistId param
     const ids = Array.isArray(therapistIds) ? therapistIds.filter(Boolean) : (therapistIds ? [therapistIds] : []);
@@ -1782,6 +1847,8 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       therapist_id: primaryId,
       therapist_name_snapshot: therapistNameSnapshot,
     };
+    if (companionName !== undefined) updatePayload.companion_name = companionName?.trim() || null;
+    if (companionPhone !== undefined) updatePayload.companion_phone = companionPhone ? toE164(companionPhone) : null;
 
     // 6. Room assignment (if roomId provided)
     if (roomId !== undefined) {
@@ -1823,25 +1890,68 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId }) 
       throw updateError;
     }
 
-    // 8. Sync junction table: preserve per-therapist times where possible
-    const { data: existingBt } = await supabase.from('booking_therapists').select('therapist_id, start_time, end_time').eq('booking_id', bookingId);
+    // 7a. Validate + capacity-check any per-therapist room overrides (couple bookings
+    // with each person in a separate room) before touching the junction table, so a
+    // full override room fails fast rather than after the primary update already committed.
+    const overrideEntries = therapistRoomOverrides
+      ? Object.entries(therapistRoomOverrides).filter(([tid, rid]) => rid && ids.includes(tid))
+      : [];
+    if (overrideEntries.length > 0) {
+      const { rooms: overrideRooms, error: overrideRoomError } = await validateRoomsForBranch(
+        overrideEntries.map(([, rid]) => rid),
+        booking.branch_id
+      );
+      if (overrideRoomError) return { data: null, error: overrideRoomError };
+
+      const { data: bkForCapacity } = await supabase.from('bookings').select('date, start_time, end_time').eq('id', bookingId).single();
+      for (const [, overrideRoomId] of overrideEntries) {
+        const capacityError = await checkOverrideRoomCapacity({
+          room: overrideRooms.get(overrideRoomId),
+          branchId: booking.branch_id,
+          date: bkForCapacity?.date,
+          startTime: bkForCapacity?.start_time,
+          endTime: bkForCapacity?.end_time,
+          excludeBookingId: bookingId,
+        });
+        if (capacityError) return { data: null, error: capacityError };
+      }
+    }
+
+    // 8. Sync junction table: preserve per-therapist times AND room overrides where possible —
+    // this delete+reinsert cycle previously dropped room_id silently on every reassignment.
+    const { data: existingBt } = await supabase.from('booking_therapists').select('therapist_id, start_time, end_time, room_id').eq('booking_id', bookingId);
     const existingTimeMap = {};
-    (existingBt || []).forEach(bt => { existingTimeMap[bt.therapist_id] = { start_time: bt.start_time, end_time: bt.end_time }; });
+    (existingBt || []).forEach(bt => { existingTimeMap[bt.therapist_id] = { start_time: bt.start_time, end_time: bt.end_time, room_id: bt.room_id }; });
 
     await supabase.from('booking_therapists').delete().eq('booking_id', bookingId);
 
     if (ids.length > 0) {
       // Fetch booking times for default
       const { data: bk } = await supabase.from('bookings').select('start_time, end_time').eq('id', bookingId).single();
-      const rows = ids.map(tid => ({
+      const rows = ids.map((tid, index) => ({
         booking_id: bookingId,
         therapist_id: tid,
         start_time: existingTimeMap[tid]?.start_time || bk?.start_time || null,
         end_time: existingTimeMap[tid]?.end_time || bk?.end_time || null,
+        room_id: resolveJunctionRoomId({
+          index,
+          therapistId: tid,
+          overridesMap: therapistRoomOverrides,
+          existingRoomId: existingTimeMap[tid]?.room_id,
+        }),
       }));
       const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
       if (junctionError) {
+        // Non-fatal: the primary therapist/room update on `bookings` above already
+        // committed. But since migration-171 added a trigger that can reject this
+        // insert for a real reason (room-capacity conflict), staying silent here would
+        // leave the booking with ZERO therapist rows while reporting success -- surface
+        // it as a warning so the caller can tell staff, instead of only console.warn.
         console.warn('[API] booking_therapists insert warning:', junctionError.message);
+        return {
+          data: { success: true, bookingId, therapistIds: ids, roomId: updated.room_id, warning: junctionError.message },
+          error: null,
+        };
       }
     }
 
@@ -4221,7 +4331,7 @@ export async function fetchBookingById(bookingId) {
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
         payments(amount, payment_mode, created_at),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name, gender))
+        booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
       .eq('id', bookingId)
       .single();
@@ -4447,7 +4557,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         therapist:therapists(id, name),
         room:rooms(id, name),
         creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, therapist:therapists(id, name)),
+        booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name)),
         payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
@@ -4561,6 +4671,9 @@ export async function createBooking({
   therapistId,
   therapistIds,
   roomId,
+  therapistRoomOverrides,
+  companionName,
+  companionPhone,
   bookingGroupId,
   referringCustomerId,
   referringRewardType,
@@ -4578,11 +4691,26 @@ export async function createBooking({
     // 1. Fetch service for duration + price
     const { data: service, error: serviceError } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr')
+      .select('id, name, duration_minutes, price_npr, is_couple')
       .eq('id', serviceId)
       .single();
 
     if (serviceError) throw serviceError;
+
+    // Group-booking creates one independent bookings row per person, each carrying the
+    // full service price -- a couple service (priced once for the pair) picked there
+    // would double-charge. The calendar's group-booking service pickers already filter
+    // is_couple services out of their options, but that's client-side only; enforce it
+    // here too in case a value was selected before the service list refreshed.
+    if (bookingGroupId && service.is_couple) {
+      return {
+        data: null,
+        error: {
+          code: 'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP',
+          message: `${service.name} is a couple service and can't be booked as a group booking — use a single booking with 2 therapists instead.`,
+        },
+      };
+    }
 
     // 2. Compute end time for overlap check
     const endTime = addMinutesToTime(startTime, service.duration_minutes);
@@ -4631,7 +4759,11 @@ export async function createBooking({
           return { data: null, error: { code: 'ROOM_INACTIVE', message: 'Selected room is not active.' } };
         }
 
-        // Check room capacity — count overlapping bookings
+        // Check room capacity — count overlapping bookings. Must union bookings.room_id
+        // matches (someone's primary room) with booking_therapists.room_id matches
+        // (a companion's override room) — see migration-171's check_room_capacity(),
+        // which this JS pre-check must agree with or staff get told a room is free
+        // right before the stricter DB trigger rejects it.
         const capacity = getRoomCapacity(selectedRoom);
         const { data: roomOverlaps } = await supabase
           .from('bookings')
@@ -4643,7 +4775,15 @@ export async function createBooking({
           .lt('start_time', endTime)
           .gt('end_time', startTime);
 
-        if ((roomOverlaps || []).length >= capacity) {
+        const { data: companionOverlapRows } = await supabase
+          .from('booking_therapists')
+          .select('booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
+          .eq('room_id', roomId);
+        const companionOverlapCount = countOverlappingRoomRows(companionOverlapRows, {
+          branchId: resolvedBranchId, date, startTime, endTime,
+        });
+
+        if ((roomOverlaps || []).length + companionOverlapCount >= capacity) {
           return { data: null, error: { code: 'ROOM_FULL', message: `${selectedRoom.name} is fully booked at this time (capacity: ${capacity}).` } };
         }
 
@@ -4674,11 +4814,29 @@ export async function createBooking({
 
         if (overlapError) throw overlapError;
 
-        // 5. Count bookings per room and pick first with remaining capacity
+        // 5. Count bookings per room and pick first with remaining capacity. Also count
+        // booking_therapists.room_id occupancy (companion overrides) per candidate room —
+        // same reasoning as the explicit-room path above.
         const roomBookingCounts = {};
         (overlapping || []).forEach(b => {
           roomBookingCounts[b.room_id] = (roomBookingCounts[b.room_id] || 0) + 1;
         });
+
+        const { data: companionOverlapRowsAll } = await supabase
+          .from('booking_therapists')
+          .select('room_id, booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
+          .in('room_id', rooms.map(r => r.id));
+
+        rooms.forEach(r => {
+          const rowsForRoom = (companionOverlapRowsAll || []).filter(row => row.room_id === r.id);
+          const companionCount = countOverlappingRoomRows(rowsForRoom, {
+            branchId: resolvedBranchId, date, startTime, endTime,
+          });
+          if (companionCount > 0) {
+            roomBookingCounts[r.id] = (roomBookingCounts[r.id] || 0) + companionCount;
+          }
+        });
+
         availableRoom = rooms.find(r => {
           const capacity = getRoomCapacity(r);
           const used = roomBookingCounts[r.id] || 0;
@@ -4815,6 +4973,32 @@ export async function createBooking({
       therapistNameSnapshot = primary?.name || null;
     }
 
+    // 7a2. Validate + capacity-check per-therapist room overrides (couple bookings with
+    // each person in a separate room). Done before the main insert so a full override
+    // room fails fast with a friendly error instead of creating a booking with a
+    // companion silently left unassigned.
+    const overrideEntries = therapistRoomOverrides
+      ? Object.entries(therapistRoomOverrides).filter(([tid, rid]) => rid && allTherapistIds.includes(tid))
+      : [];
+    if (overrideEntries.length > 0) {
+      const { rooms: overrideRooms, error: overrideRoomError } = await validateRoomsForBranch(
+        overrideEntries.map(([, rid]) => rid),
+        resolvedBranchId
+      );
+      if (overrideRoomError) return { data: null, error: overrideRoomError };
+
+      for (const [, overrideRoomId] of overrideEntries) {
+        const capacityError = await checkOverrideRoomCapacity({
+          room: overrideRooms.get(overrideRoomId),
+          branchId: resolvedBranchId,
+          date,
+          startTime,
+          endTime,
+        });
+        if (capacityError) return { data: null, error: capacityError };
+      }
+    }
+
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
     // Capture who created it (null for anonymous customer self-booking).
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -4831,6 +5015,8 @@ export async function createBooking({
         customer_phone: toE164(customerPhone),
         customer_gender: customerGender || null,
         customer_account_id: customerAccountId || null,
+        companion_name: companionName?.trim() || null,
+        companion_phone: companionPhone ? toE164(companionPhone) : null,
         date: date,
         start_time: startTime,
         base_amount: Number(service.price_npr),
@@ -4897,14 +5083,26 @@ export async function createBooking({
 
     // 7b. Insert into junction table for all therapists
     if (allTherapistIds.length > 0) {
-      const rows = allTherapistIds.map(tid => ({
+      const rows = allTherapistIds.map((tid, index) => ({
         booking_id: booking.id,
         therapist_id: tid,
         start_time: booking.start_time,
         end_time: booking.end_time,
+        room_id: resolveJunctionRoomId({
+          index,
+          therapistId: tid,
+          overridesMap: therapistRoomOverrides,
+          existingRoomId: null, // brand-new booking, nothing to preserve
+        }),
       }));
       const { error: btError } = await supabase.from('booking_therapists').insert(rows);
-      if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
+      if (btError) {
+        // Same reasoning as assignTherapist above -- the booking row itself already
+        // committed, so this stays non-fatal, but must be visible to the caller now
+        // that a real trigger can reject this insert.
+        console.warn('[API] booking_therapists insert error:', btError.message);
+        booking._therapistAssignmentWarning = btError.message;
+      }
     }
 
     capture('staff_booking_created', {
@@ -5927,7 +6125,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -5990,7 +6188,7 @@ export async function uploadServiceImage(file) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category }) {
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6024,10 +6222,11 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         description: description || null,
         image_url: imageUrl || null,
         category: category || 'Spa',
+        is_couple: !!isCouple,
         is_active: true,
         org_id: profile.org_id,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
       .single();
 
     if (error) throw error;
@@ -6038,7 +6237,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category }) {
+export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6058,6 +6257,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     if (description !== undefined) updatePayload.description = description;
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
+    if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -6068,7 +6268,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_active')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active')
       .single();
 
     if (error) {
