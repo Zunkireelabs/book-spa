@@ -6,7 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, EXOTIC_PAYMENT_MODES } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -64,6 +64,14 @@ const BookingActionModal = ({
   onAssignTherapist,
   onUpdateStatus,
   onRecordPayment,
+  // Optional: when provided, a bundle whose tenders are all "standard"
+  // (not in EXOTIC_PAYMENT_MODES) is paid atomically via recordGroupPayment
+  // instead of one sequential onRecordPayment call per booking — see
+  // migration-177. Callback takes no args; just refresh + toast, the same
+  // tail the caller's own onRecordPayment handler already does. Falls back
+  // to the existing sequential loop wherever this isn't wired, so it's
+  // fully opt-in and backward compatible.
+  onGroupPaymentRecorded,
   onApplyDiscount,
   onEditBooking,
   onCreateBooking,
@@ -124,6 +132,10 @@ const BookingActionModal = ({
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
+  // Every sibling in this booking's group, any payment_status — display only,
+  // never used for bundling (see fetchGroupBookings). Keeps a paid sibling
+  // visible from every other sibling's modal instead of silently vanishing.
+  const [groupSiblings, setGroupSiblings] = useState([]);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
 
@@ -185,7 +197,14 @@ const BookingActionModal = ({
         customerName: booking.customerName,
         date: booking.date,
         excludeBookingId: booking.bookingId,
+        bookingGroupId: booking.bookingGroupId,
       });
+      if (activeTab === 'payment' && booking.bookingGroupId) {
+        fetchGroupBookings({ bookingGroupId: booking.bookingGroupId, excludeBookingId: booking.bookingId })
+          .then(({ data }) => setGroupSiblings(data || []));
+      } else {
+        setGroupSiblings([]);
+      }
       const duePromise = (activeTab === 'payment' && booking?.customerPhone)
         ? getCustomerOutstandingBalance({
             customerPhone: booking.customerPhone,
@@ -554,6 +573,31 @@ const BookingActionModal = ({
     setPaymentSubmitting(true);
     setActionError(null);
     try {
+      // Atomic path: every tender across the whole bundle is a "standard"
+      // mode (see EXOTIC_PAYMENT_MODES) and the parent opted in via
+      // onGroupPaymentRecorded — pay the primary booking + every allocation
+      // in ONE transaction (migration-177), instead of N sequential
+      // onRecordPayment calls that can't be rolled back if one fails
+      // partway through (payments rows are immutable). This closes the
+      // partial-bundle failure mode, not just the stale-related-list
+      // display bug the BK-20260915-0025/-0026/-0027 incident also had.
+      const allTenders = [...(tenders || []), ...(additionalAllocations || []).flatMap((a) => a.tenders || [])];
+      const isAtomicEligible = onGroupPaymentRecorded
+        && allTenders.every((t) => !EXOTIC_PAYMENT_MODES.includes(t.paymentMode));
+
+      if (isAtomicEligible) {
+        const { data, error } = await recordGroupPayment([
+          { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
+          ...(additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes: paymentNotes })),
+        ]);
+        if (error) return { error };
+
+        setShowPaymentModal(false);
+        setSelectedPreviousDueIds(new Set());
+        onGroupPaymentRecorded();
+        return { data: data?.[0], error: null };
+      }
+
       const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes });
       if (result?.error) return result;
 
@@ -1918,6 +1962,31 @@ const BookingActionModal = ({
                             </div>
                           </div>
                           <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {relatedRemaining(rb).toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Group siblings already paid — display only (never bundled), so a paid
+                    sibling never silently vanishes just because it's no longer "unpaid".
+                    See the BK-20260915-0025/-0026/-0027 incident this closes. */}
+                {groupSiblings.some(gb => gb.payment_status === 'paid') && (
+                  <div className="space-y-2">
+                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
+                      <Icon name="CheckCircle2" size={13} className="text-success" />
+                      Already paid in this group
+                    </label>
+                    <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
+                      {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
+                        <div key={gb.id} className="flex items-center gap-3 px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-body text-sm text-text-primary">{gb.service?.name || 'Service'}</div>
+                            <div className="font-caption text-xs text-text-secondary">#{gb.booking_number}</div>
+                          </div>
+                          <span className="font-data text-sm text-success flex-shrink-0">
+                            NPR {Number(gb.final_amount || 0).toLocaleString('en-IN')} · Paid
+                          </span>
                         </div>
                       ))}
                     </div>
