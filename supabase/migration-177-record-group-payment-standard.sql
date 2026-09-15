@@ -84,8 +84,11 @@ BEGIN
       RAISE EXCEPTION 'record_group_payment_standard: each entry requires a booking_id';
     END IF;
 
-    -- Lock the row for the duration of this transaction — prevents a
-    -- concurrent payment attempt on the same booking from racing this one.
+    -- Lock the row for the duration of this transaction — prevents two
+    -- concurrent calls to THIS RPC from racing each other on the same
+    -- booking. Does not protect against a concurrent plain recordPayment()
+    -- call (src/services/api.js), which takes no lock — that race
+    -- pre-exists this migration and isn't introduced or closed by it.
     SELECT b.id, b.branch_id, b.status, b.payment_status, b.final_amount,
            b.is_locked, b.due_holder_name
       INTO v_booking
@@ -117,6 +120,26 @@ BEGIN
     SELECT COALESCE(SUM(amount), 0) INTO v_collected
     FROM public.payments WHERE booking_id = v_booking_id;
     v_remaining := round((v_booking.final_amount - v_collected)::numeric, 2);
+
+    -- Nothing left to collect (e.g. a 100%-discounted booking) but
+    -- payment_status isn't 'paid' yet since no payments row exists — a
+    -- bundle with an empty tenders array for this booking would otherwise
+    -- insert nothing at all, meaning the AFTER INSERT trigger that flips
+    -- payment_status to 'paid' never fires, even though this function
+    -- reports fully_paid: true. Settle it with a $0 row (same trigger-firing
+    -- path recordPayment's own zero-balance branch uses), then move on.
+    IF v_remaining <= 0 THEN
+      INSERT INTO public.payments (booking_id, amount, payment_mode, recorded_by, notes)
+      VALUES (v_booking_id, 0, 'No Charge', auth.uid(), v_notes);
+
+      v_results := v_results || jsonb_build_array(jsonb_build_object(
+        'booking_id', v_booking_id,
+        'amount_paid', 0,
+        'amount_due', 0,
+        'fully_paid', true
+      ));
+      CONTINUE;
+    END IF;
 
     v_tender_total := 0;
     v_first_row := true;
