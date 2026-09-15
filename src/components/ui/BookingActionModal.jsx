@@ -504,9 +504,12 @@ const BookingActionModal = ({
     setActionError(null);
     try {
       if (onAssignTherapist) {
-        // Overrides only make sense for non-primary (companion) therapists —
-        // the primary always uses selectedRoom.
-        const overridesToSend = selectedTherapists.length > 1
+        // Overrides/companion info only make sense for a couple-flagged service with
+        // 2+ therapists selected -- gate on BOTH, not just therapist count, or this data
+        // ships even after the section that shows it has been hidden (e.g. staff picked
+        // 2 therapists on a couple service, then changed the service before saving).
+        const isCoupleAssignment = selectedTherapists.length > 1 && !!currentServiceObj?.is_couple;
+        const overridesToSend = isCoupleAssignment
           ? Object.fromEntries(
               selectedTherapists.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || selectedRoom || null])
             )
@@ -517,8 +520,8 @@ const BookingActionModal = ({
           notes,
           selectedRoom || null,
           overridesToSend,
-          selectedTherapists.length > 1 ? (companionName.trim() || null) : undefined,
-          selectedTherapists.length > 1 ? (companionPhone.trim() || null) : undefined
+          isCoupleAssignment ? (companionName.trim() || null) : undefined,
+          isCoupleAssignment ? (companionPhone.trim() || null) : undefined
         );
       }
       onClose();

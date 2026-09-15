@@ -105,6 +105,7 @@ function formatTimeDisplay(time) {
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
   const [serviceId, setServiceId] = useState('');
+  const isCoupleService = (services || []).find(s => s.id === serviceId)?.is_couple || false;
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
@@ -483,13 +484,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           specialRequests: specialRequests.trim() || null,
           therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
           roomId: roomId || null,
-          therapistRoomOverrides: selectedTherapistIds.length > 1
+          therapistRoomOverrides: isCoupleService && selectedTherapistIds.length > 1
             ? Object.fromEntries(
                 selectedTherapistIds.slice(1).map(tid => [tid, therapistRoomOverrides[tid] || roomId || null])
               )
             : undefined,
-          companionName: selectedTherapistIds.length > 1 ? (companionName.trim() || null) : undefined,
-          companionPhone: selectedTherapistIds.length > 1 ? (companionPhone.trim() || null) : undefined,
+          companionName: isCoupleService && selectedTherapistIds.length > 1 ? (companionName.trim() || null) : undefined,
+          companionPhone: isCoupleService && selectedTherapistIds.length > 1 ? (companionPhone.trim() || null) : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -771,7 +772,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
             {/* Couple in separate rooms — surfaced only for a couple-flagged service with 2+
                 therapists selected, not any multi-therapist assignment. */}
-            {selectedTherapistIds.length > 1 && (services || []).find(s => s.id === serviceId)?.is_couple && (
+            {selectedTherapistIds.length > 1 && isCoupleService && (
               <div className="space-y-2 p-3 border border-border rounded-spa bg-background">
                 <p className="font-body font-body-medium text-sm text-text-primary">
                   Couple — separate rooms &amp; companion (optional)
