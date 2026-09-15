@@ -119,4 +119,22 @@ describe('countOverlappingRoomRows', () => {
     });
     expect(count).toBe(0);
   });
+
+  it('does not count a row ending exactly when the new "HH:MM" window starts (regression: string vs HH:MM:SS comparison)', () => {
+    // row: 10:00:00-11:00:00 (Postgres time serialization), window: 11:00-12:00 (caller HH:MM)
+    const rows = [baseRow({ start_time: '10:00:00', end_time: '11:00:00' })];
+    const count = countOverlappingRoomRows(rows, {
+      branchId: 'br-1', date: '2027-01-01', startTime: '11:00', endTime: '12:00',
+    });
+    expect(count).toBe(0);
+  });
+
+  it('does not count a row starting exactly when the new "HH:MM" window ends (symmetric boundary case)', () => {
+    // row: 12:00:00-13:00:00, window: 11:00-12:00
+    const rows = [baseRow({ start_time: '12:00:00', end_time: '13:00:00' })];
+    const count = countOverlappingRoomRows(rows, {
+      branchId: 'br-1', date: '2027-01-01', startTime: '11:00', endTime: '12:00',
+    });
+    expect(count).toBe(0);
+  });
 });

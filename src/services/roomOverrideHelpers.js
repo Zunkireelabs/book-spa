@@ -18,16 +18,25 @@ export function resolveJunctionRoomId({ index, therapistId, overridesMap, existi
 // (migration-171) do in SQL. Falls back to the parent booking's own start_time/end_time
 // when the row's own are null, mirroring the triggers' COALESCE(bt.start_time,
 // b2.start_time) — without this fallback, a null-timed row would silently never count.
+// Normalizes "HH:MM" to "HH:MM:SS" so time-string comparisons are apples-to-apples
+// regardless of whether a value came from a Postgres `time` column (always "HH:MM:SS")
+// or a caller-supplied "HH:MM" window bound (e.g. addMinutesToTime() in api.js).
+function normalizeTime(t) {
+  return t && t.length === 5 ? `${t}:00` : t;
+}
+
 export function countOverlappingRoomRows(rows, { branchId, date, startTime, endTime, excludeBookingId }) {
+  const winStart = normalizeTime(startTime);
+  const winEnd = normalizeTime(endTime);
   return (rows || []).filter(row => {
     if (excludeBookingId && row.booking_id === excludeBookingId) return false;
     const b = row.bookings || {};
     if (b.branch_id !== branchId) return false;
     if (b.date !== date) return false;
     if (['Cancelled', 'No Show'].includes(b.status)) return false;
-    const rowStart = row.start_time || b.start_time;
-    const rowEnd = row.end_time || b.end_time;
+    const rowStart = normalizeTime(row.start_time || b.start_time);
+    const rowEnd = normalizeTime(row.end_time || b.end_time);
     if (!rowStart || !rowEnd) return false;
-    return rowStart < endTime && rowEnd > startTime;
+    return rowStart < winEnd && rowEnd > winStart;
   }).length;
 }
