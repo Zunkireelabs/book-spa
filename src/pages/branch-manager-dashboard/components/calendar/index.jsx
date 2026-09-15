@@ -2108,7 +2108,11 @@ const OperationalCalendar = ({ branchId }) => {
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
     }
-    showToast('Booking created successfully');
+    if (result.data?._therapistAssignmentWarning) {
+      showToast(`Booking created, but: ${result.data._therapistAssignmentWarning}`, 'error');
+    } else {
+      showToast('Booking created successfully');
+    }
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
@@ -2197,6 +2201,10 @@ const OperationalCalendar = ({ branchId }) => {
     });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
+      return;
+    }
+    if (result.data?.warning) {
+      showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
       return;
     }
     showToast('Assignment saved successfully');

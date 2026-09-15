@@ -1942,7 +1942,16 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
       }));
       const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
       if (junctionError) {
+        // Non-fatal: the primary therapist/room update on `bookings` above already
+        // committed. But since migration-171 added a trigger that can reject this
+        // insert for a real reason (room-capacity conflict), staying silent here would
+        // leave the booking with ZERO therapist rows while reporting success -- surface
+        // it as a warning so the caller can tell staff, instead of only console.warn.
         console.warn('[API] booking_therapists insert warning:', junctionError.message);
+        return {
+          data: { success: true, bookingId, therapistIds: ids, roomId: updated.room_id, warning: junctionError.message },
+          error: null,
+        };
       }
     }
 
@@ -5072,7 +5081,13 @@ export async function createBooking({
         }),
       }));
       const { error: btError } = await supabase.from('booking_therapists').insert(rows);
-      if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
+      if (btError) {
+        // Same reasoning as assignTherapist above -- the booking row itself already
+        // committed, so this stays non-fatal, but must be visible to the caller now
+        // that a real trigger can reject this insert.
+        console.warn('[API] booking_therapists insert error:', btError.message);
+        booking._therapistAssignmentWarning = btError.message;
+      }
     }
 
     capture('staff_booking_created', {
