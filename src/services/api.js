@@ -5,6 +5,7 @@ import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
+import { resolveJunctionRoomId } from './roomOverrideHelpers';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -1933,14 +1934,17 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     if (ids.length > 0) {
       // Fetch booking times for default
       const { data: bk } = await supabase.from('bookings').select('start_time, end_time').eq('id', bookingId).single();
-      const rows = ids.map(tid => ({
+      const rows = ids.map((tid, index) => ({
         booking_id: bookingId,
         therapist_id: tid,
         start_time: existingTimeMap[tid]?.start_time || bk?.start_time || null,
         end_time: existingTimeMap[tid]?.end_time || bk?.end_time || null,
-        room_id: therapistRoomOverrides?.[tid] !== undefined
-          ? (therapistRoomOverrides[tid] || null)
-          : (existingTimeMap[tid]?.room_id || null),
+        room_id: resolveJunctionRoomId({
+          index,
+          therapistId: tid,
+          overridesMap: therapistRoomOverrides,
+          existingRoomId: existingTimeMap[tid]?.room_id,
+        }),
       }));
       const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
       if (junctionError) {
@@ -5031,12 +5035,17 @@ export async function createBooking({
 
     // 7b. Insert into junction table for all therapists
     if (allTherapistIds.length > 0) {
-      const rows = allTherapistIds.map(tid => ({
+      const rows = allTherapistIds.map((tid, index) => ({
         booking_id: booking.id,
         therapist_id: tid,
         start_time: booking.start_time,
         end_time: booking.end_time,
-        room_id: therapistRoomOverrides?.[tid] || null,
+        room_id: resolveJunctionRoomId({
+          index,
+          therapistId: tid,
+          overridesMap: therapistRoomOverrides,
+          existingRoomId: null, // brand-new booking, nothing to preserve
+        }),
       }));
       const { error: btError } = await supabase.from('booking_therapists').insert(rows);
       if (btError) console.warn('[API] booking_therapists insert error:', btError.message);
