@@ -829,6 +829,60 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
   }
 }
 
+// Atomic counterpart to calling recordPayment once per booking: every
+// booking in `payments` is validated inside ONE database transaction
+// (record_group_payment, migration-178) — all or nothing, closing the
+// partial-bundle failure mode a sequential loop of recordPayment calls
+// can't avoid (payments rows are immutable, so a mid-loop failure can't be
+// rolled back client-side). Handles every tender type recordPayment does
+// (Cash/Card/Bank, Membership, ReferralWallet, ReferralVoucher,
+// VoucherWallet, SessionPackage) — the RPC calls each type's own
+// SECURITY DEFINER function (record_membership_payment etc.) from inside
+// itself, which runs in the same transaction, so no tender type needs a
+// separate non-atomic fallback.
+//
+// `payments`: [{ bookingId, tenders: [{amount, paymentMode, referralId, voucherId, packageId}], dueHolderName, notes }]
+export async function recordGroupPayment(payments) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('record_group_payment', {
+      p_payments: (payments || []).map((p) => ({
+        booking_id: p.bookingId,
+        tenders: (p.tenders || []).map((t) => ({
+          amount: Number(t.amount),
+          payment_mode: t.paymentMode,
+          ...(t.paymentMode === 'ReferralVoucher' ? { referral_id: t.referralId } : {}),
+          ...(t.paymentMode === 'VoucherWallet' ? { voucher_id: t.voucherId || null } : {}),
+          ...(t.paymentMode === 'SessionPackage' ? { package_id: t.packageId } : {}),
+        })),
+        due_holder_name: p.dueHolderName || null,
+        notes: p.notes || null,
+      })),
+    });
+    if (error) throw error;
+
+    capture('staff_group_payment_recorded', {
+      booking_count: (payments || []).length,
+      total_amount: (data || []).reduce((s, r) => s + Number(r.amount_paid || 0), 0),
+    });
+
+    return {
+      data: (data || []).map((r) => ({
+        bookingId: r.booking_id,
+        amountPaid: Number(r.amount_paid || 0),
+        amountDue: Number(r.amount_due || 0),
+        fullyPaid: !!r.fully_paid,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] recordGroupPayment error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Distinct previously-used due-holder names for the settlement typeahead.
 export async function fetchDueHolderNames(branchId) {
   try {
@@ -1962,22 +2016,68 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
   }
 }
 
-export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId }) {
+// bookingGroupId (bookings.booking_group_id, migration-030) is the real,
+// authoritative link between siblings created together as one group booking
+// — when present, match on it instead of the customer_name+date heuristic,
+// so bundling is exact rather than fuzzy-matched by name/date. Still scoped
+// to payment_status='unpaid' — this is "what to bundle into a payment", not
+// "everything in this group" (see fetchGroupBookings below for the latter).
+export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId, bookingGroupId }) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
-      .eq('customer_name', customerName)
-      .eq('date', date)
       .eq('payment_status', 'unpaid')
       .not('status', 'in', '("Cancelled","No Show")')
-      .neq('id', excludeBookingId)
-      .order('start_time');
+      .neq('id', excludeBookingId);
+
+    query = bookingGroupId
+      ? query.eq('booking_group_id', bookingGroupId)
+      : query.eq('customer_name', customerName).eq('date', date);
+
+    const { data, error } = await query.order('start_time');
 
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Every sibling in a group booking, regardless of payment_status — unlike
+// fetchRelatedUnpaidBookings above, this is purely for DISPLAY (so a sibling
+// that's already been paid never silently disappears from another sibling's
+// modal — see the BK-20260915-0025/-0026/-0027 incident, where paying 0025
+// made it drop out of every other sibling's "related" view since that query
+// filtered on payment_status='unpaid'). Never used to decide what to bundle
+// into a payment — only fetchRelatedUnpaidBookings governs that.
+// Falls back to the customer_name+date heuristic when bookingGroupId is
+// absent — same dual-matching strategy as fetchRelatedUnpaidBookings, so
+// the "don't hide a paid sibling" display fix covers non-group bookings
+// too, not just formal group bookings (a real gap: two separate walk-in
+// bookings for the same customer/day, never linked via booking_group_id,
+// had no equivalent of this panel).
+export async function fetchGroupBookings({ bookingGroupId, customerName, date, excludeBookingId }) {
+  try {
+    if (!bookingGroupId && !(customerName && date)) return { data: [], error: null };
+
+    let query = supabase
+      .from('bookings')
+      .select('id, booking_number, payment_status, status, final_amount, service:services(name)')
+      .not('status', 'in', '("Cancelled","No Show")')
+      .neq('id', excludeBookingId);
+
+    query = bookingGroupId
+      ? query.eq('booking_group_id', bookingGroupId)
+      : query.eq('customer_name', customerName).eq('date', date);
+
+    const { data, error } = await query.order('booking_number');
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchGroupBookings error:', error.message);
     return { data: [], error };
   }
 }
@@ -2019,7 +2119,14 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime })
       .from('bookings')
       .update({ start_time: startTime, end_time: endTime })
       .eq('id', bookingId);
-    if (bookingError) throw bookingError;
+    if (bookingError) {
+      // compute_booking_datetimes trigger (migration-179): the resized time
+      // + service duration would extend past midnight.
+      if (bookingError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: bookingError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This resize would extend past midnight — please choose a shorter duration or earlier time.' } };
+      }
+      throw bookingError;
+    }
 
     const { error: therapistsError } = await supabase
       .from('booking_therapists')
@@ -2219,6 +2326,11 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     if (updateError) {
       if (updateError.code === '23P01' || updateError.code === 'P0003') {
         return { data: null, error: { code: 'SCHEDULING_CONFLICT', message: 'The new date/time conflicts with an existing booking.' } };
+      }
+      // compute_booking_datetimes trigger (migration-179): the new start
+      // time + service duration would extend past midnight.
+      if (updateError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: updateError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw updateError;
     }
@@ -2820,6 +2932,13 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot reschedule a paid booking.' } };
     }
 
+    // 3a. Cannot reschedule a service that's already started — the client
+    // disables this in the UI (BookingActionModal), but that's not a real
+    // boundary; enforce it here too.
+    if (booking.status === 'In-Progress') {
+      return { data: null, error: { code: 'BOOKING_IN_PROGRESS', message: 'This service has already started — it can no longer be rescheduled.' } };
+    }
+
     // 4. Auth check
     const { user, profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -2984,6 +3103,11 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       // Room-capacity trigger: lost a race against a concurrent booking for the same room
       if (updateError.code === 'P0003') {
         return { data: null, error: { code: 'ROOM_CONFLICT', message: 'Room is fully booked at this time. Change the room or pick a different time.' } };
+      }
+      // compute_booking_datetimes trigger (migration-179): the new start time
+      // + service duration would extend past midnight.
+      if (updateError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: updateError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw updateError;
     }
@@ -5045,6 +5169,11 @@ export async function createBooking({
       }
       if (insertError.code === 'P0005') {
         return { data: null, error: { code: 'BRANCH_ONLINE_CAPACITY', message: 'This time is fully booked — no therapists available. Please choose another time.' } };
+      }
+      // compute_booking_datetimes trigger (migration-179): start time +
+      // service duration would extend past midnight.
+      if (insertError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: insertError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw insertError;
     }

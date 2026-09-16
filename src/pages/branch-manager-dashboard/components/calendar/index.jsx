@@ -1992,6 +1992,7 @@ const OperationalCalendar = ({ branchId }) => {
       const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
+
       const result = await createBooking({
         branchId,
         serviceId: source.serviceId,
@@ -2122,6 +2123,13 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Rebook "pick and place" handlers ───────────────────────
 
   const handleRebookStart = useCallback((booking) => {
+    // "Rebook" — deliberately always creates a brand-new booking with the
+    // same customer/service info, regardless of the source booking's
+    // status; the original is never touched. Confirmed business decision
+    // (not the create-vs-update bug fixed in PR #255-257 — that was a
+    // different case where "Reschedule" silently created a duplicate
+    // instead of updating; here, creating a new booking IS the intended
+    // behavior for every booking, active or terminal).
     setRebookSource({
       booking,
       customerName: booking.customerName,
@@ -2310,6 +2318,21 @@ const OperationalCalendar = ({ branchId }) => {
     }
     refreshCalendar();
     return { error: null };
+  };
+
+  // Tail-only counterpart to handleRecordPayment, for the atomic
+  // recordGroupPayment path (migration-177, BookingActionModal) — the write
+  // itself already happened in one transaction covering every booking in
+  // the bundle, so this just does the same refresh/toast handleRecordPayment
+  // does, once, instead of once per booking.
+  const handleGroupPaymentRecorded = () => {
+    showToast('Payment recorded successfully');
+    refreshCalendar();
+    if (selectedBooking) {
+      fetchBookingById(selectedBooking.bookingId).then((refreshed) => {
+        if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+      });
+    }
   };
 
   // ── Therapist/room column reorder ────────────────────────────
@@ -2826,6 +2849,7 @@ const OperationalCalendar = ({ branchId }) => {
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        onGroupPaymentRecorded={handleGroupPaymentRecorded}
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}

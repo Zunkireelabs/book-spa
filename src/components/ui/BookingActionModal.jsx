@@ -6,7 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -64,6 +64,14 @@ const BookingActionModal = ({
   onAssignTherapist,
   onUpdateStatus,
   onRecordPayment,
+  // Optional: when provided, the whole bundle (primary booking + every
+  // allocation, any tender type) is paid atomically via recordGroupPayment
+  // instead of one sequential onRecordPayment call per booking — see
+  // migration-178. Callback takes no args; just refresh + toast, the same
+  // tail the caller's own onRecordPayment handler already does. Falls back
+  // to the existing sequential loop wherever this isn't wired, so it's
+  // fully opt-in and backward compatible.
+  onGroupPaymentRecorded,
   onApplyDiscount,
   onEditBooking,
   onCreateBooking,
@@ -124,6 +132,11 @@ const BookingActionModal = ({
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
+  // Every sibling (formal group, or same customer_name+date when there's no
+  // booking_group_id), any payment_status — display only, never used for
+  // bundling (see fetchGroupBookings). Keeps a paid sibling
+  // visible from every other sibling's modal instead of silently vanishing.
+  const [groupSiblings, setGroupSiblings] = useState([]);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
 
@@ -185,7 +198,18 @@ const BookingActionModal = ({
         customerName: booking.customerName,
         date: booking.date,
         excludeBookingId: booking.bookingId,
+        bookingGroupId: booking.bookingGroupId,
       });
+      if (activeTab === 'payment') {
+        fetchGroupBookings({
+          bookingGroupId: booking.bookingGroupId,
+          customerName: booking.customerName,
+          date: booking.date,
+          excludeBookingId: booking.bookingId,
+        }).then(({ data }) => setGroupSiblings(data || []));
+      } else {
+        setGroupSiblings([]);
+      }
       const duePromise = (activeTab === 'payment' && booking?.customerPhone)
         ? getCustomerOutstandingBalance({
             customerPhone: booking.customerPhone,
@@ -554,6 +578,26 @@ const BookingActionModal = ({
     setPaymentSubmitting(true);
     setActionError(null);
     try {
+      // Atomic path: the parent opted in via onGroupPaymentRecorded — pay
+      // the primary booking + every allocation in ONE transaction
+      // (migration-178, every tender type supported), instead of N
+      // sequential onRecordPayment calls that can't be rolled back if one
+      // fails partway through (payments rows are immutable). This closes
+      // the partial-bundle failure mode, not just the stale-related-list
+      // display bug the BK-20260915-0025/-0026/-0027 incident also had.
+      if (onGroupPaymentRecorded) {
+        const { data, error } = await recordGroupPayment([
+          { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
+          ...(additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes: paymentNotes })),
+        ]);
+        if (error) return { error };
+
+        setShowPaymentModal(false);
+        setSelectedPreviousDueIds(new Set());
+        onGroupPaymentRecorded();
+        return { data: data?.[0], error: null };
+      }
+
       const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes });
       if (result?.error) return result;
 
@@ -600,8 +644,11 @@ const BookingActionModal = ({
   // paid before it starts (pay-after-service isn't mandatory) and reassignment
   // should still be possible right up until the service actually begins.
   const isAssignmentBlocked = isTerminal || isLocked || isServiceStarted;
-  // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
-  const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
+  // Always "Rebook" — this always creates a brand-new booking with the same
+  // customer/service info, leaving the original untouched, regardless of
+  // the source booking's status. "Reschedule" would wrongly imply the same
+  // appointment moves (confirmed business decision, see handleRebookStart).
+  const rebookLabel = 'Rebook';
 
   // Self-service rooms (Jacuzzi/Sauna/Steam) don't need a therapist to start — driven by
   // rooms.requires_therapist, not a hardcoded room/branch list.
@@ -1924,6 +1971,31 @@ const BookingActionModal = ({
                   </div>
                 )}
 
+                {/* Group siblings already paid — display only (never bundled), so a paid
+                    sibling never silently vanishes just because it's no longer "unpaid".
+                    See the BK-20260915-0025/-0026/-0027 incident this closes. */}
+                {groupSiblings.some(gb => gb.payment_status === 'paid') && (
+                  <div className="space-y-2">
+                    <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
+                      <Icon name="CheckCircle2" size={13} className="text-success" />
+                      Already paid in this group
+                    </label>
+                    <div className="border border-success/20 bg-success/5 rounded-spa divide-y divide-success/10 overflow-hidden">
+                      {groupSiblings.filter(gb => gb.payment_status === 'paid').map(gb => (
+                        <div key={gb.id} className="flex items-center gap-3 px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-body text-sm text-text-primary">{gb.service?.name || 'Service'}</div>
+                            <div className="font-caption text-xs text-text-secondary">#{gb.booking_number}</div>
+                          </div>
+                          <span className="font-data text-sm text-success flex-shrink-0">
+                            NPR {Number(gb.final_amount || 0).toLocaleString('en-IN')} · Paid
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Pending bookings aren't payable yet — guide staff to confirm/complete first */}
                 {!canPay && booking.status === 'pending' && booking.paymentStatus !== 'paid' && !isLocked && (
                   <div className="flex items-start space-x-2 px-3 py-2.5 rounded-spa bg-warning/5 border border-warning/20">
@@ -2198,9 +2270,18 @@ const BookingActionModal = ({
                 >
                   Add another service
                 </button>
+                {/* "Rebook" always creates a brand-new booking with the same customer/service
+                    info, leaving the original untouched — onRebookStart (only wired on the
+                    branch-manager calendar today) closes this modal and lets staff click a
+                    slot on the real calendar grid to place it. Disabled while the service has
+                    already started or the day is locked — a sanity check independent of what
+                    the button does, not a data-safety boundary (rebook never mutates the
+                    original booking either way). */}
                 <button
                   onClick={() => onRebookStart?.(booking)}
-                  className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
+                  disabled={isServiceStarted || isLocked}
+                  title={isServiceStarted ? 'This service has already started.' : undefined}
+                  className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
                   {rebookLabel}
                 </button>
