@@ -2290,9 +2290,23 @@ const BookingActionModal = ({
                 >
                   Add another service
                 </button>
+                {/* Grid-based screens (branch-manager calendar) wire onRebookStart, which
+                    closes this modal and lets staff click a slot on the real calendar grid —
+                    handleRebookStart there derives rebook-vs-reschedule mode from the
+                    booking's own status, so the same click-a-slot interaction correctly
+                    creates a new booking (terminal) or updates this one in place (active).
+                    Grid-less screens don't pass onRebookStart: for an active booking this
+                    falls back to the self-contained RescheduleModal popup (rescheduleBooking);
+                    for a terminal booking there's no create-new-booking flow available at
+                    all on those screens, so the button is disabled rather than opening a
+                    popup that would only fail (RescheduleModal only ever calls
+                    rescheduleBooking, which itself rejects terminal bookings). */}
                 <button
-                  onClick={() => (isTerminal ? onRebookStart?.(booking) : setShowRescheduleModal(true))}
-                  disabled={!isTerminal && (isServiceStarted || isLocked)}
+                  onClick={() => {
+                    if (onRebookStart) return onRebookStart(booking);
+                    if (!isTerminal) setShowRescheduleModal(true);
+                  }}
+                  disabled={(!isTerminal && (isServiceStarted || isLocked)) || (isTerminal && !onRebookStart)}
                   title={!isTerminal && isServiceStarted ? 'This service has already started — it can no longer be rescheduled.' : undefined}
                   className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
