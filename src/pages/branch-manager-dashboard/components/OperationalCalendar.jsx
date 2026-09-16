@@ -195,6 +195,21 @@ const OperationalCalendar = ({ branchId }) => {
     return { error: null };
   };
 
+  // Tail-only counterpart to handleRecordPayment, for the atomic
+  // recordGroupPayment path (migration-178, BookingActionModal) — the write
+  // itself already happened in one transaction covering every booking in
+  // the bundle, so this just does the same refresh/toast handleRecordPayment
+  // does, once, instead of once per booking.
+  const handleGroupPaymentRecorded = () => {
+    showToast('Payment recorded successfully');
+    refreshCalendar();
+    if (selectedBooking) {
+      fetchBookingById(selectedBooking.bookingId).then((refreshed) => {
+        if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+      });
+    }
+  };
+
   // ── Build resources & events ────────────────────────────────
 
   const resources = calendarData
@@ -465,6 +480,7 @@ const OperationalCalendar = ({ branchId }) => {
         onUpdateStatus={handleStatusUpdate}
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
+        onGroupPaymentRecorded={handleGroupPaymentRecorded}
         userRole={profile?.role || 'staff'}
       />
 

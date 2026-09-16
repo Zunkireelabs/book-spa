@@ -29,7 +29,7 @@ const STATUS_STYLES = {
   'no show': 'bg-gray-100 text-gray-500',
 };
 
-const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onApplyDiscount, userRole = 'staff', onRefresh, dateRange = 'today' }) => {
+const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignTherapist, onRecordPayment, onGroupPaymentRecorded, onApplyDiscount, userRole = 'staff', onRefresh, dateRange = 'today' }) => {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
 
@@ -61,6 +61,17 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
     }
     return result;
   };
+
+  // Same local-refresh tail as handleRecordPaymentWrapper, for the atomic
+  // recordGroupPayment path — the currently open booking is always one of
+  // the ones just paid, so refresh it after the parent's own refresh/toast.
+  const handleGroupPaymentRecordedWrapper = onGroupPaymentRecorded && (async () => {
+    onGroupPaymentRecorded();
+    if (selectedBooking) {
+      const refreshed = await fetchBookingById(selectedBooking.bookingId);
+      if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    }
+  });
 
   // Use booking.bookingId (real UUID) for all API calls
   const handleQuickStatusUpdate = (booking, newStatus) => {
@@ -388,6 +399,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         onAssignTherapist={onAssignTherapist}
         onUpdateStatus={onStatusUpdate}
         onRecordPayment={handleRecordPaymentWrapper}
+        onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
       />

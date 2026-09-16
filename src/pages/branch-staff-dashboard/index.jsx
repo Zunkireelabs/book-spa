@@ -390,6 +390,17 @@ const BranchStaffDashboard = () => {
     return { error: null };
   };
 
+  // Tail-only counterpart to handleRecordPayment, for the atomic
+  // recordGroupPayment path (migration-178, BookingActionModal) — the write
+  // itself already happened in one transaction covering every booking in
+  // the bundle, so this just does the same refresh/toast handleRecordPayment
+  // does, once, instead of once per booking.
+  const handleGroupPaymentRecorded = () => {
+    setActionError(null);
+    showSuccess('Payment recorded successfully');
+    loadData();
+  };
+
   // Wire to real API: applyDiscount
   const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     setActionError(null);
@@ -618,6 +629,7 @@ const BranchStaffDashboard = () => {
                       onStatusUpdate={handleStatusUpdate}
                       onAssignTherapist={handleAssignTherapist}
                       onRecordPayment={handleRecordPayment}
+                      onGroupPaymentRecorded={handleGroupPaymentRecorded}
                       onApplyDiscount={handleApplyDiscount}
                       userRole={profile?.role || 'staff'}
                       onRefresh={loadData}
@@ -642,6 +654,7 @@ const BranchStaffDashboard = () => {
               onStatusUpdate={handleStatusUpdate}
               onAssignTherapist={handleAssignTherapist}
               onRecordPayment={handleRecordPayment}
+              onGroupPaymentRecorded={handleGroupPaymentRecorded}
               onApplyDiscount={handleApplyDiscount}
               userRole={profile?.role || 'staff'}
               onRefresh={loadData}
