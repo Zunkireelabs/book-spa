@@ -6,8 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import RescheduleModal from '../../pages/booking-management-portal/components/RescheduleModal';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, rescheduleBooking } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -77,12 +76,6 @@ const BookingActionModal = ({
   onEditBooking,
   onCreateBooking,
   onRebookStart,
-  // Optional: called (no args) after a successful reschedule of an active
-  // booking, so the parent can refresh its calendar/list view — same
-  // tail-callback pattern as onGroupPaymentRecorded. The reschedule write
-  // itself (rescheduleBooking) happens inside this component regardless of
-  // whether this is wired; it just governs the post-success refresh.
-  onRescheduled,
   branchHours,
   defaultNewBookingMode,
   userRole = 'staff'
@@ -101,7 +94,6 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
@@ -581,21 +573,6 @@ const BookingActionModal = ({
     }
   };
 
-  // Real reschedule (UPDATE via rescheduleBooking), for the "Reschedule"
-  // button on an active booking. Previously this button — despite its label
-  // — called onRebookStart, which creates a brand-new booking and leaves
-  // the original untouched. RescheduleModal calls this with the exact
-  // shape rescheduleBooking already expects, so no reshaping needed.
-  const handleRescheduleConfirm = async ({ bookingId, newDate, newStartTime }) => {
-    const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
-    if (!result?.error) {
-      setShowRescheduleModal(false);
-      onRescheduled?.();
-      onClose();
-    }
-    return result;
-  };
-
   const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
@@ -667,8 +644,11 @@ const BookingActionModal = ({
   // paid before it starts (pay-after-service isn't mandatory) and reassignment
   // should still be possible right up until the service actually begins.
   const isAssignmentBlocked = isTerminal || isLocked || isServiceStarted;
-  // "Rebook" reads as booking-again-after on terminal states; on active bookings "Reschedule" is clearer
-  const rebookLabel = isTerminal ? 'Rebook' : 'Reschedule';
+  // Always "Rebook" — this always creates a brand-new booking with the same
+  // customer/service info, leaving the original untouched, regardless of
+  // the source booking's status. "Reschedule" would wrongly imply the same
+  // appointment moves (confirmed business decision, see handleRebookStart).
+  const rebookLabel = 'Rebook';
 
   // Self-service rooms (Jacuzzi/Sauna/Steam) don't need a therapist to start — driven by
   // rooms.requires_therapist, not a hardcoded room/branch list.
@@ -2290,10 +2270,17 @@ const BookingActionModal = ({
                 >
                   Add another service
                 </button>
+                {/* "Rebook" always creates a brand-new booking with the same customer/service
+                    info, leaving the original untouched — onRebookStart (only wired on the
+                    branch-manager calendar today) closes this modal and lets staff click a
+                    slot on the real calendar grid to place it. Disabled while the service has
+                    already started or the day is locked — a sanity check independent of what
+                    the button does, not a data-safety boundary (rebook never mutates the
+                    original booking either way). */}
                 <button
-                  onClick={() => (isTerminal ? onRebookStart?.(booking) : setShowRescheduleModal(true))}
-                  disabled={!isTerminal && (isServiceStarted || isLocked)}
-                  title={!isTerminal && isServiceStarted ? 'This service has already started — it can no longer be rescheduled.' : undefined}
+                  onClick={() => onRebookStart?.(booking)}
+                  disabled={isServiceStarted || isLocked}
+                  title={isServiceStarted ? 'This service has already started.' : undefined}
                   className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
                   {rebookLabel}
@@ -2395,16 +2382,6 @@ const BookingActionModal = ({
           onConfirm={handlePaymentConfirm}
           onClose={() => setShowPaymentModal(false)}
           isSubmitting={paymentSubmitting}
-        />
-      )}
-
-      {/* Reschedule Modal — real UPDATE via rescheduleBooking, not a new booking */}
-      {showRescheduleModal && (
-        <RescheduleModal
-          isOpen={showRescheduleModal}
-          booking={booking}
-          onClose={() => setShowRescheduleModal(false)}
-          onConfirm={handleRescheduleConfirm}
         />
       )}
     </>,

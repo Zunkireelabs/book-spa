@@ -1992,6 +1992,7 @@ const OperationalCalendar = ({ branchId }) => {
       const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
+
       const result = await createBooking({
         branchId,
         serviceId: source.serviceId,
@@ -2122,6 +2123,13 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Rebook "pick and place" handlers ───────────────────────
 
   const handleRebookStart = useCallback((booking) => {
+    // "Rebook" — deliberately always creates a brand-new booking with the
+    // same customer/service info, regardless of the source booking's
+    // status; the original is never touched. Confirmed business decision
+    // (not the create-vs-update bug fixed in PR #255-257 — that was a
+    // different case where "Reschedule" silently created a duplicate
+    // instead of updating; here, creating a new booking IS the intended
+    // behavior for every booking, active or terminal).
     setRebookSource({
       booking,
       customerName: booking.customerName,
@@ -2325,14 +2333,6 @@ const OperationalCalendar = ({ branchId }) => {
         if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
       });
     }
-  };
-
-  // BookingActionModal closes itself after a successful reschedule (the
-  // booking may have moved to a different date entirely), so this just
-  // needs to refresh the grid — no selectedBooking refetch needed.
-  const handleRescheduled = () => {
-    showToast('Booking rescheduled successfully');
-    refreshCalendar();
   };
 
   // ── Therapist/room column reorder ────────────────────────────
@@ -2850,7 +2850,6 @@ const OperationalCalendar = ({ branchId }) => {
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
-        onRescheduled={handleRescheduled}
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
