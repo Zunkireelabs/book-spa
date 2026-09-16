@@ -12,7 +12,6 @@ const BookingLookupPanel = ({
   onAssignTherapist,
   onRecordPayment,
   onGroupPaymentRecorded,
-  onRescheduled,
   onApplyDiscount,
   userRole = 'staff',
   onRefresh,
@@ -279,7 +278,6 @@ const BookingLookupPanel = ({
         onUpdateStatus={onStatusUpdate}
         onRecordPayment={handleRecordPaymentWrapper}
         onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
-        onRescheduled={onRescheduled}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
       />

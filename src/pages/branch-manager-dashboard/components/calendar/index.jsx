@@ -1993,32 +1993,6 @@ const OperationalCalendar = ({ branchId }) => {
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
 
-      if (source.mode === 'reschedule') {
-        // Active booking — UPDATE it in place, not a new booking. Only set
-        // the ONE axis (therapist or room) matching the clicked column's
-        // type, same as drag-and-drop reschedule (handleConfirmReassign
-        // above) — rescheduleBooking treats an OMITTED param as "keep
-        // current assignment" but an explicit value (including
-        // 'unassigned') as "set/clear it", so setting both unconditionally
-        // would silently clear whichever axis the clicked column isn't
-        // (e.g. clicking a therapist's column would wipe the existing room).
-        const rescheduleParams = { bookingId: source.booking.bookingId, newDate: slotInfo.day, newStartTime: startTime };
-        if (slotInfo.colType === 'therapist') {
-          rescheduleParams.newTherapistId = slotInfo.colId === 'unassigned' ? 'unassigned' : slotInfo.colId;
-        } else if (slotInfo.colType === 'room') {
-          rescheduleParams.newRoomId = slotInfo.colId === 'unassigned' ? 'unassigned' : slotInfo.colId;
-        }
-        const result = await rescheduleBooking(rescheduleParams);
-        if (result.error) {
-          showToast(result.error.message || 'Failed to reschedule.', 'error');
-          setRebookSource(source);
-        } else {
-          showToast('Booking rescheduled successfully');
-          refreshCalendar();
-        }
-        return;
-      }
-
       const result = await createBooking({
         branchId,
         serviceId: source.serviceId,
@@ -2149,15 +2123,15 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Rebook "pick and place" handlers ───────────────────────
 
   const handleRebookStart = useCallback((booking) => {
-    // Terminal bookings (completed/cancelled/no show) get a genuinely new
-    // booking via createBooking — "rebook" is the correct action there.
-    // Any active booking gets rescheduled in place via rescheduleBooking
-    // (an UPDATE) — same terminal-status list BookingActionModal uses to
-    // label this button "Rebook" vs "Reschedule". See handleEmptySlotClick.
-    const mode = ['completed', 'cancelled', 'no show'].includes(booking.status) ? 'rebook' : 'reschedule';
+    // "Rebook" — deliberately always creates a brand-new booking with the
+    // same customer/service info, regardless of the source booking's
+    // status; the original is never touched. Confirmed business decision
+    // (not the create-vs-update bug fixed in PR #255-257 — that was a
+    // different case where "Reschedule" silently created a duplicate
+    // instead of updating; here, creating a new booking IS the intended
+    // behavior for every booking, active or terminal).
     setRebookSource({
       booking,
-      mode,
       customerName: booking.customerName,
       customerPhone: booking.customerPhone,
       serviceId: booking.serviceId,
@@ -2359,14 +2333,6 @@ const OperationalCalendar = ({ branchId }) => {
         if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
       });
     }
-  };
-
-  // BookingActionModal closes itself after a successful reschedule (the
-  // booking may have moved to a different date entirely), so this just
-  // needs to refresh the grid — no selectedBooking refetch needed.
-  const handleRescheduled = () => {
-    showToast('Booking rescheduled successfully');
-    refreshCalendar();
   };
 
   // ── Therapist/room column reorder ────────────────────────────
@@ -2839,7 +2805,7 @@ const OperationalCalendar = ({ branchId }) => {
           ref={rebookCardRef}
           role="status"
           aria-live="polite"
-          aria-label={`${rebookSource.mode === 'reschedule' ? 'Reschedule' : 'Rebook'} mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
+          aria-label={`Rebook mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
           className="fixed pointer-events-none z-notification"
           style={{ left: -9999, top: -9999, opacity: 0 }}
         >
@@ -2855,7 +2821,7 @@ const OperationalCalendar = ({ branchId }) => {
                 {rebookSource.duration}
               </span>
               <span className="font-caption text-[10px] text-primary font-medium">
-                {rebookSource.mode === 'reschedule' ? 'Click to reschedule' : 'Click to place'}
+                Click to place
               </span>
             </div>
           </div>
@@ -2884,7 +2850,6 @@ const OperationalCalendar = ({ branchId }) => {
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
-        onRescheduled={handleRescheduled}
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
