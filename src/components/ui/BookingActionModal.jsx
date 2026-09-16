@@ -2292,7 +2292,9 @@ const BookingActionModal = ({
                 </button>
                 <button
                   onClick={() => (isTerminal ? onRebookStart?.(booking) : setShowRescheduleModal(true))}
-                  className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px]"
+                  disabled={!isTerminal && (isServiceStarted || isLocked)}
+                  title={!isTerminal && isServiceStarted ? 'This service has already started — it can no longer be rescheduled.' : undefined}
+                  className="flex items-center justify-center text-center px-3 py-1.5 text-xs font-body font-body-medium text-text-secondary border border-border rounded-spa hover:bg-background spa-transition-fast min-h-[36px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
                   {rebookLabel}
                 </button>

@@ -2119,7 +2119,14 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime })
       .from('bookings')
       .update({ start_time: startTime, end_time: endTime })
       .eq('id', bookingId);
-    if (bookingError) throw bookingError;
+    if (bookingError) {
+      // compute_booking_datetimes trigger (migration-179): the resized time
+      // + service duration would extend past midnight.
+      if (bookingError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: bookingError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This resize would extend past midnight — please choose a shorter duration or earlier time.' } };
+      }
+      throw bookingError;
+    }
 
     const { error: therapistsError } = await supabase
       .from('booking_therapists')
@@ -2319,6 +2326,11 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     if (updateError) {
       if (updateError.code === '23P01' || updateError.code === 'P0003') {
         return { data: null, error: { code: 'SCHEDULING_CONFLICT', message: 'The new date/time conflicts with an existing booking.' } };
+      }
+      // compute_booking_datetimes trigger (migration-179): the new start
+      // time + service duration would extend past midnight.
+      if (updateError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: updateError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw updateError;
     }
@@ -2918,6 +2930,13 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
     // 3. Cannot reschedule paid bookings
     if (booking.payment_status === 'paid') {
       return { data: null, error: { code: 'BOOKING_IMMUTABLE', message: 'Cannot reschedule a paid booking.' } };
+    }
+
+    // 3a. Cannot reschedule a service that's already started — the client
+    // disables this in the UI (BookingActionModal), but that's not a real
+    // boundary; enforce it here too.
+    if (booking.status === 'In-Progress') {
+      return { data: null, error: { code: 'BOOKING_IN_PROGRESS', message: 'This service has already started — it can no longer be rescheduled.' } };
     }
 
     // 4. Auth check
