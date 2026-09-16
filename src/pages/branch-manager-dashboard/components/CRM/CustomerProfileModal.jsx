@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchCustomerProfile } from '../../../../services/api';
+import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQuickEdit';
+
+const MEMBERSHIP_STATUS_COLORS = {
+  active: 'bg-success/10 text-success',
+  depleted: 'bg-amber-100 text-amber-800',
+  pending: 'bg-amber-100 text-amber-800',
+  lapsed: 'bg-error/10 text-error',
+};
+
+function formatMembershipDate(d) {
+  return d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+}
 
 const LOYALTY_CONFIG = {
   VIP:        { color: 'bg-amber-100 text-amber-800', icon: 'Crown' },
@@ -113,6 +125,14 @@ const CustomerProfileModal = ({ customerId, onClose }) => {
                     {data.customer.email && (
                       <p className="font-caption text-xs text-text-tertiary">{data.customer.email}</p>
                     )}
+                    <div className="mt-1">
+                      <CustomerContactQuickEdit
+                        customerId={data.customer.id}
+                        email={data.customer.email}
+                        phone={data.customer.phone}
+                        onSaved={loadProfile}
+                      />
+                    </div>
                   </div>
                 </div>
                 <span className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-caption font-caption-medium ${loyaltyCfg.color}`}>
@@ -120,6 +140,29 @@ const CustomerProfileModal = ({ customerId, onClose }) => {
                   <span>{data.stats.loyaltyTier}</span>
                 </span>
               </div>
+
+              {/* Membership */}
+              {data.membership ? (
+                <div className="bg-background rounded-spa p-3 flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <Icon name="CreditCard" size={14} className="text-primary" />
+                      <span className="font-body font-body-medium text-sm text-text-primary">{data.membership.tierName}</span>
+                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium ${MEMBERSHIP_STATUS_COLORS[data.membership.status] || 'bg-background text-text-secondary'}`}>
+                        {data.membership.status}
+                      </span>
+                    </div>
+                    <p className="font-caption font-caption-normal text-xs text-text-tertiary">
+                      {data.membership.membershipNumber} · Expires {formatMembershipDate(data.membership.expiryDate)}
+                    </p>
+                  </div>
+                  <p className="font-data font-data-medium text-sm text-text-primary">
+                    {formatNPR(data.membership.balance)}
+                  </p>
+                </div>
+              ) : (
+                <p className="font-caption text-xs text-text-tertiary">No active membership</p>
+              )}
 
               {/* Stats Grid */}
               <div className="grid grid-cols-2 gap-3">

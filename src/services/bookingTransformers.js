@@ -177,6 +177,7 @@ export function transformMembership(dbMembership) {
     customerId: dbMembership.customer_id,
     customerName: customer?.full_name || null,
     customerPhone: customer?.phone || null,
+    customerEmail: customer?.email || null,
     customerGender: customer?.gender || null,
     customerDateOfBirth: customer?.date_of_birth || null,
     customerBranchId: customer?.branch?.id || null,

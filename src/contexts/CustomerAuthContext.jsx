@@ -118,6 +118,47 @@ export const CustomerAuthProvider = ({ children }) => {
     }
   };
 
+  // Name/phone self-edit — no re-verification needed, unlike email below.
+  // Also syncs the linked customers.phone row server-side (migration-176).
+  const updateContactInfo = async (fullName, phone) => {
+    const { data, error } = await supabaseCustomer.rpc('update_customer_contact_info', {
+      p_full_name: fullName,
+      p_phone: phone,
+    });
+    if (error) throw error;
+    setCustomerProfile(data);
+    return data;
+  };
+
+  // Step 1 of email self-edit: Supabase Auth's native flow for changing an
+  // ALREADY-authenticated session's email. Distinct from requestOtp (the
+  // login-only type: 'email' OTP) — this is auth.updateUser(), which
+  // requires the project's "Change Email Address" template to be in OTP
+  // (Token) mode rather than magic-link mode for the 6-digit-code UX below
+  // to work.
+  const requestEmailChange = async (newEmail) => {
+    const { error } = await supabaseCustomer.auth.updateUser({ email: newEmail });
+    if (error) throw error;
+  };
+
+  // Step 2: verify the code sent to the NEW address (type must be
+  // 'email_change', not the login flow's 'email'). Supabase Auth updates
+  // auth.users.email itself on success, before this returns; sync_customer_email()
+  // then mirrors that onto customer_accounts.email (the only path the
+  // migration-176 guard trigger allows) and the linked customers.email.
+  const confirmEmailChange = async (newEmail, token) => {
+    const { error: verifyError } = await supabaseCustomer.auth.verifyOtp({
+      email: newEmail, token, type: 'email_change',
+    });
+    if (verifyError) throw verifyError;
+
+    const { data: account, error: syncError } = await supabaseCustomer.rpc('sync_customer_email');
+    if (syncError) throw syncError;
+
+    setCustomerProfile(account);
+    return account;
+  };
+
   const signOut = async () => {
     setCustomerProfile(null);
     setCustomer(null);
@@ -171,7 +212,10 @@ export const CustomerAuthProvider = ({ children }) => {
   }, [customer?.id]);
 
   return (
-    <CustomerAuthContext.Provider value={{ customer, customerProfile, loading, requestOtp, verifyOtp, signOut }}>
+    <CustomerAuthContext.Provider value={{
+      customer, customerProfile, loading, requestOtp, verifyOtp, signOut,
+      updateContactInfo, requestEmailChange, confirmEmailChange,
+    }}>
       {children}
     </CustomerAuthContext.Provider>
   );

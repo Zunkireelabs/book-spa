@@ -223,6 +223,7 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">#</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Customer</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary hidden sm:table-cell">Tier</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary hidden sm:table-cell">Membership</th>
                   <th className="text-right px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Revenue</th>
                   <th className="text-center px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary hidden md:table-cell">Visits</th>
                   <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary hidden lg:table-cell">Last Visit</th>
@@ -252,6 +253,16 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
                           <Icon name={lc.icon} size={10} />
                           <span>{c.loyaltyTier}</span>
                         </span>
+                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        {c.primaryMembership ? (
+                          <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-caption font-caption-medium bg-primary/10 text-primary">
+                            <Icon name="CreditCard" size={10} />
+                            <span>{c.primaryMembership.tierName}</span>
+                          </span>
+                        ) : (
+                          <span className="text-text-tertiary text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-data font-data-medium text-sm text-text-primary">
