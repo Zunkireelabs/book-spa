@@ -1198,13 +1198,15 @@ const BookingActionModal = ({
                   </div>
                 )}
 
-                {/* Created-by audit line — only when a staff creator was recorded */}
-                {!isEditing && creator?.createdByName && (
+                {/* Created-by audit line — shows staff name, or "Online booking" for
+                    anonymous customer self-bookings (created_by is null). Matches
+                    CalendarBookingCard's fallback. */}
+                {!isEditing && creator && (
                   <div className="pt-3 border-t border-border">
                     <p className="font-caption text-xs text-text-tertiary">
                       <Icon name="UserPlus" size={12} className="inline-block mr-1 -mt-0.5" />
                       Created by{' '}
-                      <span className="text-text-secondary">{creator.createdByName}</span>
+                      <span className="text-text-secondary">{creator.createdByName || 'Online booking'}</span>
                       {creator.createdAt ? ` · ${formatCreatedAt(creator.createdAt)}` : ''}
                     </p>
                   </div>
