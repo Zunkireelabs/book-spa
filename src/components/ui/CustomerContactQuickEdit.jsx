@@ -13,12 +13,23 @@ const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
   const [editing, setEditing] = useState(false);
   const [emailInput, setEmailInput] = useState(email || '');
   const [phoneInput, setPhoneInput] = useState(phone || '');
+  // Snapshot of what the fields were when this edit session started — used
+  // to send only the field the user actually touched. staff_update_customer_contact
+  // (migration-173) treats a non-null value as authoritative (COALESCE), not
+  // as "unchanged", so always sending both would let a stale, untouched
+  // field silently overwrite a concurrent edit made elsewhere in between
+  // (e.g. another staff member editing the same customer from a different
+  // modal) with whatever this component last loaded.
+  const [initialEmail, setInitialEmail] = useState(email || '');
+  const [initialPhone, setInitialPhone] = useState(phone || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   const startEditing = () => {
     setEmailInput(email || '');
     setPhoneInput(phone || '');
+    setInitialEmail(email || '');
+    setInitialPhone(phone || '');
     setError(null);
     setEditing(true);
   };
@@ -27,9 +38,12 @@ const CustomerContactQuickEdit = ({ customerId, email, phone, onSaved }) => {
     setSaving(true);
     setError(null);
 
+    const trimmedEmail = emailInput.trim();
+    const trimmedPhone = phoneInput.trim();
+
     const { data, error: saveError } = await updateCustomerContact(customerId, {
-      email: emailInput.trim() || null,
-      phone: phoneInput.trim() || null,
+      email: trimmedEmail !== initialEmail ? (trimmedEmail || null) : null,
+      phone: trimmedPhone !== initialPhone ? (trimmedPhone || null) : null,
     });
 
     setSaving(false);
