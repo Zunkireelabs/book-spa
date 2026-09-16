@@ -3085,6 +3085,11 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       if (updateError.code === 'P0003') {
         return { data: null, error: { code: 'ROOM_CONFLICT', message: 'Room is fully booked at this time. Change the room or pick a different time.' } };
       }
+      // compute_booking_datetimes trigger (migration-179): the new start time
+      // + service duration would extend past midnight.
+      if (updateError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: updateError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
+      }
       throw updateError;
     }
 
@@ -5145,6 +5150,11 @@ export async function createBooking({
       }
       if (insertError.code === 'P0005') {
         return { data: null, error: { code: 'BRANCH_ONLINE_CAPACITY', message: 'This time is fully booked — no therapists available. Please choose another time.' } };
+      }
+      // compute_booking_datetimes trigger (migration-179): start time +
+      // service duration would extend past midnight.
+      if (insertError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
+        return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: insertError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw insertError;
     }

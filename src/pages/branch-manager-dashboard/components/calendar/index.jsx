@@ -2327,6 +2327,14 @@ const OperationalCalendar = ({ branchId }) => {
     }
   };
 
+  // BookingActionModal closes itself after a successful reschedule (the
+  // booking may have moved to a different date entirely), so this just
+  // needs to refresh the grid — no selectedBooking refetch needed.
+  const handleRescheduled = () => {
+    showToast('Booking rescheduled successfully');
+    refreshCalendar();
+  };
+
   // ── Therapist/room column reorder ────────────────────────────
   // Gates both onTherapistReorder and onRoomReorder below. Branch-scoped:
   // staff can rearrange columns for their own branch only.
@@ -2842,6 +2850,7 @@ const OperationalCalendar = ({ branchId }) => {
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
+        onRescheduled={handleRescheduled}
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}

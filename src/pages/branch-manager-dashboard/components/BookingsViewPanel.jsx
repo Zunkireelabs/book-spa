@@ -160,6 +160,11 @@ const BookingsViewPanel = ({ branchId }) => {
     loadData();
   };
 
+  const handleRescheduled = () => {
+    showToast('Booking rescheduled successfully');
+    loadData();
+  };
+
   const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo });
     if (result.error) return { error: result.error };
@@ -232,6 +237,7 @@ const BookingsViewPanel = ({ branchId }) => {
                 onAssignTherapist={handleAssignTherapist}
                 onRecordPayment={handleRecordPayment}
                 onGroupPaymentRecorded={handleGroupPaymentRecorded}
+                onRescheduled={handleRescheduled}
                 onApplyDiscount={handleApplyDiscount}
                 onRefresh={loadData}
                 dateRange={filters.dateRange}

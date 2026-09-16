@@ -210,6 +210,14 @@ const OperationalCalendar = ({ branchId }) => {
     }
   };
 
+  // BookingActionModal closes itself after a successful reschedule (the
+  // booking may have moved to a different date entirely), so this just
+  // needs to refresh the grid — no selectedBooking refetch needed.
+  const handleRescheduled = () => {
+    showToast('Booking rescheduled successfully');
+    refreshCalendar();
+  };
+
   // ── Build resources & events ────────────────────────────────
 
   const resources = calendarData
@@ -481,6 +489,7 @@ const OperationalCalendar = ({ branchId }) => {
         onAssignTherapist={handleAssignTherapist}
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
+        onRescheduled={handleRescheduled}
         userRole={profile?.role || 'staff'}
       />
 
