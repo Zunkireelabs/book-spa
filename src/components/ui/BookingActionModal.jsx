@@ -139,6 +139,11 @@ const BookingActionModal = ({
   const [groupSiblings, setGroupSiblings] = useState([]);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
   const [selectedDiscountIds, setSelectedDiscountIds] = useState(new Set()); // includes current booking ID by default
+  // Tracks the `activeTab:bookingId` pair the discount-selection state was last reset for, so a
+  // same-tab/same-booking rerun of the effect below (e.g. paymentStatus changing after a
+  // discount apply) doesn't wipe out staff's still-open selection — only a genuine tab switch or
+  // booking switch should reset it.
+  const discountResetKeyRef = useRef(null);
 
   // Previous due: this customer's outstanding balance from earlier visits (any date),
   // separate from `relatedBookings` (same-day services, used by the Discount tab).
@@ -193,7 +198,7 @@ const BookingActionModal = ({
 
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
-    if ((activeTab === 'payment' || activeTab === 'discount') && booking) {
+    if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
       const relatedPromise = fetchRelatedUnpaidBookings({
         customerName: booking.customerName,
         date: booking.date,
@@ -221,10 +226,15 @@ const BookingActionModal = ({
       Promise.all([relatedPromise, duePromise]).then(([relatedResult, dueResult]) => {
         const related = relatedResult.data || [];
         setRelatedBookings(related);
-        setSelectedDiscountIds(new Set([booking.bookingId]));
-        setSelectedApprover('');
-        setDiscountSuccess(false);
-        setRowDiscountOverrides({});
+
+        const resetKey = `${activeTab}:${booking.bookingId}:${isOpen}`;
+        if (discountResetKeyRef.current !== resetKey) {
+          discountResetKeyRef.current = resetKey;
+          setSelectedDiscountIds(new Set([booking.bookingId]));
+          setSelectedApprover('');
+          setDiscountSuccess(false);
+          setRowDiscountOverrides({});
+        }
 
         if (activeTab === 'payment') {
           // Exclude any booking already shown under "Related Services" — a real
@@ -243,18 +253,18 @@ const BookingActionModal = ({
           setSelectedPreviousDueIds(new Set());
         }
       });
-    } else if (activeTab === 'payment') {
+    } else if (isOpen && activeTab === 'payment') {
       setPreviousDueBookings([]);
       setSelectedPreviousDueIds(new Set());
     }
-    if (activeTab === 'payment' && booking?.bookingId) {
+    if (isOpen && activeTab === 'payment' && booking?.bookingId) {
       fetchMembershipForBooking(booking.bookingId).then(result => {
         setMembership(result.data || null);
       });
-    } else if (activeTab === 'payment') {
+    } else if (isOpen && activeTab === 'payment') {
       setMembership(null);
     }
-  }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId]);
+  }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
 
   // Load who created this booking when the modal opens
   useEffect(() => {

@@ -7039,6 +7039,13 @@ export async function fetchCustomerProfile(customerId) {
 
     const all = bookings || [];
 
+    // 2b. This customer's most recent membership, if any (tier/balance/status/expiry) —
+    // same lookup already used at booking checkout (fetchMembershipForCustomer).
+    const membershipResult = MEMBERSHIP_ENABLED
+      ? await fetchMembershipForCustomer(customerId)
+      : { data: null };
+    const membership = membershipResult.data || null;
+
     // 3. Compute aggregates
     let totalVisits = all.length;
     let completedVisits = 0;
@@ -7145,6 +7152,7 @@ export async function fetchCustomerProfile(customerId) {
           mostBookedService,
           loyaltyTier,
         },
+        membership,
         history,
       },
       error: null,
@@ -7199,9 +7207,10 @@ export async function getCustomerIntelligence({ branchId }) {
       .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
       .not('customer_id', 'is', null);
     bookQuery = withBranch(bookQuery, branchId);
-    const [custResult, bookResult] = await Promise.all([
+    const [custResult, bookResult, statusResult] = await Promise.all([
       custQuery,
       bookQuery,
+      MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
     ]);
 
     if (custResult.error) throw custResult.error;
@@ -7209,6 +7218,9 @@ export async function getCustomerIntelligence({ branchId }) {
 
     const customers = custResult.data || [];
     const bookings = bookResult.data || [];
+    // Same staff-safe status RPC (migration-087) + shape used by fetchCustomersLightweight —
+    // status/tier only, readable regardless of role.
+    const membershipByCustomer = new Map((statusResult.data || []).map((r) => [r.customerId, r]));
 
     if (customers.length === 0) {
       return {
@@ -7299,6 +7311,8 @@ export async function getCustomerIntelligence({ branchId }) {
         }
       }
 
+      const m = membershipByCustomer.get(c.id);
+
       return {
         id: c.id,
         fullName: c.full_name,
@@ -7315,6 +7329,9 @@ export async function getCustomerIntelligence({ branchId }) {
         lastVisitDate: s.lastVisitDate,
         mostBookedService,
         loyaltyTier,
+        primaryMembership: m
+          ? { id: m.membershipId, status: m.status, tierName: m.tierName, membershipNumber: m.membershipNumber }
+          : null,
       };
     });
 
