@@ -198,7 +198,7 @@ const BookingActionModal = ({
 
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
-    if ((activeTab === 'payment' || activeTab === 'discount') && booking) {
+    if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
       const relatedPromise = fetchRelatedUnpaidBookings({
         customerName: booking.customerName,
         date: booking.date,
@@ -253,15 +253,15 @@ const BookingActionModal = ({
           setSelectedPreviousDueIds(new Set());
         }
       });
-    } else if (activeTab === 'payment') {
+    } else if (isOpen && activeTab === 'payment') {
       setPreviousDueBookings([]);
       setSelectedPreviousDueIds(new Set());
     }
-    if (activeTab === 'payment' && booking?.bookingId) {
+    if (isOpen && activeTab === 'payment' && booking?.bookingId) {
       fetchMembershipForBooking(booking.bookingId).then(result => {
         setMembership(result.data || null);
       });
-    } else if (activeTab === 'payment') {
+    } else if (isOpen && activeTab === 'payment') {
       setMembership(null);
     }
   }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
