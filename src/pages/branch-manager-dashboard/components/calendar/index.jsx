@@ -1994,18 +1994,21 @@ const OperationalCalendar = ({ branchId }) => {
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
 
       if (source.mode === 'reschedule') {
-        // Active booking — UPDATE it in place, not a new booking. Pass
-        // therapistId/roomId explicitly (including null for an Unassigned
-        // column) since rescheduleBooking treats an omitted param as "keep
-        // current assignment" but null/undefined-checked explicitly as
-        // "clear it" — a slot click is an explicit placement either way.
-        const result = await rescheduleBooking({
-          bookingId: source.booking.bookingId,
-          newDate: slotInfo.day,
-          newStartTime: startTime,
-          newTherapistId: therapistId,
-          newRoomId: roomId,
-        });
+        // Active booking — UPDATE it in place, not a new booking. Only set
+        // the ONE axis (therapist or room) matching the clicked column's
+        // type, same as drag-and-drop reschedule (handleConfirmReassign
+        // above) — rescheduleBooking treats an OMITTED param as "keep
+        // current assignment" but an explicit value (including
+        // 'unassigned') as "set/clear it", so setting both unconditionally
+        // would silently clear whichever axis the clicked column isn't
+        // (e.g. clicking a therapist's column would wipe the existing room).
+        const rescheduleParams = { bookingId: source.booking.bookingId, newDate: slotInfo.day, newStartTime: startTime };
+        if (slotInfo.colType === 'therapist') {
+          rescheduleParams.newTherapistId = slotInfo.colId === 'unassigned' ? 'unassigned' : slotInfo.colId;
+        } else if (slotInfo.colType === 'room') {
+          rescheduleParams.newRoomId = slotInfo.colId === 'unassigned' ? 'unassigned' : slotInfo.colId;
+        }
+        const result = await rescheduleBooking(rescheduleParams);
         if (result.error) {
           showToast(result.error.message || 'Failed to reschedule.', 'error');
           setRebookSource(source);
