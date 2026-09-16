@@ -169,13 +169,11 @@ BEGIN
       v_npr_tender_total := round((v_npr_tender_total + v_tender_amt)::numeric, 2);
     END LOOP;
 
-    IF v_npr_tender_total > v_remaining THEN
-      RAISE EXCEPTION 'record_group_payment: booking % — payment (NPR %) exceeds remaining balance (NPR %)', v_booking_id, v_npr_tender_total, v_remaining;
-    END IF;
-
-    -- SessionPackage tenders settle whatever balance is left after every
-    -- other tender above, split evenly (remainder to the last one) — same
-    -- residual logic as recordPayment()'s sessionPackageAmounts.
+    -- SessionPackage shape validation (package_id required) runs BEFORE the
+    -- overpayment check below, same order recordPayment() validates in —
+    -- so a submission with both a missing package_id AND an overpaying
+    -- non-package total gets the same "missing package reference" error
+    -- either path would give, not a misleading OVERPAYMENT instead.
     SELECT count(*) INTO v_session_package_count
     FROM jsonb_array_elements(COALESCE(v_entry->'tenders', '[]'::jsonb))
     WHERE value->>'payment_mode' = 'SessionPackage';
@@ -188,19 +186,24 @@ BEGIN
       END IF;
     END LOOP;
 
+    IF v_npr_tender_total > v_remaining THEN
+      RAISE EXCEPTION 'record_group_payment: booking % — payment (NPR %) exceeds remaining balance (NPR %)', v_booking_id, v_npr_tender_total, v_remaining;
+    END IF;
+
+    -- SessionPackage tenders settle whatever balance is left after every
+    -- other tender above, split evenly (remainder to the last one) — same
+    -- residual logic as recordPayment()'s sessionPackageAmounts.
     v_session_package_residual := round((v_remaining - v_npr_tender_total)::numeric, 2);
     v_session_package_share := 0;
     IF v_session_package_count > 0 THEN
       v_session_package_share := floor((v_session_package_residual / v_session_package_count) * 100) / 100;
     END IF;
 
-    v_tender_total := round((v_npr_tender_total + (v_session_package_share * v_session_package_count))::numeric, 2);
-    -- Fold any rounding remainder into the running total the same way
-    -- recordPayment() folds it into the LAST session-package tender's share
-    -- (handled per-row below); tenderTotal itself must equal residual + npr.
-    IF v_session_package_count > 0 THEN
-      v_tender_total := round((v_npr_tender_total + v_session_package_residual)::numeric, 2);
-    END IF;
+    -- v_session_package_residual already IS remaining - npr_total (by
+    -- construction, never more), so tenderTotal is exactly npr + residual —
+    -- any rounding remainder is folded into the LAST session-package
+    -- tender's row (handled per-row below), not into this running total.
+    v_tender_total := round((v_npr_tender_total + v_session_package_residual)::numeric, 2);
 
     v_leftover := round((v_remaining - v_tender_total)::numeric, 2);
     v_due_holder := COALESCE(NULLIF(btrim(v_entry->>'due_holder_name'), ''), v_booking.due_holder_name);
