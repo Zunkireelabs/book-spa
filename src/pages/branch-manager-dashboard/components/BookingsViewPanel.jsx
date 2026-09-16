@@ -150,6 +150,16 @@ const BookingsViewPanel = ({ branchId }) => {
     return { error: null };
   };
 
+  // Tail-only counterpart to handleRecordPayment, for the atomic
+  // recordGroupPayment path (migration-178, BookingActionModal) — the write
+  // itself already happened in one transaction covering every booking in
+  // the bundle, so this just does the same refresh/toast handleRecordPayment
+  // does, once, instead of once per booking.
+  const handleGroupPaymentRecorded = () => {
+    showToast('Payment recorded successfully');
+    loadData();
+  };
+
   const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo });
     if (result.error) return { error: result.error };
@@ -221,6 +231,7 @@ const BookingsViewPanel = ({ branchId }) => {
                 onStatusUpdate={handleStatusUpdate}
                 onAssignTherapist={handleAssignTherapist}
                 onRecordPayment={handleRecordPayment}
+                onGroupPaymentRecorded={handleGroupPaymentRecorded}
                 onApplyDiscount={handleApplyDiscount}
                 onRefresh={loadData}
                 dateRange={filters.dateRange}
