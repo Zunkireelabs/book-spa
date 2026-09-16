@@ -6,7 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, EXOTIC_PAYMENT_MODES } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -64,10 +64,10 @@ const BookingActionModal = ({
   onAssignTherapist,
   onUpdateStatus,
   onRecordPayment,
-  // Optional: when provided, a bundle whose tenders are all "standard"
-  // (not in EXOTIC_PAYMENT_MODES) is paid atomically via recordGroupPayment
+  // Optional: when provided, the whole bundle (primary booking + every
+  // allocation, any tender type) is paid atomically via recordGroupPayment
   // instead of one sequential onRecordPayment call per booking — see
-  // migration-177. Callback takes no args; just refresh + toast, the same
+  // migration-178. Callback takes no args; just refresh + toast, the same
   // tail the caller's own onRecordPayment handler already does. Falls back
   // to the existing sequential loop wherever this isn't wired, so it's
   // fully opt-in and backward compatible.
@@ -132,8 +132,9 @@ const BookingActionModal = ({
 
   // Discount tab: same-day related bookings for combined discount application
   const [relatedBookings, setRelatedBookings] = useState([]);
-  // Every sibling in this booking's group, any payment_status — display only,
-  // never used for bundling (see fetchGroupBookings). Keeps a paid sibling
+  // Every sibling (formal group, or same customer_name+date when there's no
+  // booking_group_id), any payment_status — display only, never used for
+  // bundling (see fetchGroupBookings). Keeps a paid sibling
   // visible from every other sibling's modal instead of silently vanishing.
   const [groupSiblings, setGroupSiblings] = useState([]);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
@@ -199,9 +200,13 @@ const BookingActionModal = ({
         excludeBookingId: booking.bookingId,
         bookingGroupId: booking.bookingGroupId,
       });
-      if (activeTab === 'payment' && booking.bookingGroupId) {
-        fetchGroupBookings({ bookingGroupId: booking.bookingGroupId, excludeBookingId: booking.bookingId })
-          .then(({ data }) => setGroupSiblings(data || []));
+      if (activeTab === 'payment') {
+        fetchGroupBookings({
+          bookingGroupId: booking.bookingGroupId,
+          customerName: booking.customerName,
+          date: booking.date,
+          excludeBookingId: booking.bookingId,
+        }).then(({ data }) => setGroupSiblings(data || []));
       } else {
         setGroupSiblings([]);
       }
@@ -573,19 +578,14 @@ const BookingActionModal = ({
     setPaymentSubmitting(true);
     setActionError(null);
     try {
-      // Atomic path: every tender across the whole bundle is a "standard"
-      // mode (see EXOTIC_PAYMENT_MODES) and the parent opted in via
-      // onGroupPaymentRecorded — pay the primary booking + every allocation
-      // in ONE transaction (migration-177), instead of N sequential
-      // onRecordPayment calls that can't be rolled back if one fails
-      // partway through (payments rows are immutable). This closes the
-      // partial-bundle failure mode, not just the stale-related-list
+      // Atomic path: the parent opted in via onGroupPaymentRecorded — pay
+      // the primary booking + every allocation in ONE transaction
+      // (migration-178, every tender type supported), instead of N
+      // sequential onRecordPayment calls that can't be rolled back if one
+      // fails partway through (payments rows are immutable). This closes
+      // the partial-bundle failure mode, not just the stale-related-list
       // display bug the BK-20260915-0025/-0026/-0027 incident also had.
-      const allTenders = [...(tenders || []), ...(additionalAllocations || []).flatMap((a) => a.tenders || [])];
-      const isAtomicEligible = onGroupPaymentRecorded
-        && allTenders.every((t) => !EXOTIC_PAYMENT_MODES.includes(t.paymentMode));
-
-      if (isAtomicEligible) {
+      if (onGroupPaymentRecorded) {
         const { data, error } = await recordGroupPayment([
           { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
           ...(additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes: paymentNotes })),

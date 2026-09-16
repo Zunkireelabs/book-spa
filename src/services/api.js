@@ -829,32 +829,34 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
   }
 }
 
-// Tender modes that deduct from a wallet/voucher/package via their own
-// SECURITY DEFINER RPC (see recordPayment above) — record_group_payment_standard
-// (migration-177) explicitly rejects these, so a bundle containing any of
-// them must use the sequential recordPayment loop instead. Exported so
-// BookingActionModal can decide which path to take before submitting.
-export const EXOTIC_PAYMENT_MODES = ['Membership', 'ReferralWallet', 'ReferralVoucher', 'VoucherWallet', 'SessionPackage'];
-
 // Atomic counterpart to calling recordPayment once per booking: every
-// booking in `payments` is validated and its tenders inserted inside ONE
-// database transaction (record_group_payment_standard, migration-177) — all
-// or nothing, closing the partial-bundle failure mode a sequential loop of
-// recordPayment calls can't avoid (payments rows are immutable, so a
-// mid-loop failure can't be rolled back client-side). Only supports
-// standard tenders (not in EXOTIC_PAYMENT_MODES) — callers must check that
-// before choosing this over the sequential recordPayment loop.
+// booking in `payments` is validated inside ONE database transaction
+// (record_group_payment, migration-178) — all or nothing, closing the
+// partial-bundle failure mode a sequential loop of recordPayment calls
+// can't avoid (payments rows are immutable, so a mid-loop failure can't be
+// rolled back client-side). Handles every tender type recordPayment does
+// (Cash/Card/Bank, Membership, ReferralWallet, ReferralVoucher,
+// VoucherWallet, SessionPackage) — the RPC calls each type's own
+// SECURITY DEFINER function (record_membership_payment etc.) from inside
+// itself, which runs in the same transaction, so no tender type needs a
+// separate non-atomic fallback.
 //
-// `payments`: [{ bookingId, tenders: [{amount, paymentMode}], dueHolderName, notes }]
+// `payments`: [{ bookingId, tenders: [{amount, paymentMode, referralId, voucherId, packageId}], dueHolderName, notes }]
 export async function recordGroupPayment(payments) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { data, error } = await supabase.rpc('record_group_payment_standard', {
+    const { data, error } = await supabase.rpc('record_group_payment', {
       p_payments: (payments || []).map((p) => ({
         booking_id: p.bookingId,
-        tenders: (p.tenders || []).map((t) => ({ amount: Number(t.amount), payment_mode: t.paymentMode })),
+        tenders: (p.tenders || []).map((t) => ({
+          amount: Number(t.amount),
+          payment_mode: t.paymentMode,
+          ...(t.paymentMode === 'ReferralVoucher' ? { referral_id: t.referralId } : {}),
+          ...(t.paymentMode === 'VoucherWallet' ? { voucher_id: t.voucherId || null } : {}),
+          ...(t.paymentMode === 'SessionPackage' ? { package_id: t.packageId } : {}),
+        })),
         due_holder_name: p.dueHolderName || null,
         notes: p.notes || null,
       })),
@@ -2050,17 +2052,27 @@ export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBo
 // made it drop out of every other sibling's "related" view since that query
 // filtered on payment_status='unpaid'). Never used to decide what to bundle
 // into a payment — only fetchRelatedUnpaidBookings governs that.
-export async function fetchGroupBookings({ bookingGroupId, excludeBookingId }) {
+// Falls back to the customer_name+date heuristic when bookingGroupId is
+// absent — same dual-matching strategy as fetchRelatedUnpaidBookings, so
+// the "don't hide a paid sibling" display fix covers non-group bookings
+// too, not just formal group bookings (a real gap: two separate walk-in
+// bookings for the same customer/day, never linked via booking_group_id,
+// had no equivalent of this panel).
+export async function fetchGroupBookings({ bookingGroupId, customerName, date, excludeBookingId }) {
   try {
-    if (!bookingGroupId) return { data: [], error: null };
+    if (!bookingGroupId && !(customerName && date)) return { data: [], error: null };
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select('id, booking_number, payment_status, status, final_amount, service:services(name)')
-      .eq('booking_group_id', bookingGroupId)
       .not('status', 'in', '("Cancelled","No Show")')
-      .neq('id', excludeBookingId)
-      .order('booking_number');
+      .neq('id', excludeBookingId);
+
+    query = bookingGroupId
+      ? query.eq('booking_group_id', bookingGroupId)
+      : query.eq('customer_name', customerName).eq('date', date);
+
+    const { data, error } = await query.order('booking_number');
 
     if (error) throw error;
     return { data: data || [], error: null };

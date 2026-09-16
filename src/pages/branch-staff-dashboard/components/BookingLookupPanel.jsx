@@ -11,6 +11,7 @@ const BookingLookupPanel = ({
   onStatusUpdate,
   onAssignTherapist,
   onRecordPayment,
+  onGroupPaymentRecorded,
   onApplyDiscount,
   userRole = 'staff',
   onRefresh,
@@ -61,6 +62,17 @@ const BookingLookupPanel = ({
     }
     return result;
   };
+
+  // Same local-refresh tail as handleRecordPaymentWrapper, for the atomic
+  // recordGroupPayment path — the currently open booking is always one of
+  // the ones just paid, so refresh it after the parent's own refresh/toast.
+  const handleGroupPaymentRecordedWrapper = onGroupPaymentRecorded && (async () => {
+    onGroupPaymentRecorded();
+    if (selectedBooking) {
+      const refreshed = await fetchBookingById(selectedBooking.bookingId);
+      if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    }
+  });
 
   const handleModalClose = () => {
     setShowModal(false);
@@ -265,6 +277,7 @@ const BookingLookupPanel = ({
         onAssignTherapist={onAssignTherapist}
         onUpdateStatus={onStatusUpdate}
         onRecordPayment={handleRecordPaymentWrapper}
+        onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
       />
