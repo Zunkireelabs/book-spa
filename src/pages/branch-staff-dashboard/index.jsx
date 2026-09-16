@@ -401,12 +401,6 @@ const BranchStaffDashboard = () => {
     loadData();
   };
 
-  const handleRescheduled = () => {
-    setActionError(null);
-    showSuccess('Booking rescheduled successfully');
-    loadData();
-  };
-
   // Wire to real API: applyDiscount
   const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     setActionError(null);
@@ -636,7 +630,6 @@ const BranchStaffDashboard = () => {
                       onAssignTherapist={handleAssignTherapist}
                       onRecordPayment={handleRecordPayment}
                       onGroupPaymentRecorded={handleGroupPaymentRecorded}
-                      onRescheduled={handleRescheduled}
                       onApplyDiscount={handleApplyDiscount}
                       userRole={profile?.role || 'staff'}
                       onRefresh={loadData}
@@ -662,7 +655,6 @@ const BranchStaffDashboard = () => {
               onAssignTherapist={handleAssignTherapist}
               onRecordPayment={handleRecordPayment}
               onGroupPaymentRecorded={handleGroupPaymentRecorded}
-              onRescheduled={handleRescheduled}
               onApplyDiscount={handleApplyDiscount}
               userRole={profile?.role || 'staff'}
               onRefresh={loadData}
