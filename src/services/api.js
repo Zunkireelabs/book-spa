@@ -5125,7 +5125,10 @@ export async function createBooking({
 
     // 7. Insert booking — triggers compute end_time, datetimes, final_amount, booking_number
     // Capture who created it (null for anonymous customer self-booking).
-    const { data: { user: authUser } } = await supabase.auth.getUser();
+    // orgSlug is only ever passed by the public/online booking flow — never by staff
+    // flows — so treat it as authoritative: an online booking must never inherit
+    // created_by from a staff session that happens to be active in the same browser.
+    const authUser = orgSlug ? null : (await supabase.auth.getUser()).data.user;
     const { data: booking, error: insertError } = await supabase
       .from('bookings')
       .insert({

@@ -123,14 +123,34 @@ const BookingConfirmation = ({
       });
 
       if (error) {
+        console.error('[BookingConfirmation] createBooking failed:', error.code, error.message);
+        // Keep this list in sync with the error codes createBooking() (services/api.js) can return —
+        // each already carries a customer-safe message; only truly unrecognized/raw errors fall through.
+        const KNOWN_BOOKING_ERROR_CODES = [
+          'COUPLE_SERVICE_NOT_ALLOWED_IN_GROUP',
+          'ROOMS_FULL',
+          'ROOM_FULL',
+          'INVALID_ROOM',
+          'ROOM_INACTIVE',
+          'INVALID_THERAPIST',
+          'THERAPIST_INACTIVE',
+          'THERAPIST_ABSENT',
+          'THERAPIST_CHECKED_OUT',
+          'THERAPIST_CONFLICT',
+          'BRANCH_ONLINE_CAPACITY',
+          'BOOKING_CROSSES_MIDNIGHT',
+        ];
         setBookingError(
-          ['ROOMS_FULL', 'BRANCH_ONLINE_CAPACITY'].includes(error.code) ? error.message : 'Something went wrong. Please try again.'
+          KNOWN_BOOKING_ERROR_CODES.includes(error.code) && error.message
+            ? error.message
+            : 'Something went wrong while confirming your booking. Please try again.'
         );
         return;
       }
       onConfirmBooking({ bookingId: data.booking_number });
     } catch (err) {
-      setBookingError('Something went wrong. Please try again.');
+      console.error('[BookingConfirmation] unexpected error confirming booking:', err);
+      setBookingError('Something went wrong while confirming your booking. Please check your connection and try again.');
     } finally {
       setIsConfirming(false);
     }
