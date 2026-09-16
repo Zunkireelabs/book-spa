@@ -6,7 +6,7 @@ import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQ
 const MEMBERSHIP_STATUS_COLORS = {
   active: 'bg-success/10 text-success',
   depleted: 'bg-amber-100 text-amber-800',
-  expired: 'bg-error/10 text-error',
+  pending: 'bg-amber-100 text-amber-800',
   lapsed: 'bg-error/10 text-error',
 };
 

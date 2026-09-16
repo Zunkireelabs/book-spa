@@ -227,7 +227,7 @@ const BookingActionModal = ({
         const related = relatedResult.data || [];
         setRelatedBookings(related);
 
-        const resetKey = `${activeTab}:${booking.bookingId}`;
+        const resetKey = `${activeTab}:${booking.bookingId}:${isOpen}`;
         if (discountResetKeyRef.current !== resetKey) {
           discountResetKeyRef.current = resetKey;
           setSelectedDiscountIds(new Set([booking.bookingId]));
@@ -264,7 +264,7 @@ const BookingActionModal = ({
     } else if (activeTab === 'payment') {
       setMembership(null);
     }
-  }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId]);
+  }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
 
   // Load who created this booking when the modal opens
   useEffect(() => {
