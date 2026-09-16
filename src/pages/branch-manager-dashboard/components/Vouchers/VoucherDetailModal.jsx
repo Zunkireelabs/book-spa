@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQuickEdit';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useBranch } from '../../../../contexts/BranchContext';
 import {
@@ -197,6 +198,21 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
                   <div className="col-span-2">
                     <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Remarks</p>
                     <p className="font-body text-sm text-text-secondary">{voucher.remarks}</p>
+                  </div>
+                )}
+                {voucher.customerId && (
+                  <div className="col-span-2 pt-1 border-t border-border/60">
+                    <p className="font-caption text-[11px] text-text-tertiary uppercase tracking-wide">Customer contact</p>
+                    <p className="font-body text-sm text-text-secondary mb-1.5">
+                      {voucher.customerEmail || 'No email on file'}
+                      {voucher.customerPhone ? ` · ${voucher.customerPhone}` : ''}
+                    </p>
+                    <CustomerContactQuickEdit
+                      customerId={voucher.customerId}
+                      email={voucher.customerEmail}
+                      phone={voucher.customerPhone}
+                      onSaved={loadData}
+                    />
                   </div>
                 )}
               </div>
