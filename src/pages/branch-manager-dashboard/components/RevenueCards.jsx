@@ -35,7 +35,7 @@ const PERIOD_CONFIG = [
   { key: 'monthToDate', label: 'Month to Date', shortLabel: 'MTD', icon: 'CalendarDays' },
 ];
 
-const RevenueCards = ({ branchId, period }) => {
+const RevenueCards = ({ branchId, period, todayOnly = false }) => {
   const isDaily = !period || period.key === 'daily';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +47,7 @@ const RevenueCards = ({ branchId, period }) => {
     setError(null);
 
     const result = isDaily
-      ? await getRevenueIntelligence({ branchId })
+      ? await getRevenueIntelligence({ branchId, date: period?.from })
       : await getRevenueForPeriod({ branchId, from: period.from, to: period.to });
 
     if (result.error) {
@@ -132,12 +132,13 @@ const RevenueCards = ({ branchId, period }) => {
   // Compute deltas: today vs yesterday
   const netDelta = computeDelta(data.today.netRevenue, data.yesterday.netRevenue);
   const bookingsDelta = computeDelta(data.today.paidBookings, data.yesterday.paidBookings);
+  const visibleCards = todayOnly ? PERIOD_CONFIG.filter(p => p.key === 'today') : PERIOD_CONFIG;
 
   return (
     <div className="space-y-2 sm:space-y-3">
-      {/* Revenue Cards - 2 cols on mobile, 4 on desktop */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-        {PERIOD_CONFIG.map((period) => {
+      {/* Revenue Cards - 2 cols on mobile, 4 on desktop (1 col when todayOnly) */}
+      <div className={todayOnly ? 'grid grid-cols-1 sm:max-w-xs' : 'grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4'}>
+        {visibleCards.map((period) => {
           const periodData = data[period.key];
           if (!periodData) return null;
 
@@ -225,7 +226,7 @@ const RevenueCards = ({ branchId, period }) => {
       </div>
 
       {/* Today vs Yesterday delta summary - Responsive */}
-      {(netDelta.type !== 'neutral' || bookingsDelta.type !== 'neutral') && (
+      {!todayOnly && (netDelta.type !== 'neutral' || bookingsDelta.type !== 'neutral') && (
         <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 px-1">
           <span className="text-xs text-gray-400">
             vs Yesterday:
