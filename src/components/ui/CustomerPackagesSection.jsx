@@ -20,12 +20,12 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-const CustomerPackagesSection = ({ packages = [] }) => {
+const CustomerPackagesSection = ({ packages = [], onClickPackage }) => {
   if (!packages.length) return null;
 
   return (
     <div className="mb-8">
-      <h2 className="text-lg font-semibold text-text-primary mb-4">Your packages</h2>
+      <h2 className="text-lg font-semibold text-text-primary mb-4">Your annual packages</h2>
       <div className="space-y-2">
         {packages.map((p) => {
           const isExpired = p.expiry_date && new Date(p.expiry_date) < new Date() && p.status !== 'fully_redeemed';
@@ -33,26 +33,34 @@ const CustomerPackagesSection = ({ packages = [] }) => {
           const styles = STATUS_STYLES[status] || STATUS_STYLES.unused;
           const remaining = p.sessions_remaining != null ? p.sessions_remaining : p.sessions_total;
           return (
-            <div key={p.id} className="rounded-spa border border-border px-4 py-3 bg-surface">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex items-center space-x-2">
-                  <Icon name="PackageCheck" size={14} className="text-primary flex-shrink-0" />
-                  <span className="font-body font-body-medium text-sm text-text-primary truncate">
-                    {p.service?.name || p.package_type?.name || 'Package'}
-                  </span>
-                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${styles}`}>
-                    {STATUS_LABELS[status] || status}
-                  </span>
+            <button
+              type="button"
+              onClick={() => onClickPackage?.(p.id)}
+              key={p.id}
+              className="w-full text-left rounded-spa border border-border px-4 py-3 bg-surface hover:shadow-spa-resting spa-transition-fast"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-spa bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Icon name="PackageCheck" size={16} className="text-primary" />
                 </div>
-                <span className="font-data font-data-medium text-sm text-primary flex-shrink-0">
-                  {remaining} <span className="text-text-tertiary">/ {p.sessions_total} sessions</span>
-                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body font-body-medium text-sm text-text-primary truncate">
+                    {p.package_type?.name || p.service?.name || 'Annual package'}
+                  </p>
+                  <p className="mt-0.5 font-caption text-[11px] text-text-secondary truncate">
+                    Issued {formatDate(p.issued_date)} · Expires {formatDate(p.expiry_date)}
+                    {p.package_code ? ` · ${p.package_code}` : ''}
+                  </p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="font-data font-data-semibold text-lg leading-tight text-primary">{remaining}</p>
+                  <p className="font-caption text-[10px] text-text-tertiary uppercase tracking-wide">remaining</p>
+                </div>
               </div>
-              <p className="mt-1.5 font-caption text-[11px] text-text-secondary">
-                Issued {formatDate(p.issued_date)} · Expires {formatDate(p.expiry_date)}
-                {p.package_code ? ` · ${p.package_code}` : ''}
-              </p>
-            </div>
+              <span className={`mt-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-caption font-caption-medium ${styles}`}>
+                {STATUS_LABELS[status] || status}
+              </span>
+            </button>
           );
         })}
       </div>

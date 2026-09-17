@@ -6,7 +6,7 @@ import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 import {
   getCustomerBookingHistory, getCustomerMembership, getCustomerMembershipTransactions,
   getCustomerMembershipHistory, getCustomerVouchers, getCustomerVoucherClaims,
-  getCustomerPackages, getCustomerReferralStats,
+  getCustomerPackages, getCustomerPackageRedemptions, getCustomerReferralStats,
 } from 'services/api';
 import { transformBooking } from 'services/bookingTransformers';
 import { formatPhoneDisplay } from 'utils/phone';
@@ -72,6 +72,7 @@ const TONE_STYLES = {
   secondary: { chip: 'bg-secondary/10', icon: 'text-secondary' },
   accent:    { chip: 'bg-accent/10', icon: 'text-accent' },
   success:   { chip: 'bg-success/10', icon: 'text-success' },
+  warning:   { chip: 'bg-warning/10', icon: 'text-warning' },
 };
 
 const StatTile = ({ icon, label, value, tone = 'primary', empty, emptyLabel, showValue = true, to, onClick }) => {
@@ -99,9 +100,10 @@ const StatTile = ({ icon, label, value, tone = 'primary', empty, emptyLabel, sho
   return content;
 };
 
-const StatDetailModal = ({ title, onClose, children }) => (
+const StatDetailModal = ({ title, onClose, children, topOffset = 0 }) => (
   <div
-    className="fixed inset-0 z-modal-overlay bg-background flex flex-col"
+    className="fixed inset-x-0 bottom-0 z-modal-overlay bg-background flex flex-col"
+    style={{ top: topOffset }}
     role="dialog"
     aria-modal="true"
     aria-labelledby="stat-detail-title"
@@ -162,6 +164,7 @@ const CustomerAccount = () => {
   const [vouchers, setVouchers] = useState([]);
   const [voucherClaims, setVoucherClaims] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [packageRedemptions, setPackageRedemptions] = useState([]);
   const [referralStats, setReferralStats] = useState(null);
   const hasRedirected = useRef(false);
 
@@ -238,7 +241,14 @@ const CustomerAccount = () => {
 
     let cancelled = false;
     getCustomerPackages(customerProfile.customer_id).then(({ data }) => {
-      if (!cancelled) setPackages(data || []);
+      if (cancelled) return;
+      const list = data || [];
+      setPackages(list);
+      if (list.length > 0) {
+        getCustomerPackageRedemptions(list.map((p) => p.id)).then(({ data: redemptions }) => {
+          if (!cancelled) setPackageRedemptions(redemptions || []);
+        });
+      }
     });
 
     return () => { cancelled = true; };
@@ -284,11 +294,42 @@ const CustomerAccount = () => {
     [activeVouchers]
   );
 
+  const isPackagePast = (p) =>
+    p.status === 'fully_redeemed' || (p.expiry_date && new Date(p.expiry_date) < new Date());
+
+  const activePackages = useMemo(() => packages.filter((p) => !isPackagePast(p)), [packages]);
+  const pastPackages = useMemo(() => packages.filter((p) => isPackagePast(p)), [packages]);
+
+  const packageSessionsRemaining = useMemo(
+    () => activePackages.reduce((sum, p) => sum + Number(p.sessions_remaining ?? p.sessions_total ?? 0), 0),
+    [activePackages]
+  );
+
   const [showProfileEdit, setShowProfileEdit] = useState(false);
-  const [activeStat, setActiveStat] = useState(null); // null | 'membership' | 'vouchers' | 'referral' | 'visits'
+  const [activeStat, setActiveStat] = useState(null); // null | 'membership' | 'vouchers' | 'packages' | 'referral' | 'visits'
   const [activeVoucherId, setActiveVoucherId] = useState(null); // set when a specific voucher row was clicked, vs. the summary tile
+  const [activePackageId, setActivePackageId] = useState(null); // set when a specific package row was clicked, vs. the summary tile
   const [membershipView, setMembershipView] = useState('overview'); // 'overview' (top tile: past plans) | 'current' (Your membership card: current details + activity)
   const [referralView, setReferralView] = useState('overview'); // 'overview' (top tile: counts only) | 'history' (Your referrals card: full history list)
+
+  const headerRef = useRef(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  useEffect(() => {
+    if (!headerRef.current) return;
+    const el = headerRef.current;
+    const update = () => setHeaderHeight(el.offsetHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!activeStat) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [activeStat]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -307,7 +348,10 @@ const CustomerAccount = () => {
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="px-4 sm:px-6 md:px-8 py-4 sm:py-5 flex items-center justify-between gap-3 border-b border-border bg-surface">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-header px-4 sm:px-6 md:px-8 py-4 sm:py-5 flex items-center justify-between gap-3 border-b border-border bg-surface"
+      >
         {TENANT_LOGOS[orgSlug] ? (
           <img
             src={TENANT_LOGOS[orgSlug]}
@@ -347,6 +391,7 @@ const CustomerAccount = () => {
         <StatDetailModal
           title={membershipView === 'current' ? 'Your membership' : 'Membership'}
           onClose={() => setActiveStat(null)}
+          topOffset={headerHeight}
         >
           <div className="max-w-sm mx-auto space-y-4">
             {membership ? (
@@ -458,6 +503,7 @@ const CustomerAccount = () => {
           <StatDetailModal
             title={activeVoucherId ? 'Voucher' : 'Vouchers'}
             onClose={() => { setActiveStat(null); setActiveVoucherId(null); }}
+            topOffset={headerHeight}
           >
             <div className="max-w-sm mx-auto space-y-4">
               {vouchers.length > 0 ? (
@@ -512,10 +558,90 @@ const CustomerAccount = () => {
         );
       })()}
 
+      {activeStat === 'packages' && (() => {
+        const scopedPackages = activePackageId
+          ? activePackages.filter((p) => p.id === activePackageId)
+          : activePackages;
+        const scopedRedemptions = activePackageId
+          ? packageRedemptions.filter((r) => r.package_id === activePackageId)
+          : packageRedemptions;
+        const highlight = activePackageId
+          ? {
+              value: scopedPackages[0]?.sessions_remaining ?? scopedPackages[0]?.sessions_total ?? 0,
+              label: scopedPackages[0]?.package_type?.name || scopedPackages[0]?.service?.name || 'Annual package',
+            }
+          : { value: packageSessionsRemaining, label: 'Sessions remaining' };
+
+        return (
+          <StatDetailModal
+            title={activePackageId ? 'Annual package' : 'Annual packages'}
+            onClose={() => { setActiveStat(null); setActivePackageId(null); }}
+            topOffset={headerHeight}
+          >
+            <div className="max-w-sm mx-auto space-y-4">
+              {packages.length > 0 ? (
+                <>
+                  <StatHighlightCard icon="PackageCheck" value={highlight.value} label={highlight.label} />
+                  {scopedPackages.map((p, i) => (
+                    <InfoCard key={p.id} className="space-y-2.5">
+                      <p className="font-caption text-xs text-primary uppercase tracking-wide font-semibold pb-1 border-b border-border">
+                        Active package{scopedPackages.length > 1 ? ` ${i + 1}` : ''}
+                      </p>
+                      <DetailRow label="Package" value={p.package_type?.name || p.service?.name || '—'} />
+                      {p.service?.name && p.package_type?.name && p.service.name !== p.package_type.name && (
+                        <DetailRow label="Service" value={p.service.name} />
+                      )}
+                      <DetailRow label="Sessions generated" value={p.sessions_total} />
+                      <DetailRow label="Remaining" value={p.sessions_remaining ?? p.sessions_total} />
+                      {p.branch?.name && <DetailRow label="Branch" value={p.branch.name} />}
+                      {p.package_code && <DetailRow label="Code" value={p.package_code} />}
+                      <DetailRow label="Expires" value={formatRelativeDate(p.expiry_date)} />
+                    </InfoCard>
+                  ))}
+                  {!activePackageId && pastPackages.map((p, i) => (
+                    <InfoCard key={p.id} className="space-y-2.5">
+                      <p className="font-caption text-xs text-warning uppercase tracking-wide font-semibold pb-1 border-b border-border">
+                        Past package{pastPackages.length > 1 ? ` ${i + 1}` : ''}
+                      </p>
+                      <DetailRow label="Package" value={p.package_type?.name || p.service?.name || '—'} />
+                      <DetailRow label="Sessions generated" value={p.sessions_total} />
+                      <DetailRow label="Used" value={p.sessions_used ?? (p.sessions_total - (p.sessions_remaining ?? 0))} />
+                    </InfoCard>
+                  ))}
+                  {activePackageId && (
+                    <InfoCard className="space-y-3">
+                      <p className="font-caption text-xs text-text-secondary uppercase tracking-wide">Activity</p>
+                      {scopedRedemptions.length > 0 ? (
+                        scopedRedemptions.map((r) => (
+                          <div key={r.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0 last:pb-0">
+                            <div className="min-w-0">
+                              <p className="font-body text-sm text-text-primary">Session used</p>
+                              <p className="font-caption text-xs text-text-secondary">
+                                {formatDateShort(r.redeemed_date)}{r.branch?.name ? ` · ${r.branch.name}` : ''}
+                              </p>
+                            </div>
+                            <span className="font-data text-sm text-error flex-shrink-0">-1 session</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="font-body text-sm text-text-secondary">No activity yet.</p>
+                      )}
+                    </InfoCard>
+                  )}
+                </>
+              ) : (
+                <EmptyStateCard icon="PackageCheck" message="No annual packages yet. Packages issued to you will show up here." />
+              )}
+            </div>
+          </StatDetailModal>
+        );
+      })()}
+
       {activeStat === 'referral' && (
         <StatDetailModal
           title={referralView === 'history' ? 'Your referrals' : 'Referral earnings'}
           onClose={() => setActiveStat(null)}
+          topOffset={headerHeight}
         >
           <div className="max-w-sm mx-auto space-y-4">
             {referralStats && referralStats.totalReferred > 0 ? (
@@ -558,7 +684,7 @@ const CustomerAccount = () => {
       )}
 
       {activeStat === 'visits' && (
-        <StatDetailModal title="Total visits" onClose={() => setActiveStat(null)}>
+        <StatDetailModal title="Total visits" onClose={() => setActiveStat(null)} topOffset={headerHeight}>
           <div className="max-w-sm mx-auto space-y-4">
             {(() => {
               const completed = bookings
@@ -656,6 +782,15 @@ const CustomerAccount = () => {
               onClick={() => { setActiveVoucherId(null); setActiveStat('vouchers'); }}
             />
           )}
+          {packages.length > 0 && (
+            <StatTile
+              icon="PackageCheck"
+              tone="warning"
+              label="Annual Packages"
+              showValue={false}
+              onClick={() => { setActivePackageId(null); setActiveStat('packages'); }}
+            />
+          )}
           {CUSTOMER_REFERRALS_ENABLED && (
             <StatTile
               icon="Users"
@@ -684,7 +819,10 @@ const CustomerAccount = () => {
           vouchers={activeVouchers}
           onClickVoucher={(voucherId) => { setActiveVoucherId(voucherId); setActiveStat('vouchers'); }}
         />
-        <CustomerPackagesSection packages={packages} />
+        <CustomerPackagesSection
+          packages={packages}
+          onClickPackage={(packageId) => { setActivePackageId(packageId); setActiveStat('packages'); }}
+        />
         <CustomerReferralStats
           stats={referralStats}
           onClick={() => { setReferralView('history'); setActiveStat('referral'); }}
