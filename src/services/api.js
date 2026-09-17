@@ -9929,6 +9929,31 @@ export async function getCustomerMembership(customerId) {
   }
 }
 
+// Every membership row this customer has ever had (current + past/expired) —
+// getCustomerMembership only returns the single latest row, which is right
+// for the wallet card but hides an older plan they bought and let expire
+// before enrolling in the current one. Used for the "Past memberships"
+// history list on the /account membership detail popup.
+export async function getCustomerMembershipHistory(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabaseCustomer
+      .from('memberships')
+      .select(`
+        id, membership_number, total_deposited, balance,
+        activation_date, expiry_date, created_at,
+        tier:membership_tiers ( id, name )
+      `)
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] getCustomerMembershipHistory error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function getCustomerMembershipTransactions(membershipId) {
   try {
     if (!membershipId) return { data: [], error: null };
@@ -9936,7 +9961,9 @@ export async function getCustomerMembershipTransactions(membershipId) {
       .from('membership_transactions')
       .select(`
         id, kind, amount, payment_mode, booking_id, payment_id,
-        performed_by, notes, created_at
+        performed_by, notes, created_at,
+        branch:branches ( id, name ),
+        booking:bookings ( id, service_name_snapshot, date )
       `)
       .eq('membership_id', membershipId)
       .order('created_at', { ascending: false });
@@ -10312,7 +10339,8 @@ export async function getCustomerVouchers(customerId) {
       .select(`
         id, voucher_code, issued_date, expiry_date, actual_price,
         discount_percent, total_amount_issued, remarks,
-        voucher_type:voucher_types ( id, name, is_wallet )
+        voucher_type:voucher_types ( id, name, is_wallet ),
+        branch:branches ( id, name )
       `)
       .eq('customer_id', customerId)
       .order('issued_date', { ascending: false });
@@ -10330,6 +10358,30 @@ export async function getCustomerVouchers(customerId) {
     return { data: merged, error: null };
   } catch (error) {
     console.error('[API] getCustomerVouchers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Per-voucher redemption history for the /account voucher detail popup —
+// same RLS shape as getCustomerVouchers (customer reads own voucher claims
+// via the vouchers.customer_id chain), just the raw claim rows instead of
+// the aggregated voucher_balances view.
+export async function getCustomerVoucherClaims(voucherIds) {
+  try {
+    if (!voucherIds || voucherIds.length === 0) return { data: [], error: null };
+
+    const { data, error } = await supabaseCustomer
+      .from('voucher_claims')
+      .select(`
+        id, voucher_id, redeemed_date, service_claimed, amount_claimed, notes,
+        branch:branches!branch_claimed_id ( id, name )
+      `)
+      .in('voucher_id', voucherIds)
+      .order('redeemed_date', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] getCustomerVoucherClaims error:', error.message);
     return { data: null, error };
   }
 }
@@ -10375,7 +10427,10 @@ export async function getCustomerReferralStats(customerId) {
 
     const { data, error } = await supabaseCustomer
       .from('customer_referrals')
-      .select('id, reward_status, reward_amount, reward_type, reward_label, created_at, credited_at')
+      .select(`
+        id, reward_status, reward_amount, reward_type, reward_label, created_at, credited_at,
+        booking:bookings!customer_referrals_booking_id_fkey ( id, service_name_snapshot, date )
+      `)
       .eq('referring_customer_id', customerId)
       .order('created_at', { ascending: false });
     if (error) throw error;

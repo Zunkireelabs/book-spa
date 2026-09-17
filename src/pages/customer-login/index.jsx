@@ -6,7 +6,7 @@ const CustomerLoginAuthentication = () => {
   const { orgName } = useTenant();
 
   return (
-    <div className="login-page min-h-screen bg-background flex flex-col">
+    <div className="login-page min-h-dvh bg-background flex flex-col">
       <header className="flex-shrink-0 px-6 md:px-8 py-5 flex items-center">
         <span className="text-lg font-semibold text-text-primary tracking-tight">
           {orgName || 'Zennly'}
