@@ -18,6 +18,14 @@ import CustomerReferralStats from 'components/ui/CustomerReferralStats';
 import CustomerProfileEditModal from 'components/ui/CustomerProfileEditModal';
 import nuadThaiSpaLogo from 'assets/tenants/nuad-thai-spa-logo.png';
 
+// Per-tenant logo image, keyed by org slug. Orgs with no entry here fall
+// back to the plain text org name (see header render below) — adding a new
+// tenant's logo is a one-line addition to this map plus dropping the asset
+// in assets/tenants/, no other code change needed.
+const TENANT_LOGOS = {
+  'nuad-thai-spa': nuadThaiSpaLogo,
+};
+
 const STATUS_BADGE = {
   pending: 'bg-warning/10 text-warning',
   confirmed: 'bg-primary/10 text-primary',
@@ -300,10 +308,10 @@ const CustomerAccount = () => {
   return (
     <div className="min-h-dvh bg-background">
       <header className="px-4 sm:px-6 md:px-8 py-4 sm:py-5 flex items-center justify-between gap-3 border-b border-border bg-surface">
-        {orgSlug === 'nuad-thai-spa' ? (
+        {TENANT_LOGOS[orgSlug] ? (
           <img
-            src={nuadThaiSpaLogo}
-            alt={orgName || 'Nuad Thai Spa'}
+            src={TENANT_LOGOS[orgSlug]}
+            alt={orgName || 'Zennly'}
             className="h-9 w-auto flex-shrink-0 ml-2"
           />
         ) : (
