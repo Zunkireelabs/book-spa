@@ -22,7 +22,7 @@ import { transformBookings, toDbStatus } from '../../services/bookingTransformer
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
-import { getTodayISO } from '../../utils/periodPresets';
+import { getTodayISO, toISO } from '../../utils/periodPresets';
 
 const BranchStaffDashboard = () => {
   const { profile, signOut, user } = useAuth();
@@ -77,8 +77,8 @@ const BranchStaffDashboard = () => {
   const [newBookingNotification, setNewBookingNotification] = useState(null);
   const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
 
-  // Helper to format date as YYYY-MM-DD
-  const formatDate = useCallback((d) => d.toISOString().split('T')[0], []);
+  // Helper to format date as YYYY-MM-DD (Nepal-local, not UTC)
+  const formatDate = useCallback((d) => toISO(d), []);
 
   // Check if a booking date falls within the current date filter
   const isDateInCurrentFilter = useCallback((bookingDate, dateRange) => {
@@ -113,7 +113,7 @@ const BranchStaffDashboard = () => {
   // Compute date filter from dateRange value
   const getDateFilter = useCallback((dateRange) => {
     const today = new Date();
-    const fmt = (d) => d.toISOString().split('T')[0];
+    const fmt = (d) => toISO(d);
 
     switch (dateRange) {
       case 'today':
@@ -447,6 +447,18 @@ const BranchStaffDashboard = () => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // Re-fetch when the Nepal-local calendar date rolls over while viewing
+  // "today" — otherwise the list can sit on yesterday's data indefinitely
+  // if no booking mutation/realtime event happens to trigger a refresh.
+  const currentDateStr = getTodayISO();
+  const lastLoadedDateRef = useRef(currentDateStr);
+  useEffect(() => {
+    if (filters.dateRange === 'today' && currentDateStr !== lastLoadedDateRef.current) {
+      lastLoadedDateRef.current = currentDateStr;
+      loadData('today');
+    }
+  }, [currentDateStr, filters.dateRange, loadData]);
 
   const userName = profile?.full_name || 'Staff Member';
   const userRole = profile?.role || 'staff';
