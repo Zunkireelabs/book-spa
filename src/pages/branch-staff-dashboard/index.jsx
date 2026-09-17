@@ -451,14 +451,15 @@ const BranchStaffDashboard = () => {
   // Re-fetch when the Nepal-local calendar date rolls over while viewing
   // "today" — otherwise the list can sit on yesterday's data indefinitely
   // if no booking mutation/realtime event happens to trigger a refresh.
-  const currentDateStr = getTodayISO();
-  const lastLoadedDateRef = useRef(currentDateStr);
+  // Reuses todayDateStr (declared near the top of the component, also
+  // used for todayPeriod) instead of a second getTodayISO() call.
+  const lastLoadedDateRef = useRef(todayDateStr);
   useEffect(() => {
-    if (filters.dateRange === 'today' && currentDateStr !== lastLoadedDateRef.current) {
-      lastLoadedDateRef.current = currentDateStr;
+    if (filters.dateRange === 'today' && todayDateStr !== lastLoadedDateRef.current) {
+      lastLoadedDateRef.current = todayDateStr;
       loadData('today');
     }
-  }, [currentDateStr, filters.dateRange, loadData]);
+  }, [todayDateStr, filters.dateRange, loadData]);
 
   const userName = profile?.full_name || 'Staff Member';
   const userRole = profile?.role || 'staff';
