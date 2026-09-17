@@ -47,7 +47,7 @@ const RevenueCards = ({ branchId, period, todayOnly = false }) => {
     setError(null);
 
     const result = isDaily
-      ? await getRevenueIntelligence({ branchId })
+      ? await getRevenueIntelligence({ branchId, date: period?.from })
       : await getRevenueForPeriod({ branchId, from: period.from, to: period.to });
 
     if (result.error) {
