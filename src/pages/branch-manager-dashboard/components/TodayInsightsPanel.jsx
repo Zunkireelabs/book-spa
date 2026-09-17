@@ -25,7 +25,7 @@ function formatNPR(amount, compact = false) {
 // be a fixed semantic palette (green=cash etc.) like the old hardcoded 4 buckets.
 const SEGMENT_COLORS = ['bg-primary', 'bg-accent', 'bg-secondary', 'bg-success', 'bg-warning', 'bg-error', 'bg-gray-400'];
 
-const TodayInsightsPanel = ({ branchId, period }) => {
+const TodayInsightsPanel = ({ branchId, period, showVouchers = true }) => {
   const { paymentMethods } = useOrg();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -200,12 +200,14 @@ const TodayInsightsPanel = ({ branchId, period }) => {
               {data.membershipSold.count} · {formatNPR(data.membershipSold.value)}
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Gift Vouchers</span>
-            <span className="text-sm font-semibold text-gray-900">
-              {data.voucherDistributed.count} · {formatNPR(data.voucherDistributed.value)}
-            </span>
-          </div>
+          {showVouchers && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">Gift Vouchers</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {data.voucherDistributed.count} · {formatNPR(data.voucherDistributed.value)}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-700">Packages</span>
             <span className="text-sm font-semibold text-gray-900">
@@ -222,12 +224,14 @@ const TodayInsightsPanel = ({ branchId, period }) => {
               {data.membershipRedeemed.count} · {formatNPR(data.membershipRedeemed.value)}
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Gift Vouchers</span>
-            <span className="text-sm font-semibold text-gray-900">
-              {data.voucherClaimed.count} · {formatNPR(data.voucherClaimed.value)}
-            </span>
-          </div>
+          {showVouchers && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">Gift Vouchers</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {data.voucherClaimed.count} · {formatNPR(data.voucherClaimed.value)}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-700">Packages</span>
             <span className="text-sm font-semibold text-gray-900">

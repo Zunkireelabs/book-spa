@@ -601,7 +601,7 @@ const BranchStaffDashboard = () => {
             <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
               {/* Today's revenue + sales insights - staff only ever see today, no period picker */}
               <RevenueCards branchId={branchId} period={todayPeriod} todayOnly />
-              <TodayInsightsPanel branchId={branchId} period={todayPeriod} />
+              <TodayInsightsPanel branchId={branchId} period={todayPeriod} showVouchers={false} />
 
               {/* Overview Stats */}
               <h2 className="text-base sm:text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
