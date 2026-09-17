@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
 import NotificationBell from '../../components/ui/NotificationBell';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
-import BookingLookupPanel from './components/BookingLookupPanel';
+import BookingsViewPanel from '../branch-manager-dashboard/components/BookingsViewPanel';
 import StaffBookingForm from './components/StaffBookingForm';
 import CheckBookingPanel from './components/CheckBookingPanel';
 import CollectPaymentPanel from './components/CollectPaymentPanel';
@@ -13,6 +13,8 @@ import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
 import EnrollMemberModal from '../branch-manager-dashboard/components/Memberships/EnrollMemberModal';
 import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
+import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
+import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
@@ -20,6 +22,7 @@ import { transformBookings, toDbStatus } from '../../services/bookingTransformer
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
+import { getTodayISO, toISO } from '../../utils/periodPresets';
 
 const BranchStaffDashboard = () => {
   const { profile, signOut, user } = useAuth();
@@ -36,6 +39,16 @@ const BranchStaffDashboard = () => {
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Recomputes only when the calendar date actually rolls over (via the
+  // 60s currentTime tick below), not on every tick — avoids re-fetching
+  // RevenueCards/TodayInsightsPanel every minute for no reason.
+  const todayDateStr = getTodayISO();
+  const todayPeriod = useMemo(
+    () => ({ key: 'daily', from: todayDateStr, to: todayDateStr }),
+    [todayDateStr]
+  );
+
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const profileDropdownRef = useRef(null);
 
@@ -64,8 +77,8 @@ const BranchStaffDashboard = () => {
   const [newBookingNotification, setNewBookingNotification] = useState(null);
   const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
 
-  // Helper to format date as YYYY-MM-DD
-  const formatDate = useCallback((d) => d.toISOString().split('T')[0], []);
+  // Helper to format date as YYYY-MM-DD (Nepal-local, not UTC)
+  const formatDate = useCallback((d) => toISO(d), []);
 
   // Check if a booking date falls within the current date filter
   const isDateInCurrentFilter = useCallback((bookingDate, dateRange) => {
@@ -100,7 +113,7 @@ const BranchStaffDashboard = () => {
   // Compute date filter from dateRange value
   const getDateFilter = useCallback((dateRange) => {
     const today = new Date();
-    const fmt = (d) => d.toISOString().split('T')[0];
+    const fmt = (d) => toISO(d);
 
     switch (dateRange) {
       case 'today':
@@ -435,6 +448,19 @@ const BranchStaffDashboard = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // Re-fetch when the Nepal-local calendar date rolls over while viewing
+  // "today" — otherwise the list can sit on yesterday's data indefinitely
+  // if no booking mutation/realtime event happens to trigger a refresh.
+  // Reuses todayDateStr (declared near the top of the component, also
+  // used for todayPeriod) instead of a second getTodayISO() call.
+  const lastLoadedDateRef = useRef(todayDateStr);
+  useEffect(() => {
+    if (filters.dateRange === 'today' && todayDateStr !== lastLoadedDateRef.current) {
+      lastLoadedDateRef.current = todayDateStr;
+      loadData('today');
+    }
+  }, [todayDateStr, filters.dateRange, loadData]);
+
   const userName = profile?.full_name || 'Staff Member';
   const userRole = profile?.role || 'staff';
 
@@ -586,6 +612,10 @@ const BranchStaffDashboard = () => {
         <main className={`${viewMode === 'calendar' ? 'px-0 py-0 flex-1 min-h-0 overflow-hidden' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4 min-h-[calc(100vh-52px)]'} bg-surface-dim`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
           {viewMode === 'dashboard' ? (
             <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
+              {/* Today's revenue + sales insights - staff only ever see today, no period picker */}
+              <RevenueCards branchId={branchId} period={todayPeriod} todayOnly />
+              <TodayInsightsPanel branchId={branchId} period={todayPeriod} showVouchers={false} />
+
               {/* Overview Stats */}
               <h2 className="text-base sm:text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
@@ -649,16 +679,7 @@ const BranchStaffDashboard = () => {
               </div>
             </div>
           ) : viewMode === 'bookings' ? (
-            <BookingLookupPanel
-              therapists={therapists}
-              onStatusUpdate={handleStatusUpdate}
-              onAssignTherapist={handleAssignTherapist}
-              onRecordPayment={handleRecordPayment}
-              onGroupPaymentRecorded={handleGroupPaymentRecorded}
-              onApplyDiscount={handleApplyDiscount}
-              userRole={profile?.role || 'staff'}
-              onRefresh={loadData}
-            />
+            <BookingsViewPanel branchId={branchId} />
           ) : viewMode === 'calendar' ? (
             <OperationalCalendar branchId={branchId} />
           ) : viewMode === 'collect-payment' ? (
