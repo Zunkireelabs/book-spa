@@ -10399,7 +10399,8 @@ export async function getCustomerPackages(customerId) {
       .from('packages')
       .select(`
         id, package_code, issued_date, expiry_date, paid_amount, sessions_total, remarks,
-        service_id, package_type:package_type_id ( id, name ), service:service_id ( id, name )
+        service_id, package_type:package_type_id ( id, name ), service:service_id ( id, name ),
+        branch:branches ( id, name )
       `)
       .eq('customer_id', customerId)
       .order('issued_date', { ascending: false });
@@ -10417,6 +10418,31 @@ export async function getCustomerPackages(customerId) {
     return { data: merged, error: null };
   } catch (error) {
     console.error('[API] getCustomerPackages error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Per-package redemption history for the /account package detail popup —
+// same RLS shape as getCustomerVoucherClaims (customer reads own
+// package_redemptions via the packages.customer_id chain, granted in
+// migration-175), just raw redemption rows instead of the aggregated
+// package_balances view.
+export async function getCustomerPackageRedemptions(packageIds) {
+  try {
+    if (!packageIds || packageIds.length === 0) return { data: [], error: null };
+
+    const { data, error } = await supabaseCustomer
+      .from('package_redemptions')
+      .select(`
+        id, package_id, redeemed_date, notes,
+        branch:branches ( id, name )
+      `)
+      .in('package_id', packageIds)
+      .order('redeemed_date', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] getCustomerPackageRedemptions error:', error.message);
     return { data: null, error };
   }
 }
