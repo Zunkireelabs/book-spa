@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import QuickFilters from '../../branch-staff-dashboard/components/QuickFilters';
 import BookingsList from '../../branch-staff-dashboard/components/BookingsList';
 import TherapistAvailability from '../../branch-staff-dashboard/components/TherapistAvailability';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../../services/api';
 import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
+import { toISO, getTodayISO } from '../../../utils/periodPresets';
 
 const BookingsViewPanel = ({ branchId }) => {
   const { profile } = useAuth();
@@ -24,9 +25,18 @@ const BookingsViewPanel = ({ branchId }) => {
     confirmed: 0, pending: 0, inProgress: 0, completed: 0
   });
 
+  // Tick every 60s purely to detect a Nepal-local calendar-date rollover
+  // (no header clock in this panel to piggyback on, unlike the staff
+  // dashboard's own view) and re-fetch "today" data when it happens.
+  const [, forceDateCheck] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => forceDateCheck((n) => n + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   const getDateFilter = useCallback((dateRange) => {
     const today = new Date();
-    const fmt = (d) => d.toISOString().split('T')[0];
+    const fmt = (d) => toISO(d);
     switch (dateRange) {
       case 'today': return { date: fmt(today) };
       case 'tomorrow': {
@@ -74,6 +84,18 @@ const BookingsViewPanel = ({ branchId }) => {
   }, [branchId, filters.dateRange, getDateFilter]);
 
   useEffect(() => { loadData(filters.dateRange); }, [branchId, filters.dateRange]);
+
+  // Re-fetch when the Nepal-local calendar date rolls over while viewing
+  // "today" — otherwise the list can sit on yesterday's data indefinitely
+  // if no booking mutation/realtime event happens to trigger a refresh.
+  const currentDateStr = getTodayISO();
+  const lastLoadedDateRef = useRef(currentDateStr);
+  useEffect(() => {
+    if (filters.dateRange === 'today' && currentDateStr !== lastLoadedDateRef.current) {
+      lastLoadedDateRef.current = currentDateStr;
+      loadData('today');
+    }
+  }, [currentDateStr, filters.dateRange, loadData]);
 
   useEffect(() => {
     let filtered = [...bookings];
