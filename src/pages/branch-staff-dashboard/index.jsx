@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
@@ -24,9 +24,6 @@ import { usePersistentNotifications } from '../../hooks/usePersistentNotificatio
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 import { getTodayISO } from '../../utils/periodPresets';
 
-// Staff dashboard always shows today's figures only — no period picker.
-const TODAY_PERIOD = { key: 'daily', from: getTodayISO(), to: getTodayISO() };
-
 const BranchStaffDashboard = () => {
   const { profile, signOut, user } = useAuth();
   const { branchId, branchName } = useBranch();
@@ -42,6 +39,16 @@ const BranchStaffDashboard = () => {
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Recomputes only when the calendar date actually rolls over (via the
+  // 60s currentTime tick below), not on every tick — avoids re-fetching
+  // RevenueCards/TodayInsightsPanel every minute for no reason.
+  const todayDateStr = getTodayISO();
+  const todayPeriod = useMemo(
+    () => ({ key: 'daily', from: todayDateStr, to: todayDateStr }),
+    [todayDateStr]
+  );
+
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const profileDropdownRef = useRef(null);
 
@@ -593,8 +600,8 @@ const BranchStaffDashboard = () => {
           {viewMode === 'dashboard' ? (
             <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
               {/* Today's revenue + sales insights - staff only ever see today, no period picker */}
-              <RevenueCards branchId={branchId} period={TODAY_PERIOD} todayOnly />
-              <TodayInsightsPanel branchId={branchId} period={TODAY_PERIOD} />
+              <RevenueCards branchId={branchId} period={todayPeriod} todayOnly />
+              <TodayInsightsPanel branchId={branchId} period={todayPeriod} />
 
               {/* Overview Stats */}
               <h2 className="text-base sm:text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
