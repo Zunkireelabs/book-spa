@@ -5,7 +5,8 @@ import { useTenant } from 'contexts/TenantContext';
 import { useCustomerAuth } from 'contexts/CustomerAuthContext';
 import {
   getCustomerBookingHistory, getCustomerMembership, getCustomerMembershipTransactions,
-  getCustomerVouchers, getCustomerPackages, getCustomerReferralStats,
+  getCustomerMembershipHistory, getCustomerVouchers, getCustomerVoucherClaims,
+  getCustomerPackages, getCustomerReferralStats,
 } from 'services/api';
 import { transformBooking } from 'services/bookingTransformers';
 import { formatPhoneDisplay } from 'utils/phone';
@@ -15,6 +16,7 @@ import CustomerVouchersSection from 'components/ui/CustomerVouchersSection';
 import CustomerPackagesSection from 'components/ui/CustomerPackagesSection';
 import CustomerReferralStats from 'components/ui/CustomerReferralStats';
 import CustomerProfileEditModal from 'components/ui/CustomerProfileEditModal';
+import nuadThaiSpaLogo from 'assets/tenants/nuad-thai-spa-logo.png';
 
 const STATUS_BADGE = {
   pending: 'bg-warning/10 text-warning',
@@ -44,6 +46,11 @@ function formatRelativeDate(dateStr) {
   return target.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+function formatDateShort(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function formatTime12h(timeStr) {
   if (!timeStr) return '';
   const [h, m] = timeStr.split(':').map(Number);
@@ -59,25 +66,80 @@ const TONE_STYLES = {
   success:   { chip: 'bg-success/10', icon: 'text-success' },
 };
 
-const StatTile = ({ icon, label, value, tone = 'primary', empty, emptyLabel, to }) => {
+const StatTile = ({ icon, label, value, tone = 'primary', empty, emptyLabel, showValue = true, to, onClick }) => {
   const toneStyle = TONE_STYLES[tone] || TONE_STYLES.primary;
+  const clickable = to || onClick;
   const content = (
-    <div className={`h-full min-w-0 p-4 bg-surface border border-border rounded-spa-lg shadow-spa-resting hover:shadow-spa-elevated spa-transition-fast flex flex-col ${to ? 'cursor-pointer' : ''}`}>
+    <div className={`h-full min-w-0 p-4 bg-surface border border-border rounded-spa-lg shadow-spa-resting hover:shadow-spa-elevated spa-transition-fast flex flex-col ${clickable ? 'cursor-pointer' : ''}`}>
       <div className="flex items-center justify-between mb-2">
         <div className={`w-8 h-8 rounded-spa flex items-center justify-center ${toneStyle.chip}`}>
           <Icon name={icon} size={15} className={toneStyle.icon} />
         </div>
       </div>
-      {empty ? (
-        <p className="font-caption text-xs text-text-tertiary leading-6 truncate">{emptyLabel}</p>
-      ) : (
-        <p className="font-data font-data-semibold text-lg text-text-primary leading-6 truncate">{value}</p>
+      {showValue && (
+        empty ? (
+          <p className="font-caption text-xs text-text-tertiary leading-6 truncate">{emptyLabel}</p>
+        ) : (
+          <p className="font-data font-data-semibold text-lg text-text-primary leading-6 truncate">{value}</p>
+        )
       )}
-      <p className="font-caption text-[11px] text-text-secondary mt-0.5 uppercase tracking-wide">{label}</p>
+      <p className={`font-caption text-[11px] text-text-secondary uppercase tracking-wide ${showValue ? 'mt-0.5' : ''}`}>{label}</p>
     </div>
   );
-  return to ? <Link to={to}>{content}</Link> : content;
+  if (to) return <Link to={to}>{content}</Link>;
+  if (onClick) return <button type="button" onClick={onClick} className="text-left h-full w-full">{content}</button>;
+  return content;
 };
+
+const StatDetailModal = ({ title, onClose, children }) => (
+  <div
+    className="fixed inset-0 z-modal-overlay bg-background flex flex-col"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="stat-detail-title"
+  >
+    <div className="flex-shrink-0 bg-surface border-b border-border px-4 sm:px-6 py-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+      <span />
+      <h2 id="stat-detail-title" className="font-heading font-heading-semibold text-base text-text-primary text-center truncate">
+        {title}
+      </h2>
+      <button type="button" onClick={onClose} className="p-1.5 -mr-1.5 rounded-spa hover:bg-background spa-transition-fast justify-self-end">
+        <Icon name="X" size={18} className="text-text-secondary" />
+      </button>
+    </div>
+    <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 max-w-2xl w-full mx-auto">{children}</div>
+  </div>
+);
+
+const InfoCard = ({ children, className = '' }) => (
+  <div className={`bg-surface border border-border rounded-spa-lg shadow-spa-resting p-5 ${className}`}>{children}</div>
+);
+
+const StatHighlightCard = ({ icon, value, label }) => (
+  <InfoCard className="text-center py-6">
+    <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
+      <Icon name={icon} size={20} className="text-accent" />
+    </div>
+    <p className="font-data font-data-semibold text-3xl text-text-primary mb-1">{value}</p>
+    <p className="font-caption text-xs text-text-secondary uppercase tracking-wide">{label}</p>
+  </InfoCard>
+);
+
+const EmptyStateCard = ({ icon, message }) => (
+  <InfoCard className="text-center py-6">
+    <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
+      <Icon name={icon} size={20} className="text-accent" />
+    </div>
+    <p className="font-body text-sm text-text-secondary">{message}</p>
+  </InfoCard>
+);
+
+const DetailRow = ({ label, value }) => (
+  <div className="flex items-baseline justify-between gap-3 text-sm">
+    <span className="font-caption text-xs text-text-secondary uppercase tracking-wide flex-shrink-0">{label}</span>
+    <span className="font-body text-text-primary text-right truncate min-w-0">{value}</span>
+  </div>
+);
 
 const CustomerAccount = () => {
   const { orgSlug } = useParams();
@@ -88,7 +150,9 @@ const CustomerAccount = () => {
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [membership, setMembership] = useState(null);
   const [membershipTransactions, setMembershipTransactions] = useState([]);
+  const [pastMemberships, setPastMemberships] = useState([]);
   const [vouchers, setVouchers] = useState([]);
+  const [voucherClaims, setVoucherClaims] = useState([]);
   const [packages, setPackages] = useState([]);
   const [referralStats, setReferralStats] = useState(null);
   const hasRedirected = useRef(false);
@@ -135,6 +199,9 @@ const CustomerAccount = () => {
       getCustomerMembershipTransactions(m.id).then(({ data: t }) => {
         if (!cancelled) setMembershipTransactions(t || []);
       });
+      getCustomerMembershipHistory(customerProfile.customer_id).then(({ data: h }) => {
+        if (!cancelled) setPastMemberships((h || []).filter((row) => row.id !== m.id));
+      });
     });
 
     return () => { cancelled = true; };
@@ -145,7 +212,14 @@ const CustomerAccount = () => {
 
     let cancelled = false;
     getCustomerVouchers(customerProfile.customer_id).then(({ data }) => {
-      if (!cancelled) setVouchers(data || []);
+      if (cancelled) return;
+      const list = data || [];
+      setVouchers(list);
+      if (list.length > 0) {
+        getCustomerVoucherClaims(list.map((v) => v.id)).then(({ data: claims }) => {
+          if (!cancelled) setVoucherClaims(claims || []);
+        });
+      }
     });
 
     return () => { cancelled = true; };
@@ -184,12 +258,29 @@ const CustomerAccount = () => {
     return { nextBooking: upcoming[0] || null, upcomingBookings: upcoming.slice(1), pastBookings: past };
   }, [bookings]);
 
+  const membershipBranch = useMemo(() => {
+    const deposit = [...membershipTransactions]
+      .filter((t) => t.kind === 'deposit')
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    return deposit?.branch?.name || null;
+  }, [membershipTransactions]);
+
+  const isVoucherPast = (v) =>
+    v.status === 'fully_redeemed' || (v.expiry_date && new Date(v.expiry_date) < new Date());
+
+  const activeVouchers = useMemo(() => vouchers.filter((v) => !isVoucherPast(v)), [vouchers]);
+  const pastVouchers = useMemo(() => vouchers.filter((v) => isVoucherPast(v)), [vouchers]);
+
   const voucherValue = useMemo(
-    () => vouchers.reduce((sum, v) => sum + Number(v.remaining_balance ?? v.total_amount_issued ?? 0), 0),
-    [vouchers]
+    () => activeVouchers.reduce((sum, v) => sum + Number(v.remaining_balance ?? v.total_amount_issued ?? 0), 0),
+    [activeVouchers]
   );
 
   const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [activeStat, setActiveStat] = useState(null); // null | 'membership' | 'vouchers' | 'referral' | 'visits'
+  const [activeVoucherId, setActiveVoucherId] = useState(null); // set when a specific voucher row was clicked, vs. the summary tile
+  const [membershipView, setMembershipView] = useState('overview'); // 'overview' (top tile: past plans) | 'current' (Your membership card: current details + activity)
+  const [referralView, setReferralView] = useState('overview'); // 'overview' (top tile: counts only) | 'history' (Your referrals card: full history list)
 
   const handleSignOut = async () => {
     await signOut();
@@ -207,19 +298,27 @@ const CustomerAccount = () => {
   const firstName = (customerProfile.full_name || '').split(' ')[0];
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="px-6 md:px-8 py-5 flex items-center justify-between border-b border-border bg-surface">
-        <span className="font-heading font-heading-semibold text-lg text-text-primary tracking-tight">
-          {orgName || 'Zennly'}
-        </span>
-        <div className="flex items-center gap-4">
+    <div className="min-h-dvh bg-background">
+      <header className="px-4 sm:px-6 md:px-8 py-4 sm:py-5 flex items-center justify-between gap-3 border-b border-border bg-surface">
+        {orgSlug === 'nuad-thai-spa' ? (
+          <img
+            src={nuadThaiSpaLogo}
+            alt={orgName || 'Nuad Thai Spa'}
+            className="h-9 w-auto flex-shrink-0 ml-2"
+          />
+        ) : (
+          <span className="font-heading font-heading-semibold text-lg text-text-primary tracking-tight truncate">
+            {orgName || 'Zennly'}
+          </span>
+        )}
+        <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
           <button
             type="button"
             onClick={() => setShowProfileEdit(true)}
             className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
           >
             <Icon name="UserCog" size={16} />
-            Edit profile
+            <span className="hidden sm:inline">Edit profile</span>
           </button>
           <button
             type="button"
@@ -227,7 +326,7 @@ const CustomerAccount = () => {
             className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
           >
             <Icon name="LogOut" size={16} />
-            Sign out
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </header>
@@ -236,9 +335,258 @@ const CustomerAccount = () => {
         <CustomerProfileEditModal onClose={() => setShowProfileEdit(false)} />
       )}
 
-      <main className="max-w-4xl mx-auto px-5 py-10">
+      {activeStat === 'membership' && (
+        <StatDetailModal
+          title={membershipView === 'current' ? 'Your membership' : 'Membership'}
+          onClose={() => setActiveStat(null)}
+        >
+          <div className="max-w-sm mx-auto space-y-4">
+            {membership ? (
+              <>
+                <StatHighlightCard icon="Wallet" value={formatNPR(membership.balance)} label="Balance" />
+                {membershipView === 'current' ? (
+                  <>
+                    <InfoCard className="space-y-2.5">
+                      <DetailRow label="Tier" value={membership.tierName || '—'} />
+                      <DetailRow label="Total deposited" value={formatNPR(membership.totalDeposited)} />
+                      {membership.activationDate && (
+                        <DetailRow label="Created" value={formatRelativeDate(membership.activationDate)} />
+                      )}
+                      {membershipBranch && (
+                        <DetailRow label="Branch" value={membershipBranch} />
+                      )}
+                      {membership.expiryDate && (
+                        <DetailRow label="Expires" value={formatRelativeDate(membership.expiryDate)} />
+                      )}
+                    </InfoCard>
+                    <InfoCard className="space-y-3">
+                      <p className="font-caption text-xs text-text-secondary uppercase tracking-wide">Activity</p>
+                      {membershipTransactions.length > 0 ? (
+                        membershipTransactions.map((t) => (
+                          <div key={t.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0 last:pb-0">
+                            <div className="min-w-0">
+                              <p className="font-body text-sm text-text-primary capitalize">
+                                {t.booking?.service_name_snapshot || t.kind.replace('_', ' ')}
+                              </p>
+                              <p className="font-caption text-xs text-text-secondary">
+                                {formatDateShort(t.created_at)}
+                                {t.branch?.name ? ` · ${t.branch.name}` : ''}
+                              </p>
+                            </div>
+                            <span className={`font-data font-data-medium text-sm flex-shrink-0 ${Number(t.amount) < 0 ? 'text-error' : 'text-success'}`}>
+                              {Number(t.amount) < 0 ? '-' : '+'}{formatNPR(Math.abs(t.amount))}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="font-body text-sm text-text-secondary">No activity yet.</p>
+                      )}
+                    </InfoCard>
+                  </>
+                ) : (
+                  <>
+                    <InfoCard className="space-y-2.5">
+                      <p className="font-caption text-xs text-primary uppercase tracking-wide font-semibold pb-1 border-b border-border">
+                        Current membership
+                      </p>
+                      <DetailRow label="Tier" value={membership.tierName || '—'} />
+                      {membershipBranch && (
+                        <DetailRow label="Branch" value={membershipBranch} />
+                      )}
+                      {membership.activationDate && (
+                        <DetailRow label="Issued" value={formatDateShort(membership.activationDate)} />
+                      )}
+                      {membership.expiryDate && (
+                        <DetailRow label="Expires" value={formatDateShort(membership.expiryDate)} />
+                      )}
+                    </InfoCard>
+                    {pastMemberships.length > 0 ? (
+                      pastMemberships.map((pm, i) => (
+                        <InfoCard key={pm.id} className="space-y-2.5">
+                          <p className="font-caption text-xs text-warning uppercase tracking-wide font-semibold pb-1 border-b border-border">
+                            Past membership{pastMemberships.length > 1 ? ` ${i + 1}` : ''}
+                          </p>
+                          <DetailRow label="Tier" value={pm.tier?.name || 'Membership'} />
+                          <DetailRow label="Total deposited" value={formatNPR(pm.total_deposited)} />
+                          {pm.activation_date && (
+                            <DetailRow label="Issued" value={formatDateShort(pm.activation_date)} />
+                          )}
+                          {pm.expiry_date && (
+                            <DetailRow label="Expired" value={formatDateShort(pm.expiry_date)} />
+                          )}
+                        </InfoCard>
+                      ))
+                    ) : (
+                      <EmptyStateCard icon="Wallet" message="No past memberships yet." />
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              <EmptyStateCard
+                icon="Wallet"
+                message="You're not a member yet. Ask our team about membership plans on your next visit."
+              />
+            )}
+          </div>
+        </StatDetailModal>
+      )}
+
+      {activeStat === 'vouchers' && (() => {
+        const scopedVouchers = activeVoucherId
+          ? activeVouchers.filter((v) => v.id === activeVoucherId)
+          : activeVouchers;
+        const scopedClaims = activeVoucherId
+          ? voucherClaims.filter((c) => c.voucher_id === activeVoucherId)
+          : voucherClaims;
+        const highlight = activeVoucherId
+          ? {
+              value: formatNPR(scopedVouchers[0]?.remaining_balance ?? scopedVouchers[0]?.total_amount_issued ?? 0),
+              label: scopedVouchers[0]?.voucher_type?.name || 'Voucher',
+            }
+          : { value: formatNPR(voucherValue), label: 'Active voucher value' };
+
+        return (
+          <StatDetailModal
+            title={activeVoucherId ? 'Voucher' : 'Vouchers'}
+            onClose={() => { setActiveStat(null); setActiveVoucherId(null); }}
+          >
+            <div className="max-w-sm mx-auto space-y-4">
+              {vouchers.length > 0 ? (
+                <>
+                  <StatHighlightCard icon="Ticket" value={highlight.value} label={highlight.label} />
+                  {scopedVouchers.map((v, i) => (
+                    <InfoCard key={v.id} className="space-y-2.5">
+                      <p className="font-caption text-xs text-primary uppercase tracking-wide font-semibold pb-1 border-b border-border">
+                        Active voucher{scopedVouchers.length > 1 ? ` ${i + 1}` : ''}
+                      </p>
+                      <DetailRow label="Code" value={v.voucher_code} />
+                      <DetailRow label="Total issued" value={formatNPR(v.total_amount_issued)} />
+                      {v.branch?.name && <DetailRow label="Branch" value={v.branch.name} />}
+                      <DetailRow label="Expires" value={formatRelativeDate(v.expiry_date)} />
+                    </InfoCard>
+                  ))}
+                  {!activeVoucherId && pastVouchers.map((v, i) => (
+                    <InfoCard key={v.id} className="space-y-2.5">
+                      <p className="font-caption text-xs text-warning uppercase tracking-wide font-semibold pb-1 border-b border-border">
+                        Past voucher{pastVouchers.length > 1 ? ` ${i + 1}` : ''}
+                      </p>
+                      <DetailRow label="Code" value={v.voucher_code} />
+                      <DetailRow label="Total issued" value={formatNPR(v.total_amount_issued)} />
+                    </InfoCard>
+                  ))}
+                  {activeVoucherId && (
+                    <InfoCard className="space-y-3">
+                      <p className="font-caption text-xs text-text-secondary uppercase tracking-wide">Activity</p>
+                      {scopedClaims.length > 0 ? (
+                        scopedClaims.map((c) => (
+                          <div key={c.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0 last:pb-0">
+                            <div className="min-w-0">
+                              <p className="font-body text-sm text-text-primary truncate">{c.service_claimed || 'Service redemption'}</p>
+                              <p className="font-caption text-xs text-text-secondary">
+                                {formatDateShort(c.redeemed_date)}{c.branch?.name ? ` · ${c.branch.name}` : ''}
+                              </p>
+                            </div>
+                            <span className="font-data text-sm text-error flex-shrink-0">-{formatNPR(c.amount_claimed)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="font-body text-sm text-text-secondary">No activity yet.</p>
+                      )}
+                    </InfoCard>
+                  )}
+                </>
+              ) : (
+                <EmptyStateCard icon="Ticket" message="No active vouchers yet. Vouchers issued to you will show up here." />
+              )}
+            </div>
+          </StatDetailModal>
+        );
+      })()}
+
+      {activeStat === 'referral' && (
+        <StatDetailModal
+          title={referralView === 'history' ? 'Your referrals' : 'Referral earnings'}
+          onClose={() => setActiveStat(null)}
+        >
+          <div className="max-w-sm mx-auto space-y-4">
+            {referralStats && referralStats.totalReferred > 0 ? (
+              <>
+                <StatHighlightCard icon="Users" value={formatNPR(referralStats.totalCredited)} label="Total earned" />
+                {referralView === 'history' ? (
+                  <InfoCard className="space-y-3">
+                    <p className="font-caption text-xs text-text-secondary uppercase tracking-wide">Referral history</p>
+                    {referralStats.referrals.map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="font-body text-sm text-text-primary truncate">
+                            {r.booking?.service_name_snapshot || 'Referral'}
+                          </p>
+                          <p className="font-caption text-xs text-text-secondary capitalize">
+                            {r.booking?.date ? formatRelativeDate(r.booking.date) : formatDateShort(r.created_at)} · {r.reward_status}
+                          </p>
+                        </div>
+                        <span className="font-data text-sm text-success flex-shrink-0">
+                          {r.reward_status === 'credited' ? `+${formatNPR(r.reward_amount)}` : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </InfoCard>
+                ) : (
+                  <InfoCard className="space-y-2.5">
+                    <DetailRow label="Friends referred" value={referralStats.totalReferred} />
+                    <DetailRow label="Pending" value={referralStats.pendingCount} />
+                  </InfoCard>
+                )}
+              </>
+            ) : (
+              <EmptyStateCard
+                icon="Users"
+                message="You haven't referred anyone yet. Share your name with a friend at checkout to start earning."
+              />
+            )}
+          </div>
+        </StatDetailModal>
+      )}
+
+      {activeStat === 'visits' && (
+        <StatDetailModal title="Total visits" onClose={() => setActiveStat(null)}>
+          <div className="max-w-sm mx-auto space-y-4">
+            {(() => {
+              const completed = bookings
+                .filter((b) => b.status === 'completed')
+                .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+              if (completed.length === 0) {
+                return (
+                  <EmptyStateCard icon="Sparkles" message="Your first visit awaits — book a service to get started." />
+                );
+              }
+              return (
+                <>
+                  <StatHighlightCard icon="Sparkles" value={completed.length} label="Visits completed" />
+                  <InfoCard className="space-y-2.5">
+                    {completed.map((b) => (
+                      <div key={b.bookingId} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="font-body text-sm text-text-primary truncate">{b.service}</p>
+                          <p className="font-caption text-xs text-text-secondary">
+                            {formatRelativeDate(b.date)} · {formatTime12h(b.time)}
+                          </p>
+                        </div>
+                        <span className="font-data text-sm text-text-primary flex-shrink-0">{b.price}</span>
+                      </div>
+                    ))}
+                  </InfoCard>
+                </>
+              );
+            })()}
+          </div>
+        </StatDetailModal>
+      )}
+
+      <main className="max-w-4xl mx-auto px-5 py-6 sm:py-10">
         {/* Hero greeting */}
-        <div className="mb-8 flex items-end justify-between gap-4 flex-wrap">
+        <div className="mb-5 sm:mb-8 flex items-end justify-between gap-4 flex-wrap">
           <div>
             <p className="font-accent italic text-3xl text-text-primary mb-1">Welcome back, {firstName}</p>
             <p className="font-body text-sm text-text-secondary">
@@ -256,12 +604,12 @@ const CustomerAccount = () => {
 
         {/* Next appointment spotlight */}
         {nextBooking && (
-          <details className="group mb-8 relative overflow-hidden bg-surface border border-border rounded-spa-lg shadow-spa-elevated [&_summary::-webkit-details-marker]:hidden">
+          <details className="group mb-6 sm:mb-8 relative overflow-hidden bg-surface border border-border rounded-spa-lg shadow-spa-elevated [&_summary::-webkit-details-marker]:hidden">
             <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-accent" />
-            <summary className="p-6 pl-7 flex items-center justify-between gap-4 flex-wrap cursor-pointer list-none">
+            <summary className="p-4 pl-6 sm:p-6 sm:pl-7 flex items-center justify-between gap-3 sm:gap-4 flex-wrap cursor-pointer list-none">
               <div>
-                <p className="font-caption text-xs text-accent uppercase tracking-widest mb-1.5">Your next appointment</p>
-                <p className="font-heading font-heading-semibold text-xl text-text-primary mb-1">{nextBooking.service}</p>
+                <p className="font-caption text-xs text-accent uppercase tracking-widest mb-1">Your next appointment</p>
+                <p className="font-heading font-heading-semibold text-lg sm:text-xl text-text-primary mb-0.5">{nextBooking.service}</p>
                 <p className="font-body text-sm text-text-secondary">
                   {formatRelativeDate(nextBooking.date)} · {formatTime12h(nextBooking.time)}
                   {nextBooking.duration ? ` · ${nextBooking.duration}` : ''}
@@ -274,7 +622,7 @@ const CustomerAccount = () => {
                 <Icon name="ChevronDown" size={15} className="text-text-secondary spa-transition-fast group-open:rotate-180" />
               </div>
             </summary>
-            <div className="px-6 pl-7 pb-6 pt-1 border-t border-border space-y-2.5">
+            <div className="px-4 pl-6 sm:px-6 sm:pl-7 pb-4 sm:pb-6 pt-1 border-t border-border space-y-2.5">
               <BookingDetailFields booking={nextBooking} />
             </div>
           </details>
@@ -287,9 +635,8 @@ const CustomerAccount = () => {
               icon="Wallet"
               tone="primary"
               label="Membership"
-              value={membership ? membership.tierName : null}
-              empty={!membership}
-              emptyLabel="Not a member yet"
+              showValue={false}
+              onClick={() => { setMembershipView('overview'); setActiveStat('membership'); }}
             />
           )}
           {VOUCHER_ENABLED && (
@@ -297,9 +644,8 @@ const CustomerAccount = () => {
               icon="Ticket"
               tone="secondary"
               label="Vouchers"
-              value={formatNPR(voucherValue)}
-              empty={vouchers.length === 0}
-              emptyLabel="No active vouchers"
+              showValue={false}
+              onClick={() => { setActiveVoucherId(null); setActiveStat('vouchers'); }}
             />
           )}
           {CUSTOMER_REFERRALS_ENABLED && (
@@ -307,9 +653,8 @@ const CustomerAccount = () => {
               icon="Users"
               tone="accent"
               label="Referral earnings"
-              value={referralStats ? formatNPR(referralStats.totalCredited) : null}
-              empty={!referralStats || referralStats.totalReferred === 0}
-              emptyLabel="Refer a friend to earn"
+              showValue={false}
+              onClick={() => { setReferralView('overview'); setActiveStat('referral'); }}
             />
           )}
           <StatTile
@@ -319,13 +664,23 @@ const CustomerAccount = () => {
             value={bookings.filter((b) => b.status === 'completed').length || null}
             empty={bookings.filter((b) => b.status === 'completed').length === 0}
             emptyLabel="Your first visit awaits"
+            onClick={() => setActiveStat('visits')}
           />
         </div>
 
-        <CustomerMembershipSection membership={membership} transactions={membershipTransactions} />
-        <CustomerVouchersSection vouchers={vouchers} />
+        <CustomerMembershipSection
+          membership={membership}
+          onClick={() => { setMembershipView('current'); setActiveStat('membership'); }}
+        />
+        <CustomerVouchersSection
+          vouchers={activeVouchers}
+          onClickVoucher={(voucherId) => { setActiveVoucherId(voucherId); setActiveStat('vouchers'); }}
+        />
         <CustomerPackagesSection packages={packages} />
-        <CustomerReferralStats stats={referralStats} />
+        <CustomerReferralStats
+          stats={referralStats}
+          onClick={() => { setReferralView('history'); setActiveStat('referral'); }}
+        />
 
         {/* Bookings */}
         {loadingBookings && (
@@ -392,15 +747,15 @@ const BookingDetailFields = ({ booking }) => (
       </div>
     )}
     {booking.branchName && (
-      <div className="flex items-baseline justify-between gap-4 text-sm">
-        <span className="font-caption text-xs text-text-secondary uppercase tracking-wide">Branch</span>
-        <span className="font-body text-text-primary text-right">{booking.branchName}</span>
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="font-caption text-xs text-text-secondary uppercase tracking-wide flex-shrink-0">Branch</span>
+        <span className="font-body text-text-primary text-right truncate min-w-0">{booking.branchName}</span>
       </div>
     )}
     {booking.therapist?.name && (
-      <div className="flex items-baseline justify-between gap-4 text-sm">
-        <span className="font-caption text-xs text-text-secondary uppercase tracking-wide">Staff</span>
-        <span className="font-body text-text-primary text-right">{booking.therapist.name}</span>
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="font-caption text-xs text-text-secondary uppercase tracking-wide flex-shrink-0">Staff</span>
+        <span className="font-body text-text-primary text-right truncate min-w-0">{booking.therapist.name}</span>
       </div>
     )}
     <div className="flex items-baseline justify-between gap-4 text-sm">
