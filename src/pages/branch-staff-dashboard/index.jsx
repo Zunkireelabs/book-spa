@@ -5,7 +5,7 @@ import Icon from '../../components/AppIcon';
 import NotificationBell from '../../components/ui/NotificationBell';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
-import BookingLookupPanel from './components/BookingLookupPanel';
+import BookingsViewPanel from '../branch-manager-dashboard/components/BookingsViewPanel';
 import StaffBookingForm from './components/StaffBookingForm';
 import CheckBookingPanel from './components/CheckBookingPanel';
 import CollectPaymentPanel from './components/CollectPaymentPanel';
@@ -666,16 +666,7 @@ const BranchStaffDashboard = () => {
               </div>
             </div>
           ) : viewMode === 'bookings' ? (
-            <BookingLookupPanel
-              therapists={therapists}
-              onStatusUpdate={handleStatusUpdate}
-              onAssignTherapist={handleAssignTherapist}
-              onRecordPayment={handleRecordPayment}
-              onGroupPaymentRecorded={handleGroupPaymentRecorded}
-              onApplyDiscount={handleApplyDiscount}
-              userRole={profile?.role || 'staff'}
-              onRefresh={loadData}
-            />
+            <BookingsViewPanel branchId={branchId} />
           ) : viewMode === 'calendar' ? (
             <OperationalCalendar branchId={branchId} />
           ) : viewMode === 'collect-payment' ? (
