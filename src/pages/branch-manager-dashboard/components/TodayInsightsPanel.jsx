@@ -142,6 +142,9 @@ const TodayInsightsPanel = ({ branchId, period, showVouchers = true }) => {
           </span>
         </div>
         <p className="text-2xl font-semibold text-gray-900">{formatNPR(totalSales)}</p>
+        {!showVouchers && (
+          <p className="text-[11px] text-gray-400">Excludes gift voucher sales</p>
+        )}
 
         {hasSales ? (
           <div className="w-full h-2.5 rounded-full overflow-hidden bg-gray-100 flex">
