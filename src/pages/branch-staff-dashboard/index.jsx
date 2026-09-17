@@ -13,6 +13,8 @@ import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
 import EnrollMemberModal from '../branch-manager-dashboard/components/Memberships/EnrollMemberModal';
 import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
+import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
+import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
@@ -20,6 +22,10 @@ import { transformBookings, toDbStatus } from '../../services/bookingTransformer
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
+import { getTodayISO } from '../../utils/periodPresets';
+
+// Staff dashboard always shows today's figures only — no period picker.
+const TODAY_PERIOD = { key: 'daily', from: getTodayISO(), to: getTodayISO() };
 
 const BranchStaffDashboard = () => {
   const { profile, signOut, user } = useAuth();
@@ -586,6 +592,10 @@ const BranchStaffDashboard = () => {
         <main className={`${viewMode === 'calendar' ? 'px-0 py-0 flex-1 min-h-0 overflow-hidden' : 'px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4 min-h-[calc(100vh-52px)]'} bg-surface-dim`} style={{ borderRadius: '16px 0 0 0', borderLeft: '1px solid #e5e7eb', borderTop: '1px solid #e5e7eb' }}>
           {viewMode === 'dashboard' ? (
             <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
+              {/* Today's revenue + sales insights - staff only ever see today, no period picker */}
+              <RevenueCards branchId={branchId} period={TODAY_PERIOD} todayOnly />
+              <TodayInsightsPanel branchId={branchId} period={TODAY_PERIOD} />
+
               {/* Overview Stats */}
               <h2 className="text-base sm:text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
