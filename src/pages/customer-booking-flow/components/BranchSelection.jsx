@@ -10,6 +10,16 @@ const INDUSTRY_IMAGES = {
   salon: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop',
 };
 const DEFAULT_IMAGE = INDUSTRY_IMAGES.spa;
+
+// Per-branch entrance photos (Nuad Thai Spa) — keyed by exact branch name,
+// falling back to the generic industry stock photo for any branch (or org)
+// that doesn't have a custom one yet.
+const BRANCH_IMAGES = {
+  Bhaisepati: '/assets/images/branches/bhaisepati.webp',
+  Lazimpat: '/assets/images/branches/lazimpat.webp',
+  Sanepa: '/assets/images/branches/sanepa.webp',
+  Thamel: '/assets/images/branches/thamel.webp',
+};
 const DEFAULT_OPEN_HOURS = '10:00 AM - 8:00 PM';
 
 const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
@@ -38,11 +48,11 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
           return;
         }
 
-        const branchImage = INDUSTRY_IMAGES[industryType] || DEFAULT_IMAGE;
+        const fallbackImage = INDUSTRY_IMAGES[industryType] || DEFAULT_IMAGE;
         const activeBranches = (data || []).map((b) => ({
           ...b,
           openHours: DEFAULT_OPEN_HOURS,
-          image: branchImage,
+          image: BRANCH_IMAGES[b.name] || fallbackImage,
         }));
 
         setBranches(activeBranches);
@@ -85,7 +95,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
             onClick={() => onBranchSelect(branch)}
             className={"bg-surface rounded-spa-lg border-2 cursor-pointer transition-all " + (selectedBranch?.id === branch.id ? 'border-primary bg-primary/5 shadow-md' : 'border-border hover:border-primary/50')}
           >
-            <div className="relative h-40 overflow-hidden rounded-t-spa-lg">
+            <div className="relative h-56 sm:h-64 overflow-hidden rounded-t-spa-lg">
               <Image src={branch.image} alt={branch.name} className="w-full h-full object-cover" />
               {selectedBranch?.id === branch.id && (
                 <div className="absolute top-2 right-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center">
