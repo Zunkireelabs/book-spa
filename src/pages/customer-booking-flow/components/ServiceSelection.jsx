@@ -11,7 +11,10 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
   // Collapses the "Choose Service" title/subtitle and the category filter
   // pills once the customer scrolls down, so they don't stay pinned above
   // the service list — reappears the moment they scroll back up. The search
-  // bar stays put so it's always reachable while scrolling.
+  // bar stays put so it's always reachable while scrolling. `overflow-anchor:
+  // none` on both collapsing wrappers is load-bearing — without it the
+  // browser's scroll-anchoring fights the height change and the page jitters
+  // (see useScrollDirection's rAF-throttling, the other half of that fix).
   const hideOnScroll = useScrollDirection();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -126,7 +129,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
             style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
           >
             <div
-              className={`text-center overflow-hidden transition-[max-height,opacity] duration-300 ease-out ${
+              className={`text-center overflow-hidden transition-[max-height,opacity] duration-300 ease-out [overflow-anchor:none] ${
                 hideOnScroll ? 'max-h-0 opacity-0' : 'max-h-28 opacity-100 mb-3'
               }`}
             >
@@ -159,7 +162,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
               )}
             </div>
             <div
-              className={`overflow-hidden transition-[max-height,opacity] duration-300 ease-out ${
+              className={`overflow-hidden transition-[max-height,opacity] duration-300 ease-out [overflow-anchor:none] ${
                 hideOnScroll ? 'max-h-0 opacity-0' : 'max-h-96 opacity-100'
               }`}
             >
