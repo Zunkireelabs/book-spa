@@ -4,9 +4,14 @@ import Image from '../../../components/AppImage';
 import { useTenant } from '../../../contexts/TenantContext';
 import { fetchServicesByOrgId } from '../../../services/api';
 import { enrichServices } from '../../../services/serviceEnrichment';
+import useScrollDirection from '../../../hooks/useScrollDirection';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
   const { orgId, loading: tenantLoading } = useTenant();
+  // Collapses the "Choose Service" title/subtitle once the customer scrolls
+  // down, so the sticky search bar + category filters (which stay put) don't
+  // keep that extra vertical space pinned above the service list.
+  const hideTitleOnScroll = useScrollDirection();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -119,7 +124,11 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
             className="sticky z-sticky-filter bg-background pt-7 pb-2"
             style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
           >
-            <div className="text-center mb-3">
+            <div
+              className={`text-center overflow-hidden transition-[max-height,opacity] duration-300 ease-out ${
+                hideTitleOnScroll ? 'max-h-0 opacity-0' : 'max-h-28 opacity-100 mb-3'
+              }`}
+            >
               <div className="flex items-center justify-center space-x-2 mb-1">
                 <Icon name="Sparkles" size={20} className="text-primary" />
                 <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
