@@ -1,17 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { useTenant } from '../../../contexts/TenantContext';
 import { fetchServicesByOrgId } from '../../../services/api';
 import { enrichServices } from '../../../services/serviceEnrichment';
+import useScrollCollapse from '../../../hooks/useScrollCollapse';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
   const { orgId, loading: tenantLoading } = useTenant();
+  // Collapses the "Choose Service" title/subtitle and the category filter
+  // pills as the customer scrolls down, so they don't stay pinned above the
+  // service list — reverses smoothly as they scroll back up. The search bar
+  // stays put so it's always reachable. `collapseProgress` is driven
+  // directly by scroll position every frame (see useScrollCollapse) rather
+  // than a boolean flipped by a CSS transition — a timed transition running
+  // on its own clock while the user keeps scrolling is what caused jitter.
+  // The real (unclipped) height of each block is measured via ResizeObserver
+  // on an inner wrapper so the collapse always matches actual content,
+  // whatever the category-pill row count.
+  const collapseProgress = useScrollCollapse();
+  const titleInnerRef = useRef(null);
+  const categoriesInnerRef = useRef(null);
+  const [titleHeight, setTitleHeight] = useState(0);
+  const [categoriesHeight, setCategoriesHeight] = useState(0);
+
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+
+  // The title/categories refs only exist once the sticky block itself
+  // renders (i.e. once services have loaded — see showStickyBlock below), so
+  // these must re-run when loading finishes rather than only once on mount,
+  // or the refs are still null the one time the effect fires and the
+  // ResizeObserver never attaches at all.
+  useEffect(() => {
+    if (!titleInnerRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setTitleHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(titleInnerRef.current);
+    return () => observer.disconnect();
+  }, [loading, services.length]);
+
+  useEffect(() => {
+    if (!categoriesInnerRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCategoriesHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(categoriesInnerRef.current);
+    return () => observer.disconnect();
+  }, [loading, services.length]);
 
   const hasUncategorized = services.some(s => !s.category);
   const categories = ['All', ...new Set(services.map(s => s.category).filter(Boolean)), ...(hasUncategorized ? ['Others'] : [])];
@@ -116,19 +156,31 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       {showStickyBlock && (
         <>
           <div
-            className="sticky z-sticky-filter bg-background pt-7 pb-2"
-            style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
+            className="sticky z-sticky-filter bg-background pb-2"
+            style={{
+              top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))',
+              paddingTop: 28 - 20 * collapseProgress,
+            }}
           >
-            <div className="text-center mb-3">
-              <div className="flex items-center justify-center space-x-2 mb-1">
-                <Icon name="Sparkles" size={20} className="text-primary" />
-                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                  Choose Service
-                </h1>
+            <div
+              className="text-center overflow-hidden [overflow-anchor:none]"
+              style={{
+                maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
+                opacity: 1 - collapseProgress,
+                marginBottom: 12 * (1 - collapseProgress),
+              }}
+            >
+              <div ref={titleInnerRef}>
+                <div className="flex items-center justify-center space-x-2 mb-1">
+                  <Icon name="Sparkles" size={20} className="text-primary" />
+                  <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                    Choose Service
+                  </h1>
+                </div>
+                <p className="font-body font-body-normal text-text-secondary">
+                  Step 2 of 5 - Complete your spa booking journey
+                </p>
               </div>
-              <p className="font-body font-body-normal text-text-secondary">
-                Step 2 of 5 - Complete your spa booking journey
-              </p>
             </div>
             <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -148,20 +200,28 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => setSelectedCategory(category)}
-                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
-                    selectedCategory === category
-                      ? 'bg-primary text-white'
-                      : 'bg-background text-text-secondary hover:bg-primary/10'
-                  }`}
-                >
-                  {category}
-                </button>
-              ))}
+            <div
+              className="overflow-hidden [overflow-anchor:none]"
+              style={{
+                maxHeight: categoriesHeight ? categoriesHeight * (1 - collapseProgress) : undefined,
+                opacity: 1 - collapseProgress,
+              }}
+            >
+              <div ref={categoriesInnerRef} className="flex flex-wrap gap-2">
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                      selectedCategory === category
+                        ? 'bg-primary text-white'
+                        : 'bg-background text-text-secondary hover:bg-primary/10'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </>

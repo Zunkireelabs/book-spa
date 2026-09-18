@@ -433,10 +433,11 @@ const CustomerBookingFlowV2 = () => {
 
       <main
         className={
-          wideOpen
+          (wideOpen
             ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:ml-[calc((100vw-56rem)/2)] lg:mr-3 lg:max-w-[1600px]'
-            : 'mx-auto px-4 py-4 lg:py-6 max-w-4xl'
+            : 'mx-auto px-4 py-4 lg:py-6 max-w-4xl') + ' flex flex-col'
         }
+        style={{ minHeight: 'calc(100vh - var(--customer-header-h, 64px) - var(--progress-indicator-h, 0px))' }}
       >
         {currentStep !== 2 && (
           <div className="text-center mb-4">
@@ -460,7 +461,7 @@ const CustomerBookingFlowV2 = () => {
 
         {/* Navigation — step 2 has its own Continue button inside the booking panel */}
         {currentStep < 5 && currentStep !== 2 && (
-          <div ref={currentStep === 1 ? enterDetailsBtnRef : undefined} className="flex flex-col sm:flex-row gap-2 sm:gap-4 justify-between">
+          <div ref={currentStep === 1 ? enterDetailsBtnRef : undefined} className="flex flex-col sm:flex-row gap-2 sm:gap-4 justify-between mt-auto pt-6">
             <div className="flex space-x-4">
               {currentStep > 1 && (
                 <Button
