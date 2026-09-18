@@ -8,10 +8,11 @@ import useScrollDirection from '../../../hooks/useScrollDirection';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
   const { orgId, loading: tenantLoading } = useTenant();
-  // Collapses the "Choose Service" title/subtitle once the customer scrolls
-  // down, so the sticky search bar + category filters (which stay put) don't
-  // keep that extra vertical space pinned above the service list.
-  const hideTitleOnScroll = useScrollDirection();
+  // Collapses the "Choose Service" title/subtitle and the category filter
+  // pills once the customer scrolls down, so they don't stay pinned above
+  // the service list — reappears the moment they scroll back up. The search
+  // bar stays put so it's always reachable while scrolling.
+  const hideOnScroll = useScrollDirection();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -126,7 +127,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
           >
             <div
               className={`text-center overflow-hidden transition-[max-height,opacity] duration-300 ease-out ${
-                hideTitleOnScroll ? 'max-h-0 opacity-0' : 'max-h-28 opacity-100 mb-3'
+                hideOnScroll ? 'max-h-0 opacity-0' : 'max-h-28 opacity-100 mb-3'
               }`}
             >
               <div className="flex items-center justify-center space-x-2 mb-1">
@@ -157,20 +158,26 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => setSelectedCategory(category)}
-                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
-                    selectedCategory === category
-                      ? 'bg-primary text-white'
-                      : 'bg-background text-text-secondary hover:bg-primary/10'
-                  }`}
-                >
-                  {category}
-                </button>
-              ))}
+            <div
+              className={`overflow-hidden transition-[max-height,opacity] duration-300 ease-out ${
+                hideOnScroll ? 'max-h-0 opacity-0' : 'max-h-96 opacity-100'
+              }`}
+            >
+              <div className="flex flex-wrap gap-2">
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                      selectedCategory === category
+                        ? 'bg-primary text-white'
+                        : 'bg-background text-text-secondary hover:bg-primary/10'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </>
