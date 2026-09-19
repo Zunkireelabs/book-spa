@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
+import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from 'lib/featureFlags';
 
@@ -46,25 +47,25 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   // Pending discount-approval count for the badge on "Dashboard".
   // Only approvers (manager/admin) can receive requests; re-check on branch
   // change, on navigation, and on a slow poll so the badge stays current.
-  useEffect(() => {
+  const loadPendingApprovals = useCallback(async () => {
     if (!isManagerOrAdmin || !branchId) {
       setPendingApprovals(0);
       return;
     }
-    let active = true;
-    const load = async () => {
-      const { count } = await fetchPendingApprovalCount(branchId);
-      if (active) setPendingApprovals(count);
-    };
-    load();
-    const interval = setInterval(load, 60000);
-    window.addEventListener('pending-approvals-changed', load);
-    return () => {
-      active = false;
-      clearInterval(interval);
-      window.removeEventListener('pending-approvals-changed', load);
-    };
-  }, [isManagerOrAdmin, branchId, location.pathname, location.search]);
+    const { count } = await fetchPendingApprovalCount(branchId);
+    setPendingApprovals(count);
+  }, [isManagerOrAdmin, branchId]);
+
+  useEffect(() => {
+    loadPendingApprovals();
+  }, [loadPendingApprovals, location.pathname, location.search]);
+
+  useEffect(() => {
+    window.addEventListener('pending-approvals-changed', loadPendingApprovals);
+    return () => window.removeEventListener('pending-approvals-changed', loadPendingApprovals);
+  }, [loadPendingApprovals]);
+
+  useAutoRefresh(loadPendingApprovals, { intervalMs: 60000, enabled: isManagerOrAdmin && !!branchId });
 
   // Get org slug from URL params or profile
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
