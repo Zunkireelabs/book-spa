@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from '../../../utils/periodPresets';
 import { useIndustry } from '../../../hooks/useIndustry';
+import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { fetchStaffTransfers } from '../../../services/api';
 
 function formatDateTime(d) {
@@ -100,22 +101,28 @@ const TransferReportPanel = () => {
     setMode('custom');
   };
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      const { data, error: err } = await fetchStaffTransfers();
-      if (!active) return;
-      if (err) {
-        setError(err.message || 'Failed to load transfer history.');
-      } else {
-        setTransfers(data || []);
-      }
-      setLoading(false);
-    })();
-    return () => { active = false; };
+  // Only the very first load shows the full skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
+  // the panel doesn't flash back to a loading state while someone's viewing it.
+  const hasLoadedRef = useRef(false);
+  const loadTransferReport = useCallback(async () => {
+    if (!hasLoadedRef.current) setLoading(true);
+    setError(null);
+    const { data, error: err } = await fetchStaffTransfers();
+    if (err) {
+      setError(err.message || 'Failed to load transfer history.');
+    } else {
+      setTransfers(data || []);
+    }
+    hasLoadedRef.current = true;
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    loadTransferReport();
+  }, [loadTransferReport]);
+
+  useAutoRefresh(loadTransferReport, { intervalMs: 120000 });
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

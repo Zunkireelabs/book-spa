@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { fetchPendingDiscounts, approveDiscount, rejectDiscount } from '../../../services/api';
+import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 
 const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
   const [discounts, setDiscounts] = useState([]);
@@ -11,9 +12,13 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
   const [highlightId, setHighlightId] = useState(null);
   const rowRefs = useRef({});
 
+  // Only the very first load shows the full skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
+  // the panel doesn't flash back to a loading state while someone's viewing it.
+  const hasLoadedRef = useRef(false);
   const loadPending = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
 
     const result = await fetchPendingDiscounts(branchId);
@@ -22,10 +27,18 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
     } else {
       setDiscounts(result.data || []);
     }
+    hasLoadedRef.current = true;
     setLoading(false);
   }, [branchId]);
 
   useEffect(() => { loadPending(); }, [loadPending]);
+
+  useEffect(() => {
+    window.addEventListener('pending-approvals-changed', loadPending);
+    return () => window.removeEventListener('pending-approvals-changed', loadPending);
+  }, [loadPending]);
+
+  useAutoRefresh(loadPending, { intervalMs: 60000 });
 
   // Scroll to + briefly highlight the row targeted from a notification click
   useEffect(() => {
