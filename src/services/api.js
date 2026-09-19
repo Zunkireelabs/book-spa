@@ -5056,9 +5056,8 @@ export async function createBooking({
     if (allTherapistIds.length > 0) {
       const { data: therapistsData, error: therapistLookupError } = await supabase
         .from('therapists')
-        .select('id, name, is_active')
-        .in('id', allTherapistIds)
-        .eq('branch_id', resolvedBranchId);
+        .select('id, name, is_active, branch_id')
+        .in('id', allTherapistIds);
       if (therapistLookupError) throw therapistLookupError;
 
       if (!therapistsData || therapistsData.length !== allTherapistIds.length) {
@@ -5067,6 +5066,29 @@ export async function createBooking({
       const inactive = therapistsData.find(t => !t.is_active);
       if (inactive) {
         return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Therapist ${inactive.name} is not active.` } };
+      }
+
+      // A therapist's static branch_id is only their home branch — visiting therapists on
+      // an active staff_transfers window must also be bookable at the destination branch.
+      // Reconstruct each therapist's effective branch at the booking's date/time instead of
+      // trusting branch_id directly (same approach as the reassignment path, see
+      // therapistBranchWindow.js).
+      const atDate = toKathmanduDate(date, startTime);
+      const { data: transferRows } = await supabase
+        .from('staff_transfers')
+        .select('therapist_id, from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at, transferred_at')
+        .in('therapist_id', allTherapistIds);
+
+      const transfersByTherapist = {};
+      (transferRows || []).forEach(t => {
+        (transfersByTherapist[t.therapist_id] ||= []).push(t);
+      });
+
+      const wrongBranch = therapistsData.find(t =>
+        computeTherapistBranchAt(transfersByTherapist[t.id] || [], t.branch_id, atDate) !== resolvedBranchId
+      );
+      if (wrongBranch) {
+        return { data: null, error: { code: 'INVALID_THERAPIST', message: `${wrongBranch.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
       }
 
       if (date) {
