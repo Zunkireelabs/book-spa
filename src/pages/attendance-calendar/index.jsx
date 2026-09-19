@@ -5,6 +5,7 @@ import Icon from 'components/AppIcon';
 import CustomSelect from 'components/ui/CustomSelect';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from 'utils/periodPresets';
 import { fetchAttendanceReport } from 'services/api';
+import { useAutoRefresh } from 'hooks/useAutoRefresh';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -230,6 +231,8 @@ const AttendanceCalendarPage = () => {
   }, [branchId, range]);
 
   useEffect(() => { load(); }, [load]);
+
+  useAutoRefresh(load, { intervalMs: 60000 });
 
   // Close aggregated staff dropdown on outside click
   useEffect(() => {
