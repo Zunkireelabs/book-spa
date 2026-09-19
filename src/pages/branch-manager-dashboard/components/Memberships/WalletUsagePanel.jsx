@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchMemberships, fetchMembershipLedgerReport } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
@@ -31,8 +31,12 @@ const WalletUsagePanel = () => {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(() => new Set());
 
+  // Only the very first load shows the full skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
+  // the panel doesn't flash back to a loading state while someone's viewing it.
+  const hasLoadedRef = useRef(false);
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const [membershipsRes, ledgerRes] = await Promise.all([
       fetchMemberships(),
@@ -40,12 +44,14 @@ const WalletUsagePanel = () => {
     ]);
     if (membershipsRes.error || ledgerRes.error) {
       setError((membershipsRes.error || ledgerRes.error)?.message || 'Failed to load wallet usage.');
+      hasLoadedRef.current = true;
       setLoading(false);
       return;
     }
     setMemberships(membershipsRes.data || []);
     setTransactions(ledgerRes.data?.usage || []);
     setCycleDeposited(ledgerRes.data?.cycleDeposited || new Map());
+    hasLoadedRef.current = true;
     setLoading(false);
   }, []);
 

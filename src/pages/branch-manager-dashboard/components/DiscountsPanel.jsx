@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
@@ -57,9 +57,13 @@ const DiscountsPanel = ({ branchId }) => {
     setMode('custom');
   };
 
+  // Only the very first load shows the full skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
+  // the panel doesn't flash back to a loading state while someone's viewing it.
+  const hasLoadedRef = useRef(false);
   const loadData = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const result = await fetchAllDiscounts(branchId);
     if (result.error) {
@@ -67,6 +71,7 @@ const DiscountsPanel = ({ branchId }) => {
     } else {
       setDiscounts(result.data || []);
     }
+    hasLoadedRef.current = true;
     setLoading(false);
   }, [branchId]);
 

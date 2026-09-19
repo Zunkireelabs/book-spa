@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { useAuth } from '../../../../contexts/AuthContext';
@@ -49,16 +49,22 @@ const MembershipsPanel = ({ branchId }) => {
   const [showTiers, setShowTiers] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
 
+  // Only the very first load shows the full skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
+  // the panel doesn't flash back to a loading state while someone's viewing it.
+  const hasLoadedRef = useRef(false);
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const { data, error } = await fetchMemberships();
     if (error) {
       setError(error.message || 'Failed to load memberships.');
+      hasLoadedRef.current = true;
       setLoading(false);
       return;
     }
     setRows(data || []);
+    hasLoadedRef.current = true;
     setLoading(false);
   }, []);
 

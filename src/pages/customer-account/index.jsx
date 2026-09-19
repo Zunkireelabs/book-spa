@@ -176,10 +176,15 @@ const CustomerAccount = () => {
     }
   }, [authLoading, customer, orgSlug, navigate]);
 
+  // Only the very first load shows the "Loading bookings..." skeleton —
+  // background auto-refresh ticks (see reloadCustomerAccount/useAutoRefresh
+  // below) swap data in silently so the page doesn't flash while a customer
+  // is browsing it.
+  const hasLoadedBookingsRef = useRef(false);
   const loadBookingHistory = useCallback(() => {
     if (!customerProfile?.id) return () => {};
     let cancelled = false;
-    setLoadingBookings(true);
+    if (!hasLoadedBookingsRef.current) setLoadingBookings(true);
 
     getCustomerBookingHistory(customerProfile.id).then(({ data, error }) => {
       if (cancelled) return;
@@ -189,6 +194,7 @@ const CustomerAccount = () => {
       } else {
         setBookings((data || []).map(transformBooking));
       }
+      hasLoadedBookingsRef.current = true;
       setLoadingBookings(false);
     });
 

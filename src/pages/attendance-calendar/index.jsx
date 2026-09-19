@@ -217,9 +217,17 @@ const AttendanceCalendarPage = () => {
 
   const customDirty = customFrom && (customFrom !== appliedFrom || customTo !== appliedTo);
 
+  // Only the very first load of a given range shows the full loading state —
+  // background auto-refresh ticks of the SAME range (see useAutoRefresh
+  // below) swap data in silently so the page doesn't flash while someone's
+  // viewing it. Switching to a different range is its own "first load".
+  const hasLoadedRef = useRef(false);
+  const loadedRangeKeyRef = useRef(null);
   const load = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true);
+    const rangeKey = `${range.startDate}|${range.endDate}`;
+    if (loadedRangeKeyRef.current !== rangeKey) hasLoadedRef.current = false;
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const result = await fetchAttendanceReport({ branchId, ...range });
     if (result.error) {
@@ -227,6 +235,8 @@ const AttendanceCalendarPage = () => {
     } else {
       setData(result.data);
     }
+    hasLoadedRef.current = true;
+    loadedRangeKeyRef.current = rangeKey;
     setLoading(false);
   }, [branchId, range]);
 

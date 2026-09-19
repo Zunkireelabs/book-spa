@@ -12,9 +12,13 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
   const [highlightId, setHighlightId] = useState(null);
   const rowRefs = useRef({});
 
+  // Only the very first load shows the full skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap data in silently so
+  // the panel doesn't flash back to a loading state while someone's viewing it.
+  const hasLoadedRef = useRef(false);
   const loadPending = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
 
     const result = await fetchPendingDiscounts(branchId);
@@ -23,6 +27,7 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
     } else {
       setDiscounts(result.data || []);
     }
+    hasLoadedRef.current = true;
     setLoading(false);
   }, [branchId]);
 
