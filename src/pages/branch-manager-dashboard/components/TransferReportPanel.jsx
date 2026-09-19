@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from '../../../utils/periodPresets';
 import { useIndustry } from '../../../hooks/useIndustry';
+import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { fetchStaffTransfers } from '../../../services/api';
 
 function formatDateTime(d) {
@@ -100,22 +101,23 @@ const TransferReportPanel = () => {
     setMode('custom');
   };
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      const { data, error: err } = await fetchStaffTransfers();
-      if (!active) return;
-      if (err) {
-        setError(err.message || 'Failed to load transfer history.');
-      } else {
-        setTransfers(data || []);
-      }
-      setLoading(false);
-    })();
-    return () => { active = false; };
+  const loadTransferReport = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const { data, error: err } = await fetchStaffTransfers();
+    if (err) {
+      setError(err.message || 'Failed to load transfer history.');
+    } else {
+      setTransfers(data || []);
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    loadTransferReport();
+  }, [loadTransferReport]);
+
+  useAutoRefresh(loadTransferReport, { intervalMs: 120000 });
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
