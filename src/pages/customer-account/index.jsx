@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import { useTenant } from 'contexts/TenantContext';
@@ -16,6 +16,7 @@ import CustomerVouchersSection from 'components/ui/CustomerVouchersSection';
 import CustomerPackagesSection from 'components/ui/CustomerPackagesSection';
 import CustomerReferralStats from 'components/ui/CustomerReferralStats';
 import CustomerProfileEditModal from 'components/ui/CustomerProfileEditModal';
+import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import nuadThaiSpaLogo from 'assets/tenants/nuad-thai-spa-logo.png';
 
 // Per-tenant logo image, keyed by org slug. Orgs with no entry here fall
@@ -175,9 +176,8 @@ const CustomerAccount = () => {
     }
   }, [authLoading, customer, orgSlug, navigate]);
 
-  useEffect(() => {
-    if (!customerProfile?.id) return;
-
+  const loadBookingHistory = useCallback(() => {
+    if (!customerProfile?.id) return () => {};
     let cancelled = false;
     setLoadingBookings(true);
 
@@ -195,9 +195,10 @@ const CustomerAccount = () => {
     return () => { cancelled = true; };
   }, [customerProfile?.id]);
 
-  useEffect(() => {
-    if (!MEMBERSHIP_ENABLED || !customerProfile?.customer_id) return;
+  useEffect(() => loadBookingHistory(), [loadBookingHistory]);
 
+  const loadMembership = useCallback(() => {
+    if (!MEMBERSHIP_ENABLED || !customerProfile?.customer_id) return () => {};
     let cancelled = false;
 
     getCustomerMembership(customerProfile.customer_id).then(({ data: m, error }) => {
@@ -218,9 +219,10 @@ const CustomerAccount = () => {
     return () => { cancelled = true; };
   }, [customerProfile?.customer_id]);
 
-  useEffect(() => {
-    if (!VOUCHER_ENABLED || !customerProfile?.customer_id) return;
+  useEffect(() => loadMembership(), [loadMembership]);
 
+  const loadVouchers = useCallback(() => {
+    if (!VOUCHER_ENABLED || !customerProfile?.customer_id) return () => {};
     let cancelled = false;
     getCustomerVouchers(customerProfile.customer_id).then(({ data }) => {
       if (cancelled) return;
@@ -236,9 +238,10 @@ const CustomerAccount = () => {
     return () => { cancelled = true; };
   }, [customerProfile?.customer_id]);
 
-  useEffect(() => {
-    if (!customerProfile?.customer_id) return;
+  useEffect(() => loadVouchers(), [loadVouchers]);
 
+  const loadPackages = useCallback(() => {
+    if (!customerProfile?.customer_id) return () => {};
     let cancelled = false;
     getCustomerPackages(customerProfile.customer_id).then(({ data }) => {
       if (cancelled) return;
@@ -253,6 +256,17 @@ const CustomerAccount = () => {
 
     return () => { cancelled = true; };
   }, [customerProfile?.customer_id]);
+
+  useEffect(() => loadPackages(), [loadPackages]);
+
+  const reloadCustomerAccount = useCallback(() => {
+    loadBookingHistory();
+    loadMembership();
+    loadVouchers();
+    loadPackages();
+  }, [loadBookingHistory, loadMembership, loadVouchers, loadPackages]);
+
+  useAutoRefresh(reloadCustomerAccount, { intervalMs: 60000, enabled: !!customerProfile?.id });
 
   useEffect(() => {
     if (!CUSTOMER_REFERRALS_ENABLED || !customerProfile?.customer_id) return;
