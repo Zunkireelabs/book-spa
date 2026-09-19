@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchMemberships, fetchMembershipLedgerReport } from '../../../../services/api';
+import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -49,6 +50,8 @@ const WalletUsagePanel = () => {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useAutoRefresh(loadData, { intervalMs: 90000 });
 
   const totals = useMemo(() => {
     const deposited = memberships.reduce((sum, m) => sum + (cycleDeposited.get(m.id) ?? Number(m.totalDeposited || 0)), 0);
