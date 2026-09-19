@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { fetchPendingDiscounts, approveDiscount, rejectDiscount } from '../../../services/api';
+import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 
 const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
   const [discounts, setDiscounts] = useState([]);
@@ -26,6 +27,13 @@ const PendingDiscountsPanel = ({ branchId, highlightBookingId }) => {
   }, [branchId]);
 
   useEffect(() => { loadPending(); }, [loadPending]);
+
+  useEffect(() => {
+    window.addEventListener('pending-approvals-changed', loadPending);
+    return () => window.removeEventListener('pending-approvals-changed', loadPending);
+  }, [loadPending]);
+
+  useAutoRefresh(loadPending, { intervalMs: 60000 });
 
   // Scroll to + briefly highlight the row targeted from a notification click
   useEffect(() => {
