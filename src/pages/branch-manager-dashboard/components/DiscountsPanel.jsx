@@ -3,6 +3,7 @@ import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../utils/periodPresets';
 import { fetchAllDiscounts } from '../../../services/api';
+import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 
 const STATUS_FILTER_OPTIONS = [
   { value: 'all', label: 'All Statuses' },
@@ -70,6 +71,8 @@ const DiscountsPanel = ({ branchId }) => {
   }, [branchId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useAutoRefresh(loadData, { intervalMs: 120000 });
 
   const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'all';
 
