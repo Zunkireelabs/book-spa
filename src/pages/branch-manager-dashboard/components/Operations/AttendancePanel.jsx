@@ -6,6 +6,7 @@ import Input from '../../../../components/ui/Input';
 import Button from '../../../../components/ui/Button';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import {
   fetchAttendance,
   fetchAttendanceByTherapistIds,
@@ -331,6 +332,8 @@ const AttendancePanel = ({ branchId }) => {
   }, [branchId, selectedDate, loadPendingTransfers]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useAutoRefresh(loadData, { intervalMs: 60000 });
 
   const handleFieldChange = (therapistId, field, value) => {
     setEdits(prev => ({
