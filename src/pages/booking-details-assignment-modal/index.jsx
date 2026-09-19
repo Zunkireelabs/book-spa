@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist, fetchDueHolderNames } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
 const BookingDetailsAssignmentModal = () => {
   const navigate = useNavigate();
@@ -72,6 +73,8 @@ const BookingDetailsAssignmentModal = () => {
   }, [bookingIdFromUrl, branchId]);
 
   useEffect(() => { loadBooking(); }, [loadBooking]);
+
+  useAutoRefresh(loadBooking, { intervalMs: 30000 });
 
   const tabs = [
     { id: 'details', label: 'Details', icon: 'FileText' },
