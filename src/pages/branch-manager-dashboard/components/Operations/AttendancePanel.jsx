@@ -6,6 +6,7 @@ import Input from '../../../../components/ui/Input';
 import Button from '../../../../components/ui/Button';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import {
   fetchAttendance,
   fetchAttendanceByTherapistIds,
@@ -288,9 +289,20 @@ const AttendancePanel = ({ branchId }) => {
     setTransferStatusByTherapist(statusMap || {});
   }, [branchId]);
 
+  // Only the very first load per date shows the full skeleton, resets the
+  // row selection, and unconditionally overwrites `edits` — background
+  // auto-refresh ticks (see useAutoRefresh below) instead: skip the skeleton,
+  // leave the current selection alone, and preserve any row a manager has
+  // mid-edit (dirty=true) instead of silently clobbering unsaved input.
+  const hasLoadedRef = useRef(false);
+  const loadedDateRef = useRef(null);
   const loadData = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true);
+    // A date switch is its own "first load" — don't treat it as a background
+    // refresh of the previous date's (now-irrelevant) dirty edits/selection.
+    if (loadedDateRef.current !== selectedDate) hasLoadedRef.current = false;
+    const isFirstLoad = !hasLoadedRef.current;
+    if (isFirstLoad) setLoading(true);
     setError(null);
     setDayLocked(false);
 
@@ -302,35 +314,48 @@ const AttendancePanel = ({ branchId }) => {
 
     if (attendanceResult.error) {
       setError(attendanceResult.error.message || 'Failed to load attendance.');
+      hasLoadedRef.current = true;
       setLoading(false);
       return;
     }
 
     const rows = attendanceResult.data || [];
     setTherapists(rows);
-    setSelectedIds([]);
+    if (isFirstLoad) setSelectedIds([]);
 
-    // Initialize edits from fetched data
-    const initialEdits = {};
-    for (const t of rows) {
-      initialEdits[t.therapistId] = {
-        status: t.status || '',
-        checkInTime: t.checkInTime || '',
-        checkOutTime: t.checkOutTime || '',
-        notes: t.notes || '',
-        dirty: false,
-      };
-    }
-    setEdits(initialEdits);
+    setEdits(prev => {
+      const next = {};
+      for (const t of rows) {
+        const existing = prev[t.therapistId];
+        // Keep the manager's in-progress, unsaved edit instead of
+        // overwriting it with the freshly fetched row on a background poll.
+        if (!isFirstLoad && existing?.dirty) {
+          next[t.therapistId] = existing;
+        } else {
+          next[t.therapistId] = {
+            status: t.status || '',
+            checkInTime: t.checkInTime || '',
+            checkOutTime: t.checkOutTime || '',
+            notes: t.notes || '',
+            dirty: false,
+          };
+        }
+      }
+      return next;
+    });
 
     if (summaryResult.data) {
       setSummary(summaryResult.data);
     }
 
+    hasLoadedRef.current = true;
+    loadedDateRef.current = selectedDate;
     setLoading(false);
   }, [branchId, selectedDate, loadPendingTransfers]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useAutoRefresh(loadData, { intervalMs: 60000 });
 
   const handleFieldChange = (therapistId, field, value) => {
     setEdits(prev => ({

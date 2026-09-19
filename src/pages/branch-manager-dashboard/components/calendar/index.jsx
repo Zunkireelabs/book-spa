@@ -33,6 +33,7 @@ import CountryCodeSelect, { parsePhone } from '../../../../components/ui/Country
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
+import { useAutoRefresh } from 'hooks/useAutoRefresh';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -1535,6 +1536,8 @@ const OperationalCalendar = ({ branchId }) => {
     const { start, end } = getDateRange(currentDate, viewMode);
     fetchData(start, end);
   }, [currentDate, viewMode, fetchData]);
+
+  useAutoRefresh(refreshCalendar, { intervalMs: 60000, enabled: !!branchId });
 
   // ── Navigation ─────────────────────────────────────────────
 

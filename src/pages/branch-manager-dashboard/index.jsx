@@ -74,7 +74,9 @@ const BranchManagerDashboard = () => {
   const profileDropdownRef = useRef(null);
 
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [period, setPeriod] = useState(() => ({ key: 'daily', from: getTodayISO(), to: getTodayISO() }));
+  const [period, setPeriodState] = useState(() => ({ key: 'daily', from: getTodayISO(), to: getTodayISO() }));
+  const todayDateStr = getTodayISO();
+  const setPeriod = setPeriodState;
   const viewMode = searchParams.get('view') || 'dashboard';
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bookings, setBookings] = useState([]);
@@ -285,6 +287,14 @@ const BranchManagerDashboard = () => {
     }, 60000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    setPeriodState((prev) =>
+      prev.key === 'daily' && prev.from === prev.to && prev.from !== todayDateStr
+        ? { key: 'daily', from: todayDateStr, to: todayDateStr }
+        : prev
+    );
+  }, [todayDateStr]);
 
   // Handle viewing a booking from the new booking notification
   const handleViewNewBooking = () => {

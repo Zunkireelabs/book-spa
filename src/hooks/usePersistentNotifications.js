@@ -49,6 +49,28 @@ export function usePersistentNotifications(userId) {
         seen.current.add(row.id);
         setItems((prev) => [normalize(row), ...prev].slice(0, 30));
       })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      }, (payload) => {
+        const row = payload.new;
+        if (!row) return;
+        seen.current.add(row.id);
+        setItems((prev) => prev.map((n) => (n.id === row.id ? normalize(row) : n)));
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      }, (payload) => {
+        const row = payload.old;
+        if (!row) return;
+        seen.current.delete(row.id);
+        setItems((prev) => prev.filter((n) => n.id !== row.id));
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [userId, normalize]);

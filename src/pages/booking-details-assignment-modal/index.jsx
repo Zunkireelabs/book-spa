@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist, fetchDueHolderNames } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
 const BookingDetailsAssignmentModal = () => {
   const navigate = useNavigate();
@@ -37,6 +38,11 @@ const BookingDetailsAssignmentModal = () => {
   // Resolve booking ID from URL params or query string
   const bookingIdFromUrl = paramBookingId || new URLSearchParams(location.search).get('id');
 
+  // Only the very first load shows the full-page skeleton — background
+  // auto-refresh ticks (see useAutoRefresh below) swap the booking in
+  // silently instead of blanking the whole details/payment UI every 30s
+  // while a staff member is actively viewing (or mid-payment-entry on) it.
+  const hasLoadedRef = useRef(false);
   const loadBooking = useCallback(async () => {
     if (!bookingIdFromUrl) {
       setPageLoading(false);
@@ -44,11 +50,12 @@ const BookingDetailsAssignmentModal = () => {
       return;
     }
 
-    setPageLoading(true);
+    if (!hasLoadedRef.current) setPageLoading(true);
     const bookingResult = await fetchBookingById(bookingIdFromUrl);
 
     if (bookingResult.error) {
       setError(bookingResult.error.message || 'Failed to load booking.');
+      hasLoadedRef.current = true;
       setPageLoading(false);
       return;
     }
@@ -68,10 +75,16 @@ const BookingDetailsAssignmentModal = () => {
       }
     }
 
+    hasLoadedRef.current = true;
     setPageLoading(false);
   }, [bookingIdFromUrl, branchId]);
 
   useEffect(() => { loadBooking(); }, [loadBooking]);
+
+  // Paused entirely while the payment modal is open or submitting — a
+  // background refetch replacing `booking` mid-payment-entry is worse than
+  // just going 30s stale for that one screen.
+  useAutoRefresh(loadBooking, { intervalMs: 30000, enabled: !showPaymentModal && !paymentSubmitting });
 
   const tabs = [
     { id: 'details', label: 'Details', icon: 'FileText' },
