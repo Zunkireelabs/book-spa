@@ -188,20 +188,14 @@ All staff/customer routes are org-scoped: `/:orgSlug/login`, `/:orgSlug/dashboar
 | `/:orgSlug/attendance-calendar` | AttendanceCalendarPage | manager, admin |
 | `/:orgSlug/bookings/:bookingId` | BookingDetailsAssignmentModal | staff, manager, admin |
 | `/:orgSlug/book` | CustomerBookingFlow (via TenantProvider) | Public |
-| `/:orgSlug/manage` | BookingManagementPortal (via TenantProvider) | Public (customer self-service) |
+| `/:orgSlug/manage` | Redirects to `/:orgSlug/book` (self-service booking search moved to staff-only "Check Booking") | Public |
 | `/:orgSlug` | CustomerBookingFlow (shortcut) | Public |
 
 **Important:** there is no separate `/staff-dashboard` / `/manager-dashboard` — both roles land on `/:orgSlug/dashboard` and `UnifiedDashboard` renders the right view.
 
-Legacy paths (`/branch-staff-dashboard`, `/branch-manager-dashboard`, `/booking-details/:bookingId`, `/customer-booking-flow`, `/booking-management-portal`) auto-redirect to their org-scoped equivalents. Protected routes use `<ProtectedRoute allowedRoles={[...]}>`.
+Legacy paths (`/branch-staff-dashboard`, `/branch-manager-dashboard`, `/booking-details/:bookingId`) auto-redirect to their org-scoped equivalents for the logged-in user's own org. Protected routes use `<ProtectedRoute allowedRoles={[...]}>`.
 
-> [!WARNING]
-> **Legacy customer redirects are hardcoded to the `nuad-thai-spa` tenant** —
-> `/customer-booking-flow` → `/nuad-thai-spa/book` and `/booking-management-portal` →
-> `/nuad-thai-spa/manage` (see `src/Routes.jsx`). This is fine while Nuad Thai Spa is the only
-> production tenant, but **when a second org goes live, these two redirects must be replaced**
-> (probably with a per-org landing page or a "pick your org" prompt) — otherwise their customers
-> will be silently sent to the wrong tenant.
+`/customer-booking-flow` and `/booking-management-portal` predate multi-tenancy and have no logged-in user to infer an org from — they render `CustomerOrgFinder` (`src/pages/customer-org-finder`), a customer-facing "which spa?" picker that resolves a typed org name to a slug and sends the customer to `/:orgSlug/book`. (Previously hardcoded to redirect straight to `nuad-thai-spa` — fixed once a second production tenant went live.)
 
 ### Data Flow
 
