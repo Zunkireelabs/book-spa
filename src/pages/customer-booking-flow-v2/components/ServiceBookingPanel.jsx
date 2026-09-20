@@ -28,8 +28,13 @@ const ServiceBookingPanel = ({
   canContinue,
 }) => {
   return (
-    <div className="lg:flex lg:items-start lg:gap-6">
-      <div className="lg:flex-1 lg:min-w-0">
+    <div className="lg:flex lg:items-start lg:justify-center lg:gap-8">
+      {/* Capped (not flex-1/growing) so cards don't keep stretching wider as `main`
+          grows to 1600px for the drawer — 3 columns of ever-wider cards read as
+          flat/"fat" rather than more content. `justify-center` on the row means any
+          leftover width splits evenly on the outside (left of the grid, right of the
+          drawer) instead of piling up as a single dead gap between the two. */}
+      <div className="lg:w-full lg:max-w-4xl lg:min-w-0">
         <ServiceSelection
           selectedService={selectedService}
           onServiceSelect={onServiceSelect}
@@ -37,8 +42,12 @@ const ServiceBookingPanel = ({
         />
       </div>
 
+      {/* `top`/`max-h` match the same --customer-header-h / --progress-indicator-h
+          vars the service grid's sticky title uses (ServiceSelection.jsx), instead
+          of a hardcoded px offset that goes stale whenever the header or stepper's
+          own height changes. */}
       {selectedService && (
-        <div className="fixed inset-0 z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[520px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[136px] lg:max-h-[calc(100dvh-152px)]">
+        <div className="fixed inset-0 z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[460px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px)+12px)] lg:max-h-[calc(100dvh-var(--customer-header-h,64px)-var(--progress-indicator-h,67px)-28px)]">
           <button
             type="button"
             onClick={() => onServiceSelect(null)}
@@ -52,7 +61,10 @@ const ServiceBookingPanel = ({
               sticky overlay, so it can never overlap this area no matter how tall it gets.
               `min-h-0` is required for this to actually scroll inside the flex column
               (without it the flex item refuses to shrink below its content height, so the
-              panel overflows the viewport and the footer button drops below the fold). */}
+              panel overflows the viewport and the footer button drops below the fold).
+              On desktop (lg:) the outer wrapper is `sticky` and height-capped to the
+              viewport, so this scrolls internally once content is taller than that —
+              the drawer stays pinned alongside the service grid either way. */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
             <h2 className="font-heading font-heading-semibold text-xl text-text-primary mb-3">
               Book Your Visit

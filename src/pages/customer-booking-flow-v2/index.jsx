@@ -33,6 +33,7 @@ const CustomerBookingFlowV2 = () => {
   // — has scrolled out of view. That way it never doubles up with, or floats
   // on top of, the real one once the customer reaches the bottom of the page.
   const [showFloatingPrev, setShowFloatingPrev] = useState(false);
+  const [floatingPrevLeft, setFloatingPrevLeft] = useState(null);
   const prevBtnRef = useRef(null);
   // Same pattern for step 1's "Enter Details" button: floats on the right from the
   // moment the customer lands on the branch list, then stops (hides) the instant
@@ -102,6 +103,7 @@ const CustomerBookingFlowV2 = () => {
   }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!orgSlug) return;
     const bookingState = {
       currentStep,
       selectedBranch,
@@ -110,11 +112,15 @@ const CustomerBookingFlowV2 = () => {
       genderPreference,
       customerInfo
     };
-    localStorage.setItem('bookingFlowV2', JSON.stringify(bookingState));
-  }, [currentStep, selectedBranch, selectedService, selectedDateTime, genderPreference, customerInfo]);
+    localStorage.setItem(`bookingFlowV2:${orgSlug}`, JSON.stringify(bookingState));
+  }, [orgSlug, currentStep, selectedBranch, selectedService, selectedDateTime, genderPreference, customerInfo]);
 
   useEffect(() => {
-    const savedState = localStorage.getItem('bookingFlowV2');
+    if (!orgSlug) return;
+    // Drop the old org-unscoped key so a stale cross-org draft from before this
+    // fix can't leak into any org's flow.
+    localStorage.removeItem('bookingFlowV2');
+    const savedState = localStorage.getItem(`bookingFlowV2:${orgSlug}`);
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState);
@@ -142,7 +148,7 @@ const CustomerBookingFlowV2 = () => {
         console.error('Error loading saved booking state:', error);
       }
     }
-  }, []);
+  }, [orgSlug]);
 
   useEffect(() => {
     if (currentStep !== 2) {
@@ -154,6 +160,13 @@ const CustomerBookingFlowV2 = () => {
       const realBtnRect = prevBtnRef.current?.getBoundingClientRect();
       const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
       setShowFloatingPrev(pastTop && !realBtnVisible);
+      // Measured from the real inline button's own position rather than a
+      // viewport-width calc — the content's left edge/width has changed several
+      // times (max-w-3xl, max-w-2xl, max-w-4xl...) and a calc tuned to any one of
+      // those silently drifts out of alignment the next time it changes again.
+      if (realBtnRect) {
+        setFloatingPrevLeft(realBtnRect.left);
+      }
     };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -414,27 +427,30 @@ const CustomerBookingFlowV2 = () => {
     );
   }
 
-  // When the drawer is open, main's left edge is pinned with the exact same formula that
-  // `mx-auto max-w-4xl` already produces (viewport width minus 56rem, halved) — so the box
-  // grows to the right only. Never switch to `mx-auto` here: auto margins recompute on both
-  // sides when width changes, which is what caused the grid to recenter/shift before.
+  // Widening the container to fit the drawer used to keep the OLD max-w-4xl
+  // centered position for its left edge and only grow rightward, which kept
+  // step transitions from shifting but left a lopsided gutter on the left
+  // once the container was actually 1600px wide. Recentering on `wideOpen`
+  // instead (a normal `mx-auto`) makes the widened layout look balanced,
+  // which matters more than avoiding the small left-edge shift.
   const wideOpen = currentStep === 2 && selectedService !== null;
 
   return (
     <div className="min-h-screen bg-background" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
-      <CustomerHeader />
+      <CustomerHeader wide={wideOpen} />
 
       {currentStep < 5 && (
         <ProgressIndicatorV2
           currentStep={currentStep}
           totalSteps={4}
+          wide={wideOpen}
         />
       )}
 
       <main
         className={
           (wideOpen
-            ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:ml-[calc((100vw-56rem)/2)] lg:mr-3 lg:max-w-[1600px]'
+            ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:max-w-[1600px]'
             : 'mx-auto px-4 py-4 lg:py-6 max-w-4xl') + ' flex flex-col'
         }
         style={{ minHeight: 'calc(100vh - var(--customer-header-h, 64px) - var(--progress-indicator-h, 0px))' }}
@@ -529,8 +545,14 @@ const CustomerBookingFlowV2 = () => {
           </div>
         )}
 
+        {/* Positioned from the real inline button's measured left edge (floatingPrevLeft),
+            minus its own width plus a small gap, so it sits just left of the content
+            no matter what width `main` is currently using. */}
         {currentStep === 2 && showFloatingPrev && (
-          <div className={`fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 lg:bottom-6 lg:left-[max(1rem,calc((100vw-56rem)/2-8.5rem))] z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}>
+          <div
+            className={`fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 lg:bottom-6 z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}
+            style={floatingPrevLeft !== null ? { left: `max(1rem, ${floatingPrevLeft - 136}px)` } : undefined}
+          >
             <Button
               variant="outline"
               onClick={handlePrevious}

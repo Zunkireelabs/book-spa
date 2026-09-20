@@ -5,7 +5,7 @@ import TenantContext from 'contexts/TenantContext';
 import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
-const CustomerHeader = () => {
+const CustomerHeader = ({ wide }) => {
   const location = useLocation();
   const { orgSlug } = useParams();
   const headerRef = useRef(null);
@@ -39,7 +39,7 @@ const CustomerHeader = () => {
 
   return (
     <header ref={headerRef} className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
-      <div className="relative max-w-7xl mx-auto pl-4 pr-2 sm:px-6 lg:px-8">
+      <div className={`relative mx-auto pl-8 pr-2 sm:pl-10 sm:pr-6 lg:pl-14 lg:pr-8 ${wide ? 'max-w-7xl lg:max-w-[1600px]' : 'max-w-7xl'}`}>
         <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
           <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0 flex-1">

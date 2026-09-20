@@ -159,7 +159,9 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
             className="sticky z-sticky-filter bg-background pb-2"
             style={{
               top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))',
-              paddingTop: 28 - 20 * collapseProgress,
+              // 24px at rest to match the "Book Your Visit" drawer's own top padding
+              // (lg:p-6) exactly, so the two headings sit on the same line.
+              paddingTop: 24 - 20 * collapseProgress,
             }}
           >
             <div
@@ -235,15 +237,15 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       )}
 
       {!loading && !error && filteredServices.length > 0 && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredServices.map((service) => (
             <div
               key={service.id}
               onClick={() => onServiceSelect(service)}
-              className={`group bg-surface rounded-spa-lg border-2 spa-transition-fast cursor-pointer hover:spa-shadow-elevated hover:-translate-y-0.5 ${
+              className={`group bg-surface rounded-spa-lg spa-transition-fast cursor-pointer shadow-spa-resting hover:shadow-spa-elevated hover:-translate-y-0.5 ${
                 selectedService?.id === service.id
-                  ? 'border-primary bg-primary/5 spa-shadow-elevated -translate-y-1'
-                  : 'border-border hover:border-primary/50'
+                  ? 'border-2 border-primary bg-primary/5 shadow-spa-elevated -translate-y-1'
+                  : 'border border-border hover:border-primary/50'
               }`}
             >
               <div className="relative overflow-hidden rounded-t-spa-lg">
@@ -257,7 +259,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     Select Service
                   </span>
                 </div>
-                <div className="absolute top-4 left-4 flex flex-col space-y-2">
+                <div className="absolute top-3 left-3 flex flex-col space-y-1.5">
                   {service.popularity && (
                     <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
                       {service.popularity}
@@ -269,23 +271,23 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     </span>
                   )}
                 </div>
-                <div className="absolute top-4 right-4 bg-surface/90 backdrop-blur-sm rounded-spa px-3 py-1">
-                  <span className="font-heading font-heading-semibold text-lg text-text-primary">
+                <div className="absolute top-3 right-3 bg-surface/90 backdrop-blur-sm rounded-spa px-2.5 py-1">
+                  <span className="font-heading font-heading-semibold text-base text-text-primary">
                     {formatPrice(service.price)}
                   </span>
                 </div>
               </div>
 
-              <div className="p-4">
-                <div className="flex items-start justify-between mb-2">
+              <div className="p-3.5">
+                <div className="flex items-start justify-between mb-1.5">
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-1">
+                    <h3 className="font-heading font-heading-medium text-base text-text-primary mb-1">
                       {service.name}
                     </h3>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-secondary mb-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-text-secondary mb-1.5">
                       <div className="flex items-center space-x-1">
-                        <Icon name="Clock" size={14} />
-                        <span className="font-body font-body-normal text-sm">
+                        <Icon name="Clock" size={13} />
+                        <span className="font-body font-body-normal text-xs">
                           {service.duration}
                         </span>
                       </div>
@@ -295,27 +297,27 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     </div>
                   </div>
                   {selectedService?.id === service.id && (
-                    <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-                      <Icon name="Check" size={14} className="text-primary-foreground" />
+                    <div className="w-5 h-5 shrink-0 bg-primary rounded-full flex items-center justify-center">
+                      <Icon name="Check" size={12} className="text-primary-foreground" />
                     </div>
                   )}
                 </div>
 
                 {service.description && (
-                  <p className="font-body font-body-normal text-sm text-text-secondary mb-3 line-clamp-3">
+                  <p className="font-body font-body-normal text-xs text-text-secondary mb-2 line-clamp-2">
                     {service.description}
                   </p>
                 )}
 
                 <div>
-                  <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
+                  <h4 className="font-body font-body-medium text-xs text-text-primary mb-1.5">
                     Benefits
                   </h4>
                   <div className="flex flex-wrap gap-1">
                     {service.benefits.map((benefit) => (
                       <span
                         key={benefit}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
                       >
                         {benefit}
                       </span>
