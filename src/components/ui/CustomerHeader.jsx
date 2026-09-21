@@ -1,8 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useContext, useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
-import { useTenant } from 'contexts/TenantContext';
-import { useCustomerAuth } from 'contexts/CustomerAuthContext';
+import TenantContext from 'contexts/TenantContext';
+import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
 const CustomerHeader = () => {
@@ -16,24 +16,11 @@ const CustomerHeader = () => {
   // hardcode a stale 64px and end up overlapping it.
   useMeasuredHeightVar(headerRef, '--customer-header-h');
 
-  // Try to get tenant context, but don't fail if not available
-  let tenantData = { orgName: 'Zennly', isCleaning: false, isSalon: false };
-  try {
-    tenantData = useTenant();
-  } catch {
-    // TenantContext not available, use defaults
-  }
-
+  // Falls back to defaults when rendered outside TenantProvider/CustomerAuthProvider
+  const tenantData = useContext(TenantContext) || { orgName: 'Zennly', isCleaning: false, isSalon: false };
   const { orgName, isCleaning, isSalon } = tenantData;
 
-  // Try to get customer auth context, but don't fail if not available
-  let customerAuth = { customer: null, customerProfile: null };
-  try {
-    customerAuth = useCustomerAuth();
-  } catch {
-    // CustomerAuthContext not available, use defaults
-  }
-
+  const customerAuth = useContext(CustomerAuthContext) || { customer: null, customerProfile: null };
   const { customer, customerProfile } = customerAuth;
   const loginPath = orgSlug ? `/${orgSlug}/customer-login` : '/login';
   const accountPath = orgSlug ? `/${orgSlug}/account` : '/';
