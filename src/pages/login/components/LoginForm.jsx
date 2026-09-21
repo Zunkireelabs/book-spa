@@ -163,8 +163,10 @@ const LoginForm = () => {
 
         // PIN login successful — session is set, fetch profile
         saveEmail(urlOrgSlug, email);
-        // Reload to let AuthContext pick up the session
-        window.location.href = getDashboardPath(null, urlOrgSlug || 'nuad-thai-spa');
+        // Reload to let AuthContext pick up the session. urlOrgSlug should always be
+        // present here (this form only renders on the org-scoped /:orgSlug/login route)
+        // — if it's ever missing, don't guess an org; send back to the org finder.
+        window.location.href = urlOrgSlug ? getDashboardPath(null, urlOrgSlug) : '/login';
         return;
       }
 

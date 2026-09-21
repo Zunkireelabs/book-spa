@@ -12,6 +12,7 @@ import BookingDetailsAssignmentModal from "pages/booking-details-assignment-moda
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import AttendanceCalendarPage from "pages/attendance-calendar";
 import OrgFinder from "pages/org-finder";
+import CustomerOrgFinder from "pages/customer-org-finder";
 import CustomerLoginAuthentication from "pages/customer-login";
 import CustomerSignup from "pages/customer-signup";
 import CustomerAccount from "pages/customer-account";
@@ -202,9 +203,11 @@ const AppRoutes = () => {
         <Route path="/:orgSlug/signup" element={<TenantWrapper><CustomerSignup /></TenantWrapper>} />
         <Route path="/:orgSlug/account" element={<TenantWrapper><CustomerAccount /></TenantWrapper>} />
 
-        {/* Legacy customer routes - redirect to default tenant for backwards compatibility */}
-        <Route path="/customer-booking-flow" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
-        <Route path="/booking-management-portal" element={<ExternalRedirect to="/nuad-thai-spa/book" />} />
+        {/* Legacy customer routes — predate multi-tenancy, no single default org to
+            assume anymore (multiple orgs are live in production). Send to a
+            customer-facing org picker instead of a hardcoded tenant. */}
+        <Route path="/customer-booking-flow" element={<CustomerOrgFinder />} />
+        <Route path="/booking-management-portal" element={<CustomerOrgFinder />} />
 
         {/* ==================== CATCH-ALL ==================== */}
 
