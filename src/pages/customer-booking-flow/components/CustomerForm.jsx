@@ -48,7 +48,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
         }
         break;
 
-      case 'email':
+      case 'email': {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (value.trim() && !emailRegex.test(value)) {
           newErrors.email = 'Please enter a valid email address';
@@ -56,6 +56,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           delete newErrors.email;
         }
         break;
+      }
 
       case 'phone': {
         // Nepal keeps the strict 10-digit mobile format (the overwhelming common
