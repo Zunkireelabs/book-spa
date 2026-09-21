@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchPackageOverview, fetchPackageTypes } from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
 import NewPackageModal from './NewPackageModal';
 
 function formatNPR(amount) {
@@ -12,6 +13,8 @@ function formatNPR(amount) {
 // packages each branch has issued and how many sessions remain outstanding
 // against them. Packages counterpart of VoucherOverviewPanel.
 const PackageOverviewPanel = () => {
+  const { profile } = useAuth();
+  const userRole = profile?.role || 'manager';
   const [overview, setOverview] = useState(null);
   const [packageTypes, setPackageTypes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -237,6 +240,7 @@ const PackageOverviewPanel = () => {
 
       {showNewPackage && (
         <NewPackageModal
+          userRole={userRole}
           onClose={() => setShowNewPackage(false)}
           onIssued={() => {
             setShowNewPackage(false);

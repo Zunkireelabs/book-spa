@@ -10865,6 +10865,50 @@ export async function fetchPackageTypes() {
   }
 }
 
+// Admin-only quick-add for package types, used inline from the package
+// issuance flow (NewPackageModal) — no RPC needed, package_types RLS
+// ("Admin can manage package types") already restricts writes to admin.
+// Mirrors createVoucherType.
+export async function createPackageType({ orgId, name, serviceId, defaultSessions, standardPrice, validityDays }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!orgId)      return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
+    if (!name?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Package type name is required.' } };
+    if (!serviceId)  return { data: null, error: { code: 'INVALID_INPUT', message: 'A service is required.' } };
+    const sessions = Number(defaultSessions);
+    if (!Number.isFinite(sessions) || sessions <= 0) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Default sessions must be greater than zero.' } };
+    }
+    const price = Number(standardPrice);
+    if (!(price >= 0)) return { data: null, error: { code: 'INVALID_INPUT', message: 'Standard price must be zero or greater.' } };
+    const validity = validityDays != null && validityDays !== '' ? Number(validityDays) : 365;
+    if (!Number.isFinite(validity) || validity <= 0) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Validity days must be greater than zero.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('package_types')
+      .insert({
+        org_id: orgId,
+        service_id: serviceId,
+        name: name.trim(),
+        default_sessions: sessions,
+        standard_price: price,
+        validity_days: validity,
+        is_active: true,
+      })
+      .select('id, name, service_id, default_sessions, standard_price, validity_days, is_active, display_order, service:services ( id, name, duration_minutes )')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createPackageType error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function issuePackage({
   orgId, branchId, packageTypeId, customerId = null, guestName = null,
   guestInfo = null, issuedDate = null, expiryDate = null, paidAmount = null,
