@@ -17,7 +17,7 @@ const CategoryManagementPanel = () => {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
-  const [formData, setFormData] = useState({ name: '', description: '' });
+  const [formData, setFormData] = useState({ name: '', description: '', offerEnabled: false, offerPercent: '' });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -58,7 +58,7 @@ const CategoryManagementPanel = () => {
 
   const handleOpenCreate = () => {
     setEditingCategory(null);
-    setFormData({ name: '', description: '' });
+    setFormData({ name: '', description: '', offerEnabled: false, offerPercent: '' });
     setFormError(null);
     setShowModal(true);
   };
@@ -68,6 +68,8 @@ const CategoryManagementPanel = () => {
     setFormData({
       name: category.name,
       description: category.description || '',
+      offerEnabled: !!category.offer_enabled,
+      offerPercent: category.offer_percent != null ? String(category.offer_percent) : '',
     });
     setFormError(null);
     setShowModal(true);
@@ -79,6 +81,15 @@ const CategoryManagementPanel = () => {
       return;
     }
 
+    let offerPercentNum = null;
+    if (formData.offerEnabled) {
+      offerPercentNum = Number(formData.offerPercent);
+      if (!offerPercentNum || offerPercentNum <= 0 || offerPercentNum >= 100) {
+        setFormError('Offer percentage must be between 1 and 99.');
+        return;
+      }
+    }
+
     setSaving(true);
     setFormError(null);
 
@@ -88,11 +99,15 @@ const CategoryManagementPanel = () => {
         categoryId: editingCategory.id,
         name: formData.name.trim(),
         description: formData.description.trim() || null,
+        offerEnabled: formData.offerEnabled,
+        offerPercent: formData.offerEnabled ? offerPercentNum : null,
       });
     } else {
       result = await createCategory({
         name: formData.name.trim(),
         description: formData.description.trim() || null,
+        offerEnabled: formData.offerEnabled,
+        offerPercent: formData.offerEnabled ? offerPercentNum : null,
       });
     }
 
@@ -234,13 +249,20 @@ const CategoryManagementPanel = () => {
                   </td>
                   <td className="px-4 py-3 font-data text-sm text-text-primary">{c.service_count}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption ${
-                      c.is_active
-                        ? 'bg-success/10 text-success'
-                        : 'bg-text-secondary/10 text-text-secondary'
-                    }`}>
-                      {c.is_active ? 'Active' : 'Inactive'}
-                    </span>
+                    <div className="flex flex-col gap-1 items-start">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-caption ${
+                        c.is_active
+                          ? 'bg-success/10 text-success'
+                          : 'bg-text-secondary/10 text-text-secondary'
+                      }`}>
+                        {c.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      {c.offer_enabled && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption bg-warning/10 text-warning">
+                          −{c.offer_percent}% (category)
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
@@ -318,6 +340,40 @@ const CategoryManagementPanel = () => {
                   rows={3}
                   className="w-full rounded-spa border border-border bg-background px-3 py-2 font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast resize-none"
                 />
+              </div>
+
+              {/* Offer toggle */}
+              <div className="space-y-2 p-3 bg-background rounded-spa border border-border">
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-medium text-sm text-text-primary">Offer</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, offerEnabled: !formData.offerEnabled })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                      formData.offerEnabled ? 'bg-success' : 'bg-border'
+                    }`}
+                  >
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                      formData.offerEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
+
+                {formData.offerEnabled && (
+                  <div className="space-y-1">
+                    <Input
+                      type="number"
+                      value={formData.offerPercent}
+                      onChange={(e) => setFormData({ ...formData, offerPercent: e.target.value })}
+                      placeholder="e.g. 30"
+                      min="1"
+                      max="99"
+                    />
+                    <p className="font-caption text-xs text-text-secondary">
+                      Applies to every service in this category unless that service has its own offer enabled (which always takes priority).
+                    </p>
+                  </div>
+                )}
               </div>
 
               {editingCategory && (

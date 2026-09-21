@@ -21,7 +21,7 @@ const ServiceManagementPanel = () => {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingService, setEditingService] = useState(null);
-  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa', isCouple: false });
+  const [formData, setFormData] = useState({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: 'Spa', isCouple: false, offerEnabled: false, offerType: 'percent', offerValue: '' });
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [formError, setFormError] = useState(null);
@@ -85,7 +85,7 @@ const ServiceManagementPanel = () => {
 
   const handleOpenCreate = () => {
     setEditingService(null);
-    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: categories[0]?.name || 'Spa', isCouple: false });
+    setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: categories[0]?.name || 'Spa', isCouple: false, offerEnabled: false, offerType: 'percent', offerValue: '' });
     setImageFile(null);
     setImagePreview(null);
     setFormError(null);
@@ -102,6 +102,9 @@ const ServiceManagementPanel = () => {
       imageUrl: service.image_url || '',
       category: service.category || 'Spa',
       isCouple: !!service.is_couple,
+      offerEnabled: !!service.offer_enabled,
+      offerType: service.offer_type || 'percent',
+      offerValue: service.offer_value != null ? String(service.offer_value) : '',
     });
     setImageFile(null);
     setImagePreview(service.image_url || null);
@@ -152,6 +155,19 @@ const ServiceManagementPanel = () => {
       return;
     }
 
+    let offerValueNum = null;
+    if (formData.offerEnabled) {
+      offerValueNum = Number(formData.offerValue);
+      if (!offerValueNum || offerValueNum <= 0) {
+        setFormError('Offer value must be a positive number.');
+        return;
+      }
+      if (formData.offerType === 'percent' && offerValueNum >= 100) {
+        setFormError('Offer percentage must be less than 100.');
+        return;
+      }
+    }
+
     setSaving(true);
     setFormError(null);
 
@@ -180,6 +196,9 @@ const ServiceManagementPanel = () => {
         imageUrl: finalImageUrl,
         category: formData.category,
         isCouple: formData.isCouple,
+        offerEnabled: formData.offerEnabled,
+        offerType: formData.offerEnabled ? formData.offerType : null,
+        offerValue: formData.offerEnabled ? offerValueNum : null,
       });
     } else {
       result = await createService({
@@ -190,6 +209,9 @@ const ServiceManagementPanel = () => {
         imageUrl: finalImageUrl,
         category: formData.category,
         isCouple: formData.isCouple,
+        offerEnabled: formData.offerEnabled,
+        offerType: formData.offerEnabled ? formData.offerType : null,
+        offerValue: formData.offerEnabled ? offerValueNum : null,
       });
     }
 
@@ -341,7 +363,21 @@ const ServiceManagementPanel = () => {
                   <td className="px-4 py-3 font-body font-body-medium text-sm text-text-primary">{s.name}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || 'Spa'}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary">{s.duration_minutes} min</td>
-                  <td className="px-4 py-3 font-data text-sm text-text-primary">{formatNPR(s.price_npr)}</td>
+                  <td className="px-4 py-3 font-data text-sm text-text-primary">
+                    {s.is_on_offer ? (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs text-text-tertiary line-through">{formatNPR(s.original_price_npr ?? s.price_npr)}</span>
+                        <span className="flex items-center gap-1.5">
+                          {formatNPR(s.effective_price_npr)}
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption bg-warning/10 text-warning">
+                            {s.offer_enabled ? (s.offer_type === 'percent' ? `-${s.offer_value}%` : 'Offer') : `-${s.category_offer_percent}%`}
+                          </span>
+                        </span>
+                      </div>
+                    ) : (
+                      formatNPR(s.price_npr)
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden md:table-cell max-w-[200px] truncate">
                     {s.description || '—'}
                   </td>
@@ -459,6 +495,81 @@ const ServiceManagementPanel = () => {
                     min="1"
                   />
                 </div>
+              </div>
+
+              {/* Offer toggle */}
+              <div className="space-y-2 p-3 bg-background rounded-spa border border-border">
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-medium text-sm text-text-primary">Offer</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, offerEnabled: !formData.offerEnabled })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                      formData.offerEnabled ? 'bg-success' : 'bg-border'
+                    }`}
+                  >
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                      formData.offerEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
+
+                {formData.offerEnabled ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, offerType: 'percent' })}
+                        className={`flex-1 px-3 py-1.5 rounded-spa border text-sm font-body spa-transition-fast ${
+                          formData.offerType === 'percent'
+                            ? 'border-primary bg-primary/5 text-primary'
+                            : 'border-border text-text-secondary'
+                        }`}
+                      >
+                        Percentage off
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, offerType: 'fixed' })}
+                        className={`flex-1 px-3 py-1.5 rounded-spa border text-sm font-body spa-transition-fast ${
+                          formData.offerType === 'fixed'
+                            ? 'border-primary bg-primary/5 text-primary'
+                            : 'border-border text-text-secondary'
+                        }`}
+                      >
+                        Flat price
+                      </button>
+                    </div>
+                    <Input
+                      type="number"
+                      value={formData.offerValue}
+                      onChange={(e) => setFormData({ ...formData, offerValue: e.target.value })}
+                      placeholder={formData.offerType === 'percent' ? 'e.g. 30' : 'e.g. 4500'}
+                      min="1"
+                    />
+                    {formData.priceNpr && formData.offerValue && Number(formData.offerValue) > 0 && (
+                      <p className="font-caption text-xs text-text-secondary">
+                        Customers will see:{' '}
+                        <span className="line-through text-text-tertiary">{formatNPR(formData.priceNpr)}</span>{' '}
+                        {formatNPR(
+                          formData.offerType === 'percent'
+                            ? Number(formData.priceNpr) * (1 - Number(formData.offerValue) / 100)
+                            : Number(formData.offerValue)
+                        )}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  (() => {
+                    const selectedCategory = categories.find((c) => c.name === formData.category);
+                    return selectedCategory?.offer_enabled ? (
+                      <p className="font-caption text-xs text-text-secondary">
+                        This service inherits the "{selectedCategory.name}" category offer
+                        ({selectedCategory.offer_percent}% off) unless you enable its own offer above.
+                      </p>
+                    ) : null;
+                  })()
+                )}
               </div>
 
               <label className="flex items-center gap-2 cursor-pointer">

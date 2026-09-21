@@ -6278,8 +6278,8 @@ export async function fetchServicesForManagement() {
     }
 
     const { data, error } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -6342,7 +6342,7 @@ export async function uploadServiceImage(file) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6367,6 +6367,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
       return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A service with this name already exists in your organization.' } };
     }
 
+    const isOfferEnabled = !!offerEnabled;
     const { data, error } = await supabase
       .from('services')
       .insert({
@@ -6379,8 +6380,11 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         is_couple: !!isCouple,
         is_active: true,
         org_id: profile.org_id,
+        offer_enabled: isOfferEnabled,
+        offer_type: isOfferEnabled ? offerType : null,
+        offer_value: isOfferEnabled ? offerValue : null,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value')
       .single();
 
     if (error) throw error;
@@ -6391,7 +6395,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
+export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6412,6 +6416,12 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
     if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
+    if (offerEnabled !== undefined) {
+      const isOfferEnabled = !!offerEnabled;
+      updatePayload.offer_enabled = isOfferEnabled;
+      updatePayload.offer_type = isOfferEnabled ? offerType : null;
+      updatePayload.offer_value = isOfferEnabled ? offerValue : null;
+    }
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -6422,7 +6432,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value')
       .single();
 
     if (error) {
@@ -8785,7 +8795,7 @@ export async function fetchCategoriesForManagement() {
     // Get categories with service count - filtered by org
     const { data: categories, error } = await supabase
       .from('service_categories')
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .eq('org_id', profile.org_id)
       .order('display_order', { ascending: true });
 
@@ -8830,7 +8840,7 @@ export async function fetchActiveCategories() {
 
     const { data, error } = await supabase
       .from('service_categories')
-      .select('id, name')
+      .select('id, name, offer_enabled, offer_percent')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('display_order', { ascending: true });
@@ -8846,7 +8856,7 @@ export async function fetchActiveCategories() {
 /**
  * Create a new category
  */
-export async function createCategory({ name, description }) {
+export async function createCategory({ name, description, offerEnabled, offerPercent }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8868,6 +8878,7 @@ export async function createCategory({ name, description }) {
       .single();
 
     const nextOrder = (maxOrder?.display_order || 0) + 1;
+    const isOfferEnabled = !!offerEnabled;
 
     const { data, error } = await supabase
       .from('service_categories')
@@ -8877,8 +8888,10 @@ export async function createCategory({ name, description }) {
         display_order: nextOrder,
         is_active: true,
         org_id: profile.org_id,
+        offer_enabled: isOfferEnabled,
+        offer_percent: isOfferEnabled ? offerPercent : null,
       })
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .single();
 
     if (error) {
@@ -8897,7 +8910,7 @@ export async function createCategory({ name, description }) {
 /**
  * Update an existing category
  */
-export async function updateCategory({ categoryId, name, description }) {
+export async function updateCategory({ categoryId, name, description, offerEnabled, offerPercent }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8928,13 +8941,18 @@ export async function updateCategory({ categoryId, name, description }) {
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
+    if (offerEnabled !== undefined) {
+      const isOfferEnabled = !!offerEnabled;
+      updateData.offer_enabled = isOfferEnabled;
+      updateData.offer_percent = isOfferEnabled ? offerPercent : null;
+    }
 
     const { data, error } = await supabase
       .from('service_categories')
       .update(updateData)
       .eq('id', categoryId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .single();
 
     if (error) {
