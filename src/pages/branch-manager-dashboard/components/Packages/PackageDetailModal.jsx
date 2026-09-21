@@ -174,7 +174,9 @@ const PackageDetailModal = ({ packageId, onClose, onChanged: _onChanged }) => {
                     <Icon name={cfg.icon} size={11} />
                     <span>{cfg.label}</span>
                   </span>
-                  <span className="font-caption text-xs text-text-tertiary">Paid {formatNPR(pkg.paidAmount)}</span>
+                  <span className="font-caption text-xs text-text-tertiary">
+                    Paid {formatNPR(pkg.paidAmount)}{pkg.paymentMethod ? ` (${pkg.paymentMethod})` : ''}
+                  </span>
                 </div>
                 {pkg.lastRedeemedDate && (
                   <span className="font-caption text-xs text-text-tertiary">Last used {formatDate(pkg.lastRedeemedDate)}</span>
