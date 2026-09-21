@@ -34,8 +34,8 @@ jobs:
       - name: Check new/modified migrations self-record
         run: scripts/check-migrations.sh "origin/${{ github.base_ref }}"
 
-  build:
-    name: Build
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +48,19 @@ jobs:
       - run: npm ci
 
       - run: npm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
 
       - run: npm run build
         env:
