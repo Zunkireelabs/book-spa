@@ -292,7 +292,11 @@ const PaymentModal = ({
   // gate) — redeeming against an already-settled booking would just produce
   // a $0 tender that gets filtered out before ever reaching onConfirm.
   const selectedPackageTender = tenders.find((t) => t.paymentMode === 'SessionPackage') || null;
-  const packageLeaves = remaining > 0
+  // redeemPackage() below does a full setTenders([...]) replace — correct
+  // when there's a single tender row, but it would silently wipe an
+  // in-progress split payment (2+ rows). Hide the option once a split is
+  // started rather than letting it destroy the other rows.
+  const packageLeaves = remaining > 0 && tenders.length <= 1
     ? customerPackages.map((pkg) => ({
         value: `SessionPackage:${pkg.packageId}`,
         label: `Package — ${pkg.packageName} (${pkg.sessionsRemaining} left)`,
