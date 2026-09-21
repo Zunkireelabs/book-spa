@@ -1,17 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { useTenant } from '../../../contexts/TenantContext';
 import { fetchServicesByOrgId } from '../../../services/api';
 import { enrichServices } from '../../../services/serviceEnrichment';
+import useScrollCollapse from '../../../hooks/useScrollCollapse';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
   const { orgId, loading: tenantLoading } = useTenant();
+  // Collapses the "Choose Service" title/subtitle and the category filter
+  // pills as the customer scrolls down, so they don't stay pinned above the
+  // service list — reverses smoothly as they scroll back up. The search bar
+  // stays put so it's always reachable. `collapseProgress` is driven
+  // directly by scroll position every frame (see useScrollCollapse) rather
+  // than a boolean flipped by a CSS transition — a timed transition running
+  // on its own clock while the user keeps scrolling is what caused jitter.
+  // The real (unclipped) height of each block is measured via ResizeObserver
+  // on an inner wrapper so the collapse always matches actual content,
+  // whatever the category-pill row count.
+  const collapseProgress = useScrollCollapse();
+  const titleInnerRef = useRef(null);
+  const categoriesInnerRef = useRef(null);
+  const [titleHeight, setTitleHeight] = useState(0);
+  const [categoriesHeight, setCategoriesHeight] = useState(0);
+
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+
+  // The title/categories refs only exist once the sticky block itself
+  // renders (i.e. once services have loaded — see showStickyBlock below), so
+  // these must re-run when loading finishes rather than only once on mount,
+  // or the refs are still null the one time the effect fires and the
+  // ResizeObserver never attaches at all.
+  useEffect(() => {
+    if (!titleInnerRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setTitleHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(titleInnerRef.current);
+    return () => observer.disconnect();
+  }, [loading, services.length]);
+
+  useEffect(() => {
+    if (!categoriesInnerRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCategoriesHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(categoriesInnerRef.current);
+    return () => observer.disconnect();
+  }, [loading, services.length]);
 
   const hasUncategorized = services.some(s => !s.category);
   const categories = ['All', ...new Set(services.map(s => s.category).filter(Boolean)), ...(hasUncategorized ? ['Others'] : [])];
@@ -116,19 +156,33 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       {showStickyBlock && (
         <>
           <div
-            className="sticky z-sticky-filter bg-background pt-7 pb-2"
-            style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
+            className="sticky z-sticky-filter bg-background pb-2"
+            style={{
+              top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))',
+              // 24px at rest to match the "Book Your Visit" drawer's own top padding
+              // (lg:p-6) exactly, so the two headings sit on the same line.
+              paddingTop: 24 - 20 * collapseProgress,
+            }}
           >
-            <div className="text-center mb-3">
-              <div className="flex items-center justify-center space-x-2 mb-1">
-                <Icon name="Sparkles" size={20} className="text-primary" />
-                <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                  Choose Service
-                </h1>
+            <div
+              className="text-center overflow-hidden [overflow-anchor:none]"
+              style={{
+                maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
+                opacity: 1 - collapseProgress,
+                marginBottom: 12 * (1 - collapseProgress),
+              }}
+            >
+              <div ref={titleInnerRef}>
+                <div className="flex items-center justify-center space-x-2 mb-1">
+                  <Icon name="Sparkles" size={20} className="text-primary" />
+                  <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                    Choose Service
+                  </h1>
+                </div>
+                <p className="font-body font-body-normal text-text-secondary">
+                  Step 2 of 5 - Complete your spa booking journey
+                </p>
               </div>
-              <p className="font-body font-body-normal text-text-secondary">
-                Step 2 of 5 - Complete your spa booking journey
-              </p>
             </div>
             <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -148,20 +202,28 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => setSelectedCategory(category)}
-                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
-                    selectedCategory === category
-                      ? 'bg-primary text-white'
-                      : 'bg-background text-text-secondary hover:bg-primary/10'
-                  }`}
-                >
-                  {category}
-                </button>
-              ))}
+            <div
+              className="overflow-hidden [overflow-anchor:none]"
+              style={{
+                maxHeight: categoriesHeight ? categoriesHeight * (1 - collapseProgress) : undefined,
+                opacity: 1 - collapseProgress,
+              }}
+            >
+              <div ref={categoriesInnerRef} className="flex flex-wrap gap-2">
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-body font-body-medium spa-transition-fast ${
+                      selectedCategory === category
+                        ? 'bg-primary text-white'
+                        : 'bg-background text-text-secondary hover:bg-primary/10'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </>
@@ -175,15 +237,15 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       )}
 
       {!loading && !error && filteredServices.length > 0 && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredServices.map((service) => (
             <div
               key={service.id}
               onClick={() => onServiceSelect(service)}
-              className={`group bg-surface rounded-spa-lg border-2 spa-transition-fast cursor-pointer hover:spa-shadow-elevated hover:-translate-y-0.5 ${
+              className={`group bg-surface rounded-spa-lg spa-transition-fast cursor-pointer shadow-spa-resting hover:shadow-spa-elevated hover:-translate-y-0.5 ${
                 selectedService?.id === service.id
-                  ? 'border-primary bg-primary/5 spa-shadow-elevated -translate-y-1'
-                  : 'border-border hover:border-primary/50'
+                  ? 'border-2 border-primary bg-primary/5 shadow-spa-elevated -translate-y-1'
+                  : 'border border-border hover:border-primary/50'
               }`}
             >
               <div className="relative overflow-hidden rounded-t-spa-lg">
@@ -197,7 +259,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     Select Service
                   </span>
                 </div>
-                <div className="absolute top-4 left-4 flex flex-col space-y-2">
+                <div className="absolute top-3 left-3 flex flex-col space-y-1.5">
                   {service.popularity && (
                     <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
                       {service.popularity}
@@ -209,23 +271,23 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     </span>
                   )}
                 </div>
-                <div className="absolute top-4 right-4 bg-surface/90 backdrop-blur-sm rounded-spa px-3 py-1">
-                  <span className="font-heading font-heading-semibold text-lg text-text-primary">
+                <div className="absolute top-3 right-3 bg-surface/90 backdrop-blur-sm rounded-spa px-2.5 py-1">
+                  <span className="font-heading font-heading-semibold text-base text-text-primary">
                     {formatPrice(service.price)}
                   </span>
                 </div>
               </div>
 
-              <div className="p-4">
-                <div className="flex items-start justify-between mb-2">
+              <div className="p-3.5">
+                <div className="flex items-start justify-between mb-1.5">
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-1">
+                    <h3 className="font-heading font-heading-medium text-base text-text-primary mb-1">
                       {service.name}
                     </h3>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-secondary mb-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-text-secondary mb-1.5">
                       <div className="flex items-center space-x-1">
-                        <Icon name="Clock" size={14} />
-                        <span className="font-body font-body-normal text-sm">
+                        <Icon name="Clock" size={13} />
+                        <span className="font-body font-body-normal text-xs">
                           {service.duration}
                         </span>
                       </div>
@@ -235,27 +297,27 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                     </div>
                   </div>
                   {selectedService?.id === service.id && (
-                    <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-                      <Icon name="Check" size={14} className="text-primary-foreground" />
+                    <div className="w-5 h-5 shrink-0 bg-primary rounded-full flex items-center justify-center">
+                      <Icon name="Check" size={12} className="text-primary-foreground" />
                     </div>
                   )}
                 </div>
 
                 {service.description && (
-                  <p className="font-body font-body-normal text-sm text-text-secondary mb-3 line-clamp-3">
+                  <p className="font-body font-body-normal text-xs text-text-secondary mb-2 line-clamp-2">
                     {service.description}
                   </p>
                 )}
 
                 <div>
-                  <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
+                  <h4 className="font-body font-body-medium text-xs text-text-primary mb-1.5">
                     Benefits
                   </h4>
                   <div className="flex flex-wrap gap-1">
                     {service.benefits.map((benefit) => (
                       <span
                         key={benefit}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-caption font-caption-normal bg-success/10 text-success"
                       >
                         {benefit}
                       </span>

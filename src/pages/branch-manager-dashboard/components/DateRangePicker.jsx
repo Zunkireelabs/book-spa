@@ -27,33 +27,37 @@ const DateRangePicker = ({ onDateRangeChange, onExport }) => {
     switch (range) {
       case 'today':
         return { start: startOfDay, end: endOfDay };
-      case 'yesterday':
+      case 'yesterday': {
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
-        return { 
-          start: new Date(yesterday.setHours(0, 0, 0, 0)), 
-          end: new Date(yesterday.setHours(23, 59, 59, 999)) 
+        return {
+          start: new Date(yesterday.setHours(0, 0, 0, 0)),
+          end: new Date(yesterday.setHours(23, 59, 59, 999))
         };
-      case 'week':
+      }
+      case 'week': {
         const startOfWeek = new Date(today);
         startOfWeek.setDate(today.getDate() - today.getDay());
-        return { 
-          start: new Date(startOfWeek.setHours(0, 0, 0, 0)), 
-          end: endOfDay 
+        return {
+          start: new Date(startOfWeek.setHours(0, 0, 0, 0)),
+          end: endOfDay
         };
-      case 'month':
+      }
+      case 'month': {
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-        return { 
-          start: startOfMonth, 
-          end: endOfDay 
+        return {
+          start: startOfMonth,
+          end: endOfDay
         };
-      case 'quarter':
+      }
+      case 'quarter': {
         const quarter = Math.floor(today.getMonth() / 3);
         const startOfQuarter = new Date(today.getFullYear(), quarter * 3, 1);
-        return { 
-          start: startOfQuarter, 
-          end: endOfDay 
+        return {
+          start: startOfQuarter,
+          end: endOfDay
         };
+      }
       default:
         return { start: startOfDay, end: endOfDay };
     }

@@ -250,11 +250,11 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
 
       {/* Gender Preference - only shown for industries that use it */}
       {enableStaffGender && (
-        <div className="bg-surface rounded-spa-lg border border-border p-6">
-          <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
+        <div className="bg-surface rounded-spa-lg border border-border p-5">
+          <h3 className="font-heading font-heading-medium text-base text-text-primary mb-3">
             {staffLabel} Gender Preference
           </h3>
-          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+          <div className="grid grid-cols-3 gap-2.5">
             {[
               { value: 'female', label: `Female ${staffLabel}`, icon: 'User', color: 'pink' },
               { value: 'male', label: `Male ${staffLabel}`, icon: 'User', color: 'blue' },
@@ -262,9 +262,9 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
             ].map((option) => (
               <label
                 key={option.value}
-                className={`relative flex flex-col items-center text-center gap-1 sm:gap-2 p-2 sm:p-3 rounded-spa border-2 cursor-pointer spa-transition-fast ${
+                className={`relative flex flex-col items-center text-center gap-1.5 p-3 rounded-spa border cursor-pointer spa-transition-fast shadow-spa-resting hover:shadow-spa-elevated ${
                   genderPreference === option.value
-                    ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
+                    ? 'border-primary bg-primary/5 shadow-spa-elevated' :'border-border hover:border-primary/50'
                 }`}
               >
                 <input
@@ -273,9 +273,18 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                   value={option.value}
                   checked={genderPreference === option.value}
                   onChange={(e) => onGenderPreferenceChange(e.target.value)}
-                  className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 text-primary focus:ring-primary"
+                  className="sr-only"
                 />
-                <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full flex items-center justify-center ${
+                <div className={`absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center spa-transition-fast ${
+                  genderPreference === option.value
+                    ? 'bg-primary'
+                    : 'border-2 border-border'
+                }`}>
+                  {genderPreference === option.value && (
+                    <Icon name="Check" size={10} className="text-primary-foreground" />
+                  )}
+                </div>
+                <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center ${
                   option.color === 'pink' ? 'bg-pink-100' :
                   option.color === 'blue' ? 'bg-blue-100' : 'bg-primary/10'
                 }`}>
@@ -288,7 +297,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                     }
                   />
                 </div>
-                <span className="font-body font-body-medium text-[11px] sm:text-sm leading-tight text-text-primary">
+                <span className="font-body font-body-medium text-xs leading-tight text-text-primary">
                   {option.label}
                 </span>
               </label>

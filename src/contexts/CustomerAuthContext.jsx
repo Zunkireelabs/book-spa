@@ -11,6 +11,8 @@ export const useCustomerAuth = () => {
   return context;
 };
 
+export default CustomerAuthContext;
+
 async function fetchCustomerProfile(authUserId) {
   try {
     const { data, error } = await supabaseCustomer
