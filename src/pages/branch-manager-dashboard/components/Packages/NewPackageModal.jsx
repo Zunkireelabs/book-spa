@@ -6,7 +6,7 @@ import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
-import { fetchPackageTypes, issuePackage } from '../../../../services/api';
+import { fetchPackageTypes, createPackageType, fetchServicesForManagement, issuePackage } from '../../../../services/api';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -16,19 +16,28 @@ function toDateInputValue(date) {
   return date.toISOString().slice(0, 10);
 }
 
+const EMPTY_NEW_TYPE = { name: '', serviceId: '', defaultSessions: '', standardPrice: '', validityDays: '365' };
+
 // Manager/admin only — issues a new session package via issue_package()
 // (migration-141). Unlike NewVoucherModal, there's no manual code entry
 // (package_code is left NULL — issue_package has no p_package_code param)
 // and no tender/payment-method collection: packages just record paid_amount
 // as a single number, they don't post rows to `payments` at issuance time.
-const NewPackageModal = ({ onClose, onIssued }) => {
+const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
   const { orgId } = useOrg();
+  const isAdmin = (userRole || profile?.role) === 'admin';
 
   const [types, setTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [loadError, setLoadError] = useState(null);
+
+  const [services, setServices] = useState([]);
+  const [showNewType, setShowNewType] = useState(false);
+  const [newType, setNewType] = useState(EMPTY_NEW_TYPE);
+  const [newTypeSubmitting, setNewTypeSubmitting] = useState(false);
+  const [newTypeError, setNewTypeError] = useState(null);
 
   const [packageTypeId, setPackageTypeId] = useState('');
   const [guestName, setGuestName] = useState('');
@@ -46,6 +55,19 @@ const NewPackageModal = ({ onClose, onIssued }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [issued, setIssued] = useState(null); // the issued package row, shown as a success state
+
+  const loadTypes = async ({ selectId } = {}) => {
+    const { data, error: fetchError } = await fetchPackageTypes();
+    if (fetchError) {
+      setLoadError(fetchError.message || 'Failed to load package types.');
+      setLoadingTypes(false);
+      return;
+    }
+    setTypes(data || []);
+    const toSelect = selectId ? data?.find((t) => t.id === selectId) : data?.[0];
+    if (toSelect) applyType(toSelect, issuedDate);
+    setLoadingTypes(false);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -67,11 +89,54 @@ const NewPackageModal = ({ onClose, onIssued }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Service list for the "Add new package type" affordance — admin-only, so
+  // only fetched for admins (mirrors NewVoucherModal's category list, but
+  // services are per-org data rather than a static enum).
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchServicesForManagement();
+      if (cancelled) return;
+      setServices((data || []).filter((s) => s.is_active));
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
+
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
+
+  const handleCreateNewType = async (e) => {
+    e.preventDefault();
+    setNewTypeError(null);
+    if (!newType.name.trim()) { setNewTypeError('Type name is required.'); return; }
+    if (!newType.serviceId) { setNewTypeError('Please select a service.'); return; }
+    const sessions = Number(newType.defaultSessions);
+    if (!Number.isFinite(sessions) || sessions <= 0) { setNewTypeError('Default sessions must be greater than zero.'); return; }
+    const price = Number(newType.standardPrice);
+    if (!(price >= 0)) { setNewTypeError('Standard price must be zero or greater.'); return; }
+
+    setNewTypeSubmitting(true);
+    const { data, error: createErr } = await createPackageType({
+      orgId,
+      name: newType.name,
+      serviceId: newType.serviceId,
+      defaultSessions: sessions,
+      standardPrice: price,
+      validityDays: newType.validityDays,
+    });
+    setNewTypeSubmitting(false);
+    if (createErr) { setNewTypeError(createErr.message || 'Failed to create package type.'); return; }
+
+    setNewType(EMPTY_NEW_TYPE);
+    setShowNewType(false);
+    setExpiryTouched(false);
+    await loadTypes({ selectId: data.id });
+  };
 
   const selectedType = types.find((t) => t.id === packageTypeId);
 
@@ -288,6 +353,92 @@ const NewPackageModal = ({ onClose, onIssued }) => {
                     Redeemable against {selectedType.service.name}
                     {selectedType.service.duration_minutes ? ` (${selectedType.service.duration_minutes} min)` : ''} only.
                   </p>
+                )}
+                {isAdmin && (
+                  <div className="mt-2">
+                    {!showNewType ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowNewType(true)}
+                        className="flex items-center gap-1 text-xs font-body font-body-medium text-primary hover:underline"
+                      >
+                        <Icon name="Plus" size={12} />
+                        <span>Can't find the type? Add new package type</span>
+                      </button>
+                    ) : (
+                      <div className="bg-background border border-border rounded-spa p-3 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-heading font-heading-semibold text-xs text-text-primary">New package type</h4>
+                          <button
+                            type="button"
+                            onClick={() => { setShowNewType(false); setNewType(EMPTY_NEW_TYPE); setNewTypeError(null); }}
+                            className="p-1 rounded-spa hover:bg-surface spa-transition-fast"
+                          >
+                            <Icon name="X" size={12} className="text-text-secondary" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={newType.name}
+                            onChange={(e) => setNewType((p) => ({ ...p, name: e.target.value }))}
+                            placeholder="Type name, e.g. Annual Package - 60 min"
+                            className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                          <CustomSelect
+                            value={newType.serviceId}
+                            onChange={(v) => setNewType((p) => ({ ...p, serviceId: v }))}
+                            options={services.map((s) => ({ value: s.id, label: s.name }))}
+                            placeholder="Select service"
+                            size="sm"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={newType.defaultSessions}
+                            onChange={(e) => setNewType((p) => ({ ...p, defaultSessions: e.target.value }))}
+                            placeholder="Sessions"
+                            className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={newType.standardPrice}
+                            onChange={(e) => setNewType((p) => ({ ...p, standardPrice: e.target.value }))}
+                            placeholder="Price (NPR)"
+                            className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={newType.validityDays}
+                            onChange={(e) => setNewType((p) => ({ ...p, validityDays: e.target.value }))}
+                            placeholder="Validity (days)"
+                            className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                          />
+                        </div>
+                        {newTypeError && (
+                          <p className="font-caption text-xs text-error">{newTypeError}</p>
+                        )}
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={handleCreateNewType}
+                            disabled={newTypeSubmitting}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-spa bg-primary text-white text-xs font-body font-body-medium hover:bg-primary/90 disabled:opacity-50 spa-transition-fast"
+                          >
+                            {newTypeSubmitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                            <span>Add type</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
