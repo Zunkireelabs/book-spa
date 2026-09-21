@@ -264,6 +264,9 @@ const PackageListPanel = () => {
                       </td>
                       <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                         <span className="font-data font-data-normal text-xs text-text-secondary">{formatNPR(p.paidAmount)}</span>
+                        {p.paymentMethod && (
+                          <p className="font-caption text-[9px] text-text-tertiary mt-0.5">{p.paymentMethod}</p>
+                        )}
                       </td>
                       <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                         {p.dueAmount > 0 ? (
