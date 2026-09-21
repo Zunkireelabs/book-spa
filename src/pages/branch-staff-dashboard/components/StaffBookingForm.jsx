@@ -160,9 +160,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     setReferringCustomerPhone('');
     setReferringCustomerCountryCode('+977');
     setReferringCustomerName('');
-    setReferringRewardType('wallet');
     setReferringRewardAmount('');
-    setReferringRewardCatalogId('');
   }, []);
 
   const handleReferringPhoneChange = useCallback((v) => {
