@@ -138,10 +138,26 @@ BEGIN
       IF p_discount_type NOT IN ('percentage','fixed') THEN
         RAISE EXCEPTION 'issue_package: discount_type must be percentage or fixed';
       END IF;
+      -- Reject an out-of-range discount_value outright rather than silently
+      -- clamping it — clamping-only would still charge the correct amount
+      -- but persist a misleading raw value (e.g. a typed "500" for a
+      -- percentage discount would store discount_value=500 even though only
+      -- 100% was actually applied), corrupting any future reporting off this
+      -- column. Matches BookingActionModal's existing hard-reject pattern
+      -- for the equivalent booking-discount input.
+      IF p_discount_value IS NOT NULL AND p_discount_value < 0 THEN
+        RAISE EXCEPTION 'issue_package: discount_value cannot be negative';
+      END IF;
       IF p_discount_type = 'percentage' THEN
-        v_discount_amount := round(v_base_amount * LEAST(GREATEST(COALESCE(p_discount_value, 0), 0), 100) / 100, 2);
+        IF COALESCE(p_discount_value, 0) > 100 THEN
+          RAISE EXCEPTION 'issue_package: percentage discount cannot exceed 100';
+        END IF;
+        v_discount_amount := round(v_base_amount * COALESCE(p_discount_value, 0) / 100, 2);
       ELSE
-        v_discount_amount := LEAST(GREATEST(COALESCE(p_discount_value, 0), 0), v_base_amount);
+        IF COALESCE(p_discount_value, 0) > v_base_amount THEN
+          RAISE EXCEPTION 'issue_package: fixed discount cannot exceed the package price';
+        END IF;
+        v_discount_amount := COALESCE(p_discount_value, 0);
       END IF;
     END IF;
 

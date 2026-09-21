@@ -11030,6 +11030,7 @@ export async function fetchPackage(packageId) {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -11069,6 +11070,15 @@ export async function fetchPackage(packageId) {
         sessionsTotal: p.sessions_total,
         remarks: p.remarks,
         issuedByName: p.issuer?.full_name || '—',
+        baseAmount: p.base_amount != null ? Number(p.base_amount) : null,
+        discountType: p.discount_type,
+        discountValue: p.discount_value != null ? Number(p.discount_value) : null,
+        discountAmount: Number(p.discount_amount || 0),
+        finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
+        dueHolderName: p.due_holder_name || null,
+        dueAmount: p.final_amount != null
+          ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
+          : 0,
         sessionsUsed: balance.sessions_used || 0,
         sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
         status: balance.status || 'unused',

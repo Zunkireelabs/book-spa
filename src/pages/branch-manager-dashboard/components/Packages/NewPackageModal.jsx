@@ -201,6 +201,9 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     if (!packageTypeId) { setError('Please select a package type.'); return; }
     if (!linkedCustomerId && !guestName.trim()) { setError('Guest name is required.'); return; }
     if (paidAmountNum < 0) { setError('Paid amount cannot be negative.'); return; }
+    if (baseAmount != null && discountValueNum < 0) { setError('Discount cannot be negative.'); return; }
+    if (baseAmount != null && discountType === 'percentage' && discountValueNum > 100) { setError('Percentage discount cannot exceed 100%.'); return; }
+    if (baseAmount != null && discountType === 'fixed' && discountValueNum > baseAmount) { setError('Fixed discount cannot exceed the package price.'); return; }
     if (finalAmountNum != null && paidAmountNum > finalAmountNum) { setError('Paid amount cannot exceed the discounted total.'); return; }
     if (dueAmountNum > 0 && !dueHolderName.trim()) { setError('A responsible person is required when there is a due balance.'); return; }
     if (!Number.isFinite(sessionsTotalNum) || sessionsTotalNum <= 0) { setError('Sessions must be greater than zero.'); return; }
