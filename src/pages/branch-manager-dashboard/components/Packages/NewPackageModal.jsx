@@ -47,6 +47,9 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [sessionsTotal, setSessionsTotal] = useState('');
+  const [discountType, setDiscountType] = useState('percentage');
+  const [discountValue, setDiscountValue] = useState('');
+  const [dueHolderName, setDueHolderName] = useState('');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
   const [expiryDate, setExpiryDate] = useState('');
   const [expiryTouched, setExpiryTouched] = useState(false);
@@ -149,6 +152,9 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     setPackageTypeId(type.id);
     setSessionsTotal(type.default_sessions != null ? String(type.default_sessions) : '');
     setPaidAmount(type.standard_price != null ? String(type.standard_price) : '');
+    setDiscountType('percentage');
+    setDiscountValue('');
+    setDueHolderName('');
     if (!expiryTouched) {
       const base = fromIssuedDate ? new Date(fromIssuedDate) : new Date();
       base.setDate(base.getDate() + (type.validity_days || 365));
@@ -173,6 +179,20 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const paidAmountNum = Number(paidAmount) || 0;
   const sessionsTotalNum = Number(sessionsTotal) || 0;
 
+  // The package type's price is fixed (base_amount) — staff can only discount
+  // it, never override it directly. Mirrors the issue_package RPC's own
+  // clamping so the on-screen "Total due" always matches what the RPC will
+  // actually charge.
+  const baseAmount = selectedType?.standard_price != null ? Number(selectedType.standard_price) : null;
+  const discountValueNum = Number(discountValue) || 0;
+  const discountAmountNum = baseAmount == null
+    ? 0
+    : discountType === 'percentage'
+      ? Math.round(baseAmount * Math.min(Math.max(discountValueNum, 0), 100) / 100 * 100) / 100
+      : Math.min(Math.max(discountValueNum, 0), baseAmount);
+  const finalAmountNum = baseAmount == null ? null : Math.round((baseAmount - discountAmountNum) * 100) / 100;
+  const dueAmountNum = finalAmountNum == null ? 0 : Math.max(0, Math.round((finalAmountNum - paidAmountNum) * 100) / 100);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -181,6 +201,8 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     if (!packageTypeId) { setError('Please select a package type.'); return; }
     if (!linkedCustomerId && !guestName.trim()) { setError('Guest name is required.'); return; }
     if (paidAmountNum < 0) { setError('Paid amount cannot be negative.'); return; }
+    if (finalAmountNum != null && paidAmountNum > finalAmountNum) { setError('Paid amount cannot exceed the discounted total.'); return; }
+    if (dueAmountNum > 0 && !dueHolderName.trim()) { setError('A responsible person is required when there is a due balance.'); return; }
     if (!Number.isFinite(sessionsTotalNum) || sessionsTotalNum <= 0) { setError('Sessions must be greater than zero.'); return; }
     if (!issuedDate || !expiryDate) { setError('Issued and expiry dates are required.'); return; }
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
@@ -201,6 +223,9 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
       paidAmount: paidAmountNum,
       sessionsTotal: sessionsTotalNum,
       remarks: remarks.trim() || null,
+      discountType: baseAmount != null ? discountType : null,
+      discountValue: baseAmount != null ? discountValueNum : null,
+      dueHolderName: dueAmountNum > 0 ? dueHolderName.trim() : null,
     });
     setSubmitting(false);
 
@@ -451,9 +476,81 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                     step="1"
                     value={sessionsTotal}
                     onChange={(e) => setSessionsTotal(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    disabled={selectedType?.default_sessions != null}
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background disabled:text-text-secondary disabled:cursor-not-allowed"
+                  />
+                  {selectedType?.default_sessions == null && (
+                    <p className="mt-1.5 font-caption text-xs text-text-tertiary">
+                      This package type has no fixed session count — enter it manually.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Price (NPR)</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={baseAmount != null ? formatNPR(baseAmount) : 'No fixed price'}
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-background text-text-secondary cursor-not-allowed"
                   />
                 </div>
+              </div>
+
+              {baseAmount != null && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Discount</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['percentage', 'fixed'].map((t) => (
+                        <label
+                          key={t}
+                          className={`flex items-center justify-center gap-1.5 h-10 rounded-spa border cursor-pointer spa-transition-fast text-xs font-body font-body-medium ${
+                            discountType === t ? 'border-primary bg-primary/5 text-primary' : 'border-border text-text-secondary hover:border-primary/50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="packageDiscountType"
+                            value={t}
+                            checked={discountType === t}
+                            onChange={() => setDiscountType(t)}
+                            className="sr-only"
+                          />
+                          <span>{t === 'percentage' ? '% Percent' : 'NPR Fixed'}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                      {discountType === 'percentage' ? 'Discount (%)' : 'Discount (NPR)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={discountType === 'percentage' ? 100 : baseAmount}
+                      step="any"
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                      placeholder="0"
+                      className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                {baseAmount != null && (
+                  <div>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Total due (NPR)</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={formatNPR(finalAmountNum)}
+                      className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-background text-text-secondary cursor-not-allowed"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Paid amount (NPR)</label>
                   <input
@@ -466,6 +563,24 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                   />
                 </div>
               </div>
+
+              {dueAmountNum > 0 && (
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                    Responsible person <span className="text-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={dueHolderName}
+                    onChange={(e) => setDueHolderName(e.target.value)}
+                    placeholder="Who owes the remaining balance?"
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <p className="mt-1.5 font-caption text-xs text-text-tertiary">
+                    Due: {formatNPR(dueAmountNum)} — required since paid amount is less than the total due.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -486,11 +601,6 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                     className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
                 </div>
-              </div>
-
-              <div className="bg-background border border-border rounded-spa px-3 py-2 flex items-center justify-between">
-                <span className="font-body text-xs text-text-secondary">Paid amount</span>
-                <span className="font-data font-data-semibold text-sm text-primary">{formatNPR(paidAmountNum)}</span>
               </div>
 
               <div>
