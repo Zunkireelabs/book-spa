@@ -102,19 +102,18 @@ const CustomerBookingFlowV2 = () => {
     });
   }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (!orgSlug) return;
-    const bookingState = {
-      currentStep,
-      selectedBranch,
-      selectedService,
-      selectedDateTime,
-      genderPreference,
-      customerInfo
-    };
-    localStorage.setItem(`bookingFlowV2:${orgSlug}`, JSON.stringify(bookingState));
-  }, [orgSlug, currentStep, selectedBranch, selectedService, selectedDateTime, genderPreference, customerInfo]);
-
+  // Must run (and be declared) before the SAVE effect below. Effects fire in
+  // declaration order on mount, and this one calls setState — it doesn't
+  // synchronously update the closure values the SAVE effect reads, so on the
+  // very first commit SAVE still writes out the pre-load defaults regardless
+  // of order. What matters is that LOAD reads and captures the real stored
+  // draft before anything overwrites it: with LOAD declared first, that read
+  // happens first, and SAVE's subsequent default-state write gets replaced
+  // again on the re-render its own setState calls trigger (SAVE re-runs
+  // because currentStep/etc. are now in its deps and just changed). Declared
+  // in the other order, SAVE would clobber the real draft with defaults
+  // *before* LOAD ever got to read it — permanently, since by the time LOAD
+  // ran there'd be nothing but defaults left to load.
   useEffect(() => {
     if (!orgSlug) return;
     // Drop the old org-unscoped key so a stale cross-org draft from before this
@@ -149,6 +148,19 @@ const CustomerBookingFlowV2 = () => {
       }
     }
   }, [orgSlug]);
+
+  useEffect(() => {
+    if (!orgSlug) return;
+    const bookingState = {
+      currentStep,
+      selectedBranch,
+      selectedService,
+      selectedDateTime,
+      genderPreference,
+      customerInfo
+    };
+    localStorage.setItem(`bookingFlowV2:${orgSlug}`, JSON.stringify(bookingState));
+  }, [orgSlug, currentStep, selectedBranch, selectedService, selectedDateTime, genderPreference, customerInfo]);
 
   useEffect(() => {
     if (currentStep !== 2) {
