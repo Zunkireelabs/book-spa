@@ -29,3 +29,10 @@ export const OUTREACH_ENABLED = import.meta.env.VITE_ENABLE_OUTREACH === 'true';
 // configuration (migrations 113-117). Gate all platform-admin routes and
 // components behind this flag until schema is promoted to production.
 export const PLATFORM_ADMIN_ENABLED = import.meta.env.VITE_ENABLE_PLATFORM_ADMIN === 'true';
+
+// Sellable retail product catalog (migrations 188-190) — a product catalog
+// staff can both manage and actually sell (own transaction record, not a
+// line item on a booking). Independent of the other flags. Gate every
+// products entry point behind this until the schema has been promoted to
+// production.
+export const PRODUCTS_ENABLED = import.meta.env.VITE_ENABLE_PRODUCTS === 'true';
