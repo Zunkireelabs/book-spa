@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
@@ -301,10 +302,10 @@ const CategoryManagementPanel = () => {
         </table>
       </div>
 
-      {/* Create / Edit Modal */}
-      {showModal && (
+      {/* Create / Edit Modal — portaled to escape any ancestor stacking context (transitions/sticky headers) that would otherwise clip a fixed overlay */}
+      {showModal && createPortal(
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
                 {editingCategory ? 'Edit Category' : 'Add Category'}
@@ -393,11 +394,12 @@ const CategoryManagementPanel = () => {
               </Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Deactivation Confirmation Dialog */}
-      {confirmToggle && (
+      {confirmToggle && createPortal(
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setConfirmToggle(null)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3">
@@ -416,11 +418,12 @@ const CategoryManagementPanel = () => {
               <Button variant="warning" size="sm" onClick={() => executeToggle(confirmToggle, false)}>Deactivate</Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete Confirmation Dialog */}
-      {confirmDelete && (
+      {confirmDelete && createPortal(
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !deleting && setConfirmDelete(null)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3">
@@ -452,7 +455,8 @@ const CategoryManagementPanel = () => {
               </Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
@@ -319,8 +320,8 @@ const CampaignsPanel = () => {
         </table>
       </div>
 
-      {/* Create / Edit Modal */}
-      {showModal && (
+      {/* Create / Edit Modal — portaled to escape any ancestor stacking context (transitions/sticky headers) that would otherwise clip a fixed overlay */}
+      {showModal && createPortal(
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
@@ -508,11 +509,12 @@ const CampaignsPanel = () => {
               </Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete Confirmation Dialog */}
-      {confirmDelete && (
+      {confirmDelete && createPortal(
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !deleting && setConfirmDelete(null)}>
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3">
@@ -531,7 +533,8 @@ const CampaignsPanel = () => {
               <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete</Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
