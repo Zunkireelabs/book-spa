@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import { useOrg } from '../../../../contexts/OrgContext';
+import { sanitizeHtml } from '../../../../utils/sanitizeHtml';
 import {
   fetchOutreachTemplates,
   upsertOutreachTemplate,
   deleteOutreachTemplate,
+  fetchOutreachLayouts,
+  createOutreachLayout,
   renderTemplatePreview,
 } from '../../../../services/api';
 
@@ -16,7 +20,8 @@ const CHANNEL_OPTIONS = [
 
 const MERGE_FIELDS = [{ token: '{{customer_name}}', label: 'Customer name' }];
 
-const EMPTY_FORM = { id: null, key: '', channel: 'email', subject: '', body: '', isActive: true };
+const EMPTY_FORM = { id: null, key: '', channel: 'email', subject: '', body: '', layoutId: null, isActive: true };
+const EMPTY_NEW_LAYOUT = { name: '', html: '' };
 
 // Template list + edit form. body is plain text with {{customer_name}}
 // mustache-style placeholders rendered server-side at send time (migration
@@ -31,17 +36,27 @@ const TemplateEditorPanel = () => {
   const [formError, setFormError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const bodyRef = useRef(null);
+  const { orgId } = useOrg();
+  const [layouts, setLayouts] = useState([]);
+  const [showNewLayout, setShowNewLayout] = useState(false);
+  const [newLayout, setNewLayout] = useState(EMPTY_NEW_LAYOUT);
+  const [newLayoutSubmitting, setNewLayoutSubmitting] = useState(false);
+  const [newLayoutError, setNewLayoutError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: fetchError } = await fetchOutreachTemplates();
+    const [{ data, error: fetchError }, { data: layoutData }] = await Promise.all([
+      fetchOutreachTemplates(),
+      fetchOutreachLayouts(),
+    ]);
     if (fetchError) {
       setError(fetchError.message || 'Failed to load templates.');
       setLoading(false);
       return;
     }
     setTemplates(data || []);
+    setLayouts(layoutData || []);
     setLoading(false);
   }, []);
 
@@ -59,6 +74,7 @@ const TemplateEditorPanel = () => {
       channel: template.channel,
       subject: template.subject || '',
       body: template.body || '',
+      layoutId: template.layout_id || null,
       isActive: template.is_active,
     });
   };
@@ -94,6 +110,7 @@ const TemplateEditorPanel = () => {
       channel: form.channel,
       subject: form.subject || null,
       body: form.body,
+      layoutId: form.layoutId || null,
       isActive: form.isActive,
     });
     setSaving(false);
@@ -119,7 +136,43 @@ const TemplateEditorPanel = () => {
     await loadData();
   };
 
-  const preview = renderTemplatePreview({ subject: form.subject, body: form.body });
+  const handleCreateLayout = async (e) => {
+    e.preventDefault();
+    setNewLayoutError(null);
+    if (!newLayout.name.trim()) { setNewLayoutError('Layout name is required.'); return; }
+    if (!newLayout.html.trim()) { setNewLayoutError('Layout HTML is required.'); return; }
+    if (!newLayout.html.includes('{{content}}')) {
+      setNewLayoutError('Layout HTML must contain a {{content}} slot.');
+      return;
+    }
+
+    setNewLayoutSubmitting(true);
+    const { data, error: createErr } = await createOutreachLayout({
+      orgId,
+      name: newLayout.name,
+      html: newLayout.html,
+    });
+    setNewLayoutSubmitting(false);
+    if (createErr) { setNewLayoutError(createErr.message || 'Failed to create layout.'); return; }
+
+    setNewLayout(EMPTY_NEW_LAYOUT);
+    setShowNewLayout(false);
+    const { data: layoutData } = await fetchOutreachLayouts();
+    setLayouts(layoutData || []);
+    setForm((prev) => ({ ...prev, layoutId: data.id }));
+  };
+
+  const selectedLayout = layouts.find((l) => l.id === form.layoutId);
+  const preview = renderTemplatePreview({ subject: form.subject, body: form.body }, 'Jane Doe', selectedLayout?.html || null);
+  const layoutOptions = [
+    { value: '', label: 'No layout (plain body)' },
+    ...layouts
+      .filter((l) => l.org_id === null)
+      .map((l) => ({ value: l.id, label: `Built-in — ${l.name}` })),
+    ...layouts
+      .filter((l) => l.org_id !== null)
+      .map((l) => ({ value: l.id, label: `Your org — ${l.name}` })),
+  ];
 
   if (loading) {
     return (
@@ -219,6 +272,71 @@ const TemplateEditorPanel = () => {
             </div>
           </div>
 
+          {form.channel === 'email' && (
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Layout</label>
+              <CustomSelect
+                value={form.layoutId || ''}
+                onChange={(v) => setForm((prev) => ({ ...prev, layoutId: v || null }))}
+                options={layoutOptions}
+                placeholder="Select layout"
+              />
+              <div className="mt-2">
+                {!showNewLayout ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowNewLayout(true)}
+                    className="flex items-center gap-1 text-xs font-body font-body-medium text-primary hover:underline"
+                  >
+                    <Icon name="Plus" size={12} />
+                    <span>Can't find a style you like? Paste your own layout</span>
+                  </button>
+                ) : (
+                  <div className="bg-background border border-border rounded-spa p-3 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-heading font-heading-semibold text-xs text-text-primary">New layout</h4>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewLayout(false); setNewLayout(EMPTY_NEW_LAYOUT); setNewLayoutError(null); }}
+                        className="p-1 rounded-spa hover:bg-surface spa-transition-fast"
+                      >
+                        <Icon name="X" size={12} className="text-text-secondary" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={newLayout.name}
+                      onChange={(e) => setNewLayout((p) => ({ ...p, name: e.target.value }))}
+                      placeholder="Layout name, e.g. Autumn Promo"
+                      className="w-full h-9 px-2.5 text-xs border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                    <textarea
+                      value={newLayout.html}
+                      onChange={(e) => setNewLayout((p) => ({ ...p, html: e.target.value }))}
+                      rows={6}
+                      placeholder="Paste your HTML here — must include a {{content}} placeholder where the template body goes."
+                      className="w-full px-2.5 py-2 text-xs font-data border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-y"
+                    />
+                    {newLayoutError && (
+                      <p className="font-caption text-xs text-error">{newLayoutError}</p>
+                    )}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleCreateLayout}
+                        disabled={newLayoutSubmitting}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-spa bg-primary text-white text-xs font-body font-body-medium hover:bg-primary/90 disabled:opacity-50 spa-transition-fast"
+                      >
+                        {newLayoutSubmitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                        <span>Save layout</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Subject (email only)</label>
             <input
@@ -303,9 +421,14 @@ const TemplateEditorPanel = () => {
             {form.channel === 'email' && preview.subject && (
               <p className="font-body font-body-semibold text-sm text-text-primary">{preview.subject}</p>
             )}
-            <p className="font-body text-sm text-text-secondary whitespace-pre-wrap">
-              {preview.body || 'Preview will appear here as you type.'}
-            </p>
+            {preview.body ? (
+              <div
+                className="text-sm text-text-secondary"
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(preview.body) }}
+              />
+            ) : (
+              <p className="font-body text-sm text-text-secondary">Preview will appear here as you type.</p>
+            )}
           </div>
         </div>
       </div>
