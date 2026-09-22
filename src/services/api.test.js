@@ -121,4 +121,18 @@ describe('renderTemplatePreview with a layout', () => {
     const result = renderTemplatePreview(template, 'Jane Doe', null);
     expect(result.body).toBe('plain Jane Doe text');
   });
+
+  it('substitutes {{org_name}} in a layout header, after {{content}} is slotted in', () => {
+    const template = { subject: 'Hi {{customer_name}} from {{org_name}}', body: '<p>Hi {{customer_name}}</p>' };
+    const layoutHtml = '<div><span>{{org_name}}</span>{{content}}</div>';
+    const result = renderTemplatePreview(template, 'Jane Doe', layoutHtml, 'DemoSpa');
+    expect(result.body).toBe('<div><span>DemoSpa</span><p>Hi Jane Doe</p></div>');
+    expect(result.subject).toBe('Hi Jane Doe from DemoSpa');
+  });
+
+  it('falls back to "Your Business" when no orgName is passed', () => {
+    const template = { subject: '', body: '{{org_name}}' };
+    const result = renderTemplatePreview(template, 'Jane Doe', null);
+    expect(result.body).toBe('Your Business');
+  });
 });

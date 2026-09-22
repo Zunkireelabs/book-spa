@@ -7,6 +7,11 @@
 -- '{{content}}' as the "wrapper" (a no-op passthrough), so untouched
 -- templates behave identically to before this migration.
 --
+-- Also adds a {{org_name}} merge field (substituted from organizations.name,
+-- same replace() pattern as {{customer_name}}) — needed because the seeded
+-- "Branded Header" built-in layout (migration-186) shows the org's name in
+-- its header and must not hardcode one specific org's name.
+--
 -- CREATE OR REPLACE with the SAME parameter list as migration-108 (no new
 -- overload risk here, unlike issue_package in migration-185 — neither
 -- function's signature changes, only their bodies).
@@ -75,10 +80,12 @@ BEGIN
       e.*,
       t.subject   AS template_subject,
       t.body      AS template_body,
-      l.html      AS layout_html
+      l.html      AS layout_html,
+      org.name    AS org_name
     FROM eligible e
     JOIN public.outreach_templates t ON t.id = e.template_id
     LEFT JOIN public.outreach_layouts l ON l.id = t.layout_id
+    JOIN public.organizations org ON org.id = e.org_id
   ),
   inserted AS (
     INSERT INTO public.outreach_messages (
@@ -92,10 +99,16 @@ BEGIN
       tp.booking_id,
       tp.channel,
       tp.customer_email,
-      replace(tp.template_subject, '{{customer_name}}', tp.customer_name),
       replace(
-        replace(COALESCE(tp.layout_html, '{{content}}'), '{{content}}', tp.template_body),
-        '{{customer_name}}', tp.customer_name
+        replace(tp.template_subject, '{{customer_name}}', tp.customer_name),
+        '{{org_name}}', tp.org_name
+      ),
+      replace(
+        replace(
+          replace(COALESCE(tp.layout_html, '{{content}}'), '{{content}}', tp.template_body),
+          '{{customer_name}}', tp.customer_name
+        ),
+        '{{org_name}}', tp.org_name
       ),
       CASE WHEN tp.send_mode = 'auto' THEN 'queued' ELSE 'review' END,
       'template',
@@ -134,6 +147,7 @@ DECLARE
   v_template public.outreach_templates;
   v_layout   public.outreach_layouts;
   v_customer public.customers;
+  v_org_name text;
   v_delay_hours integer;
 BEGIN
   SELECT * INTO v_booking FROM public.bookings WHERE id = p_booking_id;
@@ -169,6 +183,8 @@ BEGIN
     RETURN;
   END IF;
 
+  SELECT name INTO v_org_name FROM public.organizations WHERE id = v_rule.org_id;
+
   v_delay_hours := COALESCE(v_rule.review_delay_hours, 24);
 
   INSERT INTO public.outreach_messages (
@@ -182,10 +198,16 @@ BEGIN
     v_booking.id,
     v_rule.channel,
     v_customer.email,
-    replace(v_template.subject, '{{customer_name}}', v_customer.full_name),
     replace(
-      replace(COALESCE(v_layout.html, '{{content}}'), '{{content}}', v_template.body),
-      '{{customer_name}}', v_customer.full_name
+      replace(v_template.subject, '{{customer_name}}', v_customer.full_name),
+      '{{org_name}}', v_org_name
+    ),
+    replace(
+      replace(
+        replace(COALESCE(v_layout.html, '{{content}}'), '{{content}}', v_template.body),
+        '{{customer_name}}', v_customer.full_name
+      ),
+      '{{org_name}}', v_org_name
     ),
     CASE WHEN v_rule.send_mode = 'auto' THEN 'queued' ELSE 'review' END,
     'template',

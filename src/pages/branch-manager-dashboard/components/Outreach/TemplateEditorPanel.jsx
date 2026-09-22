@@ -18,7 +18,10 @@ const CHANNEL_OPTIONS = [
   { value: 'whatsapp', label: 'WhatsApp (coming soon)', disabled: true },
 ];
 
-const MERGE_FIELDS = [{ token: '{{customer_name}}', label: 'Customer name' }];
+const MERGE_FIELDS = [
+  { token: '{{customer_name}}', label: 'Customer name' },
+  { token: '{{org_name}}', label: 'Business name' },
+];
 
 const EMPTY_FORM = { id: null, key: '', channel: 'email', subject: '', body: '', layoutId: null, isActive: true };
 const EMPTY_NEW_LAYOUT = { name: '', html: '' };
@@ -36,7 +39,7 @@ const TemplateEditorPanel = () => {
   const [formError, setFormError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const bodyRef = useRef(null);
-  const { orgId } = useOrg();
+  const { orgId, orgName } = useOrg();
   const [layouts, setLayouts] = useState([]);
   const [showNewLayout, setShowNewLayout] = useState(false);
   const [newLayout, setNewLayout] = useState(EMPTY_NEW_LAYOUT);
@@ -163,7 +166,7 @@ const TemplateEditorPanel = () => {
   };
 
   const selectedLayout = layouts.find((l) => l.id === form.layoutId);
-  const preview = renderTemplatePreview({ subject: form.subject, body: form.body }, 'Jane Doe', selectedLayout?.html || null);
+  const preview = renderTemplatePreview({ subject: form.subject, body: form.body }, 'Jane Doe', selectedLayout?.html || null, orgName);
   const layoutOptions = [
     { value: '', label: 'No layout (plain body)' },
     ...layouts

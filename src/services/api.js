@@ -11481,15 +11481,18 @@ export async function deleteOutreachTemplate(id) {
 // SQL functions render server-side at insert time. layoutHtml is the
 // selected layout's html (or null/undefined for "no layout" — a template
 // with no layout renders its raw body unwrapped, same as before layouts
-// existed).
-export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe', layoutHtml = null) {
+// existed). orgName substitutes {{org_name}}, used by the built-in "Branded
+// Header" layout's header text — falls back to 'Your Business' so the
+// preview never shows a literal unsubstituted token.
+export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe', layoutHtml = null, orgName = 'Your Business') {
   if (!template) return { subject: '', body: '' };
   const name = sampleCustomerName || 'Jane Doe';
+  const org = orgName || 'Your Business';
   const wrapper = layoutHtml || '{{content}}';
   const combinedBody = wrapper.split('{{content}}').join(template.body || '');
   return {
-    subject: (template.subject || '').split('{{customer_name}}').join(name),
-    body: combinedBody.split('{{customer_name}}').join(name),
+    subject: (template.subject || '').split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
+    body: combinedBody.split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
   };
 }
 

@@ -83,7 +83,7 @@ INSERT INTO public.outreach_layouts (org_id, name, html)
 SELECT NULL, 'Branded Header',
 $html$<div style="max-width:600px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;color:#1f2937;border:1px solid #E1E3E5;border-radius:8px;overflow:hidden;">
   <div style="background:#2D5A27;padding:20px 24px;">
-    <span style="color:#ffffff;font-size:18px;font-weight:600;">Nuad Thai Spa</span>
+    <span style="color:#ffffff;font-size:18px;font-weight:600;">{{org_name}}</span>
   </div>
   <div style="padding:24px;">
     {{content}}
