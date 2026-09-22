@@ -11394,7 +11394,7 @@ export async function fetchOutreachTemplates() {
 
     const { data, error } = await supabase
       .from('outreach_templates')
-      .select('id, org_id, branch_id, key, channel, subject, body, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
+      .select('id, org_id, branch_id, key, channel, subject, body, layout_id, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
       .eq('org_id', profile.org_id)
       .order('key', { ascending: true });
     if (error) throw error;
@@ -11428,6 +11428,7 @@ export async function upsertOutreachTemplate(payload) {
       channel: payload.channel,
       subject: payload.subject ?? null,
       body: payload.body,
+      layout_id: payload.layoutId ?? null,
       whatsapp_template_name: payload.whatsappTemplateName ?? null,
       whatsapp_template_lang: payload.whatsappTemplateLang ?? null,
       is_active: payload.isActive ?? true,
@@ -11474,17 +11475,76 @@ export async function deleteOutreachTemplate(id) {
   }
 }
 
-// Preview-only, client-side string replace — mirrors the server-side
-// `replace(body, '{{customer_name}}', ...)` calls in outreach_scan_winback /
-// outreach_enqueue_for_completed (migration-108/109). Not used to generate
-// what actually gets sent — those RPCs render server-side at insert time.
-export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe') {
+// Preview-only, client-side mirror of the server-side combine-then-substitute
+// logic in outreach_scan_winback / outreach_enqueue_for_completed
+// (migration-187) — not used to generate what actually gets sent, those
+// SQL functions render server-side at insert time. layoutHtml is the
+// selected layout's html (or null/undefined for "no layout" — a template
+// with no layout renders its raw body unwrapped, same as before layouts
+// existed). orgName substitutes {{org_name}}, used by the built-in "Branded
+// Header" layout's header text — falls back to 'Your Business' so the
+// preview never shows a literal unsubstituted token.
+export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe', layoutHtml = null, orgName = 'Your Business') {
   if (!template) return { subject: '', body: '' };
   const name = sampleCustomerName || 'Jane Doe';
+  const org = orgName || 'Your Business';
+  const wrapper = layoutHtml || '{{content}}';
+  const combinedBody = wrapper.split('{{content}}').join(template.body || '');
   return {
-    subject: (template.subject || '').split('{{customer_name}}').join(name),
-    body: (template.body || '').split('{{customer_name}}').join(name),
+    subject: (template.subject || '').split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
+    body: combinedBody.split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
   };
+}
+
+// ---- Layouts ------------------------------------------------------------------
+
+export async function fetchOutreachLayouts() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('outreach_layouts')
+      .select('id, org_id, name, html, is_active')
+      .or(`org_id.eq.${profile.org_id},org_id.is.null`)
+      .eq('is_active', true)
+      .order('org_id', { ascending: true, nullsFirst: true })
+      .order('name', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachLayouts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createOutreachLayout({ orgId, name, html }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create outreach layouts.' } };
+    }
+    if (!orgId) return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
+    if (!name?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout name is required.' } };
+    if (!html?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout HTML is required.' } };
+    if (!html.includes('{{content}}')) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout HTML must contain a {{content}} slot.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_layouts')
+      .insert({ org_id: orgId, name: name.trim(), html, is_active: true })
+      .select('id, name, html')
+      .single();
+    if (error) throw error;
+    capture('outreach_layout_created', { layout_id: data.id });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createOutreachLayout error:', error.message);
+    return { data: null, error };
+  }
 }
 
 // ---- Messages (outbox / send log) --------------------------------------------
