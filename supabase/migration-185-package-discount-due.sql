@@ -1,12 +1,19 @@
 -- Migration 185: package discount + due-balance tracking
 --
 -- Session packages (migration-141) only recorded paid_amount — no concept of
--- the package's actual price, any discount applied, or a due balance when
--- payment falls short. Adds base_amount/discount/final_amount columns and a
--- due_holder_name (same convention as bookings.due_holder_name) so staff can
--- discount a package and, if underpaid, attribute the remainder to a named
--- responsible person. See docs/superpowers/specs/2026-09-21-package-
+-- the package's actual price, any discount applied, a due balance when
+-- payment falls short, or which method the payment was collected in. Adds
+-- base_amount/discount/final_amount columns, a due_holder_name (same
+-- convention as bookings.due_holder_name), and a payment_method column so
+-- staff can discount a package, record how it was paid, and attribute any
+-- shortfall to a named responsible person. See docs/superpowers/specs/2026-09-21-package-
 -- discount-due-tracking-design.md for full design context.
+--
+-- payment_method is plain text, unconstrained — mirrors how
+-- PaymentMethodSelector/buildPaymentMethodTree already produce free-text leaf
+-- values (e.g. "Cash", "Visa") from org-configured payment methods, not a
+-- fixed enum; a CHECK constraint here would need updating every time an org
+-- adds a new method, unlike discount_type's genuinely-fixed 2-value set.
 --
 -- Due is never stored as a column — always computed as final_amount -
 -- paid_amount, same "derive, don't trust a stored due column" approach
@@ -26,7 +33,8 @@
 --     DROP COLUMN IF EXISTS discount_value,
 --     DROP COLUMN IF EXISTS discount_amount,
 --     DROP COLUMN IF EXISTS final_amount,
---     DROP COLUMN IF EXISTS due_holder_name;
+--     DROP COLUMN IF EXISTS due_holder_name,
+--     DROP COLUMN IF EXISTS payment_method;
 
 -- ============================================================
 -- 1. SCHEMA
@@ -38,13 +46,15 @@ ALTER TABLE public.packages
   ADD COLUMN IF NOT EXISTS discount_value   numeric(10,2),
   ADD COLUMN IF NOT EXISTS discount_amount  numeric(10,2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS final_amount     numeric(10,2),
-  ADD COLUMN IF NOT EXISTS due_holder_name  text;
+  ADD COLUMN IF NOT EXISTS due_holder_name  text,
+  ADD COLUMN IF NOT EXISTS payment_method   text;
 
 -- ============================================================
 -- 2. issue_package — extend with discount + due-holder params
 -- ============================================================
 
 DROP FUNCTION IF EXISTS public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text);
+DROP FUNCTION IF EXISTS public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text);
 
 CREATE OR REPLACE FUNCTION public.issue_package(
   p_org_id          uuid,
@@ -60,7 +70,8 @@ CREATE OR REPLACE FUNCTION public.issue_package(
   p_remarks         text    DEFAULT NULL,
   p_discount_type   text    DEFAULT NULL,
   p_discount_value  numeric DEFAULT NULL,
-  p_due_holder_name text    DEFAULT NULL
+  p_due_holder_name text    DEFAULT NULL,
+  p_payment_method  text    DEFAULT NULL
 )
 RETURNS public.packages
 LANGUAGE plpgsql
@@ -176,14 +187,15 @@ BEGIN
     org_id, branch_id, package_type_id, service_id, customer_id, guest_name,
     guest_info, issued_date, expiry_date, paid_amount, sessions_total, remarks,
     issued_by, base_amount, discount_type, discount_value, discount_amount,
-    final_amount, due_holder_name
+    final_amount, due_holder_name, payment_method
   )
   VALUES (
     v_org, p_branch_id, p_package_type_id, v_type.service_id, p_customer_id,
     btrim(p_guest_name), p_guest_info, v_issued, v_expiry, p_paid_amount,
     COALESCE(p_sessions_total, v_type.default_sessions), p_remarks, auth.uid(),
     v_base_amount, p_discount_type, p_discount_value, v_discount_amount,
-    v_final_amount, NULLIF(btrim(COALESCE(p_due_holder_name, '')), '')
+    v_final_amount, NULLIF(btrim(COALESCE(p_due_holder_name, '')), ''),
+    NULLIF(btrim(COALESCE(p_payment_method, '')), '')
   )
   RETURNING * INTO v_row;
 
@@ -191,9 +203,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text) FROM anon;
-GRANT EXECUTE ON FUNCTION public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text, text) FROM anon;
+GRANT EXECUTE ON FUNCTION public.issue_package(uuid, uuid, uuid, uuid, text, text, date, date, numeric, int, text, text, numeric, text, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
 VALUES ('185', 'package-discount-due')

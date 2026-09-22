@@ -3,6 +3,7 @@ import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
+import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -26,7 +27,7 @@ const EMPTY_NEW_TYPE = { name: '', serviceId: '', defaultSessions: '', standardP
 const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
-  const { orgId } = useOrg();
+  const { orgId, paymentMethods } = useOrg();
   const isAdmin = (userRole || profile?.role) === 'admin';
 
   const [types, setTypes] = useState([]);
@@ -50,6 +51,7 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const [discountType, setDiscountType] = useState('percentage');
   const [discountValue, setDiscountValue] = useState('');
   const [dueHolderName, setDueHolderName] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
   const [expiryDate, setExpiryDate] = useState('');
   const [expiryTouched, setExpiryTouched] = useState(false);
@@ -229,6 +231,7 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
       discountType: baseAmount != null ? discountType : null,
       discountValue: baseAmount != null ? discountValueNum : null,
       dueHolderName: dueAmountNum > 0 ? dueHolderName.trim() : null,
+      paymentMethod: paidAmountNum > 0 ? paymentMethod : null,
     });
     setSubmitting(false);
 
@@ -566,6 +569,17 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                   />
                 </div>
               </div>
+
+              {paidAmountNum > 0 && (
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Payment method</label>
+                  <PaymentMethodSelector
+                    paymentMethods={paymentMethods}
+                    value={paymentMethod}
+                    onChange={setPaymentMethod}
+                  />
+                </div>
+              )}
 
               {dueAmountNum > 0 && (
                 <div>

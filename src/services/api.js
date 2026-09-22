@@ -10913,7 +10913,7 @@ export async function issuePackage({
   orgId, branchId, packageTypeId, customerId = null, guestName = null,
   guestInfo = null, issuedDate = null, expiryDate = null, paidAmount = null,
   sessionsTotal = null, remarks = null, discountType = null, discountValue = null,
-  dueHolderName = null,
+  dueHolderName = null, paymentMethod = null,
 }) {
   try {
     guestName = toTitleCase(guestName);
@@ -10935,6 +10935,7 @@ export async function issuePackage({
       p_discount_type: discountType,
       p_discount_value: discountValue,
       p_due_holder_name: dueHolderName,
+      p_payment_method: paymentMethod,
     });
     if (error) throw error;
     capture('package_issued', { package_type_id: packageTypeId, branch_id: branchId, linked_to_customer: !!customerId });
@@ -10959,7 +10960,7 @@ export async function fetchPackages() {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
-          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -11001,6 +11002,7 @@ export async function fetchPackages() {
         discountAmount: Number(p.discount_amount || 0),
         finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
         dueHolderName: p.due_holder_name || null,
+        paymentMethod: p.payment_method || null,
         dueAmount: p.final_amount != null
           ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
           : 0,
@@ -11030,7 +11032,7 @@ export async function fetchPackage(packageId) {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
-          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -11076,6 +11078,7 @@ export async function fetchPackage(packageId) {
         discountAmount: Number(p.discount_amount || 0),
         finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
         dueHolderName: p.due_holder_name || null,
+        paymentMethod: p.payment_method || null,
         dueAmount: p.final_amount != null
           ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
           : 0,
