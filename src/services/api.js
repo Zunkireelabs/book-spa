@@ -11802,3 +11802,289 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
     return { data: null, error };
   }
 }
+
+// ============================================================
+// Campaigns — named, dated promotional events (migrations 190-195)
+// ============================================================
+
+export async function fetchCampaignsForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage campaigns.' } };
+    }
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: campaigns, error } = await supabase
+      .from('campaigns')
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .eq('org_id', profile.org_id)
+      .order('start_date', { ascending: false });
+
+    if (error) throw error;
+
+    const campaignIds = (campaigns || []).map((c) => c.id);
+    let servicesByCampaign = {};
+    let categoriesByCampaign = {};
+
+    if (campaignIds.length > 0) {
+      const [{ data: linkedServices }, { data: linkedCategories }] = await Promise.all([
+        supabase.from('campaign_services').select('campaign_id, service_id').in('campaign_id', campaignIds),
+        supabase.from('campaign_categories').select('campaign_id, category_id').in('campaign_id', campaignIds),
+      ]);
+
+      (linkedServices || []).forEach((row) => {
+        servicesByCampaign[row.campaign_id] = servicesByCampaign[row.campaign_id] || [];
+        servicesByCampaign[row.campaign_id].push(row.service_id);
+      });
+      (linkedCategories || []).forEach((row) => {
+        categoriesByCampaign[row.campaign_id] = categoriesByCampaign[row.campaign_id] || [];
+        categoriesByCampaign[row.campaign_id].push(row.category_id);
+      });
+    }
+
+    const data = (campaigns || []).map((c) => ({
+      ...c,
+      service_ids: servicesByCampaign[c.id] || [],
+      category_ids: categoriesByCampaign[c.id] || [],
+    }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchCampaignsForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Upload a campaign banner image to Supabase Storage.
+ * Reuses the same bucket as service images, under a campaigns/ prefix.
+ */
+export async function uploadCampaignBanner(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload campaign banners.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `campaigns/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadCampaignBanner error:', error.message);
+    return { url: null, error };
+  }
+}
+
+export async function createCampaign({ name, message, bannerImageUrl, discountPercent, startDate, endDate, serviceIds = [], categoryIds = [] }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create campaigns.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Campaign name is required.' } };
+    }
+    if (!discountPercent || discountPercent <= 0 || discountPercent >= 100) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Discount percent must be between 1 and 99.' } };
+    }
+    if (!startDate || !endDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Start and end dates are required.' } };
+    }
+    if (endDate < startDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+
+    const { data: campaign, error } = await supabase
+      .from('campaigns')
+      .insert({
+        name: name.trim(),
+        message: message?.trim() || null,
+        banner_image_url: bannerImageUrl || null,
+        discount_percent: discountPercent,
+        start_date: startDate,
+        end_date: endDate,
+        is_active: true,
+        org_id: profile.org_id,
+      })
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+
+    await syncCampaignLinks({ campaignId: campaign.id, serviceIds, categoryIds });
+
+    return { data: campaign, error: null };
+  } catch (error) {
+    console.error('[API] createCampaign error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateCampaign({ campaignId, name, message, bannerImageUrl, discountPercent, startDate, endDate, serviceIds, categoryIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+    if (startDate !== undefined && endDate !== undefined && endDate < startDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+
+    const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name.trim();
+    if (message !== undefined) updatePayload.message = message?.trim() || null;
+    if (bannerImageUrl !== undefined) updatePayload.banner_image_url = bannerImageUrl || null;
+    if (discountPercent !== undefined) updatePayload.discount_percent = discountPercent;
+    if (startDate !== undefined) updatePayload.start_date = startDate;
+    if (endDate !== undefined) updatePayload.end_date = endDate;
+
+    if (Object.keys(updatePayload).length > 0) {
+      const { error } = await supabase
+        .from('campaigns')
+        .update(updatePayload)
+        .eq('id', campaignId)
+        .eq('org_id', profile.org_id);
+
+      if (error) throw error;
+    }
+
+    if (serviceIds !== undefined || categoryIds !== undefined) {
+      await syncCampaignLinks({ campaignId, serviceIds: serviceIds || [], categoryIds: categoryIds || [] });
+    }
+
+    const { data, error: fetchError } = await supabase
+      .from('campaigns')
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (fetchError) throw fetchError;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCampaign error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Replaces a campaign's full set of linked services/categories in one go —
+// simplest correct approach for a "pick from a checkbox list" UI (the form
+// always submits the complete desired set, not a diff).
+async function syncCampaignLinks({ campaignId, serviceIds, categoryIds }) {
+  await Promise.all([
+    supabase.from('campaign_services').delete().eq('campaign_id', campaignId),
+    supabase.from('campaign_categories').delete().eq('campaign_id', campaignId),
+  ]);
+
+  const inserts = [];
+  if (serviceIds.length > 0) {
+    inserts.push(
+      supabase.from('campaign_services').insert(serviceIds.map((service_id) => ({ campaign_id: campaignId, service_id })))
+    );
+  }
+  if (categoryIds.length > 0) {
+    inserts.push(
+      supabase.from('campaign_categories').insert(categoryIds.map((category_id) => ({ campaign_id: campaignId, category_id })))
+    );
+  }
+  if (inserts.length > 0) await Promise.all(inserts);
+}
+
+export async function toggleCampaignActive({ campaignId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can toggle campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('campaigns')
+      .update({ is_active: isActive })
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleCampaignActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCampaign({ campaignId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { error } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCampaign error:', error.message);
+    return { data: null, error };
+  }
+}

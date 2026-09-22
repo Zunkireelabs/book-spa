@@ -29,3 +29,10 @@ export const OUTREACH_ENABLED = import.meta.env.VITE_ENABLE_OUTREACH === 'true';
 // configuration (migrations 113-117). Gate all platform-admin routes and
 // components behind this flag until schema is promoted to production.
 export const PLATFORM_ADMIN_ENABLED = import.meta.env.VITE_ENABLE_PLATFORM_ADMIN === 'true';
+
+// Named, dated promotional campaigns (migrations 190-195) — client-curated
+// events (e.g. "Dashain Offer") linked to specific services/categories,
+// surfaced on the website as a banner/popup. Independent of the other
+// flags. Gate every campaign entry point behind this until the schema has
+// been promoted to production.
+export const CAMPAIGNS_ENABLED = import.meta.env.VITE_ENABLE_CAMPAIGNS === 'true';

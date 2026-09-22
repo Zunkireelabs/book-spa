@@ -6,7 +6,7 @@ import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
-import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from 'lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, CAMPAIGNS_ENABLED } from 'lib/featureFlags';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
   const location = useLocation();
@@ -330,6 +330,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['manager', 'admin'],
         },
       ],
+    }] : []),
+    ...(CAMPAIGNS_ENABLED ? [{
+      id: 'campaigns',
+      label: 'Campaigns',
+      icon: 'Megaphone',
+      path: `${basePath}?view=campaigns`,
+      roles: ['manager', 'admin'],
     }] : []),
     {
       id: 'packages',
