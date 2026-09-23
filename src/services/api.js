@@ -6278,8 +6278,8 @@ export async function fetchServicesForManagement() {
     }
 
     const { data, error } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -6342,7 +6342,7 @@ export async function uploadServiceImage(file) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6367,6 +6367,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
       return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A service with this name already exists in your organization.' } };
     }
 
+    const isOfferEnabled = !!offerEnabled;
     const { data, error } = await supabase
       .from('services')
       .insert({
@@ -6379,8 +6380,11 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         is_couple: !!isCouple,
         is_active: true,
         org_id: profile.org_id,
+        offer_enabled: isOfferEnabled,
+        offer_type: isOfferEnabled ? offerType : null,
+        offer_value: isOfferEnabled ? offerValue : null,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value')
       .single();
 
     if (error) throw error;
@@ -6391,7 +6395,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
+export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6412,6 +6416,12 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
     if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
+    if (offerEnabled !== undefined) {
+      const isOfferEnabled = !!offerEnabled;
+      updatePayload.offer_enabled = isOfferEnabled;
+      updatePayload.offer_type = isOfferEnabled ? offerType : null;
+      updatePayload.offer_value = isOfferEnabled ? offerValue : null;
+    }
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -6422,7 +6432,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value')
       .single();
 
     if (error) {
@@ -8761,6 +8771,76 @@ export async function fetchServicesByOrgId(orgId, branchId) {
   }
 }
 
+/**
+ * Fetch services for the public customer booking flow (/:orgSlug/book),
+ * offer-price and campaign-aware. Distinct from fetchServicesByOrgId above
+ * (kept unchanged — still used by staff-authenticated screens like
+ * VoucherDetailModal) because the booking flow is fully anonymous, and
+ * campaign discounts require a SECURITY DEFINER RPC
+ * (public_get_bookable_services, migration-205) to see past the
+ * campaigns table's org-scoped RLS with no session present.
+ */
+export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
+  try {
+    const { data, error } = await supabase.rpc('public_get_bookable_services', {
+      p_org_slug: orgSlug,
+    });
+
+    if (error) throw error;
+
+    const services = (data || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      duration_minutes: s.duration_minutes,
+      price_npr: s.price_npr,
+      description: s.description,
+      image_url: s.image_url,
+      category: s.category_name,
+      effective_price_npr: s.effective_price_npr,
+      is_on_offer: s.is_on_offer,
+      original_price_npr: s.original_price_npr,
+      active_campaign_name: s.active_campaign_name,
+    }));
+
+    if (branchId) {
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('excluded_service_categories')
+        .eq('id', branchId)
+        .single();
+      const excluded = branch?.excluded_service_categories;
+      if (excluded?.length > 0) {
+        return { data: services.filter((s) => !excluded.includes(s.category)), error: null };
+      }
+    }
+
+    return { data: services, error: null };
+  } catch (error) {
+    console.error('[API] fetchBookableServicesByOrgSlug error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch the single currently-active campaign for the public customer
+ * booking flow's banner/popup (public_get_active_campaign, migration-204
+ * — the same anon-safe RPC nuadthainepal.com's website already uses).
+ * Returns null (not an error) when no campaign is currently active.
+ */
+export async function fetchActiveCampaignForBooking(orgSlug) {
+  try {
+    const { data, error } = await supabase.rpc('public_get_active_campaign', {
+      p_org_slug: orgSlug,
+    });
+
+    if (error) throw error;
+    return { data: data?.[0] || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchActiveCampaignForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // Service Categories Management (Manager + Admin)
 // ============================================================
@@ -8785,7 +8865,7 @@ export async function fetchCategoriesForManagement() {
     // Get categories with service count - filtered by org
     const { data: categories, error } = await supabase
       .from('service_categories')
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .eq('org_id', profile.org_id)
       .order('display_order', { ascending: true });
 
@@ -8830,7 +8910,7 @@ export async function fetchActiveCategories() {
 
     const { data, error } = await supabase
       .from('service_categories')
-      .select('id, name')
+      .select('id, name, offer_enabled, offer_percent')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('display_order', { ascending: true });
@@ -8846,7 +8926,7 @@ export async function fetchActiveCategories() {
 /**
  * Create a new category
  */
-export async function createCategory({ name, description }) {
+export async function createCategory({ name, description, offerEnabled, offerPercent }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8868,6 +8948,7 @@ export async function createCategory({ name, description }) {
       .single();
 
     const nextOrder = (maxOrder?.display_order || 0) + 1;
+    const isOfferEnabled = !!offerEnabled;
 
     const { data, error } = await supabase
       .from('service_categories')
@@ -8877,8 +8958,10 @@ export async function createCategory({ name, description }) {
         display_order: nextOrder,
         is_active: true,
         org_id: profile.org_id,
+        offer_enabled: isOfferEnabled,
+        offer_percent: isOfferEnabled ? offerPercent : null,
       })
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .single();
 
     if (error) {
@@ -8897,7 +8980,7 @@ export async function createCategory({ name, description }) {
 /**
  * Update an existing category
  */
-export async function updateCategory({ categoryId, name, description }) {
+export async function updateCategory({ categoryId, name, description, offerEnabled, offerPercent }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8928,13 +9011,18 @@ export async function updateCategory({ categoryId, name, description }) {
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
+    if (offerEnabled !== undefined) {
+      const isOfferEnabled = !!offerEnabled;
+      updateData.offer_enabled = isOfferEnabled;
+      updateData.offer_percent = isOfferEnabled ? offerPercent : null;
+    }
 
     const { data, error } = await supabase
       .from('service_categories')
       .update(updateData)
       .eq('id', categoryId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .single();
 
     if (error) {
@@ -12434,6 +12522,292 @@ export async function refundProductSale({ saleId, reason }) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] refundProductSale error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Campaigns — named, dated promotional events (migrations 198-204)
+// ============================================================
+
+export async function fetchCampaignsForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage campaigns.' } };
+    }
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: campaigns, error } = await supabase
+      .from('campaigns')
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .eq('org_id', profile.org_id)
+      .order('start_date', { ascending: false });
+
+    if (error) throw error;
+
+    const campaignIds = (campaigns || []).map((c) => c.id);
+    let servicesByCampaign = {};
+    let categoriesByCampaign = {};
+
+    if (campaignIds.length > 0) {
+      const [{ data: linkedServices }, { data: linkedCategories }] = await Promise.all([
+        supabase.from('campaign_services').select('campaign_id, service_id').in('campaign_id', campaignIds),
+        supabase.from('campaign_categories').select('campaign_id, category_id').in('campaign_id', campaignIds),
+      ]);
+
+      (linkedServices || []).forEach((row) => {
+        servicesByCampaign[row.campaign_id] = servicesByCampaign[row.campaign_id] || [];
+        servicesByCampaign[row.campaign_id].push(row.service_id);
+      });
+      (linkedCategories || []).forEach((row) => {
+        categoriesByCampaign[row.campaign_id] = categoriesByCampaign[row.campaign_id] || [];
+        categoriesByCampaign[row.campaign_id].push(row.category_id);
+      });
+    }
+
+    const data = (campaigns || []).map((c) => ({
+      ...c,
+      service_ids: servicesByCampaign[c.id] || [],
+      category_ids: categoriesByCampaign[c.id] || [],
+    }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchCampaignsForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Upload a campaign banner image to Supabase Storage.
+ * Reuses the same bucket as service images, under a campaigns/ prefix.
+ */
+export async function uploadCampaignBanner(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload campaign banners.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `campaigns/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadCampaignBanner error:', error.message);
+    return { url: null, error };
+  }
+}
+
+export async function createCampaign({ name, message, bannerImageUrl, discountPercent, startDate, endDate, serviceIds = [], categoryIds = [] }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create campaigns.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Campaign name is required.' } };
+    }
+    if (!discountPercent || discountPercent <= 0 || discountPercent >= 100) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Discount percent must be between 1 and 99.' } };
+    }
+    if (!startDate || !endDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Start and end dates are required.' } };
+    }
+    if (endDate < startDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+
+    const { data: campaign, error } = await supabase
+      .from('campaigns')
+      .insert({
+        name: name.trim(),
+        message: message?.trim() || null,
+        banner_image_url: bannerImageUrl || null,
+        discount_percent: discountPercent,
+        start_date: startDate,
+        end_date: endDate,
+        is_active: true,
+        org_id: profile.org_id,
+      })
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+
+    await syncCampaignLinks({ campaignId: campaign.id, serviceIds, categoryIds });
+
+    return { data: campaign, error: null };
+  } catch (error) {
+    console.error('[API] createCampaign error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateCampaign({ campaignId, name, message, bannerImageUrl, discountPercent, startDate, endDate, serviceIds, categoryIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+    if (startDate !== undefined && endDate !== undefined && endDate < startDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+
+    const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name.trim();
+    if (message !== undefined) updatePayload.message = message?.trim() || null;
+    if (bannerImageUrl !== undefined) updatePayload.banner_image_url = bannerImageUrl || null;
+    if (discountPercent !== undefined) updatePayload.discount_percent = discountPercent;
+    if (startDate !== undefined) updatePayload.start_date = startDate;
+    if (endDate !== undefined) updatePayload.end_date = endDate;
+
+    if (Object.keys(updatePayload).length > 0) {
+      const { error } = await supabase
+        .from('campaigns')
+        .update(updatePayload)
+        .eq('id', campaignId)
+        .eq('org_id', profile.org_id);
+
+      if (error) throw error;
+    }
+
+    if (serviceIds !== undefined || categoryIds !== undefined) {
+      await syncCampaignLinks({ campaignId, serviceIds: serviceIds || [], categoryIds: categoryIds || [] });
+    }
+
+    const { data, error: fetchError } = await supabase
+      .from('campaigns')
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (fetchError) throw fetchError;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCampaign error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Replaces a campaign's full set of linked services/categories in one go —
+// simplest correct approach for a "pick from a checkbox list" UI (the form
+// always submits the complete desired set, not a diff).
+async function syncCampaignLinks({ campaignId, serviceIds, categoryIds }) {
+  await Promise.all([
+    supabase.from('campaign_services').delete().eq('campaign_id', campaignId),
+    supabase.from('campaign_categories').delete().eq('campaign_id', campaignId),
+  ]);
+
+  const inserts = [];
+  if (serviceIds.length > 0) {
+    inserts.push(
+      supabase.from('campaign_services').insert(serviceIds.map((service_id) => ({ campaign_id: campaignId, service_id })))
+    );
+  }
+  if (categoryIds.length > 0) {
+    inserts.push(
+      supabase.from('campaign_categories').insert(categoryIds.map((category_id) => ({ campaign_id: campaignId, category_id })))
+    );
+  }
+  if (inserts.length > 0) await Promise.all(inserts);
+}
+
+export async function toggleCampaignActive({ campaignId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can toggle campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('campaigns')
+      .update({ is_active: isActive })
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleCampaignActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCampaign({ campaignId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { error } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCampaign error:', error.message);
     return { data: null, error };
   }
 }

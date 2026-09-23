@@ -51,8 +51,9 @@ import RewardCatalogPanel from './components/Referrals/RewardCatalogPanel';
 import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPanel from './components/Memberships/MembershipsPanel';
-import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from '../../lib/featureFlags';
 import ProductsPanel from './components/Products/ProductsPanel';
+import CampaignsPanel from './components/Campaigns/CampaignsPanel';
 import MembershipCollectionPanel from './components/Memberships/MembershipCollectionPanel';
 import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import VoucherListPanel from './components/Vouchers/VoucherListPanel';
@@ -661,6 +662,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'package-overview' && ['manager','admin'].includes(profile?.role) && <PackageOverviewPanel />}
               {viewMode === 'packages' && ['manager','admin'].includes(profile?.role) && <PackageListPanel />}
               {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
+              {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
               {viewMode === 'rooms' && !isOverall && <RoomManagementPanel branchId={branchId} />}
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}

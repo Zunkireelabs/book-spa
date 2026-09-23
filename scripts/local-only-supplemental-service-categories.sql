@@ -6,14 +6,15 @@
 -- migration — it exists on staging/production only because it was created directly via the
 -- Supabase dashboard at some point (pre-existing drift, first documented in
 -- migration-184-public-services.sql's comments). Every migration that references it
--- was written and tested against staging/production, where the table already exists — never
--- against a byte-for-byte fresh bootstrap.
+-- (migration-184, migration-194 onward) was written and tested against staging/production, where
+-- the table already exists — never against a byte-for-byte fresh bootstrap.
 --
 -- A fresh local OrbStack bootstrap (supabase/LOCAL_DEV.md) replays schema.sql + every migration
 -- from scratch, so it hits this gap for real: migration-184 fails immediately with
 -- "relation public.service_categories does not exist" the first time this is attempted end to
--- end. This file closes that gap for local dev only — run once, right after rls.sql, before any
--- migration replays.
+-- end. This file closes that gap for local dev only, the same way
+-- scripts/local-only-supplemental-triggers.sql closes migration-002's schema.sql-snapshot gap —
+-- run once, right after rls.sql, before any migration replays.
 --
 -- Schema inferred from src/services/api.js's usage (fetchCategoriesForManagement,
 -- fetchActiveCategories, createCategory, updateCategory, toggleCategoryActive): columns id,
@@ -24,15 +25,16 @@
 -- permissive SELECT for both authenticated and anon, org isolation enforced entirely at the app
 -- layer via .eq('org_id', ...) — not a new pattern introduced here), plus the permissive
 -- manager/admin write policies migration-049-services-manager-write.sql's own comment already
--- describes as live on staging.
+-- describes as live on staging ("service_categories needs NO DB change — its INSERT/UPDATE/
+-- DELETE policies on staging are already permissive (USING true / WITH CHECK true)").
+--
+-- Idempotent: CREATE TABLE IF NOT EXISTS, DROP POLICY IF EXISTS + CREATE POLICY.
 --
 -- No FK on org_id to organizations(id): this supplemental script runs right after rls.sql,
 -- before any migration replays — organizations itself isn't created until migration-009 runs
 -- later in the same bootstrap. This is local-bootstrap-only scaffolding (not a source of truth
 -- for staging/production's real table), so a plain uuid column without the FK is a safe
 -- simplification rather than reordering the whole bootstrap around one constraint.
---
--- Idempotent: CREATE TABLE IF NOT EXISTS, DROP POLICY IF EXISTS + CREATE POLICY.
 
 CREATE TABLE IF NOT EXISTS public.service_categories (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
