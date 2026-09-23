@@ -375,7 +375,11 @@ const ServiceManagementPanel = () => {
                         <span className="flex items-center gap-1.5">
                           {formatNPR(s.effective_price_npr)}
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-caption bg-warning/10 text-warning">
-                            {s.offer_enabled ? (s.offer_type === 'percent' ? `-${s.offer_value}%` : 'Offer') : `-${s.category_offer_percent}%`}
+                            {s.active_campaign_name
+                              ? s.active_campaign_name
+                              : s.offer_enabled
+                              ? (s.offer_type === 'percent' ? `-${s.offer_value}%` : 'Offer')
+                              : `-${s.category_offer_percent}%`}
                           </span>
                         </span>
                       </div>
