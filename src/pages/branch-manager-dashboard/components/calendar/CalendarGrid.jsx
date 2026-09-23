@@ -1028,6 +1028,9 @@ const CalendarGrid = ({
   // ── Column header renderer ────────────────────────────────
   const renderColumnHeader = (col) => {
     const isUnassigned = col.type === 'unassigned';
+    const returnsAtLabel = col.returnsAt
+      ? new Date(col.returnsAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+      : null;
     const transferReason = getTransferReasonText(col);
     const todayBlock = getManualBlockRanges(col, currentDate ?? days?.[0], blockOccurrences)[0];
     const headerTooltip = transferReason
