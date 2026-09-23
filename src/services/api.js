@@ -8421,6 +8421,31 @@ export async function getTherapistCustomerHistory({ branchId, therapistId, fromD
   }
 }
 
+// Booking details dialog "New" badge: does this customer have any earlier non-Cancelled
+// booking than the one being viewed? No customer_id (walk-in/guest) → always first.
+export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate) {
+  try {
+    if (!customerId) {
+      return { data: { isFirstBooking: true }, error: null };
+    }
+
+    const { data: priorVisits, error } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('customer_id', customerId)
+      .neq('id', bookingId)
+      .neq('status', 'Cancelled')
+      .lte('date', bookingDate)
+      .limit(1);
+    if (error) throw error;
+
+    return { data: { isFirstBooking: (priorVisits || []).length === 0 }, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerFirstBookingFlag error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Services tab: per-service Completed/Cancelled/Missed(No Show) counts, avg duration, revenue.
 export async function getTherapistServiceBreakdown({ branchId, therapistId, fromDate, toDate }) {
   try {
