@@ -48,8 +48,6 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [sessionsTotal, setSessionsTotal] = useState('');
-  const [discountType, setDiscountType] = useState('percentage');
-  const [discountValue, setDiscountValue] = useState('');
   const [dueHolderName, setDueHolderName] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
@@ -154,8 +152,6 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     setPackageTypeId(type.id);
     setSessionsTotal(type.default_sessions != null ? String(type.default_sessions) : '');
     setPaidAmount(type.standard_price != null ? String(type.standard_price) : '');
-    setDiscountType('percentage');
-    setDiscountValue('');
     setDueHolderName('');
     if (!expiryTouched) {
       const base = fromIssuedDate ? new Date(fromIssuedDate) : new Date();
@@ -181,19 +177,12 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const paidAmountNum = Number(paidAmount) || 0;
   const sessionsTotalNum = Number(sessionsTotal) || 0;
 
-  // The package type's price is fixed (base_amount) — staff can only discount
-  // it, never override it directly. Mirrors the issue_package RPC's own
-  // clamping so the on-screen "Total due" always matches what the RPC will
-  // actually charge.
+  // The package type's price is already the discounted bulk rate (e.g. 12
+  // sessions for 30% less than paying per-visit) — there's no further
+  // discount to apply on top at issuance. What's owed is simply the type's
+  // price; paidAmountNum falling short of it becomes a due balance.
   const baseAmount = selectedType?.standard_price != null ? Number(selectedType.standard_price) : null;
-  const discountValueNum = Number(discountValue) || 0;
-  const discountAmountNum = baseAmount == null
-    ? 0
-    : discountType === 'percentage'
-      ? Math.round(baseAmount * Math.min(Math.max(discountValueNum, 0), 100) / 100 * 100) / 100
-      : Math.min(Math.max(discountValueNum, 0), baseAmount);
-  const finalAmountNum = baseAmount == null ? null : Math.round((baseAmount - discountAmountNum) * 100) / 100;
-  const dueAmountNum = finalAmountNum == null ? 0 : Math.max(0, Math.round((finalAmountNum - paidAmountNum) * 100) / 100);
+  const dueAmountNum = baseAmount == null ? 0 : Math.max(0, Math.round((baseAmount - paidAmountNum) * 100) / 100);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -203,10 +192,7 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     if (!packageTypeId) { setError('Please select a package type.'); return; }
     if (!linkedCustomerId && !guestName.trim()) { setError('Guest name is required.'); return; }
     if (paidAmountNum < 0) { setError('Paid amount cannot be negative.'); return; }
-    if (baseAmount != null && discountValueNum < 0) { setError('Discount cannot be negative.'); return; }
-    if (baseAmount != null && discountType === 'percentage' && discountValueNum > 100) { setError('Percentage discount cannot exceed 100%.'); return; }
-    if (baseAmount != null && discountType === 'fixed' && discountValueNum > baseAmount) { setError('Fixed discount cannot exceed the package price.'); return; }
-    if (finalAmountNum != null && paidAmountNum > finalAmountNum) { setError('Paid amount cannot exceed the discounted total.'); return; }
+    if (baseAmount != null && paidAmountNum > baseAmount) { setError('Paid amount cannot exceed the package price.'); return; }
     if (dueAmountNum > 0 && !dueHolderName.trim()) { setError('A responsible person is required when there is a due balance.'); return; }
     if (!Number.isFinite(sessionsTotalNum) || sessionsTotalNum <= 0) { setError('Sessions must be greater than zero.'); return; }
     if (!issuedDate || !expiryDate) { setError('Issued and expiry dates are required.'); return; }
@@ -228,8 +214,6 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
       paidAmount: paidAmountNum,
       sessionsTotal: sessionsTotalNum,
       remarks: remarks.trim() || null,
-      discountType: baseAmount != null ? discountType : null,
-      discountValue: baseAmount != null ? discountValueNum : null,
       dueHolderName: dueAmountNum > 0 ? dueHolderName.trim() : null,
       paymentMethod: paidAmountNum > 0 ? paymentMethod : null,
     });
@@ -502,72 +486,16 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                 </div>
               </div>
 
-              {baseAmount != null && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Discount</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {['percentage', 'fixed'].map((t) => (
-                        <label
-                          key={t}
-                          className={`flex items-center justify-center gap-1.5 h-10 rounded-spa border cursor-pointer spa-transition-fast text-xs font-body font-body-medium ${
-                            discountType === t ? 'border-primary bg-primary/5 text-primary' : 'border-border text-text-secondary hover:border-primary/50'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="packageDiscountType"
-                            value={t}
-                            checked={discountType === t}
-                            onChange={() => setDiscountType(t)}
-                            className="sr-only"
-                          />
-                          <span>{t === 'percentage' ? '% Percent' : 'NPR Fixed'}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
-                      {discountType === 'percentage' ? 'Discount (%)' : 'Discount (NPR)'}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={discountType === 'percentage' ? 100 : baseAmount}
-                      step="any"
-                      value={discountValue}
-                      onChange={(e) => setDiscountValue(e.target.value)}
-                      placeholder="0"
-                      className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                {baseAmount != null && (
-                  <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Total due (NPR)</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={formatNPR(finalAmountNum)}
-                      className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-background text-text-secondary cursor-not-allowed"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Paid amount (NPR)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                  />
-                </div>
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Paid amount (NPR)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
               </div>
 
               {paidAmountNum > 0 && (
