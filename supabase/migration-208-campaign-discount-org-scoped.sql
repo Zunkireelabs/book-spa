@@ -21,6 +21,14 @@
 -- lesson migration-197's header already documents for RETURNS TABLE
 -- changes, extended here to parameter-list changes too.
 --
+-- CASCADE is required: services_with_offer_pricing (migration-201),
+-- public_get_services (migration-202), and public_get_bookable_services
+-- (migration-205) all reference the 2-arg signature, so plain DROP
+-- FUNCTION fails with a dependency error. Safe here because
+-- migrations 209-211 (applied immediately after, in the same run)
+-- recreate all three dependents against the new 3-arg signature,
+-- including their original REVOKE/GRANT permissions.
+--
 -- Idempotent: DROP FUNCTION IF EXISTS + CREATE FUNCTION. Portable: no
 -- hardcoded UUIDs.
 --
@@ -28,7 +36,7 @@
 -- FUNCTION body verbatim (after a DROP FUNCTION on the 3-arg signature)
 -- to drop the org scoping.
 
-DROP FUNCTION IF EXISTS public.get_active_campaign_discount_percent(uuid, uuid);
+DROP FUNCTION IF EXISTS public.get_active_campaign_discount_percent(uuid, uuid) CASCADE;
 
 CREATE OR REPLACE FUNCTION public.get_active_campaign_discount_percent(
   p_service_id  uuid,
