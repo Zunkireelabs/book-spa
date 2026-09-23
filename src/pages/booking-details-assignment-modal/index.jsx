@@ -10,7 +10,7 @@ import BookingTimelinePanel from './components/BookingTimelinePanel';
 import CustomerCommunicationPanel from './components/CustomerCommunicationPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist, fetchDueHolderNames } from '../../services/api';
+import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
 import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
@@ -27,6 +27,7 @@ const BookingDetailsAssignmentModal = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [booking, setBooking] = useState(null);
+  const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [therapists, setTherapists] = useState([]);
   const [error, setError] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -62,6 +63,9 @@ const BookingDetailsAssignmentModal = () => {
 
     const transformed = transformBooking(bookingResult.data);
     setBooking(transformed);
+
+    const firstBookingResult = await getCustomerFirstBookingFlag(transformed.customerId, transformed.bookingId, transformed.date, transformed.startTime);
+    setIsFirstBooking(!!firstBookingResult.data?.isFirstBooking);
 
     if (branchId) {
       const therapistsResult = await fetchTherapists(branchId, { date: bookingResult.data?.date });
@@ -306,6 +310,7 @@ const BookingDetailsAssignmentModal = () => {
                               onStatusUpdate={handleStatusUpdate}
                               onRecordPayment={() => setShowPaymentModal(true)}
                               isLoading={isLoading}
+                              isFirstBooking={isFirstBooking}
                             />
                           </div>
 
