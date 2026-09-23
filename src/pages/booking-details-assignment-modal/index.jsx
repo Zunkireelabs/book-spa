@@ -64,7 +64,7 @@ const BookingDetailsAssignmentModal = () => {
     const transformed = transformBooking(bookingResult.data);
     setBooking(transformed);
 
-    const firstBookingResult = await getCustomerFirstBookingFlag(transformed.customerId, transformed.bookingId, transformed.date);
+    const firstBookingResult = await getCustomerFirstBookingFlag(transformed.customerId, transformed.bookingId, transformed.date, transformed.startTime);
     setIsFirstBooking(!!firstBookingResult.data?.isFirstBooking);
 
     if (branchId) {

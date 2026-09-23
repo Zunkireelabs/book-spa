@@ -8719,20 +8719,27 @@ export async function getTherapistCustomerHistory({ branchId, therapistId, fromD
 
 // Booking details dialog "New" badge: does this customer have any earlier non-Cancelled
 // booking than the one being viewed? No customer_id (walk-in/guest) → always first.
-export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate) {
+export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate, bookingStartTime = null) {
   try {
     if (!customerId) {
       return { data: { isFirstBooking: true }, error: null };
     }
 
-    const { data: priorVisits, error } = await supabase
+    let query = supabase
       .from('bookings')
       .select('id')
       .eq('customer_id', customerId)
       .neq('id', bookingId)
-      .neq('status', 'Cancelled')
-      .lte('date', bookingDate)
-      .limit(1);
+      .neq('status', 'Cancelled');
+
+    // With a start time, tiebreak same-day bookings by time so two back-to-back services
+    // booked on a customer's actual first day don't each see the other and both suppress
+    // the badge — only a strictly-earlier same-day booking counts as a prior visit.
+    query = bookingStartTime
+      ? query.or(`date.lt.${bookingDate},and(date.eq.${bookingDate},start_time.lt.${bookingStartTime})`)
+      : query.lte('date', bookingDate);
+
+    const { data: priorVisits, error } = await query.limit(1);
     if (error) throw error;
 
     return { data: { isFirstBooking: (priorVisits || []).length === 0 }, error: null };
