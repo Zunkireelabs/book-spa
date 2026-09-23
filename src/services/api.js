@@ -6279,7 +6279,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -12737,6 +12737,9 @@ export async function updateCampaign({ campaignId, name, message, bannerImageUrl
     }
     if (startDate !== undefined && endDate !== undefined && endDate < startDate) {
       return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+    if (discountPercent !== undefined && (!discountPercent || discountPercent <= 0 || discountPercent >= 100)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Discount percent must be between 1 and 99.' } };
     }
 
     const updatePayload = {};

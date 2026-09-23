@@ -5,6 +5,8 @@ docs
 temp_ss
 .env
 .env.*
+!.env.staging
+!.env.production
 .mcp.json
 .claude
 *.md
