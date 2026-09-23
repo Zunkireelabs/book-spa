@@ -6,7 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -82,6 +82,7 @@ const BookingActionModal = ({
 }) => {
   const { branchId } = useBranch();
   const [activeTab, setActiveTab] = useState('details');
+  const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
   const [therapistSearch, setTherapistSearch] = useState('');
   const [selectedRoom, setSelectedRoom] = useState('');
@@ -196,6 +197,20 @@ const BookingActionModal = ({
     setNewBookingForm({});
     setNewBookingSubmitting(false);
   }, [booking?.bookingId]);
+
+  // "New" badge — this is the modal staff actually reach by clicking a booking card on the
+  // Calendar (booking-details-assignment-modal is a separate route, /:orgSlug/bookings/:id).
+  useEffect(() => {
+    let cancelled = false;
+    if (!booking?.bookingId) {
+      setIsFirstBooking(false);
+      return;
+    }
+    getCustomerFirstBookingFlag(booking.customerId, booking.bookingId, booking.date, booking.startTime).then((result) => {
+      if (!cancelled) setIsFirstBooking(!!result.data?.isFirstBooking);
+    });
+    return () => { cancelled = true; };
+  }, [booking?.bookingId, booking?.customerId, booking?.date, booking?.startTime]);
 
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
@@ -837,8 +852,13 @@ const BookingActionModal = ({
                 <h2 id="booking-modal-title" className="font-heading font-heading-semibold text-base sm:text-lg text-text-primary truncate">
                   Booking Management
                 </h2>
-                <p className="font-caption font-caption-normal text-xs sm:text-sm text-text-secondary truncate">
-                  {booking.id} — {booking.customerName}
+                <p className="font-caption font-caption-normal text-xs sm:text-sm text-text-secondary truncate flex items-center gap-1.5">
+                  <span className="truncate">{booking.id} — {booking.customerName}</span>
+                  {isFirstBooking && (
+                    <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
+                      New
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
