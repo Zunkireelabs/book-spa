@@ -17,8 +17,11 @@ import Icon from '../AppIcon';
 // 0 — e.g. the modal was opened only to collect a bundled previous due) turns
 // the action into an inert "Already settled" label instead of a button that
 // would silently no-op (a $0 SessionPackage tender gets filtered out before
-// ever reaching onConfirm).
-const PackageWalletCard = ({ packages, selectedPackageId = null, redeemDisabled = false, onRedeem, onUndo }) => {
+// ever reaching onConfirm). `splitInProgress` (true when 2+ tender rows are
+// already entered) similarly disables the action — onRedeem always does a
+// full tenders-array replace, which would otherwise silently wipe whatever
+// split payment staff had already typed in.
+const PackageWalletCard = ({ packages, selectedPackageId = null, redeemDisabled = false, splitInProgress = false, onRedeem, onUndo }) => {
   const list = packages || [];
   if (list.length === 0) return null;
 
@@ -58,6 +61,10 @@ const PackageWalletCard = ({ packages, selectedPackageId = null, redeemDisabled 
               ) : redeemDisabled ? (
                 <span className="text-[11px] font-caption text-text-tertiary flex-shrink-0">
                   Booking already settled
+                </span>
+              ) : splitInProgress ? (
+                <span className="text-[11px] font-caption text-text-tertiary flex-shrink-0">
+                  Remove other payment methods first
                 </span>
               ) : (
                 <button

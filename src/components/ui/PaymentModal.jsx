@@ -651,6 +651,7 @@ const PaymentModal = ({
             packages={customerPackages}
             selectedPackageId={selectedPackageTender?.packageId || null}
             redeemDisabled={remaining <= 0}
+            splitInProgress={tenders.length > 1}
             onRedeem={redeemPackage}
             onUndo={undoPackage}
           />
