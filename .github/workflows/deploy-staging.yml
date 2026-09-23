@@ -73,6 +73,7 @@ jobs:
             VITE_ENABLE_CUSTOMER_REFERRALS=true
             VITE_ENABLE_OUTREACH=true
             VITE_ENABLE_PLATFORM_ADMIN=true
+            VITE_ENABLE_PRODUCTS=true
 
   migrate:
     name: Apply Migrations
