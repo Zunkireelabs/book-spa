@@ -11008,6 +11008,52 @@ export async function issuePackage({
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
+    // Look up or create a customer record when the guest wasn't picked from
+    // CustomerAutocomplete's suggestions — same reasoning/mechanism as
+    // createBooking's step 6: a free-typed guest name otherwise never links
+    // to a `customers` row, making that person invisible to customer search
+    // and every other booking flow even though their phone is on file
+    // (guestInfo). Non-blocking: a lookup/create failure never prevents
+    // issuing the package, it just proceeds guest-only like before.
+    if (!customerId && guestName) {
+      try {
+        const phone = toE164(guestInfo);
+        if (orgId && phone) {
+          const { data: existingCustomer } = await supabase
+            .rpc('find_customer_for_booking', { p_org_id: orgId, p_phone: phone, p_email: null })
+            .maybeSingle();
+          if (existingCustomer) {
+            customerId = existingCustomer.id;
+            await supabase
+              .from('customers')
+              .update({ full_name: guestName, phone })
+              .eq('id', customerId);
+          } else {
+            const { data: newCustomer, error: insertCustErr } = await supabase
+              .from('customers')
+              .insert({ org_id: orgId, branch_id: branchId, full_name: guestName, phone })
+              .select('id')
+              .single();
+            if (newCustomer) {
+              customerId = newCustomer.id;
+            } else if (insertCustErr?.code === '23505') {
+              // Lost a race against customers_org_nphone_uniq — re-fetch the winner
+              const { data: winner } = await supabase
+                .from('customers')
+                .select('id')
+                .eq('org_id', orgId)
+                .eq('phone', phone)
+                .limit(1)
+                .maybeSingle();
+              if (winner) customerId = winner.id;
+            }
+          }
+        }
+      } catch (custErr) {
+        console.warn('[API] issuePackage customer lookup/create failed:', custErr.message);
+      }
+    }
+
     const { data, error } = await supabase.rpc('issue_package', {
       p_org_id: orgId,
       p_branch_id: branchId,
