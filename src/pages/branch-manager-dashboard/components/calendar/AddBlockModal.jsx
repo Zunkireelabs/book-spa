@@ -43,7 +43,7 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
   const [preventOnlineBooking, setPreventOnlineBooking] = useState(true);
 
   const [repeat, setRepeat] = useState('');
-  const [interval, setInterval] = useState('1');
+  const [recurrenceIntervalInput, setRecurrenceIntervalInput] = useState('1');
   const [endCondition, setEndCondition] = useState('never');
   const [endDate, setEndDate] = useState('');
   const [endCount, setEndCount] = useState('10');
@@ -73,7 +73,7 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
       description,
       preventOnlineBooking,
       recurrenceFreq: repeat || null,
-      recurrenceInterval: Number(interval) || 1,
+      recurrenceInterval: Number(recurrenceIntervalInput) || 1,
       recurrenceEndDate: repeat && endCondition === 'date' ? endDate : null,
       recurrenceCount: repeat && endCondition === 'count' ? Number(endCount) : null,
     });
@@ -220,9 +220,9 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
               <>
                 <div className="space-y-1">
                   <label className="block font-body font-body-medium text-sm text-text-primary">
-                    Every {interval || 1} {repeat === 'daily' ? 'day(s)' : repeat === 'weekly' ? 'week(s)' : 'month(s)'}
+                    Every {recurrenceIntervalInput || 1} {repeat === 'daily' ? 'day(s)' : repeat === 'weekly' ? 'week(s)' : 'month(s)'}
                   </label>
-                  <Input type="number" min="1" value={interval} onChange={(e) => setInterval(e.target.value)} />
+                  <Input type="number" min="1" value={recurrenceIntervalInput} onChange={(e) => setRecurrenceIntervalInput(e.target.value)} />
                 </div>
 
                 <Select label="Ends" options={END_CONDITION_OPTIONS} value={endCondition} onChange={setEndCondition} />

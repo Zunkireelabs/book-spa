@@ -6187,6 +6187,13 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
         .eq('id', blockId);
       if (capError) throw capError;
 
+      // The new row's occurrence counting restarts at n=0 from occurrenceDate, so a
+      // verbatim-copied recurrence_count would double-count whatever the original series
+      // already consumed before the split — subtract those off.
+      const remainingCount = existing.recurrence_count != null
+        ? Math.max(existing.recurrence_count - expandBlockOccurrences(transformBlockRow(existing), [], existing.block_date, endDateStr).length, 0)
+        : null;
+
       const { error: insError } = await supabase.from('manual_blocks').insert({
         org_id: existing.org_id,
         branch_id: existing.branch_id,
@@ -6200,7 +6207,7 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
         recurrence_freq: existing.recurrence_freq,
         recurrence_interval: existing.recurrence_interval,
         recurrence_end_date: existing.recurrence_end_date,
-        recurrence_count: existing.recurrence_count,
+        recurrence_count: remainingCount,
         series_id: existing.series_id,
       });
       if (insError) throw insError;

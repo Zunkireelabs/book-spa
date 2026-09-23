@@ -512,7 +512,7 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
           style={{ height: 18 }}
           onClick={(e) => {
             e.stopPropagation();
-            onAdd();
+            onAdd(e);
           }}
         >
           <Icon name="Plus" size={12} strokeWidth={3} />
@@ -1366,7 +1366,7 @@ const CalendarGrid = ({
                     count={layout.badge.count}
                     bookings={hidden}
                     onBookingClick={onBookingClick}
-                    onAdd={onEmptySlotClick ? () => {
+                    onAdd={onEmptySlotClick ? (e) => {
                       if (activeDragId) return;
                       // Target the hidden segment's own start time, matching where this button
                       // now visually sits (see earliestStartTime/hiddenTop above) — not the
@@ -1576,7 +1576,7 @@ const CalendarGrid = ({
                             count={layout.badge.count}
                             bookings={hidden}
                             onBookingClick={onBookingClick}
-                            onAdd={onEmptySlotClick ? () => {
+                            onAdd={onEmptySlotClick ? (e) => {
                               if (activeDragId) return;
                               // Target the hidden segment's own start time, matching where this
                               // button now visually sits — not the cluster's overall start.
