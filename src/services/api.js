@@ -12692,6 +12692,9 @@ export async function updateCampaign({ campaignId, name, message, bannerImageUrl
     if (startDate !== undefined && endDate !== undefined && endDate < startDate) {
       return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
     }
+    if (discountPercent !== undefined && (!discountPercent || discountPercent <= 0 || discountPercent >= 100)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Discount percent must be between 1 and 99.' } };
+    }
 
     const updatePayload = {};
     if (name !== undefined) updatePayload.name = name.trim();
