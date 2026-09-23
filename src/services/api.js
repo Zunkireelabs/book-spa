@@ -8771,6 +8771,76 @@ export async function fetchServicesByOrgId(orgId, branchId) {
   }
 }
 
+/**
+ * Fetch services for the public customer booking flow (/:orgSlug/book),
+ * offer-price and campaign-aware. Distinct from fetchServicesByOrgId above
+ * (kept unchanged — still used by staff-authenticated screens like
+ * VoucherDetailModal) because the booking flow is fully anonymous, and
+ * campaign discounts require a SECURITY DEFINER RPC
+ * (public_get_bookable_services, migration-205) to see past the
+ * campaigns table's org-scoped RLS with no session present.
+ */
+export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
+  try {
+    const { data, error } = await supabase.rpc('public_get_bookable_services', {
+      p_org_slug: orgSlug,
+    });
+
+    if (error) throw error;
+
+    const services = (data || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      duration_minutes: s.duration_minutes,
+      price_npr: s.price_npr,
+      description: s.description,
+      image_url: s.image_url,
+      category: s.category_name,
+      effective_price_npr: s.effective_price_npr,
+      is_on_offer: s.is_on_offer,
+      original_price_npr: s.original_price_npr,
+      active_campaign_name: s.active_campaign_name,
+    }));
+
+    if (branchId) {
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('excluded_service_categories')
+        .eq('id', branchId)
+        .single();
+      const excluded = branch?.excluded_service_categories;
+      if (excluded?.length > 0) {
+        return { data: services.filter((s) => !excluded.includes(s.category)), error: null };
+      }
+    }
+
+    return { data: services, error: null };
+  } catch (error) {
+    console.error('[API] fetchBookableServicesByOrgSlug error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch the single currently-active campaign for the public customer
+ * booking flow's banner/popup (public_get_active_campaign, migration-204
+ * — the same anon-safe RPC nuadthainepal.com's website already uses).
+ * Returns null (not an error) when no campaign is currently active.
+ */
+export async function fetchActiveCampaignForBooking(orgSlug) {
+  try {
+    const { data, error } = await supabase.rpc('public_get_active_campaign', {
+      p_org_slug: orgSlug,
+    });
+
+    if (error) throw error;
+    return { data: data?.[0] || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchActiveCampaignForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // Service Categories Management (Manager + Admin)
 // ============================================================

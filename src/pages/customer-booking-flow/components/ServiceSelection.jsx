@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { useTenant } from '../../../contexts/TenantContext';
-import { fetchServicesByOrgId } from '../../../services/api';
+import { fetchBookableServicesByOrgSlug, fetchActiveCampaignForBooking } from '../../../services/api';
 import { enrichServices } from '../../../services/serviceEnrichment';
 import useScrollCollapse from '../../../hooks/useScrollCollapse';
+import CampaignBanner from './CampaignBanner';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) => {
-  const { orgId, loading: tenantLoading } = useTenant();
+  const { orgId, orgSlug, loading: tenantLoading } = useTenant();
+  const [activeCampaign, setActiveCampaign] = useState(null);
   // Collapses the "Choose Service" title/subtitle and the category filter
   // pills as the customer scrolls down, so they don't stay pinned above the
   // service list — reverses smoothly as they scroll back up. The search bar
@@ -72,7 +74,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
         return;
       }
 
-      if (!orgId) {
+      if (!orgId || !orgSlug) {
         setLoading(false);
         setError('Unable to load organization data.');
         return;
@@ -82,7 +84,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
       setError(null);
 
       try {
-        const { data, error: fetchError } = await fetchServicesByOrgId(orgId, selectedBranch?.id);
+        const { data, error: fetchError } = await fetchBookableServicesByOrgSlug(orgSlug, selectedBranch?.id);
         if (cancelled) return;
 
         if (fetchError) {
@@ -104,7 +106,20 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
     loadServices();
     return () => { cancelled = true; };
-  }, [orgId, tenantLoading, selectedBranch?.id]);
+  }, [orgId, orgSlug, tenantLoading, selectedBranch?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadActiveCampaign() {
+      if (tenantLoading || !orgSlug) return;
+      const { data } = await fetchActiveCampaignForBooking(orgSlug);
+      if (!cancelled) setActiveCampaign(data);
+    }
+
+    loadActiveCampaign();
+    return () => { cancelled = true; };
+  }, [orgSlug, tenantLoading]);
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat('en-IN', {
@@ -118,6 +133,8 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
 
   return (
     <div className="space-y-4">
+      {activeCampaign && <CampaignBanner campaign={activeCampaign} />}
+
       {!showStickyBlock && (
         <div className="text-center mb-4">
           <div className="flex items-center justify-center space-x-2 mb-2">
@@ -270,10 +287,20 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch }) 
                       {service.specialty}
                     </span>
                   )}
+                  {service.isOnOffer && (
+                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-success text-success-foreground">
+                      {service.activeCampaignName || 'Offer'}
+                    </span>
+                  )}
                 </div>
-                <div className="absolute top-3 right-3 bg-surface/90 backdrop-blur-sm rounded-spa px-2.5 py-1">
+                <div className="absolute top-3 right-3 bg-surface/90 backdrop-blur-sm rounded-spa px-2.5 py-1 flex items-baseline gap-1.5">
+                  {service.isOnOffer && service.originalPrice != null && (
+                    <span className="font-body font-body-normal text-xs text-text-secondary line-through">
+                      {formatPrice(service.originalPrice)}
+                    </span>
+                  )}
                   <span className="font-heading font-heading-semibold text-base text-text-primary">
-                    {formatPrice(service.price)}
+                    {formatPrice(service.isOnOffer && service.effectivePrice != null ? service.effectivePrice : service.price)}
                   </span>
                 </div>
               </div>
