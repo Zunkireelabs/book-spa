@@ -167,6 +167,10 @@ const ServiceManagementPanel = () => {
         setFormError('Offer percentage must be less than 100.');
         return;
       }
+      if (formData.offerType === 'fixed' && offerValueNum >= price) {
+        setFormError('Fixed offer price must be less than the regular price.');
+        return;
+      }
     }
 
     setSaving(true);
@@ -549,15 +553,21 @@ const ServiceManagementPanel = () => {
                       min="1"
                     />
                     {formData.priceNpr && formData.offerValue && Number(formData.offerValue) > 0 && (
-                      <p className="font-caption text-xs text-text-secondary">
-                        Customers will see:{' '}
-                        <span className="line-through text-text-tertiary">{formatNPR(formData.priceNpr)}</span>{' '}
-                        {formatNPR(
-                          formData.offerType === 'percent'
-                            ? Number(formData.priceNpr) * (1 - Number(formData.offerValue) / 100)
-                            : Number(formData.offerValue)
-                        )}
-                      </p>
+                      formData.offerType === 'fixed' && Number(formData.offerValue) >= Number(formData.priceNpr) ? (
+                        <p className="font-caption text-xs text-error">
+                          Flat price must be less than the regular price ({formatNPR(formData.priceNpr)}).
+                        </p>
+                      ) : (
+                        <p className="font-caption text-xs text-text-secondary">
+                          Customers will see:{' '}
+                          <span className="line-through text-text-tertiary">{formatNPR(formData.priceNpr)}</span>{' '}
+                          {formatNPR(
+                            formData.offerType === 'percent'
+                              ? Number(formData.priceNpr) * (1 - Number(formData.offerValue) / 100)
+                              : Number(formData.offerValue)
+                          )}
+                        </p>
+                      )
                     )}
                   </div>
                 ) : (
