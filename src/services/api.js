@@ -12354,7 +12354,7 @@ export async function fetchProductBranchStock(productId) {
  * migration-213). branchId narrows to transfers where that branch was
  * either side (source or destination); omit for the full org history.
  */
-export async function fetchProductStockTransfers({ productId, branchId, limit = 50 } = {}) {
+export async function fetchProductStockTransfers({ productId, branchId, from, to, limit = 50 } = {}) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -12364,13 +12364,21 @@ export async function fetchProductStockTransfers({ productId, branchId, limit = 
 
     let query = supabase
       .from('product_stock_transfers')
-      .select('id, product_id, from_branch_id, to_branch_id, quantity, note, transferred_by, created_at')
+      .select(`
+        id, product_id, from_branch_id, to_branch_id, quantity, note, transferred_by, created_at,
+        products(name),
+        from_branch:branches!product_stock_transfers_from_branch_id_fkey(name),
+        to_branch:branches!product_stock_transfers_to_branch_id_fkey(name),
+        users!product_stock_transfers_transferred_by_fkey(full_name)
+      `)
       .eq('org_id', profile.org_id)
       .order('created_at', { ascending: false })
       .limit(limit);
 
     if (productId) query = query.eq('product_id', productId);
     if (branchId) query = query.or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`);
+    if (from) query = query.gte('created_at', `${from}T00:00:00`);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
 
     const { data, error } = await query;
     if (error) throw error;

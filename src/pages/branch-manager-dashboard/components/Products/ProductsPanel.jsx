@@ -20,6 +20,7 @@ import SellProductModal from './SellProductModal';
 import ProductDetailDrawer from './ProductDetailDrawer';
 import ProductCategoryManagerModal from './ProductCategoryManagerModal';
 import ProductSalesReportPanel from './ProductSalesReportPanel';
+import StockTransferReportPanel from './StockTransferReportPanel';
 import StockTransferModal from './StockTransferModal';
 
 function formatNPR(amount) {
@@ -226,7 +227,7 @@ const ProductsPanel = () => {
   return (
     <div className="space-y-6">
       <div className="flex gap-1 border-b border-border">
-        {[{ id: 'catalog', label: 'Products' }, { id: 'report', label: 'Sales Report' }].map((tab) => (
+        {[{ id: 'catalog', label: 'Products' }, { id: 'report', label: 'Sales Report' }, { id: 'transfers', label: 'Stock Transfers' }].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -243,6 +244,8 @@ const ProductsPanel = () => {
 
       {activeTab === 'report' ? (
         <ProductSalesReportPanel />
+      ) : activeTab === 'transfers' ? (
+        <StockTransferReportPanel />
       ) : (
       <div className="space-y-4">
         <div className="flex items-center justify-between">

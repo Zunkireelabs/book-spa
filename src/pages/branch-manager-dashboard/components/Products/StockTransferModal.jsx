@@ -28,6 +28,7 @@ const StockTransferModal = ({ product, onClose, onTransferred }) => {
   const [quantity, setQuantity] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -166,20 +167,14 @@ const StockTransferModal = ({ product, onClose, onTransferred }) => {
             </div>
 
             {history.length > 0 && (
-              <div className="space-y-1">
-                <p className="font-caption text-xs font-medium uppercase tracking-wide text-text-secondary">Recent activity</p>
-                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                  {history.map((t) => (
-                    <div key={t.id} className="text-xs text-text-secondary flex items-center justify-between gap-2">
-                      <span className="truncate">
-                        {t.from_branch_id ? branchName(t.from_branch_id) : 'New stock'} → {branchName(t.to_branch_id)}
-                      </span>
-                      <span className="font-data text-text-primary shrink-0">+{t.quantity}</span>
-                      <span className="shrink-0 text-text-tertiary">{formatDateTime(t.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowHistory(true)}
+                className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary spa-transition-fast"
+              >
+                <Icon name="History" size={14} />
+                View recent activity ({history.length})
+              </button>
             )}
           </>
         )}
@@ -191,6 +186,31 @@ const StockTransferModal = ({ product, onClose, onTransferred }) => {
           </Button>
         </div>
       </div>
+
+      {showHistory && createPortal(
+        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setShowHistory(false); }}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm max-h-[80vh] overflow-y-auto p-6 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h4 className="font-heading font-heading-semibold text-base text-text-primary">Recent Activity</h4>
+              <button onClick={() => setShowHistory(false)} className="p-1 rounded hover:bg-background">
+                <Icon name="X" size={18} className="text-text-secondary" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {history.map((t) => (
+                <div key={t.id} className="text-xs text-text-secondary flex items-center justify-between gap-2">
+                  <span className="truncate">
+                    {t.from_branch_id ? branchName(t.from_branch_id) : 'New stock'} → {branchName(t.to_branch_id)}
+                  </span>
+                  <span className="font-data text-text-primary shrink-0">+{t.quantity}</span>
+                  <span className="shrink-0 text-text-tertiary">{formatDateTime(t.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>,
     document.body
   );

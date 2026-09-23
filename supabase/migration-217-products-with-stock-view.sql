@@ -11,6 +11,13 @@
 -- own org-scoped SELECT policies for the querying role, same as
 -- services_with_offer_pricing's note (migration-196).
 --
+-- Explicit column list rather than p.* deliberately: migration-218 (right
+-- after this one) drops products.stock_quantity, and a p.* view would
+-- have dragged that column in and blocked the DROP with a dependency
+-- error — the same class of mistake migration-208's header already
+-- documents learning from (#301's CASCADE fix), avoided here by simply
+-- not creating the dependency in the first place.
+--
 -- Idempotent: CREATE OR REPLACE VIEW. Portable: no hardcoded UUIDs.
 --
 -- Reversible (manual):
@@ -18,7 +25,8 @@
 
 CREATE OR REPLACE VIEW public.products_with_stock AS
 SELECT
-  p.*,
+  p.id, p.org_id, p.name, p.description, p.category, p.price_npr,
+  p.image_url, p.is_active, p.track_stock, p.created_at,
   CASE WHEN p.track_stock THEN COALESCE(SUM(pbs.quantity), 0) ELSE NULL END AS total_stock
 FROM public.products p
 LEFT JOIN public.product_branch_stock pbs ON pbs.product_id = p.id
