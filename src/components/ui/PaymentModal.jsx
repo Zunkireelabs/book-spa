@@ -283,25 +283,15 @@ const PaymentModal = ({
 
   const packagesUsable = customerPackages.length > 0;
 
-  // Unlike ReferralVoucher (still never in extraLeaf — no pre-fetched list to
-  // build leaves from), each active package IS a known, pre-fetched row, so
-  // it can get its own dropdown leaf carrying the packageId in its value
-  // (`SessionPackage:<packageId>`) — same "leaf reveals/selects a specific
-  // instance" shape as the Voucher leaf's manual-search reveal. Only offered
-  // while this booking still owes something (mirrors the old redeemDisabled
-  // gate) — redeeming against an already-settled booking would just produce
-  // a $0 tender that gets filtered out before ever reaching onConfirm.
+  // Deliberately NOT in any extraLeaf array — a SessionPackage tender always
+  // needs a specific packageId, and picking it from the raw payment-method
+  // dropdown proved confusing to staff (buried among Cash/Card/etc.). The
+  // package card's own "Claim" button is the single entry point instead —
+  // same reasoning as ReferralVoucher (also never in extraLeaf): the only
+  // way to create either tender type is its own card's action button
+  // (applyReferralVoucher / redeemPackage below), which sets every required
+  // field at once.
   const selectedPackageTender = tenders.find((t) => t.paymentMode === 'SessionPackage') || null;
-  // redeemPackage() below does a full setTenders([...]) replace — correct
-  // when there's a single tender row, but it would silently wipe an
-  // in-progress split payment (2+ rows). Hide the option once a split is
-  // started rather than letting it destroy the other rows.
-  const packageLeaves = remaining > 0 && tenders.length <= 1
-    ? customerPackages.map((pkg) => ({
-        value: `SessionPackage:${pkg.packageId}`,
-        label: `Package — ${pkg.packageName} (${pkg.sessionsRemaining} left)`,
-      }))
-    : [];
 
   const redeemPackage = (pkg) => {
     setTenders([{
@@ -312,19 +302,8 @@ const PaymentModal = ({
     }]);
   };
 
-  // Shared onChange for every plain PaymentMethodSelector row — a
-  // SessionPackage leaf's value needs decoding into a full-replace
-  // redeemPackage() call (same "replace the whole array" requirement as
-  // picking Membership/a voucher does NOT have, since those add to one row);
-  // anything else is a normal paymentMode update on just that row.
-  const handleMethodChange = (i, v) => {
-    if (typeof v === 'string' && v.startsWith('SessionPackage:')) {
-      const packageId = v.slice('SessionPackage:'.length);
-      const pkg = customerPackages.find((p) => p.packageId === packageId);
-      if (pkg) redeemPackage(pkg);
-      return;
-    }
-    updateTender(i, { paymentMode: v });
+  const undoPackage = () => {
+    setTenders([{ amount: String(grandTotal || ''), paymentMode: firstLeafValue(PAYMENT_TREE) }]);
   };
 
   // --- pending self-service referral reward this customer earned as a referrer
@@ -671,6 +650,9 @@ const PaymentModal = ({
           <PackageWalletCard
             packages={customerPackages}
             selectedPackageId={selectedPackageTender?.packageId || null}
+            redeemDisabled={remaining <= 0}
+            onRedeem={redeemPackage}
+            onUndo={undoPackage}
           />
 
           {/* Split payment — one or more tenders, even when a previous due is bundled in */}
@@ -713,9 +695,9 @@ const PaymentModal = ({
                         <div className="w-36 flex-shrink-0">
                           <PaymentMethodSelector
                             paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, ...packageLeaves]}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
                             value={t.paymentMode}
-                            onChange={(v) => handleMethodChange(i, v)}
+                            onChange={(v) => updateTender(i, { paymentMode: v })}
                             size="md"
                           />
                         </div>
@@ -767,9 +749,9 @@ const PaymentModal = ({
                         <div className="w-36 flex-shrink-0">
                           <PaymentMethodSelector
                             paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, ...packageLeaves]}
+                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
                             value={t.paymentMode}
-                            onChange={(v) => handleMethodChange(i, v)}
+                            onChange={(v) => updateTender(i, { paymentMode: v })}
                             size="md"
                           />
                         </div>
@@ -858,12 +840,13 @@ const PaymentModal = ({
                   );
                 }
 
-                // A SessionPackage tender is only ever created via handleMethodChange
-                // decoding a `SessionPackage:<packageId>` dropdown leaf into a
-                // redeemPackage() call, which always sets packageId + a locked,
-                // full-covering amount in the same call — so packageId is always
-                // present here. Rendered as a locked summary row, never a free-typed
-                // amount, since a session redemption is never partial.
+                // A SessionPackage tender is only ever created by PackageWalletCard's
+                // "Claim" button (redeemPackage below), which always sets packageId +
+                // a locked, full-covering amount in the same call — it's never
+                // independently selectable from the dropdown (not in any extraLeaf
+                // array, same as ReferralVoucher), so packageId is always present
+                // here. Rendered as a locked summary row, never a free-typed amount,
+                // since a session redemption is never partial.
                 if (isSessionPackage) {
                   return (
                     <div key={i} className="flex items-center gap-2">
@@ -890,9 +873,9 @@ const PaymentModal = ({
                       <div className="w-36 flex-shrink-0">
                         <PaymentMethodSelector
                           paymentMethods={paymentMethods}
-                          extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf, ...packageLeaves]}
+                          extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
                           value={t.paymentMode}
-                          onChange={(v) => handleMethodChange(i, v)}
+                          onChange={(v) => updateTender(i, { paymentMode: v })}
                           size="md"
                         />
                       </div>
