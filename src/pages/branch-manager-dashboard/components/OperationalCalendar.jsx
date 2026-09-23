@@ -144,6 +144,26 @@ const OperationalCalendar = ({ branchId }) => {
     setModalLoading(false);
   }, []);
 
+  // Jump straight to another booking's own dialog — used by BookingActionModal's
+  // Related-services/Other-unpaid-bookings "view" affordance.
+  const handleViewBooking = useCallback(async (bookingId) => {
+    if (!bookingId) return;
+    setModalLoading(true);
+    setModalOpen(true);
+
+    const result = await fetchBookingById(bookingId);
+
+    if (result.error) {
+      setModalOpen(false);
+      setModalLoading(false);
+      showToast(result.error.message || 'Failed to load booking.', 'error');
+      return;
+    }
+
+    setSelectedBooking(transformBooking(result.data));
+    setModalLoading(false);
+  }, []);
+
   const handleModalClose = useCallback(() => {
     setModalOpen(false);
     setSelectedBooking(null);
@@ -482,6 +502,7 @@ const OperationalCalendar = ({ branchId }) => {
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         userRole={profile?.role || 'staff'}
+        onViewBooking={handleViewBooking}
       />
 
       {/* Toast notification */}

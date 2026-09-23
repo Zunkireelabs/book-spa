@@ -2907,6 +2907,7 @@ const OperationalCalendar = ({ branchId }) => {
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}
+        onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
       />
 
       {/* Toast */}

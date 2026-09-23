@@ -50,6 +50,17 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
     setShowActionModal(true);
   };
 
+  // Jump straight to another booking's own dialog — used by BookingActionModal's
+  // Related-services/Other-unpaid-bookings "view" affordance, which only has an id.
+  const handleViewBooking = async (bookingId) => {
+    if (!bookingId) return;
+    const result = await fetchBookingById(bookingId);
+    if (!result.error) {
+      setSelectedBooking(transformBooking(result.data));
+      setShowActionModal(true);
+    }
+  };
+
   // Refetch and replace the open modal's booking when the payment just recorded
   // was for it, so the wallet balance/status shown update immediately instead of
   // requiring the modal to be closed and reopened.
@@ -402,6 +413,7 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
         onGroupPaymentRecorded={handleGroupPaymentRecordedWrapper}
         onApplyDiscount={onApplyDiscount}
         userRole={userRole}
+        onViewBooking={handleViewBooking}
       />
     </>
   );
