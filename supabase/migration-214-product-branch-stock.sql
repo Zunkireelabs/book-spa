@@ -1,4 +1,4 @@
--- Migration 212: product_branch_stock (additive, REVERSIBLE)
+-- Migration 214: product_branch_stock (additive, REVERSIBLE)
 --
 -- Splits product stock from a single org-wide number (products.stock_quantity,
 -- migration-188) into one row per (product, branch) — a business with
@@ -20,7 +20,7 @@
 -- than an ambiguous missing number.
 --
 -- No direct INSERT/UPDATE/DELETE policy — every write goes through
--- transfer_product_stock() (migration-214), the same "catalog table with
+-- transfer_product_stock() (migration-216), the same "catalog table with
 -- normal RLS, but the actual balance-changing table is RPC-only" shape
 -- migration-189 (product_sales) and this codebase's vouchers/packages
 -- already use, so two staff can never race an update to the same row
@@ -53,5 +53,5 @@ CREATE POLICY "Users can read own org product_branch_stock"
   );
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('212', 'product-branch-stock')
+VALUES ('214', 'product-branch-stock')
 ON CONFLICT (version) DO NOTHING;

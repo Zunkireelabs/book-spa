@@ -1,7 +1,7 @@
--- Migration 216: refund_product_sale() restores branch-scoped stock
+-- Migration 218: refund_product_sale() restores branch-scoped stock
 -- (additive, REVERSIBLE)
 --
--- Part of the multi-branch stock rework (migration-212/215):
+-- Part of the multi-branch stock rework (migration-214/217):
 -- refund_product_sale (migration-192) used to restore the refunded
 -- quantity to products.stock_quantity — the single org-wide number. Now
 -- restores it to the specific branch the original sale was made at
@@ -79,5 +79,5 @@ REVOKE ALL ON FUNCTION public.refund_product_sale(uuid, text) FROM anon;
 GRANT EXECUTE ON FUNCTION public.refund_product_sale(uuid, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('216', 'refund-product-sale-branch-stock')
+VALUES ('218', 'refund-product-sale-branch-stock')
 ON CONFLICT (version) DO NOTHING;

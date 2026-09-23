@@ -1,6 +1,6 @@
--- Migration 213: product_stock_transfers (additive, REVERSIBLE)
+-- Migration 215: product_stock_transfers (additive, REVERSIBLE)
 --
--- Permanent audit ledger for every product_branch_stock change (migration-212)
+-- Permanent audit ledger for every product_branch_stock change (migration-214)
 -- — mirrors staff_transfers' shape (migration-038) for the same reason:
 -- moving stock between branches is a real business event both the sending
 -- and receiving branch need to be able to look back on, not just a net
@@ -17,7 +17,7 @@
 -- `from_branch_id = X OR to_branch_id = X` either way.
 --
 -- No direct INSERT policy — every row is written by
--- transfer_product_stock() (migration-214) in the same transaction as the
+-- transfer_product_stock() (migration-216) in the same transaction as the
 -- balance change it records, so the ledger can never drift from the
 -- actual stock numbers.
 --
@@ -53,5 +53,5 @@ CREATE POLICY "Users can read own org product_stock_transfers"
   USING (org_id = get_user_org_id());
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('213', 'product-stock-transfers')
+VALUES ('215', 'product-stock-transfers')
 ON CONFLICT (version) DO NOTHING;

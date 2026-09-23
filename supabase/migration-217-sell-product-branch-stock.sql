@@ -1,7 +1,7 @@
--- Migration 215: sell_product() reads/decrements branch-scoped stock
+-- Migration 217: sell_product() reads/decrements branch-scoped stock
 -- (additive, REVERSIBLE)
 --
--- Part of the multi-branch stock rework (migration-212/214): sell_product
+-- Part of the multi-branch stock rework (migration-214/216): sell_product
 -- (migration-190) used to lock and decrement products.stock_quantity — a
 -- single org-wide number a sale at any branch drained regardless of which
 -- branch actually made the sale. Now locks and decrements the specific
@@ -115,5 +115,5 @@ REVOKE ALL ON FUNCTION public.sell_product(uuid, integer, text, uuid, uuid, text
 GRANT EXECUTE ON FUNCTION public.sell_product(uuid, integer, text, uuid, uuid, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('215', 'sell-product-branch-stock')
+VALUES ('217', 'sell-product-branch-stock')
 ON CONFLICT (version) DO NOTHING;

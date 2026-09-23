@@ -1,13 +1,13 @@
--- Migration 214: transfer_product_stock() (additive, REVERSIBLE)
+-- Migration 216: transfer_product_stock() (additive, REVERSIBLE)
 --
--- The one write path onto product_branch_stock (migration-212) — no
+-- The one write path onto product_branch_stock (migration-214) — no
 -- direct table write policy exists, matching migration-190's
 -- (sell_product) relationship to product_sales. Handles both cases with
 -- one function: a transfer between two branches (p_from_branch_id set) or
 -- new stock arriving from outside the business, e.g. a supplier delivery
 -- (p_from_branch_id NULL) — same balance-changing logic either way, just
 -- skips the "decrement source" step when there's no source. Every call
--- writes exactly one row to product_stock_transfers (migration-213) in
+-- writes exactly one row to product_stock_transfers (migration-215) in
 -- the same transaction, so the ledger can never drift from the actual
 -- stock numbers.
 --
@@ -147,5 +147,5 @@ REVOKE ALL ON FUNCTION public.transfer_product_stock(uuid, uuid, integer, uuid, 
 GRANT EXECUTE ON FUNCTION public.transfer_product_stock(uuid, uuid, integer, uuid, text) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('214', 'transfer-product-stock')
+VALUES ('216', 'transfer-product-stock')
 ON CONFLICT (version) DO NOTHING;

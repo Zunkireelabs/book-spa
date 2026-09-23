@@ -1,11 +1,11 @@
--- Migration 218: drop products.stock_quantity (additive*, REVERSIBLE)
+-- Migration 220: drop products.stock_quantity (additive*, REVERSIBLE)
 --
 -- *Additive in spirit (nothing else depends on this column anymore) but
 -- technically a DROP COLUMN — the last step of the multi-branch stock
--- rework (migration-212 through 217). Every reader/writer of stock now
+-- rework (migration-214 through 219). Every reader/writer of stock now
 -- goes through product_branch_stock (per-branch) or products_with_stock
--- (the all-branches total) instead — sell_product (migration-215) and
--- refund_product_sale (migration-216) were already moved off this column
+-- (the all-branches total) instead — sell_product (migration-217) and
+-- refund_product_sale (migration-218) were already moved off this column
 -- in the migrations immediately before this one, so nothing references it
 -- by the time this runs.
 --
@@ -30,5 +30,5 @@
 ALTER TABLE public.products DROP COLUMN IF EXISTS stock_quantity;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('218', 'drop-products-stock-quantity')
+VALUES ('220', 'drop-products-stock-quantity')
 ON CONFLICT (version) DO NOTHING;
