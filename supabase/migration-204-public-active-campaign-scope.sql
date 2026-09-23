@@ -1,24 +1,24 @@
--- Migration 196: public_get_active_campaign() scope info (additive, REVERSIBLE)
+-- Migration 204: public_get_active_campaign() scope info (additive, REVERSIBLE)
 --
 -- Adds applies_to (a comma-joined list of the campaign's linked category
 -- names + individually-linked service names) so the website banner can
 -- tell visitors what the discount actually covers, not just its name and
 -- percentage. Follows this repo's convention of extending an already-
 -- committed migration with a new one rather than editing it in place
--- (migration-195 is committed history, not touched here).
+-- (migration-203 is committed history, not touched here).
 --
 -- Uses string_agg over a UNION of campaign_categories (joined to
 -- service_categories for the display name) and campaign_services (joined
 -- to services), deduplicated, alphabetically ordered for a stable label.
 --
--- DROP FUNCTION first, same RETURNS TABLE lesson as migration-189/194/195 —
+-- DROP FUNCTION first, same RETURNS TABLE lesson as migration-197/202/203 —
 -- CREATE OR REPLACE cannot add a column to an existing function's return
 -- shape.
 --
 -- Idempotent: CREATE OR REPLACE FUNCTION, REVOKE/GRANT re-runnable.
 -- Portable: no hardcoded UUIDs; org resolved by slug.
 --
--- Reversible (manual): re-apply migration-195's CREATE OR REPLACE FUNCTION
+-- Reversible (manual): re-apply migration-203's CREATE OR REPLACE FUNCTION
 -- body verbatim (after a DROP FUNCTION public.public_get_active_campaign(text))
 -- to drop the applies_to column.
 
@@ -78,5 +78,5 @@ REVOKE ALL ON FUNCTION public.public_get_active_campaign(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.public_get_active_campaign(text) TO anon;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('196', 'public-active-campaign-scope')
+VALUES ('204', 'public-active-campaign-scope')
 ON CONFLICT (version) DO NOTHING;

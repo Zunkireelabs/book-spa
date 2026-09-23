@@ -1,10 +1,10 @@
--- Migration 188: services_with_offer_pricing view (additive, REVERSIBLE)
+-- Migration 196: services_with_offer_pricing view (additive, REVERSIBLE)
 --
 -- Dashboard-facing view so ServiceManagementPanel / fetchServicesForManagement
 -- never hand-rolls the category-join + offer-pricing calculation in JS. Wraps
 -- services with its category's offer fields and the shared
--- compute_service_offer_pricing() result (migration-187) via a LATERAL join,
--- mirroring the same join shape public_get_services (migration-189) uses.
+-- compute_service_offer_pricing() result (migration-195) via a LATERAL join,
+-- mirroring the same join shape public_get_services (migration-197) uses.
 --
 -- RLS: this view has no policies of its own — Postgres evaluates the
 -- underlying services/service_categories row-level policies for the
@@ -35,5 +35,5 @@ CROSS JOIN LATERAL public.compute_service_offer_pricing(
 ) p;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('188', 'services-with-offer-pricing-view')
+VALUES ('196', 'services-with-offer-pricing-view')
 ON CONFLICT (version) DO NOTHING;

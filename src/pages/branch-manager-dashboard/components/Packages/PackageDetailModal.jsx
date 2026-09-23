@@ -174,12 +174,44 @@ const PackageDetailModal = ({ packageId, onClose, onChanged: _onChanged }) => {
                     <Icon name={cfg.icon} size={11} />
                     <span>{cfg.label}</span>
                   </span>
-                  <span className="font-caption text-xs text-text-tertiary">Paid {formatNPR(pkg.paidAmount)}</span>
+                  <span className="font-caption text-xs text-text-tertiary">
+                    Paid {formatNPR(pkg.paidAmount)}{pkg.paymentMethod ? ` (${pkg.paymentMethod})` : ''}
+                  </span>
                 </div>
                 {pkg.lastRedeemedDate && (
                   <span className="font-caption text-xs text-text-tertiary">Last used {formatDate(pkg.lastRedeemedDate)}</span>
                 )}
               </div>
+
+              {/* Financials — price, any discount, and an outstanding due balance if one exists */}
+              {pkg.baseAmount != null && (
+                <div className="bg-background border border-border rounded-spa p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-caption text-xs text-text-tertiary">Price</span>
+                    <span className="font-data font-data-normal text-xs text-text-primary">{formatNPR(pkg.baseAmount)}</span>
+                  </div>
+                  {pkg.discountAmount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="font-caption text-xs text-text-tertiary">
+                        Discount {pkg.discountType === 'percentage' ? `(${pkg.discountValue}%)` : ''}
+                      </span>
+                      <span className="font-data font-data-normal text-xs text-warning">-{formatNPR(pkg.discountAmount)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="font-body font-body-medium text-xs text-text-secondary">Total due</span>
+                    <span className="font-data font-data-semibold text-xs text-text-primary">{formatNPR(pkg.finalAmount)}</span>
+                  </div>
+                  {pkg.dueAmount > 0 && (
+                    <div className="flex items-center justify-between pt-1.5 border-t border-border">
+                      <span className="font-body font-body-medium text-xs text-warning">
+                        Due{pkg.dueHolderName ? ` — ${pkg.dueHolderName}` : ''}
+                      </span>
+                      <span className="font-data font-data-semibold text-xs text-warning">{formatNPR(pkg.dueAmount)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Redemption history */}
               <div>

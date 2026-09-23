@@ -1,22 +1,22 @@
--- Migration 190: campaigns table (additive, REVERSIBLE)
+-- Migration 198: campaigns table (additive, REVERSIBLE)
 --
 -- A named, dated, client-curated promotional event (e.g. "Dashain Offer,"
 -- "Father's Day Offer") — distinct from the per-service/category offer
 -- toggle in migrations 185/186. A campaign only ever applies to the
--- specific services/categories explicitly linked to it (migration-191's
+-- specific services/categories explicitly linked to it (migration-199's
 -- campaign_services/campaign_categories), runs for a date window instead
 -- of a manual on/off toggle, and is meant to be shown prominently on the
--- website (banner + popup, migration-195's public_get_active_campaign),
+-- website (banner + popup, migration-203's public_get_active_campaign),
 -- unlike the quiet per-row badge the base offer system produces.
 --
 -- Percent-only, matching the category-level offer's existing reasoning
--- (migration-186): a campaign can span several differently-priced
+-- (migration-194): a campaign can span several differently-priced
 -- services, so a single flat override number can't apply uniformly.
 --
 -- is_active is a staff master switch independent of the date window — a
 -- campaign is only actually "live" when BOTH is_active = true AND today
 -- falls within [start_date, end_date] (checked inline wherever pricing is
--- computed, migration-192 onward — no cron, matching how vouchers/
+-- computed, migration-200 onward — no cron, matching how vouchers/
 -- memberships already check their own date ranges at read time instead of
 -- a background job).
 --
@@ -26,7 +26,7 @@
 -- predates org multi-tenancy and was the subject of a real cross-org leak
 -- fix, migration-093-fix-cross-org-rls-leak.sql). No anon policy on this
 -- table at all — public website access goes through a SECURITY DEFINER
--- RPC instead (migration-195), never a direct table grant.
+-- RPC instead (migration-203), never a direct table grant.
 --
 -- Idempotent: CREATE TABLE IF NOT EXISTS, DROP POLICY IF EXISTS + CREATE
 -- POLICY. Portable: no hardcoded UUIDs.
@@ -89,5 +89,5 @@ CREATE POLICY "Manager and admin can delete org campaigns"
   );
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('190', 'campaigns-table')
+VALUES ('198', 'campaigns-table')
 ON CONFLICT (version) DO NOTHING;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { dedupeTransfersByKey } from './transferDedup';
+import { renderTemplatePreview } from './api';
 
 // Regression coverage for the getCalendarBookings dedup fix: a therapist transferred
 // out and back twice in the same viewed range must collapse to one calendar column,
@@ -97,5 +98,41 @@ describe('getCalendarBookings transferredIn column for an already-returned visit
       .map(t => ({ ...t.therapist, transferredIn: true }));
 
     expect(transferredInTherapists).toHaveLength(0);
+  });
+});
+
+describe('renderTemplatePreview with a layout', () => {
+  it('wraps the body in the layout and substitutes {{content}} before {{customer_name}}', () => {
+    const template = { subject: 'Hi {{customer_name}}', body: '<p>Welcome back, {{customer_name}}!</p>' };
+    const layoutHtml = '<div class="wrapper">{{content}}</div>';
+    const result = renderTemplatePreview(template, 'Jane Doe', layoutHtml);
+    expect(result.body).toBe('<div class="wrapper"><p>Welcome back, Jane Doe!</p></div>');
+    expect(result.subject).toBe('Hi Jane Doe');
+  });
+
+  it('falls back to the raw body when no layout is passed (existing behavior)', () => {
+    const template = { subject: 'Hi {{customer_name}}', body: '<p>Hi {{customer_name}}</p>' };
+    const result = renderTemplatePreview(template, 'Jane Doe');
+    expect(result.body).toBe('<p>Hi Jane Doe</p>');
+  });
+
+  it('falls back to the raw body when layoutHtml is explicitly null', () => {
+    const template = { subject: '', body: 'plain {{customer_name}} text' };
+    const result = renderTemplatePreview(template, 'Jane Doe', null);
+    expect(result.body).toBe('plain Jane Doe text');
+  });
+
+  it('substitutes {{org_name}} in a layout header, after {{content}} is slotted in', () => {
+    const template = { subject: 'Hi {{customer_name}} from {{org_name}}', body: '<p>Hi {{customer_name}}</p>' };
+    const layoutHtml = '<div><span>{{org_name}}</span>{{content}}</div>';
+    const result = renderTemplatePreview(template, 'Jane Doe', layoutHtml, 'DemoSpa');
+    expect(result.body).toBe('<div><span>DemoSpa</span><p>Hi Jane Doe</p></div>');
+    expect(result.subject).toBe('Hi Jane Doe from DemoSpa');
+  });
+
+  it('falls back to "Your Business" when no orgName is passed', () => {
+    const template = { subject: '', body: '{{org_name}}' };
+    const result = renderTemplatePreview(template, 'Jane Doe', null);
+    expect(result.body).toBe('Your Business');
   });
 });

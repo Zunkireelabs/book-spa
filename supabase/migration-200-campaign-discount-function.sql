@@ -1,4 +1,4 @@
--- Migration 192: get_active_campaign_discount_percent() (additive, REVERSIBLE)
+-- Migration 200: get_active_campaign_discount_percent() (additive, REVERSIBLE)
 --
 -- The one function the whole campaigns feature hinges on. Given a service
 -- (and its category), returns the discount percent from the
@@ -13,11 +13,11 @@
 -- wins over one that only links the service's category. This function
 -- deliberately does NOT consider the service's own manual offer or its
 -- category's manual offer (migrations 185/186/187) — that comparison
--- happens one layer up, in services_with_offer_pricing (migration-193),
+-- happens one layer up, in services_with_offer_pricing (migration-201),
 -- which prefers this function's result over compute_service_offer_pricing's
 -- when both are available. Kept separate rather than folded into
 -- compute_service_offer_pricing itself so that function (already shipped
--- and tested, migration-187) stays untouched.
+-- and tested, migration-195) stays untouched.
 --
 -- If more than one active campaign links the same service (directly, or
 -- via more than one of its... a service only has one category, so this can
@@ -60,5 +60,5 @@ AS $$
 $$;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('192', 'campaign-discount-function')
+VALUES ('200', 'campaign-discount-function')
 ON CONFLICT (version) DO NOTHING;

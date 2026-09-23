@@ -1,9 +1,9 @@
--- Migration 191: campaign_services / campaign_categories (additive, REVERSIBLE)
+-- Migration 199: campaign_services / campaign_categories (additive, REVERSIBLE)
 --
--- Join tables linking a campaign (migration-190) to the specific services
+-- Join tables linking a campaign (migration-198) to the specific services
 -- and/or categories it applies to — a campaign never applies to anything
 -- not explicitly linked here. A campaign can link individual services,
--- whole categories, or both; migration-192's priority function checks
+-- whole categories, or both; migration-200's priority function checks
 -- direct service links before category links.
 --
 -- RLS: same org-scoped shape as campaigns itself, resolved via a join back
@@ -84,5 +84,5 @@ CREATE POLICY "Manager and admin can write org campaign_categories"
   );
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('191', 'campaign-links')
+VALUES ('199', 'campaign-links')
 ON CONFLICT (version) DO NOTHING;

@@ -6,7 +6,7 @@
 -- migration — it exists on staging/production only because it was created directly via the
 -- Supabase dashboard at some point (pre-existing drift, first documented in
 -- migration-184-public-services.sql's comments). Every migration that references it
--- (migration-184, migration-186 onward) was written and tested against staging/production, where
+-- (migration-184, migration-194 onward) was written and tested against staging/production, where
 -- the table already exists — never against a byte-for-byte fresh bootstrap.
 --
 -- A fresh local OrbStack bootstrap (supabase/LOCAL_DEV.md) replays schema.sql + every migration

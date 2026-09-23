@@ -1,12 +1,12 @@
--- Migration 186: service_categories offer fields (additive, REVERSIBLE)
+-- Migration 194: service_categories offer fields (additive, REVERSIBLE)
 --
--- Category-wide counterpart to migration-185: lets a whole category (e.g.
+-- Category-wide counterpart to migration-193: lets a whole category (e.g.
 -- "Facial Treatments") carry a percentage-off offer that every service in
 -- it inherits, unless that service has its own offer enabled (which always
--- wins — see compute_service_offer_pricing(), migration-187). Percent-only
+-- wins — see compute_service_offer_pricing(), migration-195). Percent-only
 -- at the category level, deliberately: a flat NPR override can't sensibly
 -- apply across services of different base prices in the same category, so
--- unlike services (migration-185), no offer_type column here.
+-- unlike services (migration-193), no offer_type column here.
 --
 -- service_categories has no tracked CREATE TABLE migration (pre-existing
 -- drift, called out in migration-184's own comments) — this migration only
@@ -27,5 +27,5 @@ ALTER TABLE service_categories
   ADD COLUMN IF NOT EXISTS offer_percent numeric(5, 2);
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('186', 'service-categories-offer-fields')
+VALUES ('194', 'service-categories-offer-fields')
 ON CONFLICT (version) DO NOTHING;

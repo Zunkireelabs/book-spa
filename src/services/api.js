@@ -10930,7 +10930,8 @@ export async function createPackageType({ orgId, name, serviceId, defaultSession
 export async function issuePackage({
   orgId, branchId, packageTypeId, customerId = null, guestName = null,
   guestInfo = null, issuedDate = null, expiryDate = null, paidAmount = null,
-  sessionsTotal = null, remarks = null,
+  sessionsTotal = null, remarks = null, discountType = null, discountValue = null,
+  dueHolderName = null, paymentMethod = null,
 }) {
   try {
     guestName = toTitleCase(guestName);
@@ -10949,6 +10950,10 @@ export async function issuePackage({
       p_paid_amount: paidAmount,
       p_sessions_total: sessionsTotal,
       p_remarks: remarks,
+      p_discount_type: discountType,
+      p_discount_value: discountValue,
+      p_due_holder_name: dueHolderName,
+      p_payment_method: paymentMethod,
     });
     if (error) throw error;
     capture('package_issued', { package_type_id: packageTypeId, branch_id: branchId, linked_to_customer: !!customerId });
@@ -10973,6 +10978,7 @@ export async function fetchPackages() {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -11008,6 +11014,16 @@ export async function fetchPackages() {
         sessionsTotal: p.sessions_total,
         remarks: p.remarks,
         issuedByName: p.issuer?.full_name || '—',
+        baseAmount: p.base_amount != null ? Number(p.base_amount) : null,
+        discountType: p.discount_type,
+        discountValue: p.discount_value != null ? Number(p.discount_value) : null,
+        discountAmount: Number(p.discount_amount || 0),
+        finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
+        dueHolderName: p.due_holder_name || null,
+        paymentMethod: p.payment_method || null,
+        dueAmount: p.final_amount != null
+          ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
+          : 0,
         sessionsUsed: balance.sessions_used || 0,
         sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
         status: balance.status || 'unused',
@@ -11034,6 +11050,7 @@ export async function fetchPackage(packageId) {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -11073,6 +11090,16 @@ export async function fetchPackage(packageId) {
         sessionsTotal: p.sessions_total,
         remarks: p.remarks,
         issuedByName: p.issuer?.full_name || '—',
+        baseAmount: p.base_amount != null ? Number(p.base_amount) : null,
+        discountType: p.discount_type,
+        discountValue: p.discount_value != null ? Number(p.discount_value) : null,
+        discountAmount: Number(p.discount_amount || 0),
+        finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
+        dueHolderName: p.due_holder_name || null,
+        paymentMethod: p.payment_method || null,
+        dueAmount: p.final_amount != null
+          ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
+          : 0,
         sessionsUsed: balance.sessions_used || 0,
         sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
         status: balance.status || 'unused',
@@ -11385,7 +11412,7 @@ export async function fetchOutreachTemplates() {
 
     const { data, error } = await supabase
       .from('outreach_templates')
-      .select('id, org_id, branch_id, key, channel, subject, body, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
+      .select('id, org_id, branch_id, key, channel, subject, body, layout_id, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
       .eq('org_id', profile.org_id)
       .order('key', { ascending: true });
     if (error) throw error;
@@ -11419,6 +11446,7 @@ export async function upsertOutreachTemplate(payload) {
       channel: payload.channel,
       subject: payload.subject ?? null,
       body: payload.body,
+      layout_id: payload.layoutId ?? null,
       whatsapp_template_name: payload.whatsappTemplateName ?? null,
       whatsapp_template_lang: payload.whatsappTemplateLang ?? null,
       is_active: payload.isActive ?? true,
@@ -11465,17 +11493,76 @@ export async function deleteOutreachTemplate(id) {
   }
 }
 
-// Preview-only, client-side string replace — mirrors the server-side
-// `replace(body, '{{customer_name}}', ...)` calls in outreach_scan_winback /
-// outreach_enqueue_for_completed (migration-108/109). Not used to generate
-// what actually gets sent — those RPCs render server-side at insert time.
-export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe') {
+// Preview-only, client-side mirror of the server-side combine-then-substitute
+// logic in outreach_scan_winback / outreach_enqueue_for_completed
+// (migration-187) — not used to generate what actually gets sent, those
+// SQL functions render server-side at insert time. layoutHtml is the
+// selected layout's html (or null/undefined for "no layout" — a template
+// with no layout renders its raw body unwrapped, same as before layouts
+// existed). orgName substitutes {{org_name}}, used by the built-in "Branded
+// Header" layout's header text — falls back to 'Your Business' so the
+// preview never shows a literal unsubstituted token.
+export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe', layoutHtml = null, orgName = 'Your Business') {
   if (!template) return { subject: '', body: '' };
   const name = sampleCustomerName || 'Jane Doe';
+  const org = orgName || 'Your Business';
+  const wrapper = layoutHtml || '{{content}}';
+  const combinedBody = wrapper.split('{{content}}').join(template.body || '');
   return {
-    subject: (template.subject || '').split('{{customer_name}}').join(name),
-    body: (template.body || '').split('{{customer_name}}').join(name),
+    subject: (template.subject || '').split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
+    body: combinedBody.split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
   };
+}
+
+// ---- Layouts ------------------------------------------------------------------
+
+export async function fetchOutreachLayouts() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('outreach_layouts')
+      .select('id, org_id, name, html, is_active')
+      .or(`org_id.eq.${profile.org_id},org_id.is.null`)
+      .eq('is_active', true)
+      .order('org_id', { ascending: true, nullsFirst: true })
+      .order('name', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachLayouts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createOutreachLayout({ orgId, name, html }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create outreach layouts.' } };
+    }
+    if (!orgId) return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
+    if (!name?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout name is required.' } };
+    if (!html?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout HTML is required.' } };
+    if (!html.includes('{{content}}')) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout HTML must contain a {{content}} slot.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_layouts')
+      .insert({ org_id: orgId, name: name.trim(), html, is_active: true })
+      .select('id, name, html')
+      .single();
+    if (error) throw error;
+    capture('outreach_layout_created', { layout_id: data.id });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createOutreachLayout error:', error.message);
+    return { data: null, error };
+  }
 }
 
 // ---- Messages (outbox / send log) --------------------------------------------
@@ -11804,7 +11891,573 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
 }
 
 // ============================================================
-// Campaigns — named, dated promotional events (migrations 190-195)
+// Products — sellable retail catalog (migrations 188-190)
+// ============================================================
+
+export async function fetchProductsForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, stock_quantity, created_at')
+      .eq('org_id', profile.org_id)
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductsForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Upload a product image to Supabase Storage.
+ * Reuses the same bucket as service images, under a products/ prefix.
+ */
+export async function uploadProductImage(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload product images.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `products/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadProductImage error:', error.message);
+    return { url: null, error };
+  }
+}
+
+export async function createProduct({ name, description, category, priceNpr, imageUrl, trackStock, stockQuantity }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create products.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Product name is required.' } };
+    }
+    if (!priceNpr || priceNpr <= 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
+    }
+    if (trackStock && (stockQuantity === undefined || stockQuantity === null || stockQuantity < 0)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Stock quantity must be zero or greater.' } };
+    }
+
+    const isTrackingStock = !!trackStock;
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        name: name.trim(),
+        description: description || null,
+        category: category?.trim() || null,
+        price_npr: priceNpr,
+        image_url: imageUrl || null,
+        is_active: true,
+        org_id: profile.org_id,
+        track_stock: isTrackingStock,
+        stock_quantity: isTrackingStock ? stockQuantity : null,
+      })
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, stock_quantity, created_at')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateProduct({ productId, name, description, category, priceNpr, imageUrl, trackStock, stockQuantity }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update products.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+    if (trackStock && (stockQuantity === undefined || stockQuantity === null || stockQuantity < 0)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Stock quantity must be zero or greater.' } };
+    }
+
+    const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name.trim();
+    if (description !== undefined) updatePayload.description = description || null;
+    if (category !== undefined) updatePayload.category = category?.trim() || null;
+    if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
+    if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
+    if (trackStock !== undefined) {
+      const isTrackingStock = !!trackStock;
+      updatePayload.track_stock = isTrackingStock;
+      updatePayload.stock_quantity = isTrackingStock ? stockQuantity : null;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .update(updatePayload)
+      .eq('id', productId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, stock_quantity')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Product not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function toggleProductActive({ productId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage product status.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .update({ is_active: isActive })
+      .eq('id', productId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Product not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleProductActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteProduct({ productId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete products.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', productId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function sellProduct({ productId, quantity, paymentMode, branchId, customerId, notes }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!productId || !quantity || quantity <= 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'A product and a positive quantity are required.' } };
+    }
+    if (!paymentMode) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Payment method is required.' } };
+    }
+    if (!branchId) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Branch is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('sell_product', {
+      p_product_id: productId,
+      p_quantity: quantity,
+      p_payment_mode: paymentMode,
+      p_branch_id: branchId,
+      p_customer_id: customerId || null,
+      p_notes: notes || null,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] sellProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchProductSales({ limit = 50, productId, from, to } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    let query = supabase
+      .from('product_sales')
+      .select('id, product_id, product_name, quantity, unit_price_npr, total_amount, payment_mode, customer_id, sold_by, created_at, refunded_at, refunded_by, refund_reason, customers(full_name), users!product_sales_sold_by_fkey(full_name)')
+      .eq('org_id', profile.org_id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (productId) query = query.eq('product_id', productId);
+    if (from) query = query.gte('created_at', `${from}T00:00:00`);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductSales error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Product Categories (migration 191) — a real place to create/rename/
+// deactivate/delete product categories, closing the gap left by the
+// Products form's dropdown (starter list + whatever's already in use,
+// with no way to add a genuinely new one).
+// ============================================================
+
+export async function fetchProductCategoriesForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: categories, error } = await supabase
+      .from('product_categories')
+      .select('id, name, description, is_active, display_order, created_at')
+      .eq('org_id', profile.org_id)
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+
+    const { data: products } = await supabase
+      .from('products')
+      .select('category')
+      .eq('org_id', profile.org_id);
+
+    const productCounts = {};
+    (products || []).forEach((p) => {
+      if (!p.category) return;
+      productCounts[p.category] = (productCounts[p.category] || 0) + 1;
+    });
+
+    const data = (categories || []).map((c) => ({ ...c, product_count: productCounts[c.name] || 0 }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductCategoriesForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchActiveProductCategories() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .select('id, name')
+      .eq('org_id', profile.org_id)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchActiveProductCategories error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createProductCategory({ name, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create product categories.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Category name is required.' } };
+    }
+
+    const { data: maxOrder } = await supabase
+      .from('product_categories')
+      .select('display_order')
+      .eq('org_id', profile.org_id)
+      .order('display_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    const nextOrder = (maxOrder?.display_order || 0) + 1;
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .insert({
+        name: name.trim(),
+        description: description?.trim() || null,
+        display_order: nextOrder,
+        is_active: true,
+        org_id: profile.org_id,
+      })
+      .select('id, name, description, is_active, display_order, created_at')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A category with this name already exists.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createProductCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateProductCategory({ categoryId, name, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update product categories.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: oldCategory, error: catError } = await supabase
+      .from('product_categories')
+      .select('name')
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (catError || !oldCategory) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+    }
+
+    const oldName = oldCategory?.name;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description?.trim() || null;
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .update(updateData)
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, description, is_active, display_order, created_at')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A category with this name already exists.' } };
+      }
+      throw error;
+    }
+
+    // Update products with the old category name to the new name (within this org only)
+    if (name && oldName && name.trim() !== oldName) {
+      await supabase
+        .from('products')
+        .update({ category: name.trim() })
+        .eq('category', oldName)
+        .eq('org_id', profile.org_id);
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateProductCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function toggleProductCategoryActive({ categoryId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can toggle product categories.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .update({ is_active: isActive })
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleProductCategoryActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteProductCategory({ categoryId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete product categories.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: category } = await supabase
+      .from('product_categories')
+      .select('name')
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (category) {
+      const { count } = await supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .eq('category', category.name)
+        .eq('org_id', profile.org_id);
+
+      if (count > 0) {
+        return { data: null, error: { code: 'HAS_PRODUCTS', message: `This category has ${count} product(s) and cannot be deleted. Reassign products first or deactivate the category.` } };
+      }
+    }
+
+    const { error } = await supabase
+      .from('product_categories')
+      .delete()
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteProductCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function refundProductSale({ saleId, reason }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!saleId) {
+      return { data: null, error: { code: 'VALIDATION', message: 'A sale is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('refund_product_sale', {
+      p_sale_id: saleId,
+      p_reason: reason || null,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] refundProductSale error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Campaigns — named, dated promotional events (migrations 198-204)
 // ============================================================
 
 export async function fetchCampaignsForManagement() {

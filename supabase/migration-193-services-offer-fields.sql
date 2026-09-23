@@ -1,4 +1,4 @@
--- Migration 185: services offer fields (additive, REVERSIBLE)
+-- Migration 193: services offer fields (additive, REVERSIBLE)
 --
 -- Adds a manual, staff-toggled promotional offer to an individual service —
 -- e.g. "Body Scrub, flat Rs. 4500 instead of Rs. 5000" or "30% off." No
@@ -11,7 +11,7 @@
 -- constraints on drifted tables (see migration-184's LEFT JOIN + COALESCE
 -- pattern). The app layer (createService/updateServicePricing) always nulls
 -- out offer_type/offer_value when offer_enabled is false, and
--- compute_service_offer_pricing() (migration-187) treats any row with
+-- compute_service_offer_pricing() (migration-195) treats any row with
 -- offer_enabled = true but a null type/value as "no offer" rather than
 -- erroring. This keeps the migration trivially safe on existing data and
 -- easy to roll back.
@@ -29,5 +29,5 @@ ALTER TABLE services
   ADD COLUMN IF NOT EXISTS offer_value   numeric(10, 2);
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('185', 'services-offer-fields')
+VALUES ('193', 'services-offer-fields')
 ON CONFLICT (version) DO NOTHING;

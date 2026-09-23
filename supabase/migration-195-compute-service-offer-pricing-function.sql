@@ -1,8 +1,8 @@
--- Migration 187: compute_service_offer_pricing() (additive, REVERSIBLE)
+-- Migration 195: compute_service_offer_pricing() (additive, REVERSIBLE)
 --
 -- Single shared source of truth for "what does this service actually cost
 -- right now" — used identically by the dashboard's services_with_offer_pricing
--- view (migration-188) and the public_get_services RPC (migration-189), so
+-- view (migration-196) and the public_get_services RPC (migration-197), so
 -- the override rule is never duplicated or allowed to drift between the two.
 --
 -- Override rule (confirmed): a service's own offer, when enabled with a
@@ -62,5 +62,5 @@ AS $$
 $$;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('187', 'compute-service-offer-pricing-function')
+VALUES ('195', 'compute-service-offer-pricing-function')
 ON CONFLICT (version) DO NOTHING;

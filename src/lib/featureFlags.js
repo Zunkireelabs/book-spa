@@ -30,7 +30,14 @@ export const OUTREACH_ENABLED = import.meta.env.VITE_ENABLE_OUTREACH === 'true';
 // components behind this flag until schema is promoted to production.
 export const PLATFORM_ADMIN_ENABLED = import.meta.env.VITE_ENABLE_PLATFORM_ADMIN === 'true';
 
-// Named, dated promotional campaigns (migrations 190-195) — client-curated
+// Sellable retail product catalog (migrations 188-190) — a product catalog
+// staff can both manage and actually sell (own transaction record, not a
+// line item on a booking). Independent of the other flags. Gate every
+// products entry point behind this until the schema has been promoted to
+// production.
+export const PRODUCTS_ENABLED = import.meta.env.VITE_ENABLE_PRODUCTS === 'true';
+
+// Named, dated promotional campaigns (migrations 198-204) — client-curated
 // events (e.g. "Dashain Offer") linked to specific services/categories,
 // surfaced on the website as a banner/popup. Independent of the other
 // flags. Gate every campaign entry point behind this until the schema has

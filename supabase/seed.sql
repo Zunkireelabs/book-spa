@@ -122,7 +122,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- password-grant login scans every auth.users column into a Go string and errors ("Scan error
 -- on column index 8, name \"email_change\": converting NULL to string is unsupported") if any of
 -- them are NULL. This affected every local login attempt, unrelated to any specific app feature —
--- discovered while locally verifying migration-189's promotional-offer-pricing feature.
+-- discovered while locally verifying migration-193's promotional-offer-pricing feature.
 INSERT INTO auth.users (
   id, instance_id, email, encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data,

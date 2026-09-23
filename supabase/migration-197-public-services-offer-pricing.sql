@@ -1,10 +1,10 @@
--- Migration 189: public_get_services() offer pricing (additive, REVERSIBLE)
+-- Migration 197: public_get_services() offer pricing (additive, REVERSIBLE)
 --
 -- Extends the public_get_services RPC (migration-184) with three new
 -- trailing columns — effective_price_npr, is_on_offer, original_price_npr —
 -- computed via the same compute_service_offer_pricing() function
--- (migration-187) the dashboard's services_with_offer_pricing view
--- (migration-188) uses, so the website and the dashboard always agree on
+-- (migration-195) the dashboard's services_with_offer_pricing view
+-- (migration-196) uses, so the website and the dashboard always agree on
 -- "what does this cost right now."
 --
 -- Purely additive in effect: the original 7 columns keep their name/
@@ -82,5 +82,5 @@ REVOKE ALL ON FUNCTION public.public_get_services(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.public_get_services(text) TO anon;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('189', 'public-services-offer-pricing')
+VALUES ('197', 'public-services-offer-pricing')
 ON CONFLICT (version) DO NOTHING;

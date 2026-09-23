@@ -92,6 +92,7 @@ const PackageListPanel = () => {
   // Total row would otherwise silently disagree with the rows above it.
   const totals = useMemo(() => ({
     paid: filtered.reduce((sum, p) => sum + p.paidAmount, 0),
+    due: filtered.reduce((sum, p) => sum + (p.dueAmount || 0), 0),
     sessionsTotal: filtered.reduce((sum, p) => sum + p.sessionsTotal, 0),
     sessionsUsed: filtered.reduce((sum, p) => sum + p.sessionsUsed, 0),
     sessionsRemaining: filtered.reduce((sum, p) => sum + p.sessionsRemaining, 0),
@@ -137,6 +138,7 @@ const PackageListPanel = () => {
         <h3 className="font-heading font-heading-semibold text-lg text-text-primary">Packages</h3>
         <p className="font-body text-sm text-text-secondary">
           {filtered.length} package{filtered.length !== 1 ? 's' : ''} issued · {totals.sessionsUsed}/{totals.sessionsTotal} sessions used · {formatNPR(totals.paid)} collected
+          {totals.due > 0 && <> · {formatNPR(totals.due)} due</>}
         </p>
       </div>
 
@@ -222,6 +224,7 @@ const PackageListPanel = () => {
                   <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Expiry</th>
                   <th className="text-left px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Last Used</th>
                   <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Paid</th>
+                  <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Due</th>
                   <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Sessions</th>
                   <th className="text-right px-2.5 py-2 font-body font-body-medium text-[11px] text-text-secondary whitespace-nowrap">Status</th>
                 </tr>
@@ -261,6 +264,21 @@ const PackageListPanel = () => {
                       </td>
                       <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                         <span className="font-data font-data-normal text-xs text-text-secondary">{formatNPR(p.paidAmount)}</span>
+                        {p.paymentMethod && (
+                          <p className="font-caption text-[9px] text-text-tertiary mt-0.5">{p.paymentMethod}</p>
+                        )}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
+                        {p.dueAmount > 0 ? (
+                          <>
+                            <span className="font-data font-data-medium text-xs text-warning">{formatNPR(p.dueAmount)}</span>
+                            {p.dueHolderName && (
+                              <p className="font-caption text-[9px] text-text-tertiary mt-0.5">{p.dueHolderName}</p>
+                            )}
+                          </>
+                        ) : (
+                          <span className="font-data font-data-normal text-xs text-text-tertiary">—</span>
+                        )}
                       </td>
                       <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                         <span className="font-data font-data-medium text-xs text-primary">{p.sessionsRemaining}/{p.sessionsTotal}</span>
@@ -284,6 +302,7 @@ const PackageListPanel = () => {
                 <tr className="bg-background border-t-2 border-border">
                   <td colSpan={8} className="px-2.5 py-2 font-body font-body-semibold text-xs text-text-primary">Total</td>
                   <td className="px-2.5 py-2 text-right font-data font-data-semibold text-xs text-text-primary whitespace-nowrap">{formatNPR(totals.paid)}</td>
+                  <td className="px-2.5 py-2 text-right font-data font-data-semibold text-xs text-warning whitespace-nowrap">{totals.due > 0 ? formatNPR(totals.due) : '—'}</td>
                   <td className="px-2.5 py-2 text-right font-data font-data-semibold text-xs text-primary whitespace-nowrap">{totals.sessionsRemaining}/{totals.sessionsTotal}</td>
                   <td />
                 </tr>

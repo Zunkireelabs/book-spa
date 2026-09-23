@@ -1,4 +1,4 @@
--- Migration 195: public_get_active_campaign() (additive, REVERSIBLE)
+-- Migration 203: public_get_active_campaign() (additive, REVERSIBLE)
 --
 -- Public, anon-safe RPC feeding the website's campaign banner and popup —
 -- matching the same trusted pattern as public_get_services (migration-184)
@@ -64,5 +64,5 @@ REVOKE ALL ON FUNCTION public.public_get_active_campaign(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.public_get_active_campaign(text) TO anon;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('195', 'public-active-campaign')
+VALUES ('203', 'public-active-campaign')
 ON CONFLICT (version) DO NOTHING;
