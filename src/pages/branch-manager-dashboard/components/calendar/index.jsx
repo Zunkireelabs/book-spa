@@ -6,8 +6,12 @@ import BookingActionModal from '../../../../components/ui/BookingActionModal';
 import StatusLegend from '../../../../components/ui/StatusLegend';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import CalendarGrid, { HOUR_HEIGHT } from './CalendarGrid';
+import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
+import TransferFromCalendarModal from './TransferFromCalendarModal';
+import AddBlockModal from './AddBlockModal';
 import {
   getCalendarBookings,
+  fetchBlocksForRange,
   fetchBookingById,
   updateBookingStatus,
   assignTherapist,
@@ -1327,6 +1331,23 @@ function isCheckedOutBlockedSlot(checkedOutByTherapistAndDate, therapistId, day,
   return isAfterCheckout(checkOutTime, day, slotTime);
 }
 
+// Whether a (day, hour, minute) slot on a given column is covered by a manual block
+// occurrence (supabase/migration-212). A block with neither therapistId nor roomId is a
+// "whole location" block and applies to every column. Returns the matching occurrence (with
+// its `description`, used as the Not-Bookable reason text) or null.
+function findManualBlockForSlot(blockOccurrences, colType, colId, day, hour, minute) {
+  if (!blockOccurrences?.length) return null;
+  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return blockOccurrences.find(occ => {
+    if (occ.date !== day) return false;
+    if (!(slotTime >= occ.startTime && slotTime < occ.endTime)) return false;
+    if (!occ.therapistId && !occ.roomId) return true; // whole-location
+    if (colType === 'therapist') return occ.therapistId === colId;
+    if (colType === 'room') return occ.roomId === colId;
+    return false;
+  }) || null;
+}
+
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
@@ -1430,6 +1451,12 @@ const OperationalCalendar = ({ branchId }) => {
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
+  // Empty-slot choice menu ("Add booking" / "Add block" / "Transfer therapist") — the
+  // popover shown after a plain (non-rebook, non-blocked) empty-slot click.
+  const [choiceMenuSlot, setChoiceMenuSlot] = useState(null);
+  const [transferModalTarget, setTransferModalTarget] = useState(null);
+  const [addBlockSlot, setAddBlockSlot] = useState(null);
+
   // Rebook "pick and place" mode
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
   const [rebookSource, setRebookSource] = useState(null);
@@ -1500,9 +1527,10 @@ const OperationalCalendar = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const [result, attResult] = await Promise.all([
+    const [result, attResult, blocksResult] = await Promise.all([
       getCalendarBookings(branchId, startDate, endDate),
       fetchAttendance({ branchId, date: startDate }),
+      fetchBlocksForRange(branchId, startDate, endDate),
     ]);
 
     if (result.error) {
@@ -1511,7 +1539,7 @@ const OperationalCalendar = ({ branchId }) => {
       return;
     }
 
-    setCalendarData(result.data);
+    setCalendarData({ ...result.data, blockOccurrences: blocksResult.data || [] });
 
     const attMap = {};
     if (attResult.data) {
@@ -1752,6 +1780,12 @@ const OperationalCalendar = ({ branchId }) => {
       }
     }
 
+    const manualBlockOnDrop = findManualBlockForSlot(calendarData?.blockOccurrences, columnMode, effectiveTargetColId, newDate, hour, minute);
+    if (manualBlockOnDrop) {
+      showToast(manualBlockOnDrop.description ? `Blocked: ${manualBlockOnDrop.description}` : 'This time is blocked.', 'error');
+      return;
+    }
+
     if (isCrossColumn) {
       // Cross-column drop → show confirmation dialog
       setPendingReassign({
@@ -1971,6 +2005,13 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Quick-create handlers ──────────────────────────────────
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    // Block new bookings/blocks on any slot covered by a manual block (migration-212).
+    const manualBlock = findManualBlockForSlot(calendarData?.blockOccurrences, slotInfo.colType, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute);
+    if (manualBlock) {
+      showToast(manualBlock.description ? `Blocked: ${manualBlock.description}` : 'This time is blocked.', 'error');
+      return;
+    }
+
     // Block new bookings on a therapist column that's currently transferred out to
     // another branch (migration-145) — the column stays visible, but isn't bookable
     // here until they're auto-reverted back.
@@ -2017,7 +2058,12 @@ const OperationalCalendar = ({ branchId }) => {
       return;
     }
 
-    // Normal flow — open QuickCreatePanel
+    // Normal flow — offer a choice instead of jumping straight to the booking form
+    setChoiceMenuSlot(slotInfo);
+  }, [rebookSource, branchId, refreshCalendar, calendarData]);
+
+  // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
+  const openQuickCreateForSlot = useCallback(async (slotInfo) => {
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
       setServicesLoading(true);
@@ -2025,7 +2071,7 @@ const OperationalCalendar = ({ branchId }) => {
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
-  }, [servicesCache, servicesLoading, rebookSource, branchId, refreshCalendar, calendarData]);
+  }, [servicesCache, servicesLoading, branchId]);
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
@@ -2727,6 +2773,7 @@ const OperationalCalendar = ({ branchId }) => {
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
+                  blockOccurrences={calendarData.blockOccurrences}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
@@ -2887,6 +2934,75 @@ const OperationalCalendar = ({ branchId }) => {
         branchId={branchId}
         branchHours={calendarData?.branchHours}
       />
+
+      {/* Empty-slot choice menu — Add booking / Add block / Transfer therapist */}
+      {choiceMenuSlot && (
+        <EmptySlotChoiceMenu
+          x={choiceMenuSlot.clientX ?? 0}
+          y={choiceMenuSlot.clientY ?? 0}
+          onClose={() => setChoiceMenuSlot(null)}
+          options={[
+            {
+              key: 'booking',
+              label: 'Add booking',
+              icon: 'CalendarPlus',
+              onSelect: () => openQuickCreateForSlot(choiceMenuSlot),
+            },
+            {
+              key: 'block',
+              label: 'Add block',
+              icon: 'Ban',
+              onSelect: () => setAddBlockSlot(choiceMenuSlot),
+            },
+            ...(choiceMenuSlot.colType === 'therapist' ? [{
+              key: 'transfer',
+              label: 'Transfer therapist',
+              icon: 'ArrowRightLeft',
+              onSelect: () => {
+                const t = calendarData?.therapists?.find(th => th.id === choiceMenuSlot.colId);
+                setTransferModalTarget({
+                  therapistId: choiceMenuSlot.colId,
+                  therapistName: t?.name || choiceMenuSlot.colName,
+                  defaultDate: choiceMenuSlot.day,
+                  defaultTime: `${String(choiceMenuSlot.hour).padStart(2, '0')}:${String(choiceMenuSlot.minute).padStart(2, '0')}`,
+                });
+              },
+            }] : []),
+          ]}
+        />
+      )}
+
+      {transferModalTarget && (
+        <TransferFromCalendarModal
+          therapistId={transferModalTarget.therapistId}
+          therapistName={transferModalTarget.therapistName}
+          currentBranchId={branchId}
+          defaultDate={transferModalTarget.defaultDate}
+          defaultTime={transferModalTarget.defaultTime}
+          onClose={() => setTransferModalTarget(null)}
+          onSuccess={() => {
+            const name = transferModalTarget.therapistName;
+            setTransferModalTarget(null);
+            showToast(`${name} transferred.`);
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {addBlockSlot && (
+        <AddBlockModal
+          branchId={branchId}
+          slotInfo={addBlockSlot}
+          therapists={calendarData?.therapists || []}
+          rooms={calendarData?.rooms || []}
+          onClose={() => setAddBlockSlot(null)}
+          onSuccess={() => {
+            setAddBlockSlot(null);
+            showToast('Block added.');
+            refreshCalendar();
+          }}
+        />
+      )}
 
       {/* Reassignment Confirmation Dialog */}
       {pendingReassign && (

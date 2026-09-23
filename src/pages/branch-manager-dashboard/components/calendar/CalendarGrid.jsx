@@ -566,6 +566,7 @@ const CalendarGrid = ({
   branchHours,
   attendanceMap,
   checkedOutByTherapistAndDate,
+  blockOccurrences,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -931,6 +932,35 @@ const CalendarGrid = ({
     };
   };
 
+  // Reason text shown on both the column header tooltip and the overlay pill itself — so
+  // "Not bookable" always says WHY, not just that it is (per the calendar bundle's reason
+  // requirement). Same phrasing the header tooltip already used pre-existing this change.
+  const getTransferReasonText = (col) => {
+    if (!col.transferredOut && !col.transferredIn) return null;
+    const returnsAtLabel = col.returnsAt
+      ? new Date(col.returnsAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+      : null;
+    return col.transferredOut
+      ? `Transferred${returnsAtLabel ? `, back ${returnsAtLabel}` : ''}`
+      : `Visiting from ${col.fromBranch || 'another branch'}${returnsAtLabel ? `, until ${returnsAtLabel}` : ''}`;
+  };
+
+  // Manual-block (migration-212) occurrences covering this column/day, as renderable
+  // {fromTime, toTime, description} ranges. A block with neither therapistId nor roomId is
+  // a "whole location" block and applies to every column.
+  const getManualBlockRanges = (col, day, occurrences) => {
+    if (!occurrences?.length) return [];
+    return occurrences
+      .filter(occ => {
+        if (occ.date !== day) return false;
+        if (!occ.therapistId && !occ.roomId) return true;
+        if (col.type === 'therapist') return occ.therapistId === col.id;
+        if (col.type === 'room') return occ.roomId === col.id;
+        return false;
+      })
+      .map(occ => ({ fromTime: occ.startTime, toTime: occ.endTime, description: occ.description }));
+  };
+
   // A therapist who's already checked out is blocked from their check-out time through
   // the rest of THAT specific day only — other days on the same column stay bookable.
   const getCheckoutBlockRange = (col, day) => {
@@ -998,13 +1028,12 @@ const CalendarGrid = ({
   // ── Column header renderer ────────────────────────────────
   const renderColumnHeader = (col) => {
     const isUnassigned = col.type === 'unassigned';
-    const returnsAtLabel = col.returnsAt
-      ? new Date(col.returnsAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-      : null;
-    const headerTooltip = col.transferredOut
-      ? `${col.name} — Transferred${returnsAtLabel ? `, back ${returnsAtLabel}` : ''}`
-      : col.transferredIn
-        ? `${col.name} — Visiting from ${col.fromBranch || 'another branch'}${returnsAtLabel ? `, until ${returnsAtLabel}` : ''}`
+    const transferReason = getTransferReasonText(col);
+    const todayBlock = getManualBlockRanges(col, currentDate ?? days?.[0], blockOccurrences)[0];
+    const headerTooltip = transferReason
+      ? `${col.name} — ${transferReason}`
+      : todayBlock
+        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''}`
         : col.name;
     return (
       <div
@@ -1155,12 +1184,14 @@ const CalendarGrid = ({
     const hour = Math.floor(minutesFromTop / 60) + openHour;
     const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
     if (hour < openHour || hour >= closeHour) return;
-    onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour, minute });
+    onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour, minute, clientX: e.clientX, clientY: e.clientY });
   };
 
   const renderColumn = (col, day) => {
     const colBookings = (bookingsByDayAndCol[day] || {})[col.id] || [];
     const droppableId = `drop-col-${day}-${col.id}`;
+    const transferReasonText = getTransferReasonText(col);
+    const manualBlockRanges = getManualBlockRanges(col, day, blockOccurrences);
 
     return (
       <div
@@ -1203,7 +1234,7 @@ const CalendarGrid = ({
               }}
             >
               <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
-                Not bookable
+                {transferReasonText || 'Not bookable'}
               </span>
             </div>
           );
@@ -1230,7 +1261,7 @@ const CalendarGrid = ({
                 style={{ top: segTop, height: segHeight, backgroundColor: 'rgba(15,118,110,0.35)' }}
               >
                 <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
-                  Not bookable
+                  {transferReasonText || 'Not bookable'}
                 </span>
               </div>
             );
@@ -1260,6 +1291,29 @@ const CalendarGrid = ({
             </div>
           );
         })()}
+
+        {/* Manual block overlay (migration-212) — a staff/room "time off" block, distinct
+            amber color from the transfer (teal) and checkout (slate) overlays. Label shows
+            the block's own description (the reason text), falling back to "Not bookable". */}
+        {manualBlockRanges.map((range, i) => {
+          const blockTop = timeToTop(range.fromTime);
+          const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
+          return (
+            <div
+              key={`manual-block-${i}`}
+              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+              style={{
+                top: blockTop,
+                height: blockHeight,
+                backgroundColor: 'rgba(217,119,6,0.35)',
+              }}
+            >
+              <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
+                {range.description || 'Not bookable'}
+              </span>
+            </div>
+          );
+        })}
 
         {/* Booking cards with overlap handling */}
         {(() => {
@@ -1321,7 +1375,7 @@ const CalendarGrid = ({
                       // cluster.length > MAX_VISIBLE_OVERLAP, so hidden always has ≥1 item).
                       const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
                       const [h, m] = anchorTime.split(':').map(Number);
-                      onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
+                      onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m, clientX: e.clientX, clientY: e.clientY });
                     } : null}
                     style={{
                       top: hiddenTop,
@@ -1349,7 +1403,7 @@ const CalendarGrid = ({
                       e.stopPropagation();
                       if (activeDragId) return;
                       const [h, m] = cluster[0].startTime.split(':').map(Number);
-                      onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
+                      onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m, clientX: e.clientX, clientY: e.clientY });
                     }}
                   >
                     <Icon name="Plus" size={12} />
@@ -1528,7 +1582,7 @@ const CalendarGrid = ({
                               // button now visually sits — not the cluster's overall start.
                               const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
                               const [h, m] = anchorTime.split(':').map(Number);
-                              onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
+                              onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m, clientX: e.clientX, clientY: e.clientY });
                             } : null}
                             style={{
                               top: hiddenTop,
@@ -1556,7 +1610,7 @@ const CalendarGrid = ({
                               e.stopPropagation();
                               if (activeDragId) return;
                               const [h, m] = cluster[0].startTime.split(':').map(Number);
-                              onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m });
+                              onEmptySlotClick({ day: currentDate, colId: unassignedCol.id, colName: unassignedCol.name, colType: unassignedCol.type, hour: h, minute: m, clientX: e.clientX, clientY: e.clientY });
                             }}
                           >
                             <Icon name="Plus" size={12} />
@@ -1648,7 +1702,7 @@ const CalendarGrid = ({
                     const hour = Math.floor(minutesFromTop / 60) + openHour;
                     const minute = Math.floor((minutesFromTop % 60) / 5) * 5;
                     if (hour < openHour || hour >= closeHour) return;
-                    onEmptySlotClick({ day, colId: 'all', colName: formatShortDate(day), colType: 'day', hour, minute });
+                    onEmptySlotClick({ day, colId: 'all', colName: formatShortDate(day), colType: 'day', hour, minute, clientX: e.clientX, clientY: e.clientY });
                   }}
                 >
                   {/* Dashed interval lines with hover tooltips — per-column so hover works */}

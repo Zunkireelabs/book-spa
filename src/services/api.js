@@ -4,6 +4,7 @@ import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
+import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 
@@ -5921,6 +5922,294 @@ export async function transferTherapist({
     return { data: { transferId: data }, error: null };
   } catch (error) {
     console.error('[API] transferTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Manual Blocks (supabase/migration-212) — Calendar "block time off"
+// ============================================================
+
+function transformBlockRow(row) {
+  return {
+    id: row.id,
+    orgId: row.org_id,
+    branchId: row.branch_id,
+    therapistId: row.therapist_id,
+    roomId: row.room_id,
+    blockDate: row.block_date,
+    startTime: row.start_time,
+    durationMinutes: row.duration_minutes,
+    description: row.description,
+    preventOnlineBooking: row.prevent_online_booking,
+    recurrenceFreq: row.recurrence_freq,
+    recurrenceInterval: row.recurrence_interval,
+    recurrenceEndDate: row.recurrence_end_date,
+    recurrenceCount: row.recurrence_count,
+    seriesId: row.series_id,
+    isCancelled: row.is_cancelled,
+  };
+}
+
+export async function createBlock({
+  orgId, branchId, therapistId = null, roomId = null, blockDate, startTime,
+  durationMinutes, description = null, preventOnlineBooking = true,
+  recurrenceFreq = null, recurrenceInterval = 1, recurrenceEndDate = null, recurrenceCount = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!orgId || !branchId) return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId and branchId are required.' } };
+    if (!blockDate || !startTime) return { data: null, error: { code: 'INVALID_INPUT', message: 'A date and start time are required.' } };
+    const duration = Number(durationMinutes);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Duration must be greater than zero.' } };
+    }
+
+    const isRecurring = !!recurrenceFreq;
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .insert({
+        org_id: orgId,
+        branch_id: branchId,
+        therapist_id: therapistId,
+        room_id: roomId,
+        block_date: blockDate,
+        start_time: startTime,
+        duration_minutes: duration,
+        description: description?.trim() || null,
+        prevent_online_booking: preventOnlineBooking,
+        recurrence_freq: recurrenceFreq,
+        recurrence_interval: recurrenceInterval || 1,
+        recurrence_end_date: isRecurring ? recurrenceEndDate : null,
+        recurrence_count: isRecurring ? recurrenceCount : null,
+        series_id: isRecurring ? crypto.randomUUID() : null,
+      })
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    return { data: { id: data.id }, error: null };
+  } catch (error) {
+    console.error('[API] createBlock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Fetches raw manual_blocks rows (+ their exceptions) whose recurrence could touch
+// [startDate, endDate], expands them client-side via expandBlockOccurrences, and returns
+// flat { ...occurrence, blockId, therapistId, roomId, description, preventOnlineBooking }
+// rows ready for the calendar to render/gate against.
+export async function fetchBlocksForRange(branchId, startDate, endDate) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { data: rows, error } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('branch_id', resolvedBranchId)
+      .eq('is_cancelled', false)
+      .lte('block_date', endDate)
+      .or(`recurrence_freq.not.is.null,block_date.gte.${startDate}`);
+    if (error) throw error;
+
+    const blocks = (rows || []).map(transformBlockRow);
+    const seriesIds = [...new Set(blocks.map(b => b.seriesId).filter(Boolean))];
+
+    let exceptionsBySeriesId = {};
+    if (seriesIds.length > 0) {
+      const { data: exceptions, error: excError } = await supabase
+        .from('manual_block_exceptions')
+        .select('series_id, exception_date')
+        .in('series_id', seriesIds);
+      if (excError) throw excError;
+      for (const e of (exceptions || [])) {
+        (exceptionsBySeriesId[e.series_id] ||= []).push(e.exception_date);
+      }
+    }
+
+    const occurrences = [];
+    for (const block of blocks) {
+      const exceptions = block.seriesId ? (exceptionsBySeriesId[block.seriesId] || []) : [];
+      for (const occ of expandBlockOccurrences(block, exceptions, startDate, endDate)) {
+        occurrences.push({
+          ...occ,
+          blockId: block.id,
+          seriesId: block.seriesId,
+          therapistId: block.therapistId,
+          roomId: block.roomId,
+          description: block.description,
+          preventOnlineBooking: block.preventOnlineBooking,
+        });
+      }
+    }
+    return { data: occurrences, error: null };
+  } catch (error) {
+    console.error('[API] fetchBlocksForRange error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// scope: 'this' (cancel just this occurrence), 'following' (split the series — this row's
+// recurrence ends the day before occurrenceDate, future occurrences come from a new row),
+// or 'series' (cancel the whole thing, including past occurrences from view going forward).
+export async function deleteBlock({ blockId, scope, occurrenceDate = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (scope === 'series') {
+      const { error } = await supabase
+        .from('manual_blocks')
+        .update({ is_cancelled: true, cancelled_at: new Date().toISOString() })
+        .eq('id', blockId);
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    if (scope === 'this') {
+      if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
+      const { data: block, error: fetchError } = await supabase
+        .from('manual_blocks')
+        .select('series_id, block_date, recurrence_freq')
+        .eq('id', blockId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      if (!block.recurrence_freq) {
+        const { error } = await supabase
+          .from('manual_blocks')
+          .update({ is_cancelled: true, cancelled_at: new Date().toISOString() })
+          .eq('id', blockId);
+        if (error) throw error;
+        return { data: { ok: true }, error: null };
+      }
+
+      const { error } = await supabase
+        .from('manual_block_exceptions')
+        .insert({ series_id: block.series_id, exception_date: occurrenceDate });
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    if (scope === 'following') {
+      if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
+      const dayBefore = new Date(occurrenceDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      const endDateStr = dayBefore.toISOString().split('T')[0];
+
+      const { error } = await supabase
+        .from('manual_blocks')
+        .update({ recurrence_end_date: endDateStr })
+        .eq('id', blockId);
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    return { data: null, error: { code: 'INVALID_INPUT', message: `Unknown scope: ${scope}` } };
+  } catch (error) {
+    console.error('[API] deleteBlock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// scope 'this'/'following' edits split the series exactly like deleteBlock's corresponding
+// scopes, then insert a new row (new id, same series_id) carrying the edited fields from
+// occurrenceDate onward. scope 'series' updates the row in place.
+export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fields }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('id', blockId)
+      .single();
+    if (fetchError) throw fetchError;
+
+    const patch = {};
+    if (fields.description !== undefined) patch.description = fields.description?.trim() || null;
+    if (fields.startTime !== undefined) patch.start_time = fields.startTime;
+    if (fields.durationMinutes !== undefined) patch.duration_minutes = Number(fields.durationMinutes);
+    if (fields.preventOnlineBooking !== undefined) patch.prevent_online_booking = fields.preventOnlineBooking;
+    if (fields.therapistId !== undefined) patch.therapist_id = fields.therapistId;
+    if (fields.roomId !== undefined) patch.room_id = fields.roomId;
+
+    if (scope === 'series') {
+      const { error } = await supabase.from('manual_blocks').update(patch).eq('id', blockId);
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    if (scope === 'this' || scope === 'following') {
+      if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
+
+      if (!existing.recurrence_freq) {
+        const { error } = await supabase.from('manual_blocks').update(patch).eq('id', blockId);
+        if (error) throw error;
+        return { data: { ok: true }, error: null };
+      }
+
+      if (scope === 'this') {
+        const { error: excError } = await supabase
+          .from('manual_block_exceptions')
+          .insert({ series_id: existing.series_id, exception_date: occurrenceDate });
+        if (excError) throw excError;
+
+        const { error: insError } = await supabase.from('manual_blocks').insert({
+          org_id: existing.org_id,
+          branch_id: existing.branch_id,
+          therapist_id: patch.therapist_id ?? existing.therapist_id,
+          room_id: patch.room_id ?? existing.room_id,
+          block_date: occurrenceDate,
+          start_time: patch.start_time ?? existing.start_time,
+          duration_minutes: patch.duration_minutes ?? existing.duration_minutes,
+          description: patch.description ?? existing.description,
+          prevent_online_booking: patch.prevent_online_booking ?? existing.prevent_online_booking,
+          recurrence_freq: null,
+          series_id: null,
+        });
+        if (insError) throw insError;
+        return { data: { ok: true }, error: null };
+      }
+
+      // scope === 'following': cap the existing series the day before occurrenceDate, then
+      // insert a new row starting at occurrenceDate carrying the edited fields forward.
+      const dayBefore = new Date(occurrenceDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      const endDateStr = dayBefore.toISOString().split('T')[0];
+
+      const { error: capError } = await supabase
+        .from('manual_blocks')
+        .update({ recurrence_end_date: endDateStr })
+        .eq('id', blockId);
+      if (capError) throw capError;
+
+      const { error: insError } = await supabase.from('manual_blocks').insert({
+        org_id: existing.org_id,
+        branch_id: existing.branch_id,
+        therapist_id: patch.therapist_id ?? existing.therapist_id,
+        room_id: patch.room_id ?? existing.room_id,
+        block_date: occurrenceDate,
+        start_time: patch.start_time ?? existing.start_time,
+        duration_minutes: patch.duration_minutes ?? existing.duration_minutes,
+        description: patch.description ?? existing.description,
+        prevent_online_booking: patch.prevent_online_booking ?? existing.prevent_online_booking,
+        recurrence_freq: existing.recurrence_freq,
+        recurrence_interval: existing.recurrence_interval,
+        recurrence_end_date: existing.recurrence_end_date,
+        recurrence_count: existing.recurrence_count,
+        series_id: existing.series_id,
+      });
+      if (insError) throw insError;
+      return { data: { ok: true }, error: null };
+    }
+
+    return { data: null, error: { code: 'INVALID_INPUT', message: `Unknown scope: ${scope}` } };
+  } catch (error) {
+    console.error('[API] updateBlock error:', error.message);
     return { data: null, error };
   }
 }
