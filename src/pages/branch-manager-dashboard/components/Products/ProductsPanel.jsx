@@ -6,6 +6,7 @@ import Input from '../../../../components/ui/Input';
 import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { useBranch } from '../../../../contexts/BranchContext';
 import {
   fetchProductsForManagement,
   createProduct,
@@ -19,6 +20,8 @@ import SellProductModal from './SellProductModal';
 import ProductDetailDrawer from './ProductDetailDrawer';
 import ProductCategoryManagerModal from './ProductCategoryManagerModal';
 import ProductSalesReportPanel from './ProductSalesReportPanel';
+import StockTransferReportPanel from './StockTransferReportPanel';
+import StockTransferModal from './StockTransferModal';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
@@ -28,11 +31,12 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-const EMPTY_FORM = { name: '', description: '', category: '', priceNpr: '', imageUrl: '', trackStock: false, stockQuantity: '' };
+const EMPTY_FORM = { name: '', description: '', category: '', priceNpr: '', imageUrl: '', trackStock: false };
 
 const ProductsPanel = () => {
   const { profile } = useAuth();
   const isManagerOrAdmin = ['manager', 'admin'].includes(profile?.role);
+  const { branchId, branchName, isOverall } = useBranch();
 
   const [activeTab, setActiveTab] = useState('catalog');
   const [products, setProducts] = useState([]);
@@ -50,6 +54,7 @@ const ProductsPanel = () => {
   const [deleting, setDeleting] = useState(false);
   const [sellingProduct, setSellingProduct] = useState(null);
   const [viewingProduct, setViewingProduct] = useState(null);
+  const [transferringProduct, setTransferringProduct] = useState(null);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState([]);
 
@@ -74,7 +79,7 @@ const ProductsPanel = () => {
     setLoading(true);
     setError(null);
     const [productsResult] = await Promise.all([
-      fetchProductsForManagement(),
+      fetchProductsForManagement(isOverall ? null : branchId),
       loadCategoryOptions(),
     ]);
     if (productsResult.error) {
@@ -83,7 +88,7 @@ const ProductsPanel = () => {
       setProducts(productsResult.data || []);
     }
     setLoading(false);
-  }, []);
+  }, [branchId, isOverall]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -105,7 +110,6 @@ const ProductsPanel = () => {
       priceNpr: String(product.price_npr),
       imageUrl: product.image_url || '',
       trackStock: !!product.track_stock,
-      stockQuantity: product.stock_quantity != null ? String(product.stock_quantity) : '',
     });
     setImageFile(null);
     setImagePreview(product.image_url || null);
@@ -148,11 +152,6 @@ const ProductsPanel = () => {
       setFormError('Price must be a positive number.');
       return;
     }
-    const stockQty = formData.trackStock ? Number(formData.stockQuantity) : null;
-    if (formData.trackStock && (formData.stockQuantity === '' || isNaN(stockQty) || stockQty < 0)) {
-      setFormError('Stock quantity must be zero or greater.');
-      return;
-    }
 
     setSaving(true);
     setFormError(null);
@@ -177,7 +176,6 @@ const ProductsPanel = () => {
       priceNpr: price,
       imageUrl: finalImageUrl,
       trackStock: formData.trackStock,
-      stockQuantity: stockQty,
     };
 
     const result = editingProduct
@@ -229,7 +227,7 @@ const ProductsPanel = () => {
   return (
     <div className="space-y-6">
       <div className="flex gap-1 border-b border-border">
-        {[{ id: 'catalog', label: 'Products' }, { id: 'report', label: 'Sales Report' }].map((tab) => (
+        {[{ id: 'catalog', label: 'Products' }, { id: 'report', label: 'Sales Report' }, { id: 'transfers', label: 'Stock Transfers' }].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -246,6 +244,8 @@ const ProductsPanel = () => {
 
       {activeTab === 'report' ? (
         <ProductSalesReportPanel />
+      ) : activeTab === 'transfers' ? (
+        <StockTransferReportPanel />
       ) : (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -307,7 +307,9 @@ const ProductsPanel = () => {
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Name</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden lg:table-cell">Category</th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Price</th>
-                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">Stock</th>
+                <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary hidden sm:table-cell">
+                  Stock {isOverall ? '(all branches)' : `(${branchName})`}
+                </th>
                 <th className="text-left px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Status</th>
                 <th className="text-right px-4 py-3 font-body font-body-medium text-sm text-text-secondary">Actions</th>
               </tr>
@@ -370,6 +372,15 @@ const ProductsPanel = () => {
                         )}
                         {p.is_active && p.track_stock && p.stock_quantity === 0 && (
                           <span className="text-xs font-caption text-error px-2">Out of stock</span>
+                        )}
+                        {isManagerOrAdmin && p.track_stock && (
+                          <button
+                            onClick={() => setTransferringProduct(p)}
+                            className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
+                            title="Receive / transfer stock"
+                          >
+                            <Icon name="ArrowLeftRight" size={16} />
+                          </button>
                         )}
                         {isManagerOrAdmin && (
                           <>
@@ -487,18 +498,10 @@ const ProductsPanel = () => {
                   </button>
                 </div>
                 {formData.trackStock && (
-                  <div className="space-y-1">
-                    <Input
-                      type="number"
-                      value={formData.stockQuantity}
-                      onChange={(e) => setFormData({ ...formData, stockQuantity: e.target.value })}
-                      placeholder="e.g. 10"
-                      min="0"
-                    />
-                    <p className="font-caption text-xs text-text-secondary">
-                      Selling this product will lower this count, and block sales once it reaches zero.
-                    </p>
-                  </div>
+                  <p className="font-caption text-xs text-text-secondary">
+                    Stock is tracked per branch. Once saved, use "Receive Stock" on this
+                    product to add its starting quantity at each branch.
+                  </p>
                 )}
               </div>
 
@@ -613,6 +616,18 @@ const ProductsPanel = () => {
           onEdit={(product) => {
             setViewingProduct(null);
             handleOpenEdit(product);
+          }}
+        />
+      )}
+
+      {/* Receive / Transfer Stock */}
+      {transferringProduct && (
+        <StockTransferModal
+          product={transferringProduct}
+          onClose={() => setTransferringProduct(null)}
+          onTransferred={() => {
+            setTransferringProduct(null);
+            loadAll();
           }}
         />
       )}

@@ -3478,6 +3478,30 @@ export async function getTodayInsights(branchId, from, to) {
     if (packagesRedeemedError) throw packagesRedeemedError;
     const packageRedeemed = { count: (packagesRedeemed || []).length };
 
+    // 7b. Products sold in range, branch-scoped, excluding refunded sales —
+    // real cash collected the same way bookings/vouchers are, so also folds
+    // into totalSales/modeTotals. Timestamp-based (created_at) like
+    // memberships (5/5b) rather than a plain date column, same Nepal-
+    // midnight boundary logic.
+    let productSalesQuery = supabase
+      .from('product_sales')
+      .select('total_amount, payment_mode, refunded_at')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    productSalesQuery = withBranch(productSalesQuery, branchId);
+    const { data: productSalesRows, error: productSalesError } = await productSalesQuery;
+    if (productSalesError) throw productSalesError;
+    const activeProductSales = (productSalesRows || []).filter(p => !p.refunded_at);
+    const productsSold = {
+      count: activeProductSales.length,
+      value: activeProductSales.reduce((sum, p) => sum + Number(p.total_amount), 0),
+    };
+    for (const p of activeProductSales) {
+      const amount = Number(p.total_amount);
+      totalSales += amount;
+      modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+    }
+
     // 8. Staff utilization (reuse existing intelligence function)
     const { data: utilization, error: utilizationError } = await getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd });
     if (utilizationError) throw utilizationError;
@@ -3492,6 +3516,7 @@ export async function getTodayInsights(branchId, from, to) {
         voucherDistributed,
         packageSold,
         packageRedeemed,
+        productsSold,
         staffUtilization: {
           avgPercent: utilization?.summary?.avgTherapistUtilization ?? 0,
           therapists: utilization?.therapistUtilization ?? [],
@@ -12338,7 +12363,16 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
 // Products — sellable retail catalog (migrations 188-190)
 // ============================================================
 
-export async function fetchProductsForManagement() {
+/**
+ * Fetch the org's product catalog. Stock is branch-relative: pass
+ * branchId (the currently selected branch, or null/undefined for
+ * "Overall") to control what stock_quantity means on each returned row —
+ * that specific branch's count, or the all-branches total
+ * (products_with_stock's total_stock, migration-217) when no branch is
+ * selected. total_stock is always included too, so the UI can show both
+ * when useful.
+ */
+export async function fetchProductsForManagement(branchId) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -12347,14 +12381,36 @@ export async function fetchProductsForManagement() {
       return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
     }
 
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, stock_quantity, created_at')
+    const { data: products, error } = await supabase
+      .from('products_with_stock')
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, total_stock, created_at')
       .eq('org_id', profile.org_id)
       .order('name');
 
     if (error) throw error;
-    return { data, error: null };
+
+    if (!branchId) {
+      return {
+        data: (products || []).map((p) => ({ ...p, stock_quantity: p.total_stock })),
+        error: null,
+      };
+    }
+
+    const { data: branchStock, error: branchStockError } = await supabase
+      .from('product_branch_stock')
+      .select('product_id, quantity')
+      .eq('branch_id', branchId);
+    if (branchStockError) throw branchStockError;
+
+    const stockByProduct = Object.fromEntries((branchStock || []).map((r) => [r.product_id, r.quantity]));
+
+    return {
+      data: (products || []).map((p) => ({
+        ...p,
+        stock_quantity: p.track_stock ? (stockByProduct[p.id] ?? 0) : null,
+      })),
+      error: null,
+    };
   } catch (error) {
     console.error('[API] fetchProductsForManagement error:', error.message);
     return { data: null, error };
@@ -12407,7 +12463,7 @@ export async function uploadProductImage(file) {
   }
 }
 
-export async function createProduct({ name, description, category, priceNpr, imageUrl, trackStock, stockQuantity }) {
+export async function createProduct({ name, description, category, priceNpr, imageUrl, trackStock }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -12422,11 +12478,12 @@ export async function createProduct({ name, description, category, priceNpr, ima
     if (!priceNpr || priceNpr <= 0) {
       return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
     }
-    if (trackStock && (stockQuantity === undefined || stockQuantity === null || stockQuantity < 0)) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Stock quantity must be zero or greater.' } };
-    }
 
-    const isTrackingStock = !!trackStock;
+    // Initial stock (if trackStock is on) is set per branch afterward via
+    // transferProductStock ("receive stock") — a new product has no
+    // meaningful org-wide starting quantity, only a per-branch one, and
+    // that needs a branch to exist as a target, which this create step
+    // doesn't ask for.
     const { data, error } = await supabase
       .from('products')
       .insert({
@@ -12437,10 +12494,9 @@ export async function createProduct({ name, description, category, priceNpr, ima
         image_url: imageUrl || null,
         is_active: true,
         org_id: profile.org_id,
-        track_stock: isTrackingStock,
-        stock_quantity: isTrackingStock ? stockQuantity : null,
+        track_stock: !!trackStock,
       })
-      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, stock_quantity, created_at')
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, created_at')
       .single();
 
     if (error) throw error;
@@ -12451,7 +12507,7 @@ export async function createProduct({ name, description, category, priceNpr, ima
   }
 }
 
-export async function updateProduct({ productId, name, description, category, priceNpr, imageUrl, trackStock, stockQuantity }) {
+export async function updateProduct({ productId, name, description, category, priceNpr, imageUrl, trackStock }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -12462,9 +12518,6 @@ export async function updateProduct({ productId, name, description, category, pr
     if (!profile.org_id) {
       return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
     }
-    if (trackStock && (stockQuantity === undefined || stockQuantity === null || stockQuantity < 0)) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Stock quantity must be zero or greater.' } };
-    }
 
     const updatePayload = {};
     if (name !== undefined) updatePayload.name = name.trim();
@@ -12472,11 +12525,7 @@ export async function updateProduct({ productId, name, description, category, pr
     if (category !== undefined) updatePayload.category = category?.trim() || null;
     if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
-    if (trackStock !== undefined) {
-      const isTrackingStock = !!trackStock;
-      updatePayload.track_stock = isTrackingStock;
-      updatePayload.stock_quantity = isTrackingStock ? stockQuantity : null;
-    }
+    if (trackStock !== undefined) updatePayload.track_stock = !!trackStock;
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -12487,7 +12536,7 @@ export async function updateProduct({ productId, name, description, category, pr
       .update(updatePayload)
       .eq('id', productId)
       .eq('org_id', profile.org_id)
-      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, stock_quantity')
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock')
       .single();
 
     if (error) {
@@ -12590,6 +12639,114 @@ export async function sellProduct({ productId, quantity, paymentMode, branchId, 
     return { data, error: null };
   } catch (error) {
     console.error('[API] sellProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Per-branch stock breakdown for one product — every branch the org has,
+ * each with its own quantity (0 for a branch that's never received it).
+ */
+export async function fetchProductBranchStock(productId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const [{ data: branches, error: branchesError }, { data: stockRows, error: stockError }] = await Promise.all([
+      supabase.from('branches').select('id, name').eq('org_id', profile.org_id).order('name'),
+      supabase.from('product_branch_stock').select('branch_id, quantity, updated_at').eq('product_id', productId),
+    ]);
+    if (branchesError) throw branchesError;
+    if (stockError) throw stockError;
+
+    const stockByBranch = Object.fromEntries((stockRows || []).map((r) => [r.branch_id, r]));
+    const data = (branches || []).map((b) => ({
+      branchId: b.id,
+      branchName: b.name,
+      quantity: stockByBranch[b.id]?.quantity ?? 0,
+      updatedAt: stockByBranch[b.id]?.updated_at ?? null,
+    }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductBranchStock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Transfer/receive history for a product's stock (product_stock_transfers,
+ * migration-213). branchId narrows to transfers where that branch was
+ * either side (source or destination); omit for the full org history.
+ */
+export async function fetchProductStockTransfers({ productId, branchId, from, to, limit = 50 } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    let query = supabase
+      .from('product_stock_transfers')
+      .select(`
+        id, product_id, from_branch_id, to_branch_id, quantity, note, transferred_by, created_at,
+        products(name),
+        from_branch:branches!product_stock_transfers_from_branch_id_fkey(name),
+        to_branch:branches!product_stock_transfers_to_branch_id_fkey(name),
+        users!product_stock_transfers_transferred_by_fkey(full_name)
+      `)
+      .eq('org_id', profile.org_id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (productId) query = query.eq('product_id', productId);
+    if (branchId) query = query.or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`);
+    if (from) query = query.gte('created_at', `${from}T00:00:00`);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductStockTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Move stock between two branches, or receive new stock into one branch
+ * (omit fromBranchId — e.g. a supplier delivery). Always fully recorded
+ * on both sides via transfer_product_stock (migration-214); no approval
+ * step, the move is immediate.
+ */
+export async function transferProductStock({ productId, toBranchId, quantity, fromBranchId, note }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!productId || !toBranchId) {
+      return { data: null, error: { code: 'VALIDATION', message: 'A product and destination branch are required.' } };
+    }
+    if (!quantity || quantity <= 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Quantity must be a positive number.' } };
+    }
+
+    const { data, error } = await supabase.rpc('transfer_product_stock', {
+      p_product_id: productId,
+      p_to_branch_id: toBranchId,
+      p_quantity: quantity,
+      p_from_branch_id: fromBranchId || null,
+      p_note: note || null,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] transferProductStock error:', error.message);
     return { data: null, error };
   }
 }

@@ -345,7 +345,7 @@ const BranchManagerDashboard = () => {
       <RevenueCards branchId={branchId} period={period} />
 
       {/* Today's Insights - sales by payment method, membership/voucher activity, staff utilization */}
-      <TodayInsightsPanel branchId={branchId} period={period} />
+      <TodayInsightsPanel branchId={branchId} period={period} showProducts={PRODUCTS_ENABLED} />
 
       {/* Utilization & Capacity Intelligence */}
       <UtilizationPanel branchId={branchId} period={period} />
