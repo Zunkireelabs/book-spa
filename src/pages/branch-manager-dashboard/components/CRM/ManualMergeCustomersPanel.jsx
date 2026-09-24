@@ -285,6 +285,12 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
                 memberships, vouchers, packages, and history move to the surviving record. This
                 cannot be undone.
               </p>
+              {error && (
+                <div className="bg-error/5 border border-error/20 rounded-spa p-3 mt-3 flex items-start space-x-2">
+                  <Icon name="AlertCircle" size={16} className="text-error flex-shrink-0 mt-0.5" />
+                  <p className="font-body text-sm text-error">{error}</p>
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-end gap-3 p-5 border-t border-border">
               <button
