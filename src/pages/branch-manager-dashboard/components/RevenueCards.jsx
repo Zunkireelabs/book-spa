@@ -92,6 +92,13 @@ const RevenueCards = ({ branchId, period, todayOnly = false }) => {
 
   if (!data) return null;
 
+  // `data` may still hold the previous fetch's shape for one render right after
+  // `period` changes (loadRevenue's fetch hasn't resolved yet) — bail rather than
+  // read fields the current shape doesn't have (e.g. `data.today` when the last
+  // fetch was a flat getRevenueForPeriod result, or vice versa).
+  const shapeMatches = isDaily ? data.today !== undefined : data.netRevenue !== undefined;
+  if (!shapeMatches) return null;
+
   if (!isDaily) {
     return (
       <div className="bg-white rounded-lg border border-blue-300 ring-1 ring-blue-100 p-3 sm:p-4 lg:p-5">
