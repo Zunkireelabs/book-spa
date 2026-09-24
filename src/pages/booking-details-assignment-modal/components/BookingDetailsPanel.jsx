@@ -53,7 +53,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoading }) => {
+const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoading, isFirstBooking }) => {
   const navigate = useNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
@@ -218,8 +218,13 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
               <Icon name="User" size={20} className="text-primary" />
             </div>
             <div className="flex-1">
-              <p className="font-body font-body-semibold text-base text-text-primary">
-                {booking.customerName}
+              <p className="font-body font-body-semibold text-base text-text-primary flex items-center gap-2">
+                <span>{booking.customerName}</span>
+                {isFirstBooking && (
+                  <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-caption font-caption-medium bg-success/10 text-success">
+                    New
+                  </span>
+                )}
               </p>
               {(booking.customerGender || booking.customerAge) && (
                 <p className="font-caption font-caption-normal text-sm text-text-secondary">

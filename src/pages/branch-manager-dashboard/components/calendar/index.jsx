@@ -6,8 +6,14 @@ import BookingActionModal from '../../../../components/ui/BookingActionModal';
 import StatusLegend from '../../../../components/ui/StatusLegend';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import CalendarGrid, { HOUR_HEIGHT } from './CalendarGrid';
+import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
+import TransferFromCalendarModal from './TransferFromCalendarModal';
+import AddBlockModal from './AddBlockModal';
+import EditBlockModal from './EditBlockModal';
+import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
 import {
   getCalendarBookings,
+  fetchBlocksForRange,
   fetchBookingById,
   updateBookingStatus,
   assignTherapist,
@@ -24,8 +30,12 @@ import {
   resizeSharedBookingTime,
   applyDiscount,
   getCustomerOutstandingBalance,
+  deleteBlock,
+  updateBlock,
+  cancelScheduledTransfer,
+  revertStaffTransferNow,
 } from '../../../../services/api';
-import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
+import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
 import { getTransferWindowPhase, isWithinTransferDaySlice } from '../../../../services/transferSlotWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -1327,6 +1337,23 @@ function isCheckedOutBlockedSlot(checkedOutByTherapistAndDate, therapistId, day,
   return isAfterCheckout(checkOutTime, day, slotTime);
 }
 
+// Whether a (day, hour, minute) slot on a given column is covered by a manual block
+// occurrence (supabase/migration-212). A block with neither therapistId nor roomId is a
+// "whole location" block and applies to every column. Returns the matching occurrence (with
+// its `description`, used as the Not-Bookable reason text) or null.
+function findManualBlockForSlot(blockOccurrences, colType, colId, day, hour, minute) {
+  if (!blockOccurrences?.length) return null;
+  const slotTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return blockOccurrences.find(occ => {
+    if (occ.date !== day) return false;
+    if (!(slotTime >= occ.startTime && slotTime < occ.endTime)) return false;
+    if (!occ.therapistId && !occ.roomId) return true; // whole-location
+    if (colType === 'therapist') return occ.therapistId === colId;
+    if (colType === 'room') return occ.roomId === colId;
+    return false;
+  }) || null;
+}
+
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
@@ -1415,6 +1442,7 @@ const OperationalCalendar = ({ branchId }) => {
   // Drag state
   const [activeDragId, setActiveDragId] = useState(null);
   const [activeDragBooking, setActiveDragBooking] = useState(null);
+  const [activeDragBlock, setActiveDragBlock] = useState(null);
   const [overSlotData, setOverSlotData] = useState(null); // { hour, minute, day }
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
@@ -1429,6 +1457,14 @@ const OperationalCalendar = ({ branchId }) => {
   const [quickCreateSlot, setQuickCreateSlot] = useState(null);
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
+
+  // Empty-slot choice menu ("Add booking" / "Add block" / "Transfer staff") — the
+  // popover shown after a plain (non-rebook, non-blocked) empty-slot click.
+  const [choiceMenuSlot, setChoiceMenuSlot] = useState(null);
+  const [transferModalTarget, setTransferModalTarget] = useState(null);
+  const [addBlockSlot, setAddBlockSlot] = useState(null);
+  const [editingBlock, setEditingBlock] = useState(null);
+  const [editingTransferTherapist, setEditingTransferTherapist] = useState(null);
 
   // Rebook "pick and place" mode
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
@@ -1500,9 +1536,10 @@ const OperationalCalendar = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const [result, attResult] = await Promise.all([
+    const [result, attResult, blocksResult] = await Promise.all([
       getCalendarBookings(branchId, startDate, endDate),
       fetchAttendance({ branchId, date: startDate }),
+      fetchBlocksForRange(branchId, startDate, endDate),
     ]);
 
     if (result.error) {
@@ -1511,7 +1548,7 @@ const OperationalCalendar = ({ branchId }) => {
       return;
     }
 
-    setCalendarData(result.data);
+    setCalendarData({ ...result.data, blockOccurrences: blocksResult.data || [] });
 
     const attMap = {};
     if (attResult.data) {
@@ -1600,6 +1637,12 @@ const OperationalCalendar = ({ branchId }) => {
     const { active, activatorEvent } = event;
     setActiveDragId(active.id);
 
+    if (active.data.current?.type === 'manual-block') {
+      setActiveDragBlock(active.data.current.block);
+      setDragGrabOffset(0);
+      return;
+    }
+
     const booking = active.data.current?.booking;
     if (booking) {
       setActiveDragBooking(booking);
@@ -1667,8 +1710,58 @@ const OperationalCalendar = ({ branchId }) => {
     return map;
   }, [calendarData]);
 
+  // Drag a block card to a new day/time/column — same "this occurrence" scoping as
+  // resize/delete above (a recurring block's dragged occurrence spins off its own one-off
+  // row via updateBlock's scope:'this' path, leaving the rest of the series untouched).
+  // Declared above handleDragEnd (not just above its own former call site) since
+  // handleDragEnd's dependency array references it directly, and a dependency array is
+  // evaluated eagerly on every render — unlike a callback body, which only runs later —
+  // so a forward reference here throws "Cannot access before initialization" immediately
+  // on page load, not just when a drag actually happens.
+  const handleMoveManualBlock = useCallback(async (block, newDate, newStartTime, targetColId) => {
+    const patch = { blockId: block.blockId, scope: 'this', occurrenceDate: block.day, blockDate: newDate, startTime: newStartTime };
+    // A whole-location block renders one identical copy per column — dropping whichever
+    // copy the user happened to grab must only move its day/time, never narrow it down to
+    // that one column's therapist/room (it would silently stop blocking every other column).
+    if (!block.isWholeLocation) {
+      if (columnMode === 'therapist') {
+        patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
+      } else if (columnMode === 'room') {
+        patch.roomId = targetColId === 'unassigned' ? null : targetColId;
+      }
+    }
+    const result = await updateBlock(patch);
+    if (result.error) {
+      showToast(result.error.message || 'Failed to move block.', 'error');
+      return;
+    }
+    refreshCalendar();
+  }, [columnMode, refreshCalendar]);
+
   const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
+
+    if (active.data.current?.type === 'manual-block') {
+      const finalTimeData = over?.data?.current
+        ? calculateTimeFromPointer(over.data.current)
+        : overSlotData;
+      const block = active.data.current.block;
+      setActiveDragId(null);
+      setActiveDragBlock(null);
+      setOverSlotData(null);
+      setDragGrabOffset(0);
+
+      if (!finalTimeData || finalTimeData.hour === undefined) return;
+      const { day: newDate, colId: targetColId, hour, minute } = finalTimeData;
+      const newStartTime = formatTimeFromSlot(hour, minute);
+      const effectiveTargetColId = targetColId || 'unassigned';
+      const sourceColId = block.colId || 'unassigned';
+      if (newDate === block.day && newStartTime === block.fromTime && effectiveTargetColId === sourceColId) {
+        return; // no change
+      }
+      handleMoveManualBlock(block, newDate, newStartTime, targetColId);
+      return;
+    }
 
     // Capture final position before clearing state
     // Fallback to last overSlotData if over is null (same-column drag may not trigger new over)
@@ -1750,6 +1843,12 @@ const OperationalCalendar = ({ branchId }) => {
         showToast('This therapist has already checked out for the day and is not bookable after their check-out time.', 'error');
         return;
       }
+    }
+
+    const manualBlockOnDrop = findManualBlockForSlot(calendarData?.blockOccurrences, columnMode, effectiveTargetColId, newDate, hour, minute);
+    if (manualBlockOnDrop) {
+      showToast(manualBlockOnDrop.description ? `Blocked: ${manualBlockOnDrop.description}` : 'This time is blocked.', 'error');
+      return;
     }
 
     if (isCrossColumn) {
@@ -1838,7 +1937,7 @@ const OperationalCalendar = ({ branchId }) => {
         timeOnly: true,
       });
     }
-  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData]);
+  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData, handleMoveManualBlock]);
 
   // Execute reschedule with optimistic update (time-only, no column change)
   const executeReschedule = useCallback(async ({ bookingId, newDate, newStartTime, newEndTime, durationMinutes }) => {
@@ -1971,6 +2070,13 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Quick-create handlers ──────────────────────────────────
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    // Block new bookings/blocks on any slot covered by a manual block (migration-212).
+    const manualBlock = findManualBlockForSlot(calendarData?.blockOccurrences, slotInfo.colType, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute);
+    if (manualBlock) {
+      showToast(manualBlock.description ? `Blocked: ${manualBlock.description}` : 'This time is blocked.', 'error');
+      return;
+    }
+
     // Block new bookings on a therapist column that's currently transferred out to
     // another branch (migration-145) — the column stays visible, but isn't bookable
     // here until they're auto-reverted back.
@@ -2017,7 +2123,74 @@ const OperationalCalendar = ({ branchId }) => {
       return;
     }
 
-    // Normal flow — open QuickCreatePanel
+    // Normal flow — offer a choice instead of jumping straight to the booking form
+    setChoiceMenuSlot(slotInfo);
+  }, [rebookSource, branchId, refreshCalendar, calendarData]);
+
+  // Manual-block management from the calendar overlay itself (delete the mistaken block,
+  // or drag its bottom edge to resize) — always scoped to just this occurrence ('this'),
+  // which deleteBlock/updateBlock (migration-212) handle correctly whether or not the
+  // block is part of a recurring series. "Delete entire series" is a distinct, explicit
+  // action so a recurring block isn't wiped out by a slip on a single day.
+  // Undo a mistaken transfer from the Calendar itself, not just Attendance panel's separate
+  // "Pending Transfers" list — the DB already refuses to let a SECOND transfer be created
+  // for a therapist who already has one pending/active (transfer_therapist's own check), so
+  // this covers the actual gap: cancelling whichever one WAS created, from wherever staff
+  // happen to notice the mistake.
+  const handleCancelScheduledTransfer = useCallback(async (col) => {
+    const transfer = col.scheduledTransfer;
+    if (!transfer?.id) return;
+    if (!window.confirm(`Cancel ${col.name}'s scheduled transfer?`)) return;
+
+    const result = await cancelScheduledTransfer(transfer.id);
+    if (result.error) {
+      showToast(result.error.message || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast('Scheduled transfer cancelled.');
+    refreshCalendar();
+  }, [refreshCalendar]);
+
+  // Undo an ALREADY-APPLIED (active) transfer directly from the Calendar's teal overlay —
+  // same one-click-with-confirm pattern as the scheduled case above, for the "created it by
+  // mistake" case. Extending/rescheduling the return date still goes through the full
+  // TransferManagementModal (main overlay click → onEditTransfer), since those aren't "undo"
+  // actions. Server-side revert_staff_transfer_now() already refuses this if the therapist
+  // is still booked at the destination branch, explaining the conflicting booking.
+  const handleCancelActiveTransfer = useCallback(async (col) => {
+    if (!col.transferId) return;
+    if (!window.confirm(`Cancel ${col.name}'s transfer and bring them back to this branch now?`)) return;
+
+    const result = await revertStaffTransferNow({ transferId: col.transferId, revertedAt: null });
+    if (result.error) {
+      showToast(result.error.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast(`${col.name}'s transfer cancelled — back at this branch now.`);
+    refreshCalendar();
+  }, [refreshCalendar]);
+
+  const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
+    const result = await deleteBlock({ blockId, scope, occurrenceDate: day });
+    if (result.error) {
+      showToast(result.error.message || 'Failed to remove block.', 'error');
+      return;
+    }
+    showToast(scope === 'series' ? 'Block series removed.' : 'Block removed.');
+    refreshCalendar();
+  }, [refreshCalendar]);
+
+  const handleResizeManualBlock = useCallback(async ({ blockId, day, durationMinutes }) => {
+    const result = await updateBlock({ blockId, scope: 'this', occurrenceDate: day, durationMinutes });
+    if (result.error) {
+      showToast(result.error.message || 'Failed to resize block.', 'error');
+      return;
+    }
+    refreshCalendar();
+  }, [refreshCalendar]);
+
+  // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
+  const openQuickCreateForSlot = useCallback(async (slotInfo) => {
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
       setServicesLoading(true);
@@ -2025,7 +2198,7 @@ const OperationalCalendar = ({ branchId }) => {
       if (result.data) setServicesCache(result.data);
       setServicesLoading(false);
     }
-  }, [servicesCache, servicesLoading, rebookSource, branchId, refreshCalendar, calendarData]);
+  }, [servicesCache, servicesLoading, branchId]);
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
@@ -2435,6 +2608,28 @@ const OperationalCalendar = ({ branchId }) => {
 
   // ── Render ─────────────────────────────────────────────────
 
+  // Duration of whatever's currently being dragged (booking or block), for the
+  // grid-anchored drop-target indicator below — a precise, position-pinned highlight is
+  // the fix for the cursor-following DragOverlay card sometimes overlapping existing
+  // column content (transfer/block overlays, other bookings) badly enough that staff
+  // can't tell exactly what time they're about to drop onto.
+  const dragPreviewDurationMinutes = activeDragBlock
+    ? (() => {
+        const [fh, fm] = activeDragBlock.fromTime.split(':').map(Number);
+        const [th, tm] = activeDragBlock.toTime.split(':').map(Number);
+        return (th * 60 + tm) - (fh * 60 + fm);
+      })()
+    : activeDragBooking
+      ? (activeDragBooking.serviceDuration ||
+          (activeDragBooking.startTime && activeDragBooking.endTime
+            ? (() => {
+                const [sh, sm] = activeDragBooking.startTime.split(':').map(Number);
+                const [eh, em] = activeDragBooking.endTime.split(':').map(Number);
+                return (eh * 60 + em) - (sh * 60 + sm);
+              })()
+            : 60))
+      : null;
+
   return (
     <>
       <DndContext
@@ -2727,6 +2922,13 @@ const OperationalCalendar = ({ branchId }) => {
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
+                  blockOccurrences={calendarData.blockOccurrences}
+                  onDeleteManualBlock={handleDeleteManualBlock}
+                  onResizeManualBlock={handleResizeManualBlock}
+                  onEditManualBlock={(range) => setEditingBlock({ blockId: range.blockId, day: range.day })}
+                  onEditTransfer={(col) => setEditingTransferTherapist({ id: col.id, name: col.name })}
+                  onCancelScheduledTransfer={handleCancelScheduledTransfer}
+                  onCancelActiveTransfer={handleCancelActiveTransfer}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
@@ -2753,52 +2955,39 @@ const OperationalCalendar = ({ branchId }) => {
           </div>
         </div>
 
-        {/* Drag overlay for visual feedback */}
+        {/* Drag overlay for visual feedback — the single on-screen indicator during a
+            block/booking drag (the separate grid-anchored highlight was removed: having
+            both this cursor-following card AND a grid-snapped box on screen at once read
+            as two competing layers rather than one clear signal). This card now shows the
+            actual snapped drop time itself, sourced from overSlotData (the same value the
+            grid highlight used to read), so "here's what I'm holding" and "here's where
+            it'll land" live in one place. */}
         <DragOverlay>
-          {activeDragBooking && (() => {
-            // Calculate preview time based on hovered slot
-            const duration = activeDragBooking.serviceDuration ||
-              (activeDragBooking.startTime && activeDragBooking.endTime
-                ? (() => {
-                    const [sh, sm] = activeDragBooking.startTime.split(':').map(Number);
-                    const [eh, em] = activeDragBooking.endTime.split(':').map(Number);
-                    return (eh * 60 + em) - (sh * 60 + sm);
-                  })()
-                : 60);
-
-            const previewStartTime = overSlotData
-              ? formatTimeFromSlot(overSlotData.hour, overSlotData.minute)
-              : activeDragBooking.startTime?.slice(0, 5) || '';
-
-            const previewEndTime = overSlotData
-              ? calculateEndTime(overSlotData.hour, overSlotData.minute, duration)
-              : activeDragBooking.endTime?.slice(0, 5) || '';
-
-            return (
-              <div className="bg-white rounded-md border-2 border-primary shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
-                {/* Time display - prominent */}
-                <div className="font-data text-sm font-semibold text-text-primary mb-1">
-                  {previewStartTime} – {previewEndTime}
+          {activeDragBlock && (
+            <div className="bg-amber-700 text-white rounded-md border-2 border-amber-800 shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
+              <div className="font-body text-xs font-semibold">{activeDragBlock.description || 'Not bookable'}</div>
+              {overSlotData && dragPreviewDurationMinutes != null && (
+                <div className="font-caption text-[10px] mt-0.5 opacity-90">
+                  {to12h(formatTimeFromSlot(overSlotData.hour, overSlotData.minute))} – {to12h(calculateEndTime(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes))}
                 </div>
-                <div className="font-body font-semibold text-xs text-text-primary">
-                  {activeDragBooking.customerName}
-                </div>
-                <div className="font-body text-[11px] text-text-secondary">
-                  {activeDragBooking.serviceName}
-                </div>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="font-caption text-[10px] text-text-secondary">
-                    {duration} mins
-                  </span>
-                  {overSlotData && (
-                    <span className="font-caption text-[10px] text-primary font-medium">
-                      Drop here
-                    </span>
-                  )}
-                </div>
+              )}
+            </div>
+          )}
+          {activeDragBooking && (
+            <div className="bg-white rounded-md border-2 border-primary shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
+              <div className="font-body font-semibold text-xs text-text-primary">
+                {activeDragBooking.customerName}
               </div>
-            );
-          })()}
+              <div className="font-body text-[11px] text-text-secondary">
+                {activeDragBooking.serviceName}
+              </div>
+              {overSlotData && dragPreviewDurationMinutes != null && (
+                <span className="font-caption text-[10px] text-text-secondary">
+                  {to12h(formatTimeFromSlot(overSlotData.hour, overSlotData.minute))} – {to12h(calculateEndTime(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes))}
+                </span>
+              )}
+            </div>
+          )}
         </DragOverlay>
       </DndContext>
 
@@ -2860,6 +3049,7 @@ const OperationalCalendar = ({ branchId }) => {
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}
+        onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
       />
 
       {/* Toast */}
@@ -2887,6 +3077,112 @@ const OperationalCalendar = ({ branchId }) => {
         branchId={branchId}
         branchHours={calendarData?.branchHours}
       />
+
+      {/* Empty-slot choice menu — Add booking / Add block / Transfer staff */}
+      {choiceMenuSlot && (
+        <EmptySlotChoiceMenu
+          x={choiceMenuSlot.clientX ?? 0}
+          y={choiceMenuSlot.clientY ?? 0}
+          onClose={() => setChoiceMenuSlot(null)}
+          options={[
+            {
+              key: 'booking',
+              label: 'Add booking',
+              icon: 'CalendarPlus',
+              onSelect: () => openQuickCreateForSlot(choiceMenuSlot),
+            },
+            {
+              key: 'block',
+              label: 'Add block',
+              icon: 'Ban',
+              onSelect: () => setAddBlockSlot(choiceMenuSlot),
+            },
+            ...(choiceMenuSlot.colType === 'therapist' ? [{
+              key: 'transfer',
+              label: 'Transfer staff',
+              icon: 'ArrowRightLeft',
+              onSelect: () => {
+                const t = calendarData?.therapists?.find(th => th.id === choiceMenuSlot.colId);
+                setTransferModalTarget({
+                  therapistId: choiceMenuSlot.colId,
+                  therapistName: t?.name || choiceMenuSlot.colName,
+                  defaultDate: choiceMenuSlot.day,
+                  defaultTime: `${String(choiceMenuSlot.hour).padStart(2, '0')}:${String(choiceMenuSlot.minute).padStart(2, '0')}`,
+                });
+              },
+            }] : []),
+          ]}
+        />
+      )}
+
+      {transferModalTarget && (
+        <TransferFromCalendarModal
+          therapistId={transferModalTarget.therapistId}
+          therapistName={transferModalTarget.therapistName}
+          currentBranchId={branchId}
+          defaultDate={transferModalTarget.defaultDate}
+          defaultTime={transferModalTarget.defaultTime}
+          onClose={() => setTransferModalTarget(null)}
+          onSuccess={({ applied, startDate, startTime } = {}) => {
+            const name = transferModalTarget.therapistName;
+            setTransferModalTarget(null);
+            if (applied === false) {
+              const when = startTime
+                ? `${startDate} at ${startTime}`
+                : startDate;
+              showToast(`${name}'s transfer is scheduled for ${when} — it hasn't happened yet.`);
+            } else {
+              showToast(`${name} transferred.`);
+            }
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {addBlockSlot && (
+        <AddBlockModal
+          branchId={branchId}
+          slotInfo={addBlockSlot}
+          therapists={calendarData?.therapists || []}
+          rooms={calendarData?.rooms || []}
+          onClose={() => setAddBlockSlot(null)}
+          onSuccess={() => {
+            setAddBlockSlot(null);
+            showToast('Block added.');
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {editingBlock && (
+        <EditBlockModal
+          blockId={editingBlock.blockId}
+          occurrenceDate={editingBlock.day}
+          therapists={calendarData?.therapists || []}
+          rooms={calendarData?.rooms || []}
+          onClose={() => setEditingBlock(null)}
+          onSuccess={() => {
+            setEditingBlock(null);
+            showToast('Block updated.');
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {editingTransferTherapist && (
+        <TransferManagementModal
+          therapistId={editingTransferTherapist.id}
+          therapistName={editingTransferTherapist.name}
+          currentBranchId={branchId}
+          defaultStartDate={currentDate}
+          onClose={() => setEditingTransferTherapist(null)}
+          onSuccess={(message) => {
+            setEditingTransferTherapist(null);
+            if (message) showToast(message);
+            refreshCalendar();
+          }}
+        />
+      )}
 
       {/* Reassignment Confirmation Dialog */}
       {pendingReassign && (

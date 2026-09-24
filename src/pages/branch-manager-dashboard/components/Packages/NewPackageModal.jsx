@@ -3,6 +3,7 @@ import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
+import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -26,7 +27,7 @@ const EMPTY_NEW_TYPE = { name: '', serviceId: '', defaultSessions: '', standardP
 const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
-  const { orgId } = useOrg();
+  const { orgId, paymentMethods } = useOrg();
   const isAdmin = (userRole || profile?.role) === 'admin';
 
   const [types, setTypes] = useState([]);
@@ -47,6 +48,8 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [sessionsTotal, setSessionsTotal] = useState('');
+  const [dueHolderName, setDueHolderName] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
   const [expiryDate, setExpiryDate] = useState('');
   const [expiryTouched, setExpiryTouched] = useState(false);
@@ -149,6 +152,7 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     setPackageTypeId(type.id);
     setSessionsTotal(type.default_sessions != null ? String(type.default_sessions) : '');
     setPaidAmount(type.standard_price != null ? String(type.standard_price) : '');
+    setDueHolderName('');
     if (!expiryTouched) {
       const base = fromIssuedDate ? new Date(fromIssuedDate) : new Date();
       base.setDate(base.getDate() + (type.validity_days || 365));
@@ -173,6 +177,13 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
   const paidAmountNum = Number(paidAmount) || 0;
   const sessionsTotalNum = Number(sessionsTotal) || 0;
 
+  // The package type's price is already the discounted bulk rate (e.g. 12
+  // sessions for 30% less than paying per-visit) — there's no further
+  // discount to apply on top at issuance. What's owed is simply the type's
+  // price; paidAmountNum falling short of it becomes a due balance.
+  const baseAmount = selectedType?.standard_price != null ? Number(selectedType.standard_price) : null;
+  const dueAmountNum = baseAmount == null ? 0 : Math.max(0, Math.round((baseAmount - paidAmountNum) * 100) / 100);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -181,6 +192,8 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
     if (!packageTypeId) { setError('Please select a package type.'); return; }
     if (!linkedCustomerId && !guestName.trim()) { setError('Guest name is required.'); return; }
     if (paidAmountNum < 0) { setError('Paid amount cannot be negative.'); return; }
+    if (baseAmount != null && paidAmountNum > baseAmount) { setError('Paid amount cannot exceed the package price.'); return; }
+    if (dueAmountNum > 0 && !dueHolderName.trim()) { setError('A responsible person is required when there is a due balance.'); return; }
     if (!Number.isFinite(sessionsTotalNum) || sessionsTotalNum <= 0) { setError('Sessions must be greater than zero.'); return; }
     if (!issuedDate || !expiryDate) { setError('Issued and expiry dates are required.'); return; }
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
@@ -201,6 +214,8 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
       paidAmount: paidAmountNum,
       sessionsTotal: sessionsTotalNum,
       remarks: remarks.trim() || null,
+      dueHolderName: dueAmountNum > 0 ? dueHolderName.trim() : null,
+      paymentMethod: paidAmountNum > 0 ? paymentMethod : null,
     });
     setSubmitting(false);
 
@@ -451,21 +466,66 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                     step="1"
                     value={sessionsTotal}
                     onChange={(e) => setSessionsTotal(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    disabled={selectedType?.default_sessions != null}
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background disabled:text-text-secondary disabled:cursor-not-allowed"
                   />
+                  {selectedType?.default_sessions == null && (
+                    <p className="mt-1.5 font-caption text-xs text-text-tertiary">
+                      This package type has no fixed session count — enter it manually.
+                    </p>
+                  )}
                 </div>
                 <div>
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Paid amount (NPR)</label>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Price (NPR)</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    type="text"
+                    readOnly
+                    value={baseAmount != null ? formatNPR(baseAmount) : 'No fixed price'}
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-background text-text-secondary cursor-not-allowed"
                   />
                 </div>
               </div>
+
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Paid amount (NPR)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+              </div>
+
+              {paidAmountNum > 0 && (
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Payment method</label>
+                  <PaymentMethodSelector
+                    paymentMethods={paymentMethods}
+                    value={paymentMethod}
+                    onChange={setPaymentMethod}
+                  />
+                </div>
+              )}
+
+              {dueAmountNum > 0 && (
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                    Responsible person <span className="text-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={dueHolderName}
+                    onChange={(e) => setDueHolderName(e.target.value)}
+                    placeholder="Who owes the remaining balance?"
+                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <p className="mt-1.5 font-caption text-xs text-text-tertiary">
+                    Due: {formatNPR(dueAmountNum)} — required since paid amount is less than the total due.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -486,11 +546,6 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                     className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
                 </div>
-              </div>
-
-              <div className="bg-background border border-border rounded-spa px-3 py-2 flex items-center justify-between">
-                <span className="font-body text-xs text-text-secondary">Paid amount</span>
-                <span className="font-data font-data-semibold text-sm text-primary">{formatNPR(paidAmountNum)}</span>
               </div>
 
               <div>

@@ -50,6 +50,11 @@ run_sql "$SUPABASE_DIR/rls.sql"
 # staging/prod already have live via migration-002, but schema.sql's snapshot predates.
 run_sql "$REPO_ROOT/scripts/local-only-supplemental-triggers.sql"
 
+# service_categories has no tracked CREATE TABLE anywhere in this repo (pre-existing drift —
+# see the file's own header for the full explanation) — closes the gap before migration-184
+# (which joins against it) replays.
+run_sql "$REPO_ROOT/scripts/local-only-supplemental-service-categories.sql"
+
 for f in $(ls "$SUPABASE_DIR"/migration-[0-9]*.sql | sort -V); do
   case "$(basename "$f")" in
     migration-002-*) echo "==> Skipping $(basename "$f") (superseded by schema.sql snapshot, see local-only-supplemental-triggers.sql)"; continue ;;

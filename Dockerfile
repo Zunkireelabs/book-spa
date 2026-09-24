@@ -5,15 +5,16 @@ ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_POSTHOG_KEY
 ARG VITE_POSTHOG_HOST
-ARG VITE_ENABLE_MEMBERSHIP
-ARG VITE_ENABLE_VOUCHERS
-ARG VITE_ENABLE_CUSTOMER_REFERRALS
-ARG VITE_ENABLE_OUTREACH
-ARG VITE_ENABLE_PLATFORM_ADMIN
+# Feature flags are NOT passed as individual build-args/ARGs (that required
+# a matching edit in both this file and every deploy workflow per flag —
+# forgotten twice already, see .env.staging/.env.production's own header).
+# Instead they live in the committed .env.staging / .env.production files,
+# which Vite loads automatically based on BUILD_MODE below.
+ARG BUILD_MODE=production
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+RUN npx vite build --mode ${BUILD_MODE}
 
 # Stage 2: Serve
 FROM nginx:alpine

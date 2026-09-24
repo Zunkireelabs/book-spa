@@ -25,7 +25,7 @@ function formatNPR(amount, compact = false) {
 // be a fixed semantic palette (green=cash etc.) like the old hardcoded 4 buckets.
 const SEGMENT_COLORS = ['bg-primary', 'bg-accent', 'bg-secondary', 'bg-success', 'bg-warning', 'bg-error', 'bg-gray-400'];
 
-const TodayInsightsPanel = ({ branchId, period, showVouchers = true }) => {
+const TodayInsightsPanel = ({ branchId, period, showVouchers = true, showProducts = false }) => {
   const { paymentMethods } = useOrg();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -217,6 +217,14 @@ const TodayInsightsPanel = ({ branchId, period, showVouchers = true }) => {
               {data.packageSold.count} · {formatNPR(data.packageSold.value)}
             </span>
           </div>
+          {showProducts && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">Products</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {data.productsSold.count} · {formatNPR(data.productsSold.value)}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="space-y-3">

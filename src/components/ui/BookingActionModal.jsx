@@ -6,7 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -78,10 +78,16 @@ const BookingActionModal = ({
   onRebookStart,
   branchHours,
   defaultNewBookingMode,
-  userRole = 'staff'
+  userRole = 'staff',
+  // Optional: when provided, a small "view" affordance appears on each Related-
+  // services/Other-unpaid-bookings row, letting staff jump straight to THAT
+  // booking's own management dialog instead of only being able to select it for
+  // a bundled payment. Takes the booking id, same contract as onBookingClick.
+  onViewBooking,
 }) => {
   const { branchId } = useBranch();
   const [activeTab, setActiveTab] = useState('details');
+  const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
   const [therapistSearch, setTherapistSearch] = useState('');
   const [selectedRoom, setSelectedRoom] = useState('');
@@ -150,6 +156,7 @@ const BookingActionModal = ({
   // Pre-selected by default so it's bundled into payment automatically.
   const [previousDueBookings, setPreviousDueBookings] = useState([]);
   const [selectedPreviousDueIds, setSelectedPreviousDueIds] = useState(new Set());
+  const [selectedRelatedIds, setSelectedRelatedIds] = useState(new Set());
 
   // This customer's membership wallet, if any — re-fetched every time the
   // Payment tab opens so the balance shown is always current, not cached
@@ -196,6 +203,20 @@ const BookingActionModal = ({
     setNewBookingSubmitting(false);
   }, [booking?.bookingId]);
 
+  // "New" badge — this is the modal staff actually reach by clicking a booking card on the
+  // Calendar (booking-details-assignment-modal is a separate route, /:orgSlug/bookings/:id).
+  useEffect(() => {
+    let cancelled = false;
+    if (!booking?.bookingId) {
+      setIsFirstBooking(false);
+      return;
+    }
+    getCustomerFirstBookingFlag(booking.customerId, booking.bookingId, booking.date, booking.startTime).then((result) => {
+      if (!cancelled) setIsFirstBooking(!!result.data?.isFirstBooking);
+    });
+    return () => { cancelled = true; };
+  }, [booking?.bookingId, booking?.customerId, booking?.date, booking?.startTime]);
+
   // Fetch related unpaid bookings when payment tab opens
   useEffect(() => {
     if (isOpen && (activeTab === 'payment' || activeTab === 'discount') && booking) {
@@ -226,6 +247,9 @@ const BookingActionModal = ({
       Promise.all([relatedPromise, duePromise]).then(([relatedResult, dueResult]) => {
         const related = relatedResult.data || [];
         setRelatedBookings(related);
+        // Auto-bundled by default — staff can uncheck individual items, same
+        // as previous-due below.
+        setSelectedRelatedIds(new Set(related.map(rb => rb.id)));
 
         const resetKey = `${activeTab}:${booking.bookingId}:${isOpen}`;
         if (discountResetKeyRef.current !== resetKey) {
@@ -251,6 +275,7 @@ const BookingActionModal = ({
         if (activeTab === 'payment') {
           setPreviousDueBookings([]);
           setSelectedPreviousDueIds(new Set());
+          setSelectedRelatedIds(new Set());
         }
       });
     } else if (isOpen && activeTab === 'payment') {
@@ -832,8 +857,13 @@ const BookingActionModal = ({
                 <h2 id="booking-modal-title" className="font-heading font-heading-semibold text-base sm:text-lg text-text-primary truncate">
                   Booking Management
                 </h2>
-                <p className="font-caption font-caption-normal text-xs sm:text-sm text-text-secondary truncate">
-                  {booking.id} — {booking.customerName}
+                <p className="font-caption font-caption-normal text-xs sm:text-sm text-text-secondary truncate flex items-center gap-1.5">
+                  <span className="truncate">{booking.id} — {booking.customerName}</span>
+                  {isFirstBooking && (
+                    <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
+                      New
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
@@ -1903,16 +1933,25 @@ const BookingActionModal = ({
             {activeTab === 'payment' && (() => {
               const selectedPreviousDue = previousDueBookings.filter(pb => selectedPreviousDueIds.has(pb.bookingId));
               const previousDueTotal = selectedPreviousDue.reduce((sum, pb) => sum + Number(pb.amountDue || 0), 0);
-              // Related same-session services (discounted together via the Discount tab)
-              // are bundled into payment automatically — no opt-in checkboxes, since they
-              // were already grouped as one action.
+              // Related same-session services are still discounted together via the
+              // Discount tab, but paying for them is a separate decision — a customer
+              // may want to settle just one service now and the other later. Selection
+              // defaults to "all" (matching the old always-bundled behavior) but staff
+              // can uncheck individual ones, same pattern as previous-due below.
               const relatedRemaining = (rb) => Math.max(Number(rb.base_amount || 0) - Number(rb.discount_amount || 0), 0);
-              const relatedBookingsTotal = relatedBookings.reduce((sum, rb) => sum + relatedRemaining(rb), 0);
+              const selectedRelated = relatedBookings.filter(rb => selectedRelatedIds.has(rb.id));
+              const relatedBookingsTotal = selectedRelated.reduce((sum, rb) => sum + relatedRemaining(rb), 0);
               const combinedTotal = (booking.finalAmount || 0) + relatedBookingsTotal + previousDueTotal;
-              const selectedCount = relatedBookings.length + selectedPreviousDueIds.size;
+              const selectedCount = selectedRelatedIds.size + selectedPreviousDueIds.size;
               const paidThisVisit = (booking.payments || [])
                 .filter(p => p.paymentMode === 'Membership')
                 .reduce((s, p) => s + p.amount, 0);
+              // relatedBookings is always same-day as the booking being viewed — label it
+              // "Today's" only when that day actually IS today, so a staffer looking at a
+              // past booking (via search, not the live Calendar) doesn't see a misleading
+              // "Today" label on services that happened days ago.
+              const todayStr = new Date().toISOString().slice(0, 10);
+              const relatedGroupLabel = booking.date === todayStr ? "Today's Services" : 'Other Day Services';
 
               return (
               <div className="space-y-4 sm:space-y-6">
@@ -1959,26 +1998,53 @@ const BookingActionModal = ({
                 </div>
 
                 {/* Related services — same-session bookings discounted together on the
-                    Discount tab. Bundled into payment by default, no opt-in needed. */}
+                    Discount tab. Bundled into payment by default (all checked), but staff
+                    can uncheck one to pay it later — see combinedTotal/selectedCount above. */}
                 {relatedBookings.length > 0 && (
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-text-secondary uppercase flex items-center gap-1.5">
                       <Icon name="Layers" size={13} />
-                      Related services ({relatedBookings.length})
+                      {relatedGroupLabel} ({relatedBookings.length})
                     </label>
                     <div className="border border-border rounded-spa divide-y divide-border overflow-hidden">
-                      {relatedBookings.map(rb => (
-                        <div key={rb.id} className="flex items-center gap-3 px-3 py-2.5">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
-                            <div className="font-caption text-xs text-text-secondary">
-                              #{rb.booking_number} · {to12h(rb.start_time)}
-                              {Number(rb.discount_amount) > 0 && ` · discount -NPR ${Number(rb.discount_amount).toLocaleString('en-IN')}`}
+                      {relatedBookings.map(rb => {
+                        const isChecked = selectedRelatedIds.has(rb.id);
+                        return (
+                          <label key={rb.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-background/50 ${isChecked ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                setSelectedRelatedIds(prev => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(rb.id);
+                                  else next.delete(rb.id);
+                                  return next;
+                                });
+                              }}
+                              className="text-primary focus:ring-primary w-4 h-4 rounded"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-body text-sm text-text-primary">{rb.service?.name || 'Service'}</div>
+                              <div className="font-caption text-xs text-text-secondary">
+                                #{rb.booking_number} · {to12h(rb.start_time)}
+                                {Number(rb.discount_amount) > 0 && ` · discount -NPR ${Number(rb.discount_amount).toLocaleString('en-IN')}`}
+                              </div>
                             </div>
-                          </div>
-                          <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {relatedRemaining(rb).toLocaleString('en-IN')}</span>
-                        </div>
-                      ))}
+                            <span className="font-data text-sm text-text-primary flex-shrink-0">NPR {relatedRemaining(rb).toLocaleString('en-IN')}</span>
+                            {onViewBooking && (
+                              <button
+                                type="button"
+                                title="View this booking"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewBooking(rb.id); }}
+                                className="flex-shrink-0 p-1 rounded hover:bg-background text-text-secondary hover:text-primary"
+                              >
+                                <Icon name="ChevronRight" size={16} />
+                              </button>
+                            )}
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2024,7 +2090,7 @@ const BookingActionModal = ({
                   <div className="space-y-2">
                     <label className="font-body font-body-medium text-xs text-warning uppercase flex items-center gap-1.5">
                       <Icon name="AlertCircle" size={13} />
-                      Previous due for {booking.customerName}
+                      Other unpaid bookings for {booking.customerName}
                     </label>
                     <div className="border border-warning/20 rounded-spa divide-y divide-border overflow-hidden">
                       {previousDueBookings.map(pb => {
@@ -2051,6 +2117,16 @@ const BookingActionModal = ({
                               </div>
                             </div>
                             <span className="font-data text-sm text-warning flex-shrink-0">NPR {Number(pb.amountDue).toLocaleString('en-IN')}</span>
+                            {onViewBooking && (
+                              <button
+                                type="button"
+                                title="View this booking"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewBooking(pb.bookingId); }}
+                                className="flex-shrink-0 p-1 rounded hover:bg-background text-text-secondary hover:text-warning"
+                              >
+                                <Icon name="ChevronRight" size={16} />
+                              </button>
+                            )}
                           </label>
                         );
                       })}
@@ -2380,7 +2456,7 @@ const BookingActionModal = ({
             dueHolderName: booking.dueHolderName,
           }}
           additionalBookings={[
-            ...relatedBookings.map(rb => ({
+            ...relatedBookings.filter(rb => selectedRelatedIds.has(rb.id)).map(rb => ({
               bookingId: rb.id,
               bookingNumber: rb.booking_number,
               service: rb.service?.name,

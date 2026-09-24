@@ -1,19 +1,27 @@
 import React from 'react';
 import Icon from '../AppIcon';
 
-// Session-package info card at checkout — same visual/structural pattern as
-// VoucherWalletCard (rounded-spa border, bg-primary/5, icon + name left,
-// value right), but purely informational: redemption itself happens by
-// picking "Package — <name>" straight from the Payment Method dropdown
-// (PaymentModal's packageLeaves), same as Membership/Voucher are picked —
-// this card exists only so staff can see sessions-remaining/expiry without
-// having to open the dropdown first. `packages` is the list returned by
-// getActivePackagesForCustomer (already filtered to unused/partially_used —
-// no fully_redeemed/expired rows reach here). `selectedPackageId` marks
-// whichever package is currently the active SessionPackage tender, so its
-// row can show "Selected" (removing it is the tender row's own trash icon,
-// not this card).
-const PackageWalletCard = ({ packages, selectedPackageId = null }) => {
+// Session-package redemption card at checkout — same visual/structural
+// pattern as VoucherWalletCard (rounded-spa border, bg-primary/5, icon + name
+// left, value + "after this payment" preview right), but packages are
+// session-counted rather than NPR-balanced: "sessions remaining / total"
+// stands in for the NPR balance, and "Claim Session" is a discrete action
+// (pick a package, it becomes this tender) rather than a typed amount, since
+// a session redemption is always worth exactly one visit, never a partial.
+// `packages` is the list returned by getActivePackagesForCustomer (already
+// filtered to unused/partially_used — no fully_redeemed/expired rows reach
+// here). `selectedPackageId` marks whichever package is currently the active
+// SessionPackage tender (only one at a time, since one booking = one session
+// redeemed), so its row can show "Selected" instead of the redeem action.
+// `redeemDisabled` (true when this booking's own remaining balance is already
+// 0 — e.g. the modal was opened only to collect a bundled previous due) turns
+// the action into an inert "Already settled" label instead of a button that
+// would silently no-op (a $0 SessionPackage tender gets filtered out before
+// ever reaching onConfirm). `splitInProgress` (true when 2+ tender rows are
+// already entered) similarly disables the action — onRedeem always does a
+// full tenders-array replace, which would otherwise silently wipe whatever
+// split payment staff had already typed in.
+const PackageWalletCard = ({ packages, selectedPackageId = null, redeemDisabled = false, splitInProgress = false, onRedeem, onUndo }) => {
   const list = packages || [];
   if (list.length === 0) return null;
 
@@ -42,8 +50,30 @@ const PackageWalletCard = ({ packages, selectedPackageId = null }) => {
                 {expiryLabel ? `Expires ${expiryLabel}` : 'No expiry'}
                 {p.packageCode ? ` · ${p.packageCode}` : ''}
               </p>
-              {isSelected && (
-                <span className="text-[11px] font-caption text-primary flex-shrink-0">Selected</span>
+              {isSelected ? (
+                <button
+                  type="button"
+                  onClick={() => onUndo && onUndo(p)}
+                  className="text-[11px] font-caption text-primary hover:underline flex-shrink-0"
+                >
+                  Selected — undo
+                </button>
+              ) : redeemDisabled ? (
+                <span className="text-[11px] font-caption text-text-tertiary flex-shrink-0">
+                  Booking already settled
+                </span>
+              ) : splitInProgress ? (
+                <span className="text-[11px] font-caption text-text-tertiary flex-shrink-0">
+                  Remove other payment methods first
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onRedeem && onRedeem(p)}
+                  className="text-[11px] font-caption text-primary hover:underline flex-shrink-0"
+                >
+                  Claim Session
+                </button>
               )}
             </div>
           </div>

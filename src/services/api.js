@@ -4,6 +4,7 @@ import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
+import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 
@@ -3477,6 +3478,30 @@ export async function getTodayInsights(branchId, from, to) {
     if (packagesRedeemedError) throw packagesRedeemedError;
     const packageRedeemed = { count: (packagesRedeemed || []).length };
 
+    // 7b. Products sold in range, branch-scoped, excluding refunded sales —
+    // real cash collected the same way bookings/vouchers are, so also folds
+    // into totalSales/modeTotals. Timestamp-based (created_at) like
+    // memberships (5/5b) rather than a plain date column, same Nepal-
+    // midnight boundary logic.
+    let productSalesQuery = supabase
+      .from('product_sales')
+      .select('total_amount, payment_mode, refunded_at')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    productSalesQuery = withBranch(productSalesQuery, branchId);
+    const { data: productSalesRows, error: productSalesError } = await productSalesQuery;
+    if (productSalesError) throw productSalesError;
+    const activeProductSales = (productSalesRows || []).filter(p => !p.refunded_at);
+    const productsSold = {
+      count: activeProductSales.length,
+      value: activeProductSales.reduce((sum, p) => sum + Number(p.total_amount), 0),
+    };
+    for (const p of activeProductSales) {
+      const amount = Number(p.total_amount);
+      totalSales += amount;
+      modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+    }
+
     // 8. Staff utilization (reuse existing intelligence function)
     const { data: utilization, error: utilizationError } = await getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd });
     if (utilizationError) throw utilizationError;
@@ -3491,6 +3516,7 @@ export async function getTodayInsights(branchId, from, to) {
         voucherDistributed,
         packageSold,
         packageRedeemed,
+        productsSold,
         staffUtilization: {
           avgPercent: utilization?.summary?.avgTherapistUtilization ?? 0,
           therapists: utilization?.therapistUtilization ?? [],
@@ -4495,7 +4521,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     //    blocked for them since their branch_id now points elsewhere — see migration-145).
     const [
       therapistsResult, roomsResult, transferredOutResult, transferredInResult,
-      revertedOutResult, revertedInResult, checkedOutResult,
+      revertedOutResult, revertedInResult, checkedOutResult, scheduledTransferResult,
     ] = await Promise.all([
       supabase
         .from('therapists')
@@ -4586,6 +4612,22 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .gte('date', startDate)
         .lte('date', endDate)
         .not('check_out_time', 'is', null),
+      // Transfers scheduled for later within the viewed range but not yet due (cron hasn't
+      // flipped applied=true) — these move nothing yet, so they must NOT block the column
+      // like transferredOut/transferredIn above, but the calendar showing literally nothing
+      // for a transfer staff just created (until its start time arrives) reads as "did this
+      // even save?" — surface it as a non-blocking "Scheduled" badge instead. Only the
+      // FROM side needs this (a pending incoming transfer doesn't affect this branch's
+      // columns at all until it applies and the therapist's own row starts appearing here).
+      supabase
+        .from('staff_transfers')
+        .select('id, therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
+        .eq('from_branch_id', resolvedBranchId)
+        .eq('applied', false)
+        .gte('effective_date', startDate)
+        .lte('effective_date', endDate)
+        .order('effective_date', { ascending: true })
+        .order('start_time', { ascending: true }),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4595,6 +4637,20 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (revertedOutResult.error) throw revertedOutResult.error;
     if (revertedInResult.error) throw revertedInResult.error;
     if (checkedOutResult.error) throw checkedOutResult.error;
+    if (scheduledTransferResult.error) throw scheduledTransferResult.error;
+
+    // Keyed by therapist id -> the SOONEST still-pending transfer touching this branch's
+    // view range (a therapist could theoretically have more than one scheduled; the list is
+    // already ordered by effective_date/start_time ascending, so `??=` keeps the first).
+    const scheduledTransferByTherapist = {};
+    (scheduledTransferResult.data || []).forEach(row => {
+      scheduledTransferByTherapist[row.therapist_id] ??= {
+        id: row.id,
+        effectiveDate: row.effective_date,
+        startTime: row.start_time,
+        toBranch: row.toBranch?.name || null,
+      };
+    });
 
     // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
     // can block each affected day's column independently.
@@ -4623,6 +4679,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         // Falling back to the live value only if that capture is missing (legacy rows).
         display_order: t.from_display_order ?? t.therapist.display_order,
         transferredOut: true,
+        transferId: t.id,
         returnsAt: t.revert_at,
         // Kathmandu wall-clock instant the transfer actually took effect — lets the
         // calendar shade only the real [start, revert_at] window, not the whole day.
@@ -4644,9 +4701,11 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       };
     });
 
-    const normalTherapists = (therapistsResult.data || []).map(t =>
-      transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t
-    );
+    const normalTherapists = (therapistsResult.data || []).map(t => {
+      const withIncoming = transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t;
+      const scheduled = scheduledTransferByTherapist[t.id];
+      return scheduled ? { ...withIncoming, scheduledTransfer: scheduled } : withIncoming;
+    });
 
     // A visitor who has ALREADY reverted home is no longer in therapistsResult (their
     // branch_id points home again), so transferredInById above can't tag an existing row —
@@ -4733,7 +4792,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           .in('id', orphanTherapistIds),
         supabase
           .from('staff_transfers')
-          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+          .select('id, therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
           .in('therapist_id', orphanTherapistIds),
       ]);
       if (orphanTherapistsResult.error) throw orphanTherapistsResult.error;
@@ -4754,6 +4813,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
             ...t,
             transferredOut: transferWindow ? !!transferWindow.transferredOut : true,
             transferredIn: transferWindow ? !!transferWindow.transferredIn : false,
+            transferId: transferWindow?.transferId ?? null,
             returnsAt: transferWindow ? transferWindow.returnsAt : null,
             transferStartAt: transferWindow ? transferWindow.transferStartAt : null,
             fromBranch: transferWindow?.fromBranch || null,
@@ -5151,39 +5211,54 @@ export async function createBooking({
     // flows — so treat it as authoritative: an online booking must never inherit
     // created_by from a staff session that happens to be active in the same browser.
     const authUser = orgSlug ? null : (await supabase.auth.getUser()).data.user;
-    const { data: booking, error: insertError } = await supabase
-      .from('bookings')
-      .insert({
-        branch_id: resolvedBranchId,
-        room_id: availableRoom?.id || null,
-        service_id: serviceId,
-        therapist_id: primaryTherapistId,
-        customer_id: customerId,
-        customer_name: customerName,
-        customer_email: customerEmail || null,
-        customer_phone: toE164(customerPhone),
-        customer_gender: customerGender || null,
-        customer_account_id: customerAccountId || null,
-        companion_name: companionName?.trim() || null,
-        companion_phone: companionPhone ? toE164(companionPhone) : null,
-        date: date,
-        start_time: startTime,
-        base_amount: Number(service.price_npr),
-        discount_amount: 0,
-        special_requests: specialRequests || null,
-        created_by: authUser?.id || null,
-        booking_group_id: bookingGroupId || null,
-        referral_source: referralSource || null,
-        referral_source_detail: referralSourceDetail || null,
-        // Phase 9A: Snapshot fields — preserve original values at booking time
-        service_name_snapshot: service.name,
-        service_duration_snapshot: service.duration_minutes,
-        service_price_snapshot: Number(service.price_npr),
-        room_name_snapshot: availableRoom?.name || null,
-        therapist_name_snapshot: therapistNameSnapshot,
-      })
-      .select()
-      .single();
+    // Public/online flow only — a random, unguessable per-attempt id. Needed because
+    // anon has no SELECT policy on `bookings` (migration-097 closed a cross-org PII
+    // leak there), so `.insert().select()` can't satisfy RETURNING under RLS and would
+    // reject the whole insert. Instead skip .select() below and read the row back
+    // through public_get_booking_by_request_id (migration-223), keyed on this id.
+    const clientRequestId = orgSlug ? crypto.randomUUID() : null;
+    const insertPayload = {
+      branch_id: resolvedBranchId,
+      room_id: availableRoom?.id || null,
+      service_id: serviceId,
+      therapist_id: primaryTherapistId,
+      customer_id: customerId,
+      customer_name: customerName,
+      customer_email: customerEmail || null,
+      customer_phone: toE164(customerPhone),
+      customer_gender: customerGender || null,
+      customer_account_id: customerAccountId || null,
+      companion_name: companionName?.trim() || null,
+      companion_phone: companionPhone ? toE164(companionPhone) : null,
+      date: date,
+      start_time: startTime,
+      base_amount: Number(service.price_npr),
+      discount_amount: 0,
+      special_requests: specialRequests || null,
+      created_by: authUser?.id || null,
+      booking_group_id: bookingGroupId || null,
+      referral_source: referralSource || null,
+      referral_source_detail: referralSourceDetail || null,
+      client_request_id: clientRequestId,
+      // Phase 9A: Snapshot fields — preserve original values at booking time
+      service_name_snapshot: service.name,
+      service_duration_snapshot: service.duration_minutes,
+      service_price_snapshot: Number(service.price_npr),
+      room_name_snapshot: availableRoom?.name || null,
+      therapist_name_snapshot: therapistNameSnapshot,
+    };
+
+    let booking;
+    let insertError;
+    if (orgSlug) {
+      ({ error: insertError } = await supabase.from('bookings').insert(insertPayload));
+    } else {
+      ({ data: booking, error: insertError } = await supabase
+        .from('bookings')
+        .insert(insertPayload)
+        .select()
+        .single());
+    }
 
     if (insertError) {
       if (insertError.code === '23P01') {
@@ -5201,6 +5276,29 @@ export async function createBooking({
         return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: insertError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw insertError;
+    }
+
+    if (orgSlug) {
+      // Read the just-inserted row back via the narrow SECURITY DEFINER RPC —
+      // see the clientRequestId comment above for why a plain .select() can't do this.
+      const { data: fetchedBooking, error: fetchError } = await supabase
+        .rpc('public_get_booking_by_request_id', { p_client_request_id: clientRequestId })
+        .single();
+      if (fetchError || !fetchedBooking) {
+        // The booking itself is already committed at this point (the insert above
+        // succeeded) — only the confirmation read-back failed, e.g. a transient network
+        // blip. Surface a distinct code so the UI doesn't tell the customer to just
+        // "try again", which would create a second, duplicate booking.
+        console.error('[API] public_get_booking_by_request_id failed:', fetchError?.message);
+        return {
+          data: null,
+          error: {
+            code: 'BOOKING_CONFIRMATION_UNAVAILABLE',
+            message: 'Your booking was placed, but we could not load the confirmation details. Please check your email/SMS, or contact the branch to confirm, before trying to book again.',
+          },
+        };
+      }
+      booking = { ...fetchedBooking, branch_id: resolvedBranchId, final_amount: fetchedBooking.base_amount };
     }
 
     // 7a2. Log customer-to-customer referral, if staff supplied one for a genuinely
@@ -5918,9 +6016,341 @@ export async function transferTherapist({
       duration_value: durationValue,
       duration_unit: durationUnit,
     });
-    return { data: { transferId: data }, error: null };
+
+    const { data: row } = await supabase
+      .from('staff_transfers')
+      .select('applied, effective_date, start_time')
+      .eq('id', data)
+      .single();
+
+    return {
+      data: {
+        transferId: data,
+        applied: row?.applied ?? null,
+        effectiveDate: row?.effective_date ?? null,
+        startTime: row?.start_time ?? null,
+      },
+      error: null,
+    };
   } catch (error) {
     console.error('[API] transferTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Manual Blocks (supabase/migration-212) — Calendar "block time off"
+// ============================================================
+
+function transformBlockRow(row) {
+  return {
+    id: row.id,
+    orgId: row.org_id,
+    branchId: row.branch_id,
+    therapistId: row.therapist_id,
+    roomId: row.room_id,
+    blockDate: row.block_date,
+    startTime: row.start_time,
+    durationMinutes: row.duration_minutes,
+    description: row.description,
+    preventOnlineBooking: row.prevent_online_booking,
+    recurrenceFreq: row.recurrence_freq,
+    recurrenceInterval: row.recurrence_interval,
+    recurrenceEndDate: row.recurrence_end_date,
+    recurrenceCount: row.recurrence_count,
+    seriesId: row.series_id,
+    isCancelled: row.is_cancelled,
+  };
+}
+
+export async function createBlock({
+  orgId, branchId, therapistId = null, roomId = null, blockDate, startTime,
+  durationMinutes, description = null, preventOnlineBooking = true,
+  recurrenceFreq = null, recurrenceInterval = 1, recurrenceEndDate = null, recurrenceCount = null,
+}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!orgId || !branchId) return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId and branchId are required.' } };
+    if (!blockDate || !startTime) return { data: null, error: { code: 'INVALID_INPUT', message: 'A date and start time are required.' } };
+    const duration = Number(durationMinutes);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Duration must be greater than zero.' } };
+    }
+
+    const isRecurring = !!recurrenceFreq;
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .insert({
+        org_id: orgId,
+        branch_id: branchId,
+        therapist_id: therapistId,
+        room_id: roomId,
+        block_date: blockDate,
+        start_time: startTime,
+        duration_minutes: duration,
+        description: description?.trim() || null,
+        prevent_online_booking: preventOnlineBooking,
+        recurrence_freq: recurrenceFreq,
+        recurrence_interval: recurrenceInterval || 1,
+        recurrence_end_date: isRecurring ? recurrenceEndDate : null,
+        recurrence_count: isRecurring ? recurrenceCount : null,
+        series_id: isRecurring ? crypto.randomUUID() : null,
+      })
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    return { data: { id: data.id }, error: null };
+  } catch (error) {
+    console.error('[API] createBlock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Full row for the Edit Block modal — the calendar's occurrence rows (from
+// fetchBlocksForRange) carry only what's needed to render/gate, not the full recurrence
+// rule (freq/interval/end date/count), which the edit form's Recurrence tab needs.
+export async function fetchBlockById(blockId) {
+  try {
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('id', blockId)
+      .single();
+    if (error) throw error;
+    return { data: transformBlockRow(data), error: null };
+  } catch (error) {
+    console.error('[API] fetchBlockById error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Fetches raw manual_blocks rows (+ their exceptions) whose recurrence could touch
+// [startDate, endDate], expands them client-side via expandBlockOccurrences, and returns
+// flat { ...occurrence, blockId, therapistId, roomId, description, preventOnlineBooking }
+// rows ready for the calendar to render/gate against.
+export async function fetchBlocksForRange(branchId, startDate, endDate) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    const { data: rows, error } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('branch_id', resolvedBranchId)
+      .eq('is_cancelled', false)
+      .lte('block_date', endDate)
+      .or(`recurrence_freq.not.is.null,block_date.gte.${startDate}`);
+    if (error) throw error;
+
+    const blocks = (rows || []).map(transformBlockRow);
+    const seriesIds = [...new Set(blocks.map(b => b.seriesId).filter(Boolean))];
+
+    let exceptionsBySeriesId = {};
+    if (seriesIds.length > 0) {
+      const { data: exceptions, error: excError } = await supabase
+        .from('manual_block_exceptions')
+        .select('series_id, exception_date')
+        .in('series_id', seriesIds);
+      if (excError) throw excError;
+      for (const e of (exceptions || [])) {
+        (exceptionsBySeriesId[e.series_id] ||= []).push(e.exception_date);
+      }
+    }
+
+    const occurrences = [];
+    for (const block of blocks) {
+      const exceptions = block.seriesId ? (exceptionsBySeriesId[block.seriesId] || []) : [];
+      for (const occ of expandBlockOccurrences(block, exceptions, startDate, endDate)) {
+        occurrences.push({
+          ...occ,
+          blockId: block.id,
+          seriesId: block.seriesId,
+          therapistId: block.therapistId,
+          roomId: block.roomId,
+          description: block.description,
+          preventOnlineBooking: block.preventOnlineBooking,
+        });
+      }
+    }
+    return { data: occurrences, error: null };
+  } catch (error) {
+    console.error('[API] fetchBlocksForRange error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// scope: 'this' (cancel just this occurrence), 'following' (split the series — this row's
+// recurrence ends the day before occurrenceDate, future occurrences come from a new row),
+// or 'series' (cancel the whole thing, including past occurrences from view going forward).
+export async function deleteBlock({ blockId, scope, occurrenceDate = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (scope === 'series') {
+      const { error } = await supabase
+        .from('manual_blocks')
+        .update({ is_cancelled: true, cancelled_at: new Date().toISOString() })
+        .eq('id', blockId);
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    if (scope === 'this') {
+      if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
+      const { data: block, error: fetchError } = await supabase
+        .from('manual_blocks')
+        .select('series_id, block_date, recurrence_freq')
+        .eq('id', blockId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      if (!block.recurrence_freq) {
+        const { error } = await supabase
+          .from('manual_blocks')
+          .update({ is_cancelled: true, cancelled_at: new Date().toISOString() })
+          .eq('id', blockId);
+        if (error) throw error;
+        return { data: { ok: true }, error: null };
+      }
+
+      const { error } = await supabase
+        .from('manual_block_exceptions')
+        .insert({ series_id: block.series_id, exception_date: occurrenceDate });
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    if (scope === 'following') {
+      if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
+      const dayBefore = new Date(occurrenceDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      const endDateStr = dayBefore.toISOString().split('T')[0];
+
+      const { error } = await supabase
+        .from('manual_blocks')
+        .update({ recurrence_end_date: endDateStr })
+        .eq('id', blockId);
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    return { data: null, error: { code: 'INVALID_INPUT', message: `Unknown scope: ${scope}` } };
+  } catch (error) {
+    console.error('[API] deleteBlock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// scope 'this'/'following' edits split the series exactly like deleteBlock's corresponding
+// scopes, then insert a new row (new id, same series_id) carrying the edited fields from
+// occurrenceDate onward. scope 'series' updates the row in place.
+export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fields }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('id', blockId)
+      .single();
+    if (fetchError) throw fetchError;
+
+    const patch = {};
+    if (fields.description !== undefined) patch.description = fields.description?.trim() || null;
+    if (fields.startTime !== undefined) patch.start_time = fields.startTime;
+    if (fields.durationMinutes !== undefined) patch.duration_minutes = Number(fields.durationMinutes);
+    if (fields.preventOnlineBooking !== undefined) patch.prevent_online_booking = fields.preventOnlineBooking;
+    if (fields.therapistId !== undefined) patch.therapist_id = fields.therapistId;
+    if (fields.roomId !== undefined) patch.room_id = fields.roomId;
+    // Drag-to-reschedule moves the occurrence to a different day — distinct from
+    // `occurrenceDate` (below), which always identifies the ORIGINAL occurrence being
+    // acted on, not where it's moving to.
+    if (fields.blockDate !== undefined) patch.block_date = fields.blockDate;
+
+    if (scope === 'series') {
+      const { error } = await supabase.from('manual_blocks').update(patch).eq('id', blockId);
+      if (error) throw error;
+      return { data: { ok: true }, error: null };
+    }
+
+    if (scope === 'this' || scope === 'following') {
+      if (!occurrenceDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'occurrenceDate is required.' } };
+
+      if (!existing.recurrence_freq) {
+        const { error } = await supabase.from('manual_blocks').update(patch).eq('id', blockId);
+        if (error) throw error;
+        return { data: { ok: true }, error: null };
+      }
+
+      if (scope === 'this') {
+        const { error: excError } = await supabase
+          .from('manual_block_exceptions')
+          .insert({ series_id: existing.series_id, exception_date: occurrenceDate });
+        if (excError) throw excError;
+
+        const { error: insError } = await supabase.from('manual_blocks').insert({
+          org_id: existing.org_id,
+          branch_id: existing.branch_id,
+          therapist_id: patch.therapist_id ?? existing.therapist_id,
+          room_id: patch.room_id ?? existing.room_id,
+          block_date: patch.block_date ?? occurrenceDate,
+          start_time: patch.start_time ?? existing.start_time,
+          duration_minutes: patch.duration_minutes ?? existing.duration_minutes,
+          description: patch.description ?? existing.description,
+          prevent_online_booking: patch.prevent_online_booking ?? existing.prevent_online_booking,
+          recurrence_freq: null,
+          series_id: null,
+        });
+        if (insError) throw insError;
+        return { data: { ok: true }, error: null };
+      }
+
+      // scope === 'following': cap the existing series the day before occurrenceDate, then
+      // insert a new row starting at occurrenceDate carrying the edited fields forward.
+      const dayBefore = new Date(occurrenceDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      const endDateStr = dayBefore.toISOString().split('T')[0];
+
+      const { error: capError } = await supabase
+        .from('manual_blocks')
+        .update({ recurrence_end_date: endDateStr })
+        .eq('id', blockId);
+      if (capError) throw capError;
+
+      // The new row's occurrence counting restarts at n=0 from occurrenceDate, so a
+      // verbatim-copied recurrence_count would double-count whatever the original series
+      // already consumed before the split — subtract those off.
+      const remainingCount = existing.recurrence_count != null
+        ? Math.max(existing.recurrence_count - expandBlockOccurrences(transformBlockRow(existing), [], existing.block_date, endDateStr).length, 0)
+        : null;
+
+      const { error: insError } = await supabase.from('manual_blocks').insert({
+        org_id: existing.org_id,
+        branch_id: existing.branch_id,
+        therapist_id: patch.therapist_id ?? existing.therapist_id,
+        room_id: patch.room_id ?? existing.room_id,
+        block_date: patch.block_date ?? occurrenceDate,
+        start_time: patch.start_time ?? existing.start_time,
+        duration_minutes: patch.duration_minutes ?? existing.duration_minutes,
+        description: patch.description ?? existing.description,
+        prevent_online_booking: patch.prevent_online_booking ?? existing.prevent_online_booking,
+        recurrence_freq: existing.recurrence_freq,
+        recurrence_interval: existing.recurrence_interval,
+        recurrence_end_date: existing.recurrence_end_date,
+        recurrence_count: remainingCount,
+        series_id: existing.series_id,
+      });
+      if (insError) throw insError;
+      return { data: { ok: true }, error: null };
+    }
+
+    return { data: null, error: { code: 'INVALID_INPUT', message: `Unknown scope: ${scope}` } };
+  } catch (error) {
+    console.error('[API] updateBlock error:', error.message);
     return { data: null, error };
   }
 }
@@ -6278,8 +6708,8 @@ export async function fetchServicesForManagement() {
     }
 
     const { data, error } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -6342,7 +6772,7 @@ export async function uploadServiceImage(file) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6367,6 +6797,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
       return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A service with this name already exists in your organization.' } };
     }
 
+    const isOfferEnabled = !!offerEnabled;
     const { data, error } = await supabase
       .from('services')
       .insert({
@@ -6379,8 +6810,11 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         is_couple: !!isCouple,
         is_active: true,
         org_id: profile.org_id,
+        offer_enabled: isOfferEnabled,
+        offer_type: isOfferEnabled ? offerType : null,
+        offer_value: isOfferEnabled ? offerValue : null,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value')
       .single();
 
     if (error) throw error;
@@ -6391,7 +6825,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple }) {
+export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -6412,6 +6846,12 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
     if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
+    if (offerEnabled !== undefined) {
+      const isOfferEnabled = !!offerEnabled;
+      updatePayload.offer_enabled = isOfferEnabled;
+      updatePayload.offer_type = isOfferEnabled ? offerType : null;
+      updatePayload.offer_value = isOfferEnabled ? offerValue : null;
+    }
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -6422,7 +6862,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value')
       .single();
 
     if (error) {
@@ -7195,7 +7635,7 @@ export async function fetchCustomerProfile(customerId) {
 // PackageDetailModal via CustomerContactQuickEdit. The RPC (migration-173)
 // also repair-links any customer_accounts row that signed up before this
 // email existed on the customer record.
-export async function updateCustomerContact(customerId, { email = null, phone = null } = {}) {
+export async function updateCustomerContact(customerId, { email = null, phone = null, fullName = null, notes = null } = {}) {
   try {
     if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
 
@@ -7203,6 +7643,8 @@ export async function updateCustomerContact(customerId, { email = null, phone = 
       p_customer_id: customerId,
       p_email: email,
       p_phone: phone,
+      p_full_name: fullName,
+      p_notes: notes,
     });
     if (error) throw error;
     return { data, error: null };
@@ -8411,6 +8853,38 @@ export async function getTherapistCustomerHistory({ branchId, therapistId, fromD
   }
 }
 
+// Booking details dialog "New" badge: does this customer have any earlier non-Cancelled
+// booking than the one being viewed? No customer_id (walk-in/guest) → always first.
+export async function getCustomerFirstBookingFlag(customerId, bookingId, bookingDate, bookingStartTime = null) {
+  try {
+    if (!customerId) {
+      return { data: { isFirstBooking: true }, error: null };
+    }
+
+    let query = supabase
+      .from('bookings')
+      .select('id')
+      .eq('customer_id', customerId)
+      .neq('id', bookingId)
+      .neq('status', 'Cancelled');
+
+    // With a start time, tiebreak same-day bookings by time so two back-to-back services
+    // booked on a customer's actual first day don't each see the other and both suppress
+    // the badge — only a strictly-earlier same-day booking counts as a prior visit.
+    query = bookingStartTime
+      ? query.or(`date.lt.${bookingDate},and(date.eq.${bookingDate},start_time.lt.${bookingStartTime})`)
+      : query.lte('date', bookingDate);
+
+    const { data: priorVisits, error } = await query.limit(1);
+    if (error) throw error;
+
+    return { data: { isFirstBooking: (priorVisits || []).length === 0 }, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerFirstBookingFlag error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Services tab: per-service Completed/Cancelled/Missed(No Show) counts, avg duration, revenue.
 export async function getTherapistServiceBreakdown({ branchId, therapistId, fromDate, toDate }) {
   try {
@@ -8761,6 +9235,76 @@ export async function fetchServicesByOrgId(orgId, branchId) {
   }
 }
 
+/**
+ * Fetch services for the public customer booking flow (/:orgSlug/book),
+ * offer-price and campaign-aware. Distinct from fetchServicesByOrgId above
+ * (kept unchanged — still used by staff-authenticated screens like
+ * VoucherDetailModal) because the booking flow is fully anonymous, and
+ * campaign discounts require a SECURITY DEFINER RPC
+ * (public_get_bookable_services, migration-205) to see past the
+ * campaigns table's org-scoped RLS with no session present.
+ */
+export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
+  try {
+    const { data, error } = await supabase.rpc('public_get_bookable_services', {
+      p_org_slug: orgSlug,
+    });
+
+    if (error) throw error;
+
+    const services = (data || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      duration_minutes: s.duration_minutes,
+      price_npr: s.price_npr,
+      description: s.description,
+      image_url: s.image_url,
+      category: s.category_name,
+      effective_price_npr: s.effective_price_npr,
+      is_on_offer: s.is_on_offer,
+      original_price_npr: s.original_price_npr,
+      active_campaign_name: s.active_campaign_name,
+    }));
+
+    if (branchId) {
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('excluded_service_categories')
+        .eq('id', branchId)
+        .single();
+      const excluded = branch?.excluded_service_categories;
+      if (excluded?.length > 0) {
+        return { data: services.filter((s) => !excluded.includes(s.category)), error: null };
+      }
+    }
+
+    return { data: services, error: null };
+  } catch (error) {
+    console.error('[API] fetchBookableServicesByOrgSlug error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch the single currently-active campaign for the public customer
+ * booking flow's banner/popup (public_get_active_campaign, migration-204
+ * — the same anon-safe RPC nuadthainepal.com's website already uses).
+ * Returns null (not an error) when no campaign is currently active.
+ */
+export async function fetchActiveCampaignForBooking(orgSlug) {
+  try {
+    const { data, error } = await supabase.rpc('public_get_active_campaign', {
+      p_org_slug: orgSlug,
+    });
+
+    if (error) throw error;
+    return { data: data?.[0] || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchActiveCampaignForBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // Service Categories Management (Manager + Admin)
 // ============================================================
@@ -8785,7 +9329,7 @@ export async function fetchCategoriesForManagement() {
     // Get categories with service count - filtered by org
     const { data: categories, error } = await supabase
       .from('service_categories')
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .eq('org_id', profile.org_id)
       .order('display_order', { ascending: true });
 
@@ -8830,7 +9374,7 @@ export async function fetchActiveCategories() {
 
     const { data, error } = await supabase
       .from('service_categories')
-      .select('id, name')
+      .select('id, name, offer_enabled, offer_percent')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('display_order', { ascending: true });
@@ -8846,7 +9390,7 @@ export async function fetchActiveCategories() {
 /**
  * Create a new category
  */
-export async function createCategory({ name, description }) {
+export async function createCategory({ name, description, offerEnabled, offerPercent }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8868,6 +9412,7 @@ export async function createCategory({ name, description }) {
       .single();
 
     const nextOrder = (maxOrder?.display_order || 0) + 1;
+    const isOfferEnabled = !!offerEnabled;
 
     const { data, error } = await supabase
       .from('service_categories')
@@ -8877,8 +9422,10 @@ export async function createCategory({ name, description }) {
         display_order: nextOrder,
         is_active: true,
         org_id: profile.org_id,
+        offer_enabled: isOfferEnabled,
+        offer_percent: isOfferEnabled ? offerPercent : null,
       })
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .single();
 
     if (error) {
@@ -8897,7 +9444,7 @@ export async function createCategory({ name, description }) {
 /**
  * Update an existing category
  */
-export async function updateCategory({ categoryId, name, description }) {
+export async function updateCategory({ categoryId, name, description, offerEnabled, offerPercent }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -8928,13 +9475,18 @@ export async function updateCategory({ categoryId, name, description }) {
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
+    if (offerEnabled !== undefined) {
+      const isOfferEnabled = !!offerEnabled;
+      updateData.offer_enabled = isOfferEnabled;
+      updateData.offer_percent = isOfferEnabled ? offerPercent : null;
+    }
 
     const { data, error } = await supabase
       .from('service_categories')
       .update(updateData)
       .eq('id', categoryId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, offer_enabled, offer_percent')
       .single();
 
     if (error) {
@@ -10912,12 +11464,59 @@ export async function createPackageType({ orgId, name, serviceId, defaultSession
 export async function issuePackage({
   orgId, branchId, packageTypeId, customerId = null, guestName = null,
   guestInfo = null, issuedDate = null, expiryDate = null, paidAmount = null,
-  sessionsTotal = null, remarks = null,
+  sessionsTotal = null, remarks = null, discountType = null, discountValue = null,
+  dueHolderName = null, paymentMethod = null,
 }) {
   try {
     guestName = toTitleCase(guestName);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+
+    // Look up or create a customer record when the guest wasn't picked from
+    // CustomerAutocomplete's suggestions — same reasoning/mechanism as
+    // createBooking's step 6: a free-typed guest name otherwise never links
+    // to a `customers` row, making that person invisible to customer search
+    // and every other booking flow even though their phone is on file
+    // (guestInfo). Non-blocking: a lookup/create failure never prevents
+    // issuing the package, it just proceeds guest-only like before.
+    if (!customerId && guestName) {
+      try {
+        const phone = toE164(guestInfo);
+        if (orgId && phone) {
+          const { data: existingCustomer } = await supabase
+            .rpc('find_customer_for_booking', { p_org_id: orgId, p_phone: phone, p_email: null })
+            .maybeSingle();
+          if (existingCustomer) {
+            customerId = existingCustomer.id;
+            await supabase
+              .from('customers')
+              .update({ full_name: guestName, phone })
+              .eq('id', customerId);
+          } else {
+            const { data: newCustomer, error: insertCustErr } = await supabase
+              .from('customers')
+              .insert({ org_id: orgId, branch_id: branchId, full_name: guestName, phone })
+              .select('id')
+              .single();
+            if (newCustomer) {
+              customerId = newCustomer.id;
+            } else if (insertCustErr?.code === '23505') {
+              // Lost a race against customers_org_nphone_uniq — re-fetch the winner
+              const { data: winner } = await supabase
+                .from('customers')
+                .select('id')
+                .eq('org_id', orgId)
+                .eq('phone', phone)
+                .limit(1)
+                .maybeSingle();
+              if (winner) customerId = winner.id;
+            }
+          }
+        }
+      } catch (custErr) {
+        console.warn('[API] issuePackage customer lookup/create failed:', custErr.message);
+      }
+    }
 
     const { data, error } = await supabase.rpc('issue_package', {
       p_org_id: orgId,
@@ -10931,6 +11530,10 @@ export async function issuePackage({
       p_paid_amount: paidAmount,
       p_sessions_total: sessionsTotal,
       p_remarks: remarks,
+      p_discount_type: discountType,
+      p_discount_value: discountValue,
+      p_due_holder_name: dueHolderName,
+      p_payment_method: paymentMethod,
     });
     if (error) throw error;
     capture('package_issued', { package_type_id: packageTypeId, branch_id: branchId, linked_to_customer: !!customerId });
@@ -10955,6 +11558,7 @@ export async function fetchPackages() {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -10990,6 +11594,16 @@ export async function fetchPackages() {
         sessionsTotal: p.sessions_total,
         remarks: p.remarks,
         issuedByName: p.issuer?.full_name || '—',
+        baseAmount: p.base_amount != null ? Number(p.base_amount) : null,
+        discountType: p.discount_type,
+        discountValue: p.discount_value != null ? Number(p.discount_value) : null,
+        discountAmount: Number(p.discount_amount || 0),
+        finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
+        dueHolderName: p.due_holder_name || null,
+        paymentMethod: p.payment_method || null,
+        dueAmount: p.final_amount != null
+          ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
+          : 0,
         sessionsUsed: balance.sessions_used || 0,
         sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
         status: balance.status || 'unused',
@@ -11016,6 +11630,7 @@ export async function fetchPackage(packageId) {
         .select(`
           id, package_code, issued_date, expiry_date, guest_name, guest_info,
           paid_amount, sessions_total, remarks, created_at,
+          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
           branch:branches ( id, name ),
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
@@ -11055,6 +11670,16 @@ export async function fetchPackage(packageId) {
         sessionsTotal: p.sessions_total,
         remarks: p.remarks,
         issuedByName: p.issuer?.full_name || '—',
+        baseAmount: p.base_amount != null ? Number(p.base_amount) : null,
+        discountType: p.discount_type,
+        discountValue: p.discount_value != null ? Number(p.discount_value) : null,
+        discountAmount: Number(p.discount_amount || 0),
+        finalAmount: p.final_amount != null ? Number(p.final_amount) : null,
+        dueHolderName: p.due_holder_name || null,
+        paymentMethod: p.payment_method || null,
+        dueAmount: p.final_amount != null
+          ? Math.max(0, Math.round((Number(p.final_amount) - Number(p.paid_amount || 0)) * 100) / 100)
+          : 0,
         sessionsUsed: balance.sessions_used || 0,
         sessionsRemaining: balance.sessions_remaining != null ? balance.sessions_remaining : p.sessions_total,
         status: balance.status || 'unused',
@@ -11367,7 +11992,7 @@ export async function fetchOutreachTemplates() {
 
     const { data, error } = await supabase
       .from('outreach_templates')
-      .select('id, org_id, branch_id, key, channel, subject, body, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
+      .select('id, org_id, branch_id, key, channel, subject, body, layout_id, whatsapp_template_name, whatsapp_template_lang, is_active, created_at, updated_at')
       .eq('org_id', profile.org_id)
       .order('key', { ascending: true });
     if (error) throw error;
@@ -11401,6 +12026,7 @@ export async function upsertOutreachTemplate(payload) {
       channel: payload.channel,
       subject: payload.subject ?? null,
       body: payload.body,
+      layout_id: payload.layoutId ?? null,
       whatsapp_template_name: payload.whatsappTemplateName ?? null,
       whatsapp_template_lang: payload.whatsappTemplateLang ?? null,
       is_active: payload.isActive ?? true,
@@ -11447,17 +12073,76 @@ export async function deleteOutreachTemplate(id) {
   }
 }
 
-// Preview-only, client-side string replace — mirrors the server-side
-// `replace(body, '{{customer_name}}', ...)` calls in outreach_scan_winback /
-// outreach_enqueue_for_completed (migration-108/109). Not used to generate
-// what actually gets sent — those RPCs render server-side at insert time.
-export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe') {
+// Preview-only, client-side mirror of the server-side combine-then-substitute
+// logic in outreach_scan_winback / outreach_enqueue_for_completed
+// (migration-187) — not used to generate what actually gets sent, those
+// SQL functions render server-side at insert time. layoutHtml is the
+// selected layout's html (or null/undefined for "no layout" — a template
+// with no layout renders its raw body unwrapped, same as before layouts
+// existed). orgName substitutes {{org_name}}, used by the built-in "Branded
+// Header" layout's header text — falls back to 'Your Business' so the
+// preview never shows a literal unsubstituted token.
+export function renderTemplatePreview(template, sampleCustomerName = 'Jane Doe', layoutHtml = null, orgName = 'Your Business') {
   if (!template) return { subject: '', body: '' };
   const name = sampleCustomerName || 'Jane Doe';
+  const org = orgName || 'Your Business';
+  const wrapper = layoutHtml || '{{content}}';
+  const combinedBody = wrapper.split('{{content}}').join(template.body || '');
   return {
-    subject: (template.subject || '').split('{{customer_name}}').join(name),
-    body: (template.body || '').split('{{customer_name}}').join(name),
+    subject: (template.subject || '').split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
+    body: combinedBody.split('{{customer_name}}').join(name).split('{{org_name}}').join(org),
   };
+}
+
+// ---- Layouts ------------------------------------------------------------------
+
+export async function fetchOutreachLayouts() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('outreach_layouts')
+      .select('id, org_id, name, html, is_active')
+      .or(`org_id.eq.${profile.org_id},org_id.is.null`)
+      .eq('is_active', true)
+      .order('org_id', { ascending: true, nullsFirst: true })
+      .order('name', { ascending: true });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOutreachLayouts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createOutreachLayout({ orgId, name, html }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create outreach layouts.' } };
+    }
+    if (!orgId) return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
+    if (!name?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout name is required.' } };
+    if (!html?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout HTML is required.' } };
+    if (!html.includes('{{content}}')) {
+      return { data: null, error: { code: 'INVALID_INPUT', message: 'Layout HTML must contain a {{content}} slot.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('outreach_layouts')
+      .insert({ org_id: orgId, name: name.trim(), html, is_active: true })
+      .select('id, name, html')
+      .single();
+    if (error) throw error;
+    capture('outreach_layout_created', { layout_id: data.id });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createOutreachLayout error:', error.message);
+    return { data: null, error };
+  }
 }
 
 // ---- Messages (outbox / send log) --------------------------------------------
@@ -11781,6 +12466,993 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
     return { data: { id: messageId }, error: null };
   } catch (error) {
     console.error('[API] sendCustomerMessage error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Products — sellable retail catalog (migrations 188-190)
+// ============================================================
+
+/**
+ * Fetch the org's product catalog. Stock is branch-relative: pass
+ * branchId (the currently selected branch, or null/undefined for
+ * "Overall") to control what stock_quantity means on each returned row —
+ * that specific branch's count, or the all-branches total
+ * (products_with_stock's total_stock, migration-217) when no branch is
+ * selected. total_stock is always included too, so the UI can show both
+ * when useful.
+ */
+export async function fetchProductsForManagement(branchId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: products, error } = await supabase
+      .from('products_with_stock')
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, total_stock, created_at')
+      .eq('org_id', profile.org_id)
+      .order('name');
+
+    if (error) throw error;
+
+    if (!branchId) {
+      return {
+        data: (products || []).map((p) => ({ ...p, stock_quantity: p.total_stock })),
+        error: null,
+      };
+    }
+
+    const { data: branchStock, error: branchStockError } = await supabase
+      .from('product_branch_stock')
+      .select('product_id, quantity')
+      .eq('branch_id', branchId);
+    if (branchStockError) throw branchStockError;
+
+    const stockByProduct = Object.fromEntries((branchStock || []).map((r) => [r.product_id, r.quantity]));
+
+    return {
+      data: (products || []).map((p) => ({
+        ...p,
+        stock_quantity: p.track_stock ? (stockByProduct[p.id] ?? 0) : null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchProductsForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Upload a product image to Supabase Storage.
+ * Reuses the same bucket as service images, under a products/ prefix.
+ */
+export async function uploadProductImage(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload product images.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `products/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadProductImage error:', error.message);
+    return { url: null, error };
+  }
+}
+
+export async function createProduct({ name, description, category, priceNpr, imageUrl, trackStock }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create products.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Product name is required.' } };
+    }
+    if (!priceNpr || priceNpr <= 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
+    }
+
+    // Initial stock (if trackStock is on) is set per branch afterward via
+    // transferProductStock ("receive stock") — a new product has no
+    // meaningful org-wide starting quantity, only a per-branch one, and
+    // that needs a branch to exist as a target, which this create step
+    // doesn't ask for.
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        name: name.trim(),
+        description: description || null,
+        category: category?.trim() || null,
+        price_npr: priceNpr,
+        image_url: imageUrl || null,
+        is_active: true,
+        org_id: profile.org_id,
+        track_stock: !!trackStock,
+      })
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, created_at')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateProduct({ productId, name, description, category, priceNpr, imageUrl, trackStock }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update products.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name.trim();
+    if (description !== undefined) updatePayload.description = description || null;
+    if (category !== undefined) updatePayload.category = category?.trim() || null;
+    if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
+    if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
+    if (trackStock !== undefined) updatePayload.track_stock = !!trackStock;
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .update(updatePayload)
+      .eq('id', productId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, description, category, price_npr, image_url, is_active, track_stock')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Product not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function toggleProductActive({ productId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage product status.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .update({ is_active: isActive })
+      .eq('id', productId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Product not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleProductActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteProduct({ productId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete products.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', productId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function sellProduct({ productId, quantity, paymentMode, branchId, customerId, notes }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!productId || !quantity || quantity <= 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'A product and a positive quantity are required.' } };
+    }
+    if (!paymentMode) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Payment method is required.' } };
+    }
+    if (!branchId) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Branch is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('sell_product', {
+      p_product_id: productId,
+      p_quantity: quantity,
+      p_payment_mode: paymentMode,
+      p_branch_id: branchId,
+      p_customer_id: customerId || null,
+      p_notes: notes || null,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] sellProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Per-branch stock breakdown for one product — every branch the org has,
+ * each with its own quantity (0 for a branch that's never received it).
+ */
+export async function fetchProductBranchStock(productId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const [{ data: branches, error: branchesError }, { data: stockRows, error: stockError }] = await Promise.all([
+      supabase.from('branches').select('id, name').eq('org_id', profile.org_id).order('name'),
+      supabase.from('product_branch_stock').select('branch_id, quantity, updated_at').eq('product_id', productId),
+    ]);
+    if (branchesError) throw branchesError;
+    if (stockError) throw stockError;
+
+    const stockByBranch = Object.fromEntries((stockRows || []).map((r) => [r.branch_id, r]));
+    const data = (branches || []).map((b) => ({
+      branchId: b.id,
+      branchName: b.name,
+      quantity: stockByBranch[b.id]?.quantity ?? 0,
+      updatedAt: stockByBranch[b.id]?.updated_at ?? null,
+    }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductBranchStock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Transfer/receive history for a product's stock (product_stock_transfers,
+ * migration-213). branchId narrows to transfers where that branch was
+ * either side (source or destination); omit for the full org history.
+ */
+export async function fetchProductStockTransfers({ productId, branchId, from, to, limit = 50 } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    let query = supabase
+      .from('product_stock_transfers')
+      .select(`
+        id, product_id, from_branch_id, to_branch_id, quantity, note, transferred_by, created_at,
+        products(name),
+        from_branch:branches!product_stock_transfers_from_branch_id_fkey(name),
+        to_branch:branches!product_stock_transfers_to_branch_id_fkey(name),
+        users!product_stock_transfers_transferred_by_fkey(full_name)
+      `)
+      .eq('org_id', profile.org_id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (productId) query = query.eq('product_id', productId);
+    if (branchId) query = query.or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`);
+    if (from) query = query.gte('created_at', `${from}T00:00:00`);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductStockTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Move stock between two branches, or receive new stock into one branch
+ * (omit fromBranchId — e.g. a supplier delivery). Always fully recorded
+ * on both sides via transfer_product_stock (migration-214); no approval
+ * step, the move is immediate.
+ */
+export async function transferProductStock({ productId, toBranchId, quantity, fromBranchId, note }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!productId || !toBranchId) {
+      return { data: null, error: { code: 'VALIDATION', message: 'A product and destination branch are required.' } };
+    }
+    if (!quantity || quantity <= 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Quantity must be a positive number.' } };
+    }
+
+    const { data, error } = await supabase.rpc('transfer_product_stock', {
+      p_product_id: productId,
+      p_to_branch_id: toBranchId,
+      p_quantity: quantity,
+      p_from_branch_id: fromBranchId || null,
+      p_note: note || null,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] transferProductStock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchProductSales({ limit = 50, productId, from, to } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    let query = supabase
+      .from('product_sales')
+      .select('id, product_id, product_name, quantity, unit_price_npr, total_amount, payment_mode, customer_id, sold_by, created_at, refunded_at, refunded_by, refund_reason, customers(full_name), users!product_sales_sold_by_fkey(full_name)')
+      .eq('org_id', profile.org_id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (productId) query = query.eq('product_id', productId);
+    if (from) query = query.gte('created_at', `${from}T00:00:00`);
+    if (to) query = query.lte('created_at', `${to}T23:59:59`);
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductSales error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Product Categories (migration 191) — a real place to create/rename/
+// deactivate/delete product categories, closing the gap left by the
+// Products form's dropdown (starter list + whatever's already in use,
+// with no way to add a genuinely new one).
+// ============================================================
+
+export async function fetchProductCategoriesForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: categories, error } = await supabase
+      .from('product_categories')
+      .select('id, name, description, is_active, display_order, created_at')
+      .eq('org_id', profile.org_id)
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+
+    const { data: products } = await supabase
+      .from('products')
+      .select('category')
+      .eq('org_id', profile.org_id);
+
+    const productCounts = {};
+    (products || []).forEach((p) => {
+      if (!p.category) return;
+      productCounts[p.category] = (productCounts[p.category] || 0) + 1;
+    });
+
+    const data = (categories || []).map((c) => ({ ...c, product_count: productCounts[c.name] || 0 }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchProductCategoriesForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchActiveProductCategories() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .select('id, name')
+      .eq('org_id', profile.org_id)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchActiveProductCategories error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createProductCategory({ name, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create product categories.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Category name is required.' } };
+    }
+
+    const { data: maxOrder } = await supabase
+      .from('product_categories')
+      .select('display_order')
+      .eq('org_id', profile.org_id)
+      .order('display_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    const nextOrder = (maxOrder?.display_order || 0) + 1;
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .insert({
+        name: name.trim(),
+        description: description?.trim() || null,
+        display_order: nextOrder,
+        is_active: true,
+        org_id: profile.org_id,
+      })
+      .select('id, name, description, is_active, display_order, created_at')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A category with this name already exists.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createProductCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateProductCategory({ categoryId, name, description }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update product categories.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: oldCategory, error: catError } = await supabase
+      .from('product_categories')
+      .select('name')
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (catError || !oldCategory) {
+      return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+    }
+
+    const oldName = oldCategory?.name;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description?.trim() || null;
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .update(updateData)
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, description, is_active, display_order, created_at')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A category with this name already exists.' } };
+      }
+      throw error;
+    }
+
+    // Update products with the old category name to the new name (within this org only)
+    if (name && oldName && name.trim() !== oldName) {
+      await supabase
+        .from('products')
+        .update({ category: name.trim() })
+        .eq('category', oldName)
+        .eq('org_id', profile.org_id);
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateProductCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function toggleProductCategoryActive({ categoryId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can toggle product categories.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('product_categories')
+      .update({ is_active: isActive })
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Category not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleProductCategoryActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteProductCategory({ categoryId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete product categories.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: category } = await supabase
+      .from('product_categories')
+      .select('name')
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (category) {
+      const { count } = await supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .eq('category', category.name)
+        .eq('org_id', profile.org_id);
+
+      if (count > 0) {
+        return { data: null, error: { code: 'HAS_PRODUCTS', message: `This category has ${count} product(s) and cannot be deleted. Reassign products first or deactivate the category.` } };
+      }
+    }
+
+    const { error } = await supabase
+      .from('product_categories')
+      .delete()
+      .eq('id', categoryId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteProductCategory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function refundProductSale({ saleId, reason }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!saleId) {
+      return { data: null, error: { code: 'VALIDATION', message: 'A sale is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('refund_product_sale', {
+      p_sale_id: saleId,
+      p_reason: reason || null,
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] refundProductSale error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Campaigns — named, dated promotional events (migrations 198-204)
+// ============================================================
+
+export async function fetchCampaignsForManagement() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can manage campaigns.' } };
+    }
+
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data: campaigns, error } = await supabase
+      .from('campaigns')
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .eq('org_id', profile.org_id)
+      .order('start_date', { ascending: false });
+
+    if (error) throw error;
+
+    const campaignIds = (campaigns || []).map((c) => c.id);
+    let servicesByCampaign = {};
+    let categoriesByCampaign = {};
+
+    if (campaignIds.length > 0) {
+      const [{ data: linkedServices }, { data: linkedCategories }] = await Promise.all([
+        supabase.from('campaign_services').select('campaign_id, service_id').in('campaign_id', campaignIds),
+        supabase.from('campaign_categories').select('campaign_id, category_id').in('campaign_id', campaignIds),
+      ]);
+
+      (linkedServices || []).forEach((row) => {
+        servicesByCampaign[row.campaign_id] = servicesByCampaign[row.campaign_id] || [];
+        servicesByCampaign[row.campaign_id].push(row.service_id);
+      });
+      (linkedCategories || []).forEach((row) => {
+        categoriesByCampaign[row.campaign_id] = categoriesByCampaign[row.campaign_id] || [];
+        categoriesByCampaign[row.campaign_id].push(row.category_id);
+      });
+    }
+
+    const data = (campaigns || []).map((c) => ({
+      ...c,
+      service_ids: servicesByCampaign[c.id] || [],
+      category_ids: categoriesByCampaign[c.id] || [],
+    }));
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchCampaignsForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Upload a campaign banner image to Supabase Storage.
+ * Reuses the same bucket as service images, under a campaigns/ prefix.
+ */
+export async function uploadCampaignBanner(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload campaign banners.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `campaigns/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadCampaignBanner error:', error.message);
+    return { url: null, error };
+  }
+}
+
+export async function createCampaign({ name, message, bannerImageUrl, discountPercent, startDate, endDate, serviceIds = [], categoryIds = [] }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create campaigns.' } };
+    }
+
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Campaign name is required.' } };
+    }
+    if (!discountPercent || discountPercent <= 0 || discountPercent >= 100) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Discount percent must be between 1 and 99.' } };
+    }
+    if (!startDate || !endDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Start and end dates are required.' } };
+    }
+    if (endDate < startDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+
+    const { data: campaign, error } = await supabase
+      .from('campaigns')
+      .insert({
+        name: name.trim(),
+        message: message?.trim() || null,
+        banner_image_url: bannerImageUrl || null,
+        discount_percent: discountPercent,
+        start_date: startDate,
+        end_date: endDate,
+        is_active: true,
+        org_id: profile.org_id,
+      })
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+
+    await syncCampaignLinks({ campaignId: campaign.id, serviceIds, categoryIds });
+
+    return { data: campaign, error: null };
+  } catch (error) {
+    console.error('[API] createCampaign error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateCampaign({ campaignId, name, message, bannerImageUrl, discountPercent, startDate, endDate, serviceIds, categoryIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+    if (startDate !== undefined && endDate !== undefined && endDate < startDate) {
+      return { data: null, error: { code: 'VALIDATION', message: 'End date cannot be before the start date.' } };
+    }
+    if (discountPercent !== undefined && (!discountPercent || discountPercent <= 0 || discountPercent >= 100)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Discount percent must be between 1 and 99.' } };
+    }
+
+    const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name.trim();
+    if (message !== undefined) updatePayload.message = message?.trim() || null;
+    if (bannerImageUrl !== undefined) updatePayload.banner_image_url = bannerImageUrl || null;
+    if (discountPercent !== undefined) updatePayload.discount_percent = discountPercent;
+    if (startDate !== undefined) updatePayload.start_date = startDate;
+    if (endDate !== undefined) updatePayload.end_date = endDate;
+
+    if (Object.keys(updatePayload).length > 0) {
+      const { error } = await supabase
+        .from('campaigns')
+        .update(updatePayload)
+        .eq('id', campaignId)
+        .eq('org_id', profile.org_id);
+
+      if (error) throw error;
+    }
+
+    if (serviceIds !== undefined || categoryIds !== undefined) {
+      await syncCampaignLinks({ campaignId, serviceIds: serviceIds || [], categoryIds: categoryIds || [] });
+    }
+
+    const { data, error: fetchError } = await supabase
+      .from('campaigns')
+      .select('id, name, message, banner_image_url, discount_percent, start_date, end_date, is_active, created_at')
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id)
+      .single();
+
+    if (fetchError) throw fetchError;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCampaign error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Replaces a campaign's full set of linked services/categories in one go —
+// simplest correct approach for a "pick from a checkbox list" UI (the form
+// always submits the complete desired set, not a diff).
+async function syncCampaignLinks({ campaignId, serviceIds, categoryIds }) {
+  await Promise.all([
+    supabase.from('campaign_services').delete().eq('campaign_id', campaignId),
+    supabase.from('campaign_categories').delete().eq('campaign_id', campaignId),
+  ]);
+
+  const inserts = [];
+  if (serviceIds.length > 0) {
+    inserts.push(
+      supabase.from('campaign_services').insert(serviceIds.map((service_id) => ({ campaign_id: campaignId, service_id })))
+    );
+  }
+  if (categoryIds.length > 0) {
+    inserts.push(
+      supabase.from('campaign_categories').insert(categoryIds.map((category_id) => ({ campaign_id: campaignId, category_id })))
+    );
+  }
+  if (inserts.length > 0) await Promise.all(inserts);
+}
+
+export async function toggleCampaignActive({ campaignId, isActive }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can toggle campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('campaigns')
+      .update({ is_active: isActive })
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, is_active')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] toggleCampaignActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCampaign({ campaignId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete campaigns.' } };
+    }
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const { error } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .eq('org_id', profile.org_id);
+
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCampaign error:', error.message);
     return { data: null, error };
   }
 }

@@ -66,10 +66,12 @@ npm run build
 npm run serve
 
 # Deployment: Docker multi-stage build (node:22-alpine → nginx:alpine)
-docker build --build-arg VITE_SUPABASE_URL=... --build-arg VITE_SUPABASE_ANON_KEY=... -t bookspa .
+docker build --build-arg VITE_SUPABASE_URL=... --build-arg VITE_SUPABASE_ANON_KEY=... --build-arg BUILD_MODE=staging -t bookspa .
 ```
 
 **`npm test` (vitest) runs the test suite** — a small but growing set of unit tests for pure logic modules (`src/services/*.test.js`). **No linter is configured.** Use `npm run build` as the primary validation gate for anything not covered by a unit test.
+
+**Feature flags (`VITE_ENABLE_*`) live in `.env.staging` / `.env.production` — never in the Dockerfile or a workflow's `build-args`.** Vite loads the matching file automatically via `--mode staging`/`--mode production` (the Dockerfile's `BUILD_MODE` build-arg controls this; defaults to `production`). This replaced an earlier pattern (an `ARG`/build-arg pair per flag, duplicated across `Dockerfile` and both `deploy*.yml` workflows) after it silently shipped two features dark on staging in a row — a flag added to one file but not the other fails silently rather than erroring, since Docker just drops an undeclared build-arg. To add a new flag: add one line to `.env.staging` (and later, once verified, move it into `.env.production` to promote) — nothing else to touch. Real secrets (Supabase URL/key, PostHog) still go through GitHub Environment secrets → Docker build-args, since those can't be committed.
 
 ---
 

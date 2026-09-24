@@ -103,6 +103,7 @@ export function transformBooking(dbBooking) {
   return {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
+    customerId: dbBooking.customer_id || null,
     customerName: dbBooking.customer_name,
     customerEmail: dbBooking.customer_email || null,
     customerPhone: dbBooking.customer_phone || null,

@@ -184,6 +184,13 @@ export function enrichService(dbService) {
     category: dbService.category || uiData.category,
     popularity: uiData.popularity,
     specialty: uiData.specialty,
+    // Offer/campaign pricing — present when the source data includes them
+    // (fetchBookableServicesByOrgSlug); undefined otherwise, so existing
+    // callers that don't fetch these fields are unaffected.
+    isOnOffer: dbService.is_on_offer,
+    effectivePrice: dbService.effective_price_npr != null ? Number(dbService.effective_price_npr) : undefined,
+    originalPrice: dbService.original_price_npr != null ? Number(dbService.original_price_npr) : undefined,
+    activeCampaignName: dbService.active_campaign_name,
   };
 }
 

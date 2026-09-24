@@ -118,11 +118,16 @@ INSERT INTO therapists (id, branch_id, name, gender, specialties, org_id, displa
 --    those pre-existing ad hoc rows (known password either way).
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- email_change / email_change_token_new must be explicit empty strings, not NULL: GoTrue's
+-- password-grant login scans every auth.users column into a Go string and errors ("Scan error
+-- on column index 8, name \"email_change\": converting NULL to string is unsupported") if any of
+-- them are NULL. This affected every local login attempt, unrelated to any specific app feature —
+-- discovered while locally verifying migration-193's promotional-offer-pricing feature.
 INSERT INTO auth.users (
   id, instance_id, email, encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data,
   aud, role, created_at, updated_at,
-  confirmation_token, recovery_token
+  confirmation_token, recovery_token, email_change, email_change_token_new
 ) VALUES (
   'e0000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000000',
@@ -132,10 +137,14 @@ INSERT INTO auth.users (
   '{"provider": "email", "providers": ["email"]}',
   '{"full_name": "Local Admin"}',
   'authenticated', 'authenticated', now(), now(),
-  '', ''
+  '', '', '', ''
 )
 ON CONFLICT (email) WHERE is_sso_user = false
-DO UPDATE SET encrypted_password = EXCLUDED.encrypted_password, email_confirmed_at = EXCLUDED.email_confirmed_at;
+DO UPDATE SET
+  encrypted_password = EXCLUDED.encrypted_password,
+  email_confirmed_at = EXCLUDED.email_confirmed_at,
+  email_change = COALESCE(auth.users.email_change, ''),
+  email_change_token_new = COALESCE(auth.users.email_change_token_new, '');
 
 INSERT INTO auth.identities (
   id, user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at
