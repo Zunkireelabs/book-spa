@@ -5,6 +5,7 @@ import Button from '../../../../components/ui/Button';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { mergeCustomers, updateCustomerContact } from '../../../../services/api';
 import { canSearchForMerge } from './manualMergeBranchGate';
+import { resolveMergeEditPatch } from './resolveMergeEditPatch';
 
 // Picks the same customer twice would otherwise slip straight into merge_customers and come
 // back as a raw SQL exception — caught client-side first for a clearer message.
@@ -66,6 +67,7 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  const [editWarning, setEditWarning] = useState(null);
 
   if (!canSearchForMerge({ isOverall, branchId })) {
     return (
@@ -102,6 +104,7 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
     setForm(null);
     setConfirming(false);
     setError(null);
+    setEditWarning(null);
     setDone(false);
   };
 
@@ -111,31 +114,30 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
 
     const { error: mergeError } = await mergeCustomers(canonical.id, duplicate.id);
     if (mergeError) {
+      // Nothing destructive happened yet — safe to leave the modal open and
+      // let the admin retry or cancel.
       setSubmitting(false);
       setError(mergeError.message || 'Merge failed.');
       return;
     }
 
-    // Only patch fields the staff actually changed from the canonical record's own values —
-    // merge_customers already coalesced email/notes/gender/dob, this is purely for the
-    // name/phone/email/notes the reviewer edited in the form above.
-    const edited = {};
-    if (form.fullName.trim() && form.fullName.trim() !== (canonical.full_name || '')) edited.fullName = form.fullName.trim();
-    if (form.phone.trim() && form.phone.trim() !== (canonical.phone || '')) edited.phone = form.phone.trim();
-    if (form.email.trim() && form.email.trim() !== (canonical.email || '')) edited.email = form.email.trim();
-    if (form.notes.trim()) edited.notes = form.notes.trim();
+    // Past this point the duplicate is already deleted and every FK is
+    // already repointed — there is no correct retry path anymore. Always
+    // land on the done screen; a failed follow-up edit is a warning, not a
+    // reason to leave the confirm modal open over a hidden error.
+    const edited = resolveMergeEditPatch({ form, canonical });
+    let warning = null;
 
     if (Object.keys(edited).length > 0) {
       const { error: updateError } = await updateCustomerContact(canonical.id, edited);
       if (updateError) {
-        setSubmitting(false);
-        setError(`Merged, but saving your edits failed: ${updateError.message || 'unknown error'}`);
-        return;
+        warning = `The merge succeeded, but saving your edits failed: ${updateError.message || 'unknown error'}. You can retry the edit from the customer's profile.`;
       }
     }
 
     setSubmitting(false);
     setConfirming(false);
+    setEditWarning(warning);
     setDone(true);
   };
 
@@ -147,6 +149,12 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
         <p className="font-caption text-xs text-text-tertiary mt-1">
           All bookings, memberships, vouchers, packages, and history now belong to {canonical.full_name}.
         </p>
+        {editWarning && (
+          <div className="bg-warning/10 border border-warning/30 rounded-spa p-3 mt-4 text-left flex items-start space-x-2">
+            <Icon name="AlertTriangle" size={16} className="text-warning flex-shrink-0 mt-0.5" />
+            <p className="font-body text-xs text-warning">{editWarning}</p>
+          </div>
+        )}
         <button
           type="button"
           onClick={reset}
