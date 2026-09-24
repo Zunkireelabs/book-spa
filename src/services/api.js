@@ -5944,7 +5944,22 @@ export async function transferTherapist({
       duration_value: durationValue,
       duration_unit: durationUnit,
     });
-    return { data: { transferId: data }, error: null };
+
+    const { data: row } = await supabase
+      .from('staff_transfers')
+      .select('applied, effective_date, start_time')
+      .eq('id', data)
+      .single();
+
+    return {
+      data: {
+        transferId: data,
+        applied: row?.applied ?? null,
+        effectiveDate: row?.effective_date ?? null,
+        startTime: row?.start_time ?? null,
+      },
+      error: null,
+    };
   } catch (error) {
     console.error('[API] transferTherapist error:', error.message);
     return { data: null, error };
