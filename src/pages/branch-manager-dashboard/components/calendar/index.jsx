@@ -2981,9 +2981,9 @@ const OperationalCalendar = ({ branchId }) => {
               <div className="font-body text-[11px] text-text-secondary">
                 {activeDragBooking.serviceName}
               </div>
-              {dragPreviewDurationMinutes != null && (
+              {overSlotData && dragPreviewDurationMinutes != null && (
                 <span className="font-caption text-[10px] text-text-secondary">
-                  {dragPreviewDurationMinutes} mins
+                  {to12h(formatTimeFromSlot(overSlotData.hour, overSlotData.minute))} – {to12h(calculateEndTime(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes))}
                 </span>
               )}
             </div>

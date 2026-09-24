@@ -4792,7 +4792,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           .in('id', orphanTherapistIds),
         supabase
           .from('staff_transfers')
-          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+          .select('id, therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
           .in('therapist_id', orphanTherapistIds),
       ]);
       if (orphanTherapistsResult.error) throw orphanTherapistsResult.error;
@@ -4813,6 +4813,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
             ...t,
             transferredOut: transferWindow ? !!transferWindow.transferredOut : true,
             transferredIn: transferWindow ? !!transferWindow.transferredIn : false,
+            transferId: transferWindow?.transferId ?? null,
             returnsAt: transferWindow ? transferWindow.returnsAt : null,
             transferStartAt: transferWindow ? transferWindow.transferStartAt : null,
             fromBranch: transferWindow?.fromBranch || null,

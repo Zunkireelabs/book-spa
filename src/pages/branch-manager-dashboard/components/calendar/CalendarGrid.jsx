@@ -1437,7 +1437,7 @@ const CalendarGrid = ({
                   scheduled-transfer badge, for the "created it by mistake" case. Extending/
                   rescheduling the return date still goes through the full modal (main
                   overlay click), since those aren't "undo" actions. */}
-              {onCancelActiveTransfer && (
+              {onCancelActiveTransfer && col.transferId && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onCancelActiveTransfer(col); }}
