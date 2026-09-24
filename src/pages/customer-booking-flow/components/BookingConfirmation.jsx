@@ -172,7 +172,7 @@ const BookingConfirmation = ({
           <h3 className="font-heading font-semibold text-text-primary">Booking Details</h3>
           <div className="space-y-3">
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Branch</span><span className="font-medium">{selectedBranch?.name}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-text-secondary">Date \& Time</span><span className="font-medium">{formatDateTime()}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-text-secondary">Date & Time</span><span className="font-medium">{formatDateTime()}</span></div>
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Price</span><span className="text-primary font-bold">{formatPrice(selectedService?.price || 0)}</span></div>
           </div>
         </div>
