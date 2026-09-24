@@ -1708,6 +1708,34 @@ const OperationalCalendar = ({ branchId }) => {
     return map;
   }, [calendarData]);
 
+  // Drag a block card to a new day/time/column — same "this occurrence" scoping as
+  // resize/delete above (a recurring block's dragged occurrence spins off its own one-off
+  // row via updateBlock's scope:'this' path, leaving the rest of the series untouched).
+  // Declared above handleDragEnd (not just above its own former call site) since
+  // handleDragEnd's dependency array references it directly, and a dependency array is
+  // evaluated eagerly on every render — unlike a callback body, which only runs later —
+  // so a forward reference here throws "Cannot access before initialization" immediately
+  // on page load, not just when a drag actually happens.
+  const handleMoveManualBlock = useCallback(async (block, newDate, newStartTime, targetColId) => {
+    const patch = { blockId: block.blockId, scope: 'this', occurrenceDate: block.day, blockDate: newDate, startTime: newStartTime };
+    // A whole-location block renders one identical copy per column — dropping whichever
+    // copy the user happened to grab must only move its day/time, never narrow it down to
+    // that one column's therapist/room (it would silently stop blocking every other column).
+    if (!block.isWholeLocation) {
+      if (columnMode === 'therapist') {
+        patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
+      } else if (columnMode === 'room') {
+        patch.roomId = targetColId === 'unassigned' ? null : targetColId;
+      }
+    }
+    const result = await updateBlock(patch);
+    if (result.error) {
+      showToast(result.error.message || 'Failed to move block.', 'error');
+      return;
+    }
+    refreshCalendar();
+  }, [columnMode, refreshCalendar]);
+
   const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
 
@@ -2120,29 +2148,6 @@ const OperationalCalendar = ({ branchId }) => {
     }
     refreshCalendar();
   }, [refreshCalendar]);
-
-  // Drag a block card to a new day/time/column — same "this occurrence" scoping as
-  // resize/delete above (a recurring block's dragged occurrence spins off its own one-off
-  // row via updateBlock's scope:'this' path, leaving the rest of the series untouched).
-  const handleMoveManualBlock = useCallback(async (block, newDate, newStartTime, targetColId) => {
-    const patch = { blockId: block.blockId, scope: 'this', occurrenceDate: block.day, blockDate: newDate, startTime: newStartTime };
-    // A whole-location block renders one identical copy per column — dropping whichever
-    // copy the user happened to grab must only move its day/time, never narrow it down to
-    // that one column's therapist/room (it would silently stop blocking every other column).
-    if (!block.isWholeLocation) {
-      if (columnMode === 'therapist') {
-        patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
-      } else if (columnMode === 'room') {
-        patch.roomId = targetColId === 'unassigned' ? null : targetColId;
-      }
-    }
-    const result = await updateBlock(patch);
-    if (result.error) {
-      showToast(result.error.message || 'Failed to move block.', 'error');
-      return;
-    }
-    refreshCalendar();
-  }, [columnMode, refreshCalendar]);
 
   // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
   const openQuickCreateForSlot = useCallback(async (slotInfo) => {
