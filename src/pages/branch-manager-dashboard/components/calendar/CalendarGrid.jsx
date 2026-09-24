@@ -946,6 +946,13 @@ const CalendarGrid = ({
       blockResizeRef.current = null;
       setResizingBlock(null);
       if (!ref) return;
+      // A plain click (no real drag) must never commit a resize — without this guard, a
+      // zero-movement mouseup still computes rawHeight === startHeight exactly, and
+      // snapping that to the nearest 15 minutes can differ from the block's actual
+      // (unsnapped) duration whenever it isn't already a multiple of 15 (e.g. a 20-minute
+      // block silently becomes 15). Same 5px threshold this app's other drag interactions
+      // use (see PointerSensor's activationConstraint in index.jsx).
+      if (Math.abs(upEvent.clientY - ref.startY) < 5) return;
       const rawHeight = Math.max(20, ref.startHeight + (upEvent.clientY - ref.startY));
       const snappedMinutes = Math.max(15, Math.round((rawHeight / eHH * 60) / 15) * 15);
       const originalMinutes = Math.round(ref.startHeight / eHH * 60);
