@@ -5285,7 +5285,18 @@ export async function createBooking({
         .rpc('public_get_booking_by_request_id', { p_client_request_id: clientRequestId })
         .single();
       if (fetchError || !fetchedBooking) {
-        throw fetchError || new Error('Booking was created but confirmation details could not be retrieved.');
+        // The booking itself is already committed at this point (the insert above
+        // succeeded) — only the confirmation read-back failed, e.g. a transient network
+        // blip. Surface a distinct code so the UI doesn't tell the customer to just
+        // "try again", which would create a second, duplicate booking.
+        console.error('[API] public_get_booking_by_request_id failed:', fetchError?.message);
+        return {
+          data: null,
+          error: {
+            code: 'BOOKING_CONFIRMATION_UNAVAILABLE',
+            message: 'Your booking was placed, but we could not load the confirmation details. Please check your email/SMS, or contact the branch to confirm, before trying to book again.',
+          },
+        };
       }
       booking = { ...fetchedBooking, branch_id: resolvedBranchId, final_amount: fetchedBooking.base_amount };
     }

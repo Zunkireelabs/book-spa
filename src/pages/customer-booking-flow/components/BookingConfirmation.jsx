@@ -139,6 +139,7 @@ const BookingConfirmation = ({
           'THERAPIST_CONFLICT',
           'BRANCH_ONLINE_CAPACITY',
           'BOOKING_CROSSES_MIDNIGHT',
+          'BOOKING_CONFIRMATION_UNAVAILABLE',
         ];
         setBookingError(
           KNOWN_BOOKING_ERROR_CODES.includes(error.code) && error.message

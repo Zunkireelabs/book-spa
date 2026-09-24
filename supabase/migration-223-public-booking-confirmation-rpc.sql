@@ -19,8 +19,17 @@
 -- displayed anywhere), so this doesn't reopen the cross-org scraping hole migration-097
 -- closed.
 --
--- Idempotent: CREATE OR REPLACE.
--- Reversible (manual): DROP FUNCTION IF EXISTS public.public_get_booking_by_request_id(uuid);
+-- Idempotent: CREATE OR REPLACE / IF NOT EXISTS.
+-- Reversible (manual):
+--   DROP FUNCTION IF EXISTS public.public_get_booking_by_request_id(uuid);
+--   DROP INDEX IF EXISTS public.idx_bookings_client_request_id;
+
+-- Partial index: client_request_id is only ever set on the anon/online-booking path,
+-- so most rows have it NULL — without this the RPC's WHERE clause is a full seq scan
+-- over the whole (multi-tenant, ever-growing) bookings table on every confirmation.
+CREATE INDEX IF NOT EXISTS idx_bookings_client_request_id
+  ON public.bookings (client_request_id)
+  WHERE client_request_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.public_get_booking_by_request_id(
   p_client_request_id uuid
