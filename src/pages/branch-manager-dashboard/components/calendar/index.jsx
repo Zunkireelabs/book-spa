@@ -32,6 +32,7 @@ import {
   getCustomerOutstandingBalance,
   deleteBlock,
   updateBlock,
+  cancelScheduledTransfer,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -2130,6 +2131,25 @@ const OperationalCalendar = ({ branchId }) => {
   // which deleteBlock/updateBlock (migration-212) handle correctly whether or not the
   // block is part of a recurring series. "Delete entire series" is a distinct, explicit
   // action so a recurring block isn't wiped out by a slip on a single day.
+  // Undo a mistaken transfer from the Calendar itself, not just Attendance panel's separate
+  // "Pending Transfers" list — the DB already refuses to let a SECOND transfer be created
+  // for a therapist who already has one pending/active (transfer_therapist's own check), so
+  // this covers the actual gap: cancelling whichever one WAS created, from wherever staff
+  // happen to notice the mistake.
+  const handleCancelScheduledTransfer = useCallback(async (col) => {
+    const transfer = col.scheduledTransfer;
+    if (!transfer?.id) return;
+    if (!window.confirm(`Cancel ${col.name}'s scheduled transfer?`)) return;
+
+    const result = await cancelScheduledTransfer(transfer.id);
+    if (result.error) {
+      showToast(result.error.message || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast('Scheduled transfer cancelled.');
+    refreshCalendar();
+  }, [refreshCalendar]);
+
   const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
     const result = await deleteBlock({ blockId, scope, occurrenceDate: day });
     if (result.error) {
@@ -2887,6 +2907,7 @@ const OperationalCalendar = ({ branchId }) => {
                   onResizeManualBlock={handleResizeManualBlock}
                   onEditManualBlock={(range) => setEditingBlock({ blockId: range.blockId, day: range.day })}
                   onEditTransfer={(col) => setEditingTransferTherapist({ id: col.id, name: col.name })}
+                  onCancelScheduledTransfer={handleCancelScheduledTransfer}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}

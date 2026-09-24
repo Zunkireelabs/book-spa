@@ -4621,7 +4621,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       // columns at all until it applies and the therapist's own row starts appearing here).
       supabase
         .from('staff_transfers')
-        .select('therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
+        .select('id, therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
         .eq('from_branch_id', resolvedBranchId)
         .eq('applied', false)
         .gte('effective_date', startDate)
@@ -4645,6 +4645,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const scheduledTransferByTherapist = {};
     (scheduledTransferResult.data || []).forEach(row => {
       scheduledTransferByTherapist[row.therapist_id] ??= {
+        id: row.id,
         effectiveDate: row.effective_date,
         startTime: row.start_time,
         toBranch: row.toBranch?.name || null,
