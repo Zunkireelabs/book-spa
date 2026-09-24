@@ -5,6 +5,15 @@ import Input from '../../../../components/ui/Input';
 import Button from '../../../../components/ui/Button';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { fetchBlockById, updateBlock, deleteBlock } from '../../../../services/api';
+import { to12h } from '../../../../services/bookingTransformers';
+
+// 'HH:MM' + minutes -> 'HH:MM', for the "ends at" preview next to the duration field.
+function addMinutesToTime(timeStr, minutes) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+}
 
 const TABS = [
   { id: 'details', label: 'Details' },
@@ -232,6 +241,11 @@ const EditBlockModal = ({ blockId, occurrenceDate, therapists, rooms, onClose, o
                     className="flex-1 px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
                 </div>
+                {startTime && Number(durationMinutes) > 0 && (
+                  <p className="text-xs text-text-secondary pl-[23px]">
+                    Opens back up at <span className="font-data font-data-medium text-text-primary">{to12h(addMinutesToTime(startTime, Number(durationMinutes)))}</span>
+                  </p>
+                )}
 
                 <div className="flex rounded-spa border border-border p-0.5 bg-background w-fit">
                   <button
