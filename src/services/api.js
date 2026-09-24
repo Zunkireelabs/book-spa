@@ -7595,7 +7595,7 @@ export async function fetchCustomerProfile(customerId) {
 // PackageDetailModal via CustomerContactQuickEdit. The RPC (migration-173)
 // also repair-links any customer_accounts row that signed up before this
 // email existed on the customer record.
-export async function updateCustomerContact(customerId, { email = null, phone = null } = {}) {
+export async function updateCustomerContact(customerId, { email = null, phone = null, fullName = null, notes = null } = {}) {
   try {
     if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
 
@@ -7603,6 +7603,8 @@ export async function updateCustomerContact(customerId, { email = null, phone = 
       p_customer_id: customerId,
       p_email: email,
       p_phone: phone,
+      p_full_name: fullName,
+      p_notes: notes,
     });
     if (error) throw error;
     return { data, error: null };
