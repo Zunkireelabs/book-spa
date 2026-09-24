@@ -5,6 +5,15 @@ import Input from '../../../../components/ui/Input';
 import Button from '../../../../components/ui/Button';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { createBlock } from '../../../../services/api';
+import { to12h } from '../../../../services/bookingTransformers';
+
+// 'HH:MM' + minutes -> 'HH:MM', for the "ends at" preview next to the duration field.
+function addMinutesToTime(timeStr, minutes) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+}
 
 const TABS = [
   { id: 'details', label: 'Details' },
@@ -193,6 +202,11 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(e.target.value)}
               />
+              {startTime && Number(durationMinutes) > 0 && (
+                <p className="text-xs text-text-secondary">
+                  Opens back up at <span className="font-data font-data-medium text-text-primary">{to12h(addMinutesToTime(startTime, Number(durationMinutes)))}</span>
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">
