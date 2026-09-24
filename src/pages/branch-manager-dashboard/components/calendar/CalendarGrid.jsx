@@ -561,10 +561,15 @@ function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onRes
     disabled: !range.blockId,
   });
 
+  // Fully hide the original card while it's being dragged — dnd-kit's DragOverlay already
+  // renders a separate floating copy that follows the cursor (see index.jsx), so leaving
+  // this one at ~85% opacity meant BOTH were visible and moving together, stacking on top
+  // of whatever the drag passed over and making it unclear which one (or where) was the
+  // real drop target. Only one representation should ever be visible during a drag.
   const dragStyle = transform ? {
     transform: CSS.Translate.toString(transform),
     zIndex: 9999,
-    opacity: isDragging ? 0.85 : 1,
+    opacity: isDragging ? 0 : 1,
     boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
   } : {};
 
@@ -651,6 +656,7 @@ const CalendarGrid = ({
   onResizeManualBlock,
   onEditManualBlock,
   onEditTransfer,
+  onCancelScheduledTransfer,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -1279,9 +1285,14 @@ const CalendarGrid = ({
           </div>
         )}
         {!col.transferredOut && !col.transferredIn && scheduledLabel && (
-          <div className="text-[9px] font-caption text-amber-600 font-bold uppercase tracking-wider mt-0.5">
-            Transfer at {to12h(col.scheduledTransfer.startTime)}
-          </div>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onCancelScheduledTransfer?.(col); }}
+            title="Click to cancel this scheduled transfer"
+            className="text-[9px] font-caption text-amber-600 font-bold uppercase tracking-wider mt-0.5 hover:underline hover:text-amber-800"
+          >
+            Transfer at {to12h(col.scheduledTransfer.startTime)} · Cancel
+          </button>
         )}
       </div>
     );
