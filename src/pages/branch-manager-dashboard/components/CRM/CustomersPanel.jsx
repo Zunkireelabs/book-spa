@@ -4,6 +4,7 @@ import { getCustomerIntelligence } from '../../../../services/api';
 import { useAuth } from '../../../../contexts/AuthContext';
 import CustomerProfileModal from './CustomerProfileModal';
 import DuplicateCustomersPanel from './DuplicateCustomersPanel';
+import ManualMergeCustomersPanel from './ManualMergeCustomersPanel';
 
 const LOYALTY_CONFIG = {
   VIP:        { color: 'bg-amber-100 text-amber-800', icon: 'Crown' },
@@ -27,8 +28,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-// readOnly accepted for the Overall view; this panel has no write affordances, so it is unused.
-const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-line no-unused-vars
+const CustomersPanel = ({ branchId, readOnly = false }) => {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('customers');
   const [data, setData] = useState(null);
@@ -62,6 +62,7 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
       {[
         { key: 'customers', label: 'Customers' },
         { key: 'duplicates', label: 'Potential Duplicates' },
+        { key: 'manual-merge', label: 'Manual Merge' },
       ].map((tab) => (
         <button
           key={tab.key}
@@ -83,6 +84,15 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
       <div className="space-y-4">
         {tabs}
         <DuplicateCustomersPanel orgId={profile?.org_id} role={profile?.role} branchId={profile?.branch_id} />
+      </div>
+    );
+  }
+
+  if (activeTab === 'manual-merge') {
+    return (
+      <div className="space-y-4">
+        {tabs}
+        <ManualMergeCustomersPanel branchId={profile?.branch_id || branchId} isOverall={readOnly} />
       </div>
     );
   }
