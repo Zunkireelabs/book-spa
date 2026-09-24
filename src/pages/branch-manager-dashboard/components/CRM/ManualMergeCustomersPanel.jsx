@@ -4,6 +4,7 @@ import Input from '../../../../components/ui/Input';
 import Button from '../../../../components/ui/Button';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { mergeCustomers, updateCustomerContact } from '../../../../services/api';
+import { canSearchForMerge } from './manualMergeBranchGate';
 
 // Picks the same customer twice would otherwise slip straight into merge_customers and come
 // back as a raw SQL exception — caught client-side first for a clearer message.
@@ -56,7 +57,7 @@ const CustomerSlot = ({ slot, customer, branchId, onSelect, onClear }) => {
   );
 };
 
-const ManualMergeCustomersPanel = ({ branchId }) => {
+const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
   const [customerA, setCustomerA] = useState(null);
   const [customerB, setCustomerB] = useState(null);
   const [canonicalSlot, setCanonicalSlot] = useState(1);
@@ -65,6 +66,18 @@ const ManualMergeCustomersPanel = ({ branchId }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+
+  if (!canSearchForMerge({ isOverall, branchId })) {
+    return (
+      <div className="bg-surface rounded-spa-lg border border-border text-center py-12">
+        <Icon name="Building2" size={32} className="text-text-tertiary mx-auto mb-3" />
+        <p className="font-body font-body-medium text-sm text-text-primary">Select a branch to use Manual Merge</p>
+        <p className="font-caption text-xs text-text-tertiary mt-1">
+          Switch out of "Overall" to a specific branch first — customer search needs one branch to resolve the organization.
+        </p>
+      </div>
+    );
+  }
 
   const bothPicked = customerA && customerB;
   const samePerson = bothPicked && customerA.id === customerB.id;

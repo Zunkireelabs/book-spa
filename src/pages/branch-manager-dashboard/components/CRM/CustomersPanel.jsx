@@ -28,8 +28,7 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-// readOnly accepted for the Overall view; this panel has no write affordances, so it is unused.
-const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-line no-unused-vars
+const CustomersPanel = ({ branchId, readOnly = false }) => {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('customers');
   const [data, setData] = useState(null);
@@ -93,7 +92,7 @@ const CustomersPanel = ({ branchId, readOnly = false }) => { // eslint-disable-l
     return (
       <div className="space-y-4">
         {tabs}
-        <ManualMergeCustomersPanel branchId={profile?.branch_id || branchId} />
+        <ManualMergeCustomersPanel branchId={profile?.branch_id || branchId} isOverall={readOnly} />
       </div>
     );
   }
