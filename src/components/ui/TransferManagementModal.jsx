@@ -99,6 +99,16 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
   const [cancellingActive, setCancellingActive] = useState(false);
   const [cancelActiveError, setCancelActiveError] = useState(null);
 
+  // Origin branch's view of an active transfer offers two distinct actions — 'cancel' (undo
+  // it, right now or at a specific past moment) vs 'edit' (push the return date/time out,
+  // still in the future) — instead of burying the edit path inside a plain checkbox under a
+  // modal titled "Cancel Transfer" the whole time.
+  const [originAction, setOriginAction] = useState('cancel');
+  const [editReturnDate, setEditReturnDate] = useState('');
+  const [editReturnTime, setEditReturnTime] = useState('');
+  const [editError, setEditError] = useState(null);
+  const [editing, setEditing] = useState(false);
+
   useEffect(() => {
     fetchAllBranches().then(({ data }) => setOrgBranches(data || []));
   }, []);
@@ -182,6 +192,38 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
     onSuccess(isFuture
       ? `${therapistName}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`
       : `${therapistName} is back — now bookable at ${activeTransfer.fromBranch}.`);
+  };
+
+  // Origin branch editing an active transfer's return date/time — always a future moment
+  // (server-enforced by reschedule_staff_transfer_return); a past moment is "cancel" territory,
+  // handled by the separate Cancel Transfer action instead.
+  const handleEditReturnTime = async () => {
+    if (!editReturnDate || !editReturnTime) {
+      setEditError('Enter a date and time.');
+      return;
+    }
+    const picked = new Date(`${editReturnDate}T${editReturnTime}`);
+    if (Number.isNaN(picked.getTime())) {
+      setEditError('Enter a valid date and time.');
+      return;
+    }
+    if (picked <= new Date()) {
+      setEditError('New return time must be in the future — for a return that already happened, use Cancel Transfer instead.');
+      return;
+    }
+
+    setEditing(true);
+    setEditError(null);
+
+    const result = await rescheduleStaffTransferReturn({ transferId: activeTransfer.id, newRevertAt: picked });
+    if (result.error) {
+      setEditError(result.error.message?.replace(/^reschedule_staff_transfer_return:\s*/, '') || 'Failed to update return time.');
+      setEditing(false);
+      return;
+    }
+
+    setEditing(false);
+    onSuccess(`${therapistName}'s return rescheduled to ${picked.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}.`);
   };
 
   // Origin branch cancelling an active transfer they initiated — one click, right now. If the
@@ -280,7 +322,7 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
     && activeTransfer.toBranchId !== currentBranchId
   );
 
-  const busy = transferring || extending || reverting || cancellingActive;
+  const busy = transferring || extending || reverting || cancellingActive || editing;
 
   if (loadingStatus) {
     return (
@@ -301,7 +343,7 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
       <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-            {isOriginCancelView ? 'Cancel Transfer' : activeTransfer ? `Active Transfer — ${staffLabel}` : `Transfer ${staffLabel}`}
+            {isOriginCancelView ? (originAction === 'edit' ? 'Edit Transfer' : 'Cancel Transfer') : activeTransfer ? `Active Transfer — ${staffLabel}` : `Transfer ${staffLabel}`}
           </h3>
           <button onClick={() => !busy && onClose()} className="p-1 rounded hover:bg-background">
             <Icon name="X" size={20} className="text-text-secondary" />
@@ -310,8 +352,10 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
 
         {activeTransfer && isOriginCancelView ? (
           <>
-            {/* ORIGIN branch cancelling a transfer it initiated — simple one-click return,
-                no Add Extra Time (only the destination manager may extend). */}
+            {/* ORIGIN branch managing a transfer it initiated — two distinct actions: Cancel
+                (undo it, now or at a specific past moment) vs Edit (push the return date/time
+                further out, still in the future). No Add Extra Time here regardless of mode —
+                only the destination manager may extend. */}
             <p className="font-body text-sm text-text-secondary">
               <span className="font-body-medium text-text-primary">"{therapistName}"</span> is currently transferred to{' '}
               <span className="font-body-medium text-text-primary">{activeTransfer.toBranch}</span>.
@@ -332,91 +376,154 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
               </div>
             </div>
 
-            {cancelActiveError && (
-              <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-                <Icon name="AlertCircle" size={16} />
-                <span>{cancelActiveError}</span>
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-background rounded-spa">
+              <button
+                type="button"
+                onClick={() => { setOriginAction('cancel'); setEditError(null); }}
+                disabled={busy}
+                className={`px-3 py-1.5 rounded-spa text-sm font-body font-body-medium spa-transition-fast ${
+                  originAction === 'cancel' ? 'bg-surface shadow-spa-resting text-text-primary' : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                Cancel Transfer
+              </button>
+              <button
+                type="button"
+                onClick={() => { setOriginAction('edit'); setCancelActiveError(null); setRevertError(null); }}
+                disabled={busy}
+                className={`px-3 py-1.5 rounded-spa text-sm font-body font-body-medium spa-transition-fast ${
+                  originAction === 'edit' ? 'bg-surface shadow-spa-resting text-text-primary' : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                Edit Transfer
+              </button>
+            </div>
 
-            <p className="font-caption text-xs text-text-tertiary">
-              Cancelling brings {therapistName} back to this branch right now. If they're still
-              booked at {activeTransfer.toBranch}, {activeTransfer.toBranch}'s manager
-              will need to mark them returned once that booking finishes.
-            </p>
-
-            <div className="border border-border rounded-spa p-3 space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useCustomReturnTime}
-                  onChange={(e) => {
-                    setUseCustomReturnTime(e.target.checked);
-                    setRevertError(null);
-                    if (e.target.checked && !customReturnDate) {
-                      const now = new Date();
-                      const pad = (n) => String(n).padStart(2, '0');
-                      setCustomReturnDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
-                      setCustomReturnTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
-                    }
-                  }}
-                  disabled={reverting}
-                  className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer"
-                />
-                <span className="font-body font-body-medium text-sm text-text-primary">
-                  Or pick a specific return time
-                </span>
-              </label>
-              {useCustomReturnTime && (
-                <div className="space-y-2 pt-1">
-                  <p className="font-caption text-xs text-text-tertiary">
-                    A past moment means they've already come back; a future one reschedules when they will.
-                  </p>
-                  {revertError && (
-                    <div className="flex items-center gap-2 p-2 bg-error/10 border border-error/20 rounded-spa text-error text-xs">
-                      <Icon name="AlertCircle" size={14} />
-                      <span>{revertError}</span>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block font-body font-body-medium text-sm text-text-primary">Date</label>
-                      <input
-                        type="date"
-                        value={customReturnDate}
-                        onChange={(e) => setCustomReturnDate(e.target.value)}
-                        disabled={reverting}
-                        className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block font-body font-body-medium text-sm text-text-primary">Time</label>
-                      <input
-                        type="time"
-                        value={customReturnTime}
-                        onChange={(e) => setCustomReturnTime(e.target.value)}
-                        disabled={reverting}
-                        className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
+            {originAction === 'edit' ? (
+              <>
+                <p className="font-caption text-xs text-text-tertiary">
+                  Push {therapistName}'s return further out — the transfer stays active until the new time.
+                </p>
+                {editError && (
+                  <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                    <Icon name="AlertCircle" size={16} />
+                    <span>{editError}</span>
                   </div>
-                  <div className="flex justify-end">
-                    <Button variant="outline" size="sm" onClick={handleUpdateReturnTime} loading={reverting}>
-                      {customReturnDate && customReturnTime && new Date(`${customReturnDate}T${customReturnTime}`) > new Date()
-                        ? 'Set New Return Time'
-                        : 'Mark Returned Early'}
-                    </Button>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block font-body font-body-medium text-sm text-text-primary">New return date</label>
+                    <input
+                      type="date"
+                      value={editReturnDate}
+                      onChange={(e) => setEditReturnDate(e.target.value)}
+                      disabled={editing}
+                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block font-body font-body-medium text-sm text-text-primary">New return time</label>
+                    <input
+                      type="time"
+                      value={editReturnTime}
+                      onChange={(e) => setEditReturnTime(e.target.value)}
+                      disabled={editing}
+                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
                   </div>
                 </div>
-              )}
-            </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={onClose} disabled={editing}>Close</Button>
+                  <Button variant="primary" size="sm" onClick={handleEditReturnTime} loading={editing}>
+                    Save New Return Time
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {cancelActiveError && (
+                  <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                    <Icon name="AlertCircle" size={16} />
+                    <span>{cancelActiveError}</span>
+                  </div>
+                )}
 
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" size="sm" onClick={onClose} disabled={cancellingActive}>Close</Button>
-              <Button variant="primary" size="sm" onClick={handleCancelTransferNow} loading={cancellingActive} disabled={reverting}>
-                Cancel Transfer
-              </Button>
-            </div>
+                <p className="font-caption text-xs text-text-tertiary">
+                  Cancelling brings {therapistName} back to this branch right now. If they're still
+                  booked at {activeTransfer.toBranch}, cancelling will tell you so — you'll then need to
+                  wait until that booking finishes, or pick the exact time it did below.
+                </p>
+
+                <div className="border border-border rounded-spa p-3 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useCustomReturnTime}
+                      onChange={(e) => {
+                        setUseCustomReturnTime(e.target.checked);
+                        setRevertError(null);
+                        if (e.target.checked && !customReturnDate) {
+                          const now = new Date();
+                          const pad = (n) => String(n).padStart(2, '0');
+                          setCustomReturnDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+                          setCustomReturnTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
+                        }
+                      }}
+                      disabled={reverting}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer"
+                    />
+                    <span className="font-body font-body-medium text-sm text-text-primary">
+                      They already returned at a specific past time
+                    </span>
+                  </label>
+                  {useCustomReturnTime && (
+                    <div className="space-y-2 pt-1">
+                      {revertError && (
+                        <div className="flex items-center gap-2 p-2 bg-error/10 border border-error/20 rounded-spa text-error text-xs">
+                          <Icon name="AlertCircle" size={14} />
+                          <span>{revertError}</span>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block font-body font-body-medium text-sm text-text-primary">Date</label>
+                          <input
+                            type="date"
+                            value={customReturnDate}
+                            max={new Date().toISOString().slice(0, 10)}
+                            onChange={(e) => setCustomReturnDate(e.target.value)}
+                            disabled={reverting}
+                            className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block font-body font-body-medium text-sm text-text-primary">Time</label>
+                          <input
+                            type="time"
+                            value={customReturnTime}
+                            onChange={(e) => setCustomReturnTime(e.target.value)}
+                            disabled={reverting}
+                            className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button variant="outline" size="sm" onClick={handleUpdateReturnTime} loading={reverting}>
+                          Mark Returned Early
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={onClose} disabled={cancellingActive}>Close</Button>
+                  <Button variant="primary" size="sm" onClick={handleCancelTransferNow} loading={cancellingActive} disabled={reverting}>
+                    Cancel Transfer
+                  </Button>
+                </div>
+              </>
+            )}
           </>
         ) : activeTransfer ? (
           <>
