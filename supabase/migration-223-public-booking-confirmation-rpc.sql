@@ -23,6 +23,28 @@
 -- Reversible (manual):
 --   DROP FUNCTION IF EXISTS public.public_get_booking_by_request_id(uuid);
 --   DROP INDEX IF EXISTS public.idx_bookings_client_request_id;
+--
+-- 2026-09-24 deploy failure: this migration was first written and verified
+-- against staging, where `client_request_id` (added ad hoc, never tracked by
+-- a migration file) is already `uuid`. Production's copy of the same ad hoc
+-- column drifted to `text`, so the CREATE FUNCTION below (typed `uuid` param)
+-- failed with "operator does not exist: text = uuid" and the whole deploy's
+-- migration step aborted before recording this version. Normalizing the
+-- column to `uuid` here (all 5,881 existing rows were NULL on prod, so the
+-- cast is lossless) instead of loosening the function's param type, since
+-- `uuid` is the correct type for a randomly-generated request id and staging
+-- already has it right.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'bookings'
+      AND column_name = 'client_request_id' AND data_type = 'text'
+  ) THEN
+    ALTER TABLE public.bookings
+      ALTER COLUMN client_request_id TYPE uuid USING client_request_id::uuid;
+  END IF;
+END $$;
 
 -- Partial index: client_request_id is only ever set on the anon/online-booking path,
 -- so most rows have it NULL — without this the RPC's WHERE clause is a full seq scan
