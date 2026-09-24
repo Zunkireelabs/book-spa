@@ -1113,6 +1113,10 @@ const CalendarGrid = ({
         // block that's the special 'unassigned'-like case of "no specific column" — needed
         // by drag-to-reschedule to detect whether a drop actually changed column.
         colId: occ.therapistId || occ.roomId || col.id,
+        // Whether this occurrence is a whole-location block (renders identically in every
+        // column) — drag-to-reschedule must NOT silently narrow it to a single therapist/
+        // room just because one of its N rendered copies got dropped on a specific column.
+        isWholeLocation: !occ.therapistId && !occ.roomId,
       }));
   };
 

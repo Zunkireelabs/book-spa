@@ -2126,10 +2126,15 @@ const OperationalCalendar = ({ branchId }) => {
   // row via updateBlock's scope:'this' path, leaving the rest of the series untouched).
   const handleMoveManualBlock = useCallback(async (block, newDate, newStartTime, targetColId) => {
     const patch = { blockId: block.blockId, scope: 'this', occurrenceDate: block.day, blockDate: newDate, startTime: newStartTime };
-    if (columnMode === 'therapist') {
-      patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
-    } else if (columnMode === 'room') {
-      patch.roomId = targetColId === 'unassigned' ? null : targetColId;
+    // A whole-location block renders one identical copy per column — dropping whichever
+    // copy the user happened to grab must only move its day/time, never narrow it down to
+    // that one column's therapist/room (it would silently stop blocking every other column).
+    if (!block.isWholeLocation) {
+      if (columnMode === 'therapist') {
+        patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
+      } else if (columnMode === 'room') {
+        patch.roomId = targetColId === 'unassigned' ? null : targetColId;
+      }
     }
     const result = await updateBlock(patch);
     if (result.error) {
