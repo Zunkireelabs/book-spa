@@ -56,6 +56,16 @@ const RevenueCards = ({ branchId, period, todayOnly = false }) => {
       return;
     }
 
+    // Guard against a malformed/unexpected API response shape here, at the source —
+    // otherwise a genuinely broken response would satisfy `!data` checks downstream
+    // and the UI would sit blank forever with no error and no Retry button.
+    const shapeMatches = isDaily ? result.data?.today !== undefined : result.data?.netRevenue !== undefined;
+    if (!shapeMatches) {
+      setError('Failed to load revenue data (unexpected response).');
+      setLoading(false);
+      return;
+    }
+
     setData(result.data);
     setLoading(false);
   }, [branchId, isDaily, period?.from, period?.to]);
