@@ -22,6 +22,14 @@ function formatPrettyDate(d) {
   });
 }
 
+// Nepal-local 'YYYY-MM-DD' for capping a date input to "today" — new Date().toISOString()
+// is UTC and lands on the previous calendar day between 00:00-05:45 Nepal time (UTC+5:45),
+// which would wrongly block picking the real local "today" during that window.
+function toLocalYMD(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 const DURATION_UNIT_OPTIONS = [
   { value: 'minute', label: 'Minute' },
   { value: 'hour', label: 'Hour' },
@@ -525,7 +533,7 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
                           <input
                             type="date"
                             value={customReturnDate}
-                            max={new Date().toISOString().slice(0, 10)}
+                            max={toLocalYMD(new Date())}
                             onChange={(e) => setCustomReturnDate(e.target.value)}
                             disabled={reverting}
                             className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -536,7 +544,7 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
                           <input
                             type="time"
                             value={customReturnTime}
-                            max={customReturnDate === new Date().toISOString().slice(0, 10)
+                            max={customReturnDate === toLocalYMD(new Date())
                               ? new Date().toTimeString().slice(0, 5)
                               : undefined}
                             onChange={(e) => setCustomReturnTime(e.target.value)}
