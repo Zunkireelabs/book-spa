@@ -9,6 +9,8 @@ import CalendarGrid, { HOUR_HEIGHT } from './CalendarGrid';
 import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
 import TransferFromCalendarModal from './TransferFromCalendarModal';
 import AddBlockModal from './AddBlockModal';
+import EditBlockModal from './EditBlockModal';
+import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
 import {
   getCalendarBookings,
   fetchBlocksForRange,
@@ -1454,11 +1456,13 @@ const OperationalCalendar = ({ branchId }) => {
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
-  // Empty-slot choice menu ("Add booking" / "Add block" / "Transfer therapist") — the
+  // Empty-slot choice menu ("Add booking" / "Add block" / "Transfer staff") — the
   // popover shown after a plain (non-rebook, non-blocked) empty-slot click.
   const [choiceMenuSlot, setChoiceMenuSlot] = useState(null);
   const [transferModalTarget, setTransferModalTarget] = useState(null);
   const [addBlockSlot, setAddBlockSlot] = useState(null);
+  const [editingBlock, setEditingBlock] = useState(null);
+  const [editingTransferTherapist, setEditingTransferTherapist] = useState(null);
 
   // Rebook "pick and place" mode
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
@@ -2849,6 +2853,8 @@ const OperationalCalendar = ({ branchId }) => {
                   blockOccurrences={calendarData.blockOccurrences}
                   onDeleteManualBlock={handleDeleteManualBlock}
                   onResizeManualBlock={handleResizeManualBlock}
+                  onEditManualBlock={(range) => setEditingBlock({ blockId: range.blockId, day: range.day })}
+                  onEditTransfer={(col) => setEditingTransferTherapist({ id: col.id, name: col.name })}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
@@ -3021,7 +3027,7 @@ const OperationalCalendar = ({ branchId }) => {
         branchHours={calendarData?.branchHours}
       />
 
-      {/* Empty-slot choice menu — Add booking / Add block / Transfer therapist */}
+      {/* Empty-slot choice menu — Add booking / Add block / Transfer staff */}
       {choiceMenuSlot && (
         <EmptySlotChoiceMenu
           x={choiceMenuSlot.clientX ?? 0}
@@ -3042,7 +3048,7 @@ const OperationalCalendar = ({ branchId }) => {
             },
             ...(choiceMenuSlot.colType === 'therapist' ? [{
               key: 'transfer',
-              label: 'Transfer therapist',
+              label: 'Transfer staff',
               icon: 'ArrowRightLeft',
               onSelect: () => {
                 const t = calendarData?.therapists?.find(th => th.id === choiceMenuSlot.colId);
@@ -3092,6 +3098,36 @@ const OperationalCalendar = ({ branchId }) => {
           onSuccess={() => {
             setAddBlockSlot(null);
             showToast('Block added.');
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {editingBlock && (
+        <EditBlockModal
+          blockId={editingBlock.blockId}
+          occurrenceDate={editingBlock.day}
+          therapists={calendarData?.therapists || []}
+          rooms={calendarData?.rooms || []}
+          onClose={() => setEditingBlock(null)}
+          onSuccess={() => {
+            setEditingBlock(null);
+            showToast('Block updated.');
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {editingTransferTherapist && (
+        <TransferManagementModal
+          therapistId={editingTransferTherapist.id}
+          therapistName={editingTransferTherapist.name}
+          currentBranchId={branchId}
+          defaultStartDate={currentDate}
+          onClose={() => setEditingTransferTherapist(null)}
+          onSuccess={(message) => {
+            setEditingTransferTherapist(null);
+            if (message) showToast(message);
             refreshCalendar();
           }}
         />

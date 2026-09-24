@@ -6068,6 +6068,24 @@ export async function createBlock({
   }
 }
 
+// Full row for the Edit Block modal — the calendar's occurrence rows (from
+// fetchBlocksForRange) carry only what's needed to render/gate, not the full recurrence
+// rule (freq/interval/end date/count), which the edit form's Recurrence tab needs.
+export async function fetchBlockById(blockId) {
+  try {
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('id', blockId)
+      .single();
+    if (error) throw error;
+    return { data: transformBlockRow(data), error: null };
+  } catch (error) {
+    console.error('[API] fetchBlockById error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Fetches raw manual_blocks rows (+ their exceptions) whose recurrence could touch
 // [startDate, endDate], expands them client-side via expandBlockOccurrences, and returns
 // flat { ...occurrence, blockId, therapistId, roomId, description, preventOnlineBooking }

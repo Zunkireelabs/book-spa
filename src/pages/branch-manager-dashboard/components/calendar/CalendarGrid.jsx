@@ -543,7 +543,7 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
 // `pointerdown` specifically — stopping only `mousedown`/`click` propagation (a different
 // event type) would not have prevented the ancestor's drag listener from also firing.
 // Needs its own component (not inline in a .map()) because useDraggable is a hook.
-function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart }) {
+function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     // colId disambiguates a whole-location block, which renders one instance per column (all
     // sharing the same blockId/day) — without it, dnd-kit's shared id registry can't tell
@@ -565,6 +565,7 @@ function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onRes
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      onClick={(e) => { e.stopPropagation(); if (range.blockId) onClick?.(); }}
       className={`group absolute inset-x-0 flex items-start justify-center pt-1.5 overflow-visible ${range.blockId ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{
         top: blockTop,
@@ -573,8 +574,9 @@ function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onRes
         ...dragStyle,
       }}
     >
-      <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
-        {range.description || 'Not bookable'}
+      <span className="flex flex-col items-center gap-0.5 text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting text-center">
+        <span>{range.description || 'Not bookable'}</span>
+        <span className="normal-case font-caption-normal opacity-90">{to12h(range.fromTime)}–{to12h(range.toTime)}</span>
       </span>
 
       {/* Remove — only if the block has an id (belt-and-suspenders; all blocks fetched via
@@ -639,6 +641,8 @@ const CalendarGrid = ({
   blockOccurrences,
   onDeleteManualBlock,
   onResizeManualBlock,
+  onEditManualBlock,
+  onEditTransfer,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -1195,7 +1199,7 @@ const CalendarGrid = ({
     const headerTooltip = transferReason
       ? `${col.name} — ${transferReason}`
       : todayBlock
-        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''}`
+        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''} (${to12h(todayBlock.fromTime)}–${to12h(todayBlock.toTime)})`
         : scheduledLabel
           ? `${col.name} — ${scheduledLabel}`
           : col.name;
@@ -1388,8 +1392,10 @@ const CalendarGrid = ({
             transfer (migration-145): transferredOut shows the window they're AWAY;
             transferredIn shows everything EXCEPT their visiting window (they're only
             actually here for that slice, even though branch_id points here for the
-            whole active period). pointer-events-none so clicks still reach the
-            column's own onClick, separately blocked in onEmptySlotClick/handleDragEnd.
+            whole active period). Clickable — opens the transfer-management modal (extend/
+            revert/cancel) instead of the empty-slot choice menu; new-booking/drag-drop
+            attempts onto a transferred column are still separately blocked in
+            onEmptySlotClick/handleDragEnd regardless of this overlay's own click handling.
             Sits below the booking cards (rendered after) so cards stay visible. */}
         {col.transferredOut && (() => {
           const range = getTransferBlockRange(col, day);
@@ -1398,7 +1404,8 @@ const CalendarGrid = ({
           const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
           return (
             <div
-              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+              onClick={(e) => { e.stopPropagation(); onEditTransfer?.(col); }}
+              className="absolute inset-x-0 cursor-pointer flex items-start justify-center pt-1.5 overflow-hidden"
               style={{
                 top: blockTop,
                 height: blockHeight,
@@ -1429,7 +1436,8 @@ const CalendarGrid = ({
             return (
               <div
                 key={i}
-                className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+                onClick={(e) => { e.stopPropagation(); onEditTransfer?.(col); }}
+                className="absolute inset-x-0 cursor-pointer flex items-start justify-center pt-1.5 overflow-hidden"
                 style={{ top: segTop, height: segHeight, backgroundColor: 'rgba(15,118,110,0.35)' }}
               >
                 <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
@@ -1481,6 +1489,7 @@ const CalendarGrid = ({
               blockHeight={blockHeight}
               onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
               onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
+              onClick={() => onEditManualBlock?.(range)}
             />
           );
         })}

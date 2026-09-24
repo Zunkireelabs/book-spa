@@ -101,7 +101,7 @@ const TransferFromCalendarModal = ({ therapistId, therapistName, currentBranchId
     <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !submitting && onClose()}>
       <div className="bg-surface rounded-spa-lg shadow-spa-modal max-w-md w-full p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-heading font-heading-medium text-lg text-text-primary">Transfer Therapist</h3>
+          <h3 className="font-heading font-heading-medium text-lg text-text-primary">Transfer Staff</h3>
           <button onClick={() => !submitting && onClose()} className="p-1 rounded hover:bg-background">
             <Icon name="X" size={18} className="text-text-secondary" />
           </button>
