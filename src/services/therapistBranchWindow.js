@@ -144,7 +144,7 @@ export function resolveOrphanTransferWindow(transfers, branchId, rangeStart, ran
   if (t.to_branch_id === branchId) {
     return { transferredIn: true, returnsAt: t.revert_at, transferStartAt, fromBranch: t.fromBranch?.name || null };
   }
-  return { transferredOut: true, returnsAt: t.revert_at, transferStartAt };
+  return { transferredOut: true, returnsAt: t.revert_at, transferStartAt, transferId: t.id };
 }
 
 /**
