@@ -194,6 +194,41 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
       : `${therapistName} is back — now bookable at ${activeTransfer.fromBranch}.`);
   };
 
+  // Origin branch's Cancel-mode "they already returned at a specific past time" — unlike the
+  // shared handleUpdateReturnTime (which dual-routes future picks to a reschedule, still used
+  // by the destination-branch ACTIVE view below), this call site's whole premise is "this
+  // already happened," so a future pick here is a mistake, not an alternate action — route it
+  // to an error pointing at Edit Transfer instead of silently rescheduling behind a button
+  // that says "Mark Returned Early".
+  const handleMarkReturnedAt = async () => {
+    if (!customReturnDate || !customReturnTime) {
+      setRevertError('Enter a date and time.');
+      return;
+    }
+    const picked = new Date(`${customReturnDate}T${customReturnTime}`);
+    if (Number.isNaN(picked.getTime())) {
+      setRevertError('Enter a valid date and time.');
+      return;
+    }
+    if (picked > new Date()) {
+      setRevertError('That time is in the future — use Edit Transfer to reschedule the return instead.');
+      return;
+    }
+
+    setReverting(true);
+    setRevertError(null);
+
+    const result = await revertStaffTransferNow({ transferId: activeTransfer.id, revertedAt: picked });
+    if (result.error) {
+      setRevertError(result.error.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to update return time.');
+      setReverting(false);
+      return;
+    }
+
+    setReverting(false);
+    onSuccess(`${therapistName} is back — now bookable at ${activeTransfer.fromBranch}.`);
+  };
+
   // Origin branch editing an active transfer's return date/time — always a future moment
   // (server-enforced by reschedule_staff_transfer_return); a past moment is "cancel" territory,
   // handled by the separate Cancel Transfer action instead.
@@ -501,6 +536,9 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
                           <input
                             type="time"
                             value={customReturnTime}
+                            max={customReturnDate === new Date().toISOString().slice(0, 10)
+                              ? new Date().toTimeString().slice(0, 5)
+                              : undefined}
                             onChange={(e) => setCustomReturnTime(e.target.value)}
                             disabled={reverting}
                             className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -508,7 +546,7 @@ const TransferManagementModal = ({ therapistId, therapistName, currentBranchId, 
                         </div>
                       </div>
                       <div className="flex justify-end">
-                        <Button variant="outline" size="sm" onClick={handleUpdateReturnTime} loading={reverting}>
+                        <Button variant="outline" size="sm" onClick={handleMarkReturnedAt} loading={reverting}>
                           Mark Returned Early
                         </Button>
                       </div>
