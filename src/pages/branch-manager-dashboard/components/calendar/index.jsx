@@ -28,6 +28,8 @@ import {
   resizeSharedBookingTime,
   applyDiscount,
   getCustomerOutstandingBalance,
+  deleteBlock,
+  updateBlock,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -2062,6 +2064,30 @@ const OperationalCalendar = ({ branchId }) => {
     setChoiceMenuSlot(slotInfo);
   }, [rebookSource, branchId, refreshCalendar, calendarData]);
 
+  // Manual-block management from the calendar overlay itself (delete the mistaken block,
+  // or drag its bottom edge to resize) — always scoped to just this occurrence ('this'),
+  // which deleteBlock/updateBlock (migration-212) handle correctly whether or not the
+  // block is part of a recurring series. "Delete entire series" is a distinct, explicit
+  // action so a recurring block isn't wiped out by a slip on a single day.
+  const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
+    const result = await deleteBlock({ blockId, scope, occurrenceDate: day });
+    if (result.error) {
+      showToast(result.error.message || 'Failed to remove block.', 'error');
+      return;
+    }
+    showToast(scope === 'series' ? 'Block series removed.' : 'Block removed.');
+    refreshCalendar();
+  }, [refreshCalendar]);
+
+  const handleResizeManualBlock = useCallback(async ({ blockId, day, durationMinutes }) => {
+    const result = await updateBlock({ blockId, scope: 'this', occurrenceDate: day, durationMinutes });
+    if (result.error) {
+      showToast(result.error.message || 'Failed to resize block.', 'error');
+      return;
+    }
+    refreshCalendar();
+  }, [refreshCalendar]);
+
   // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
   const openQuickCreateForSlot = useCallback(async (slotInfo) => {
     setQuickCreateSlot(slotInfo);
@@ -2774,6 +2800,8 @@ const OperationalCalendar = ({ branchId }) => {
                   attendanceMap={attendanceMap}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
                   blockOccurrences={calendarData.blockOccurrences}
+                  onDeleteManualBlock={handleDeleteManualBlock}
+                  onResizeManualBlock={handleResizeManualBlock}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
@@ -2981,10 +3009,17 @@ const OperationalCalendar = ({ branchId }) => {
           defaultDate={transferModalTarget.defaultDate}
           defaultTime={transferModalTarget.defaultTime}
           onClose={() => setTransferModalTarget(null)}
-          onSuccess={() => {
+          onSuccess={({ applied, startDate, startTime } = {}) => {
             const name = transferModalTarget.therapistName;
             setTransferModalTarget(null);
-            showToast(`${name} transferred.`);
+            if (applied === false) {
+              const when = startTime
+                ? `${startDate} at ${startTime}`
+                : startDate;
+              showToast(`${name}'s transfer is scheduled for ${when} — it hasn't happened yet.`);
+            } else {
+              showToast(`${name} transferred.`);
+            }
             refreshCalendar();
           }}
         />

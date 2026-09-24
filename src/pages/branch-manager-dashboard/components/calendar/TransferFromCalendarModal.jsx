@@ -94,7 +94,7 @@ const TransferFromCalendarModal = ({ therapistId, therapistName, currentBranchId
     }
 
     setSubmitting(false);
-    onSuccess?.();
+    onSuccess?.({ applied: result.data?.applied, startDate, startTime: isPermanent ? null : startTime });
   };
 
   return (

@@ -567,6 +567,8 @@ const CalendarGrid = ({
   attendanceMap,
   checkedOutByTherapistAndDate,
   blockOccurrences,
+  onDeleteManualBlock,
+  onResizeManualBlock,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -584,6 +586,14 @@ const CalendarGrid = ({
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
   const gridBodyRef = useRef(null);
+
+  // Manual-block resize-by-dragging-bottom-edge (see the block overlay render below).
+  // Tracked outside React state during the drag itself (mutable ref, updated on every
+  // mousemove) so the drag preview can repaint every frame without a re-render storm;
+  // `resizingBlock` (state) only needs to hold enough to pick out which block to redraw
+  // and to trigger that one re-render on drag start/end.
+  const [resizingBlock, setResizingBlock] = useState(null); // { blockId, day, previewHeight }
+  const blockResizeRef = useRef(null);
 
   // ── Pinch-to-zoom (mobile/touch only) ──────────────────────
   // Relayouts the grid at a scaled HOUR_HEIGHT/column width rather than a CSS
@@ -910,6 +920,65 @@ const CalendarGrid = ({
     return Math.max(((eh * 60 + em) - (sh * 60 + sm)) / 60 * eHH, 24);
   };
 
+  // Drag the bottom edge of a manual block to resize it. `startHeight`/`startY` are
+  // captured once on mousedown; every mousemove repaints a live preview via `resizingBlock`
+  // state, and mouseup snaps the final height to the nearest 15 minutes and persists it
+  // (scoped to just this occurrence — see handleDeleteManualBlock's comment in index.jsx).
+  const handleBlockResizeStart = useCallback((e, block, day) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = Math.max(timeToHeight(block.fromTime, block.toTime), 20);
+    blockResizeRef.current = { blockId: block.blockId, day, startY, startHeight };
+    setResizingBlock({ blockId: block.blockId, day, previewHeight: startHeight });
+
+    const handleMouseMove = (moveEvent) => {
+      const ref = blockResizeRef.current;
+      if (!ref) return;
+      const newHeight = Math.max(20, ref.startHeight + (moveEvent.clientY - ref.startY));
+      setResizingBlock({ blockId: ref.blockId, day: ref.day, previewHeight: newHeight });
+    };
+
+    const handleMouseUp = (upEvent) => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      const ref = blockResizeRef.current;
+      blockResizeRef.current = null;
+      setResizingBlock(null);
+      if (!ref) return;
+      // A plain click (no real drag) must never commit a resize — without this guard, a
+      // zero-movement mouseup still computes rawHeight === startHeight exactly, and
+      // snapping that to the nearest 15 minutes can differ from the block's actual
+      // (unsnapped) duration whenever it isn't already a multiple of 15 (e.g. a 20-minute
+      // block silently becomes 15). Same 5px threshold this app's other drag interactions
+      // use (see PointerSensor's activationConstraint in index.jsx).
+      if (Math.abs(upEvent.clientY - ref.startY) < 5) return;
+      const rawHeight = Math.max(20, ref.startHeight + (upEvent.clientY - ref.startY));
+      const snappedMinutes = Math.max(15, Math.round((rawHeight / eHH * 60) / 15) * 15);
+      const originalMinutes = Math.round(ref.startHeight / eHH * 60);
+      if (snappedMinutes === originalMinutes) return;
+      onResizeManualBlock?.({ blockId: ref.blockId, day: ref.day, durationMinutes: snappedMinutes });
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [eHH, onResizeManualBlock]);
+
+  // Remove a manual block that was added by mistake. A recurring block asks whether to
+  // drop just this occurrence or the whole series; a one-off block is removed outright.
+  const handleDeleteBlockClick = useCallback((e, block, day) => {
+    e.stopPropagation();
+    if (block.seriesId) {
+      const wantsSeries = window.confirm(
+        'This block repeats. Click OK to remove the ENTIRE recurring series, or Cancel to remove just this one occurrence.'
+      );
+      onDeleteManualBlock?.({ blockId: block.blockId, day, scope: wantsSeries ? 'series' : 'this' });
+      return;
+    }
+    if (!window.confirm('Remove this block?')) return;
+    onDeleteManualBlock?.({ blockId: block.blockId, day, scope: 'this' });
+  }, [onDeleteManualBlock]);
+
   // Only the ACTUAL [transfer start, revert_at] window on THIS day, not the whole day —
   // e.g. a 15:45-18:45 transfer only shades that slice, leaving the rest of the day bookable.
   const openHourStr = `${String(openHour).padStart(2, '0')}:00`;
@@ -958,7 +1027,14 @@ const CalendarGrid = ({
         if (col.type === 'room') return occ.roomId === col.id;
         return false;
       })
-      .map(occ => ({ fromTime: occ.startTime, toTime: occ.endTime, description: occ.description }));
+      .map(occ => ({
+        fromTime: occ.startTime,
+        toTime: occ.endTime,
+        description: occ.description,
+        blockId: occ.blockId,
+        seriesId: occ.seriesId,
+        day: occ.date,
+      }));
   };
 
   // A therapist who's already checked out is blocked from their check-out time through
@@ -1300,11 +1376,14 @@ const CalendarGrid = ({
             the block's own description (the reason text), falling back to "Not bookable". */}
         {manualBlockRanges.map((range, i) => {
           const blockTop = timeToTop(range.fromTime);
-          const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
+          const isResizingThis = resizingBlock?.blockId === range.blockId && resizingBlock?.day === range.day;
+          const blockHeight = isResizingThis
+            ? resizingBlock.previewHeight
+            : Math.max(timeToHeight(range.fromTime, range.toTime), 20);
           return (
             <div
               key={`manual-block-${i}`}
-              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+              className="group absolute inset-x-0 flex items-start justify-center pt-1.5 overflow-visible"
               style={{
                 top: blockTop,
                 height: blockHeight,
@@ -1314,6 +1393,29 @@ const CalendarGrid = ({
               <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
                 {range.description || 'Not bookable'}
               </span>
+
+              {/* Remove — only if the block has an id (belt-and-suspenders; all blocks
+                  fetched via fetchBlocksForRange carry one, this just avoids a dead click
+                  on any legacy/malformed row). */}
+              {range.blockId && (
+                <button
+                  type="button"
+                  onClick={(e) => handleDeleteBlockClick(e, range, range.day)}
+                  className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-800 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Remove block"
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              )}
+
+              {/* Resize handle — drag the bottom edge to change the block's duration. */}
+              {range.blockId && (
+                <div
+                  onMouseDown={(e) => handleBlockResizeStart(e, range, range.day)}
+                  className="absolute bottom-0 inset-x-0 h-1.5 cursor-row-resize opacity-0 group-hover:opacity-100 bg-amber-900/60"
+                  title="Drag to resize"
+                />
+              )}
             </div>
           );
         })}
