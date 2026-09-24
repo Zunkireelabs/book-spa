@@ -9,6 +9,8 @@ import CalendarGrid, { HOUR_HEIGHT } from './CalendarGrid';
 import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
 import TransferFromCalendarModal from './TransferFromCalendarModal';
 import AddBlockModal from './AddBlockModal';
+import EditBlockModal from './EditBlockModal';
+import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
 import {
   getCalendarBookings,
   fetchBlocksForRange,
@@ -1438,6 +1440,7 @@ const OperationalCalendar = ({ branchId }) => {
   // Drag state
   const [activeDragId, setActiveDragId] = useState(null);
   const [activeDragBooking, setActiveDragBooking] = useState(null);
+  const [activeDragBlock, setActiveDragBlock] = useState(null);
   const [overSlotData, setOverSlotData] = useState(null); // { hour, minute, day }
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
@@ -1453,11 +1456,13 @@ const OperationalCalendar = ({ branchId }) => {
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
-  // Empty-slot choice menu ("Add booking" / "Add block" / "Transfer therapist") — the
+  // Empty-slot choice menu ("Add booking" / "Add block" / "Transfer staff") — the
   // popover shown after a plain (non-rebook, non-blocked) empty-slot click.
   const [choiceMenuSlot, setChoiceMenuSlot] = useState(null);
   const [transferModalTarget, setTransferModalTarget] = useState(null);
   const [addBlockSlot, setAddBlockSlot] = useState(null);
+  const [editingBlock, setEditingBlock] = useState(null);
+  const [editingTransferTherapist, setEditingTransferTherapist] = useState(null);
 
   // Rebook "pick and place" mode
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
@@ -1630,6 +1635,12 @@ const OperationalCalendar = ({ branchId }) => {
     const { active, activatorEvent } = event;
     setActiveDragId(active.id);
 
+    if (active.data.current?.type === 'manual-block') {
+      setActiveDragBlock(active.data.current.block);
+      setDragGrabOffset(0);
+      return;
+    }
+
     const booking = active.data.current?.booking;
     if (booking) {
       setActiveDragBooking(booking);
@@ -1699,6 +1710,28 @@ const OperationalCalendar = ({ branchId }) => {
 
   const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
+
+    if (active.data.current?.type === 'manual-block') {
+      const finalTimeData = over?.data?.current
+        ? calculateTimeFromPointer(over.data.current)
+        : overSlotData;
+      const block = active.data.current.block;
+      setActiveDragId(null);
+      setActiveDragBlock(null);
+      setOverSlotData(null);
+      setDragGrabOffset(0);
+
+      if (!finalTimeData || finalTimeData.hour === undefined) return;
+      const { day: newDate, colId: targetColId, hour, minute } = finalTimeData;
+      const newStartTime = formatTimeFromSlot(hour, minute);
+      const effectiveTargetColId = targetColId || 'unassigned';
+      const sourceColId = block.colId || 'unassigned';
+      if (newDate === block.day && newStartTime === block.fromTime && effectiveTargetColId === sourceColId) {
+        return; // no change
+      }
+      handleMoveManualBlock(block, newDate, newStartTime, targetColId);
+      return;
+    }
 
     // Capture final position before clearing state
     // Fallback to last overSlotData if over is null (same-column drag may not trigger new over)
@@ -1874,7 +1907,7 @@ const OperationalCalendar = ({ branchId }) => {
         timeOnly: true,
       });
     }
-  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData]);
+  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData, handleMoveManualBlock]);
 
   // Execute reschedule with optimistic update (time-only, no column change)
   const executeReschedule = useCallback(async ({ bookingId, newDate, newStartTime, newEndTime, durationMinutes }) => {
@@ -2087,6 +2120,29 @@ const OperationalCalendar = ({ branchId }) => {
     }
     refreshCalendar();
   }, [refreshCalendar]);
+
+  // Drag a block card to a new day/time/column — same "this occurrence" scoping as
+  // resize/delete above (a recurring block's dragged occurrence spins off its own one-off
+  // row via updateBlock's scope:'this' path, leaving the rest of the series untouched).
+  const handleMoveManualBlock = useCallback(async (block, newDate, newStartTime, targetColId) => {
+    const patch = { blockId: block.blockId, scope: 'this', occurrenceDate: block.day, blockDate: newDate, startTime: newStartTime };
+    // A whole-location block renders one identical copy per column — dropping whichever
+    // copy the user happened to grab must only move its day/time, never narrow it down to
+    // that one column's therapist/room (it would silently stop blocking every other column).
+    if (!block.isWholeLocation) {
+      if (columnMode === 'therapist') {
+        patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
+      } else if (columnMode === 'room') {
+        patch.roomId = targetColId === 'unassigned' ? null : targetColId;
+      }
+    }
+    const result = await updateBlock(patch);
+    if (result.error) {
+      showToast(result.error.message || 'Failed to move block.', 'error');
+      return;
+    }
+    refreshCalendar();
+  }, [columnMode, refreshCalendar]);
 
   // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
   const openQuickCreateForSlot = useCallback(async (slotInfo) => {
@@ -2802,6 +2858,8 @@ const OperationalCalendar = ({ branchId }) => {
                   blockOccurrences={calendarData.blockOccurrences}
                   onDeleteManualBlock={handleDeleteManualBlock}
                   onResizeManualBlock={handleResizeManualBlock}
+                  onEditManualBlock={(range) => setEditingBlock({ blockId: range.blockId, day: range.day })}
+                  onEditTransfer={(col) => setEditingTransferTherapist({ id: col.id, name: col.name })}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
@@ -2830,6 +2888,16 @@ const OperationalCalendar = ({ branchId }) => {
 
         {/* Drag overlay for visual feedback */}
         <DragOverlay>
+          {activeDragBlock && (() => {
+            const previewStartTime = overSlotData ? formatTimeFromSlot(overSlotData.hour, overSlotData.minute) : activeDragBlock.fromTime;
+            return (
+              <div className="bg-amber-700 text-white rounded-md border-2 border-amber-800 shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
+                <div className="font-data text-sm font-semibold mb-1">{previewStartTime}</div>
+                <div className="font-body text-xs">{activeDragBlock.description || 'Not bookable'}</div>
+                {overSlotData && <div className="font-caption text-[10px] mt-1 opacity-90">Drop here</div>}
+              </div>
+            );
+          })()}
           {activeDragBooking && (() => {
             // Calculate preview time based on hovered slot
             const duration = activeDragBooking.serviceDuration ||
@@ -2964,7 +3032,7 @@ const OperationalCalendar = ({ branchId }) => {
         branchHours={calendarData?.branchHours}
       />
 
-      {/* Empty-slot choice menu — Add booking / Add block / Transfer therapist */}
+      {/* Empty-slot choice menu — Add booking / Add block / Transfer staff */}
       {choiceMenuSlot && (
         <EmptySlotChoiceMenu
           x={choiceMenuSlot.clientX ?? 0}
@@ -2985,7 +3053,7 @@ const OperationalCalendar = ({ branchId }) => {
             },
             ...(choiceMenuSlot.colType === 'therapist' ? [{
               key: 'transfer',
-              label: 'Transfer therapist',
+              label: 'Transfer staff',
               icon: 'ArrowRightLeft',
               onSelect: () => {
                 const t = calendarData?.therapists?.find(th => th.id === choiceMenuSlot.colId);
@@ -3035,6 +3103,36 @@ const OperationalCalendar = ({ branchId }) => {
           onSuccess={() => {
             setAddBlockSlot(null);
             showToast('Block added.');
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {editingBlock && (
+        <EditBlockModal
+          blockId={editingBlock.blockId}
+          occurrenceDate={editingBlock.day}
+          therapists={calendarData?.therapists || []}
+          rooms={calendarData?.rooms || []}
+          onClose={() => setEditingBlock(null)}
+          onSuccess={() => {
+            setEditingBlock(null);
+            showToast('Block updated.');
+            refreshCalendar();
+          }}
+        />
+      )}
+
+      {editingTransferTherapist && (
+        <TransferManagementModal
+          therapistId={editingTransferTherapist.id}
+          therapistName={editingTransferTherapist.name}
+          currentBranchId={branchId}
+          defaultStartDate={currentDate}
+          onClose={() => setEditingTransferTherapist(null)}
+          onSuccess={(message) => {
+            setEditingTransferTherapist(null);
+            if (message) showToast(message);
             refreshCalendar();
           }}
         />

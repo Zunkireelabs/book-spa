@@ -4521,7 +4521,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     //    blocked for them since their branch_id now points elsewhere — see migration-145).
     const [
       therapistsResult, roomsResult, transferredOutResult, transferredInResult,
-      revertedOutResult, revertedInResult, checkedOutResult,
+      revertedOutResult, revertedInResult, checkedOutResult, scheduledTransferResult,
     ] = await Promise.all([
       supabase
         .from('therapists')
@@ -4612,6 +4612,22 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .gte('date', startDate)
         .lte('date', endDate)
         .not('check_out_time', 'is', null),
+      // Transfers scheduled for later within the viewed range but not yet due (cron hasn't
+      // flipped applied=true) — these move nothing yet, so they must NOT block the column
+      // like transferredOut/transferredIn above, but the calendar showing literally nothing
+      // for a transfer staff just created (until its start time arrives) reads as "did this
+      // even save?" — surface it as a non-blocking "Scheduled" badge instead. Only the
+      // FROM side needs this (a pending incoming transfer doesn't affect this branch's
+      // columns at all until it applies and the therapist's own row starts appearing here).
+      supabase
+        .from('staff_transfers')
+        .select('therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
+        .eq('from_branch_id', resolvedBranchId)
+        .eq('applied', false)
+        .gte('effective_date', startDate)
+        .lte('effective_date', endDate)
+        .order('effective_date', { ascending: true })
+        .order('start_time', { ascending: true }),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
@@ -4621,6 +4637,19 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (revertedOutResult.error) throw revertedOutResult.error;
     if (revertedInResult.error) throw revertedInResult.error;
     if (checkedOutResult.error) throw checkedOutResult.error;
+    if (scheduledTransferResult.error) throw scheduledTransferResult.error;
+
+    // Keyed by therapist id -> the SOONEST still-pending transfer touching this branch's
+    // view range (a therapist could theoretically have more than one scheduled; the list is
+    // already ordered by effective_date/start_time ascending, so `??=` keeps the first).
+    const scheduledTransferByTherapist = {};
+    (scheduledTransferResult.data || []).forEach(row => {
+      scheduledTransferByTherapist[row.therapist_id] ??= {
+        effectiveDate: row.effective_date,
+        startTime: row.start_time,
+        toBranch: row.toBranch?.name || null,
+      };
+    });
 
     // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
     // can block each affected day's column independently.
@@ -4670,9 +4699,11 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       };
     });
 
-    const normalTherapists = (therapistsResult.data || []).map(t =>
-      transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t
-    );
+    const normalTherapists = (therapistsResult.data || []).map(t => {
+      const withIncoming = transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t;
+      const scheduled = scheduledTransferByTherapist[t.id];
+      return scheduled ? { ...withIncoming, scheduledTransfer: scheduled } : withIncoming;
+    });
 
     // A visitor who has ALREADY reverted home is no longer in therapistsResult (their
     // branch_id points home again), so transferredInById above can't tag an existing row —
@@ -6037,6 +6068,24 @@ export async function createBlock({
   }
 }
 
+// Full row for the Edit Block modal — the calendar's occurrence rows (from
+// fetchBlocksForRange) carry only what's needed to render/gate, not the full recurrence
+// rule (freq/interval/end date/count), which the edit form's Recurrence tab needs.
+export async function fetchBlockById(blockId) {
+  try {
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .select('*')
+      .eq('id', blockId)
+      .single();
+    if (error) throw error;
+    return { data: transformBlockRow(data), error: null };
+  } catch (error) {
+    console.error('[API] fetchBlockById error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Fetches raw manual_blocks rows (+ their exceptions) whose recurrence could touch
 // [startDate, endDate], expands them client-side via expandBlockOccurrences, and returns
 // flat { ...occurrence, blockId, therapistId, roomId, description, preventOnlineBooking }
@@ -6176,6 +6225,10 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
     if (fields.preventOnlineBooking !== undefined) patch.prevent_online_booking = fields.preventOnlineBooking;
     if (fields.therapistId !== undefined) patch.therapist_id = fields.therapistId;
     if (fields.roomId !== undefined) patch.room_id = fields.roomId;
+    // Drag-to-reschedule moves the occurrence to a different day — distinct from
+    // `occurrenceDate` (below), which always identifies the ORIGINAL occurrence being
+    // acted on, not where it's moving to.
+    if (fields.blockDate !== undefined) patch.block_date = fields.blockDate;
 
     if (scope === 'series') {
       const { error } = await supabase.from('manual_blocks').update(patch).eq('id', blockId);
@@ -6203,7 +6256,7 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
           branch_id: existing.branch_id,
           therapist_id: patch.therapist_id ?? existing.therapist_id,
           room_id: patch.room_id ?? existing.room_id,
-          block_date: occurrenceDate,
+          block_date: patch.block_date ?? occurrenceDate,
           start_time: patch.start_time ?? existing.start_time,
           duration_minutes: patch.duration_minutes ?? existing.duration_minutes,
           description: patch.description ?? existing.description,
@@ -6239,7 +6292,7 @@ export async function updateBlock({ blockId, scope, occurrenceDate = null, ...fi
         branch_id: existing.branch_id,
         therapist_id: patch.therapist_id ?? existing.therapist_id,
         room_id: patch.room_id ?? existing.room_id,
-        block_date: occurrenceDate,
+        block_date: patch.block_date ?? occurrenceDate,
         start_time: patch.start_time ?? existing.start_time,
         duration_minutes: patch.duration_minutes ?? existing.duration_minutes,
         description: patch.description ?? existing.description,

@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard, { canDragBooking, BookingHoverPreview } from './CalendarBookingCard';
+import { to12h } from '../../../../services/bookingTransformers';
 
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
@@ -535,6 +536,77 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
   );
 };
 
+// A manual-block occurrence's overlay — draggable to reschedule (same DndContext/sensors
+// bookings use, so it shares the app's existing 5px activation constraint), with its own
+// delete "x" and bottom-edge resize handle layered on top. Both inner controls call
+// e.stopPropagation() AND onPointerDown-stop, since dnd-kit's drag activation listens on
+// `pointerdown` specifically — stopping only `mousedown`/`click` propagation (a different
+// event type) would not have prevented the ancestor's drag listener from also firing.
+// Needs its own component (not inline in a .map()) because useDraggable is a hook.
+function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    // colId disambiguates a whole-location block, which renders one instance per column (all
+    // sharing the same blockId/day) — without it, dnd-kit's shared id registry can't tell
+    // those instances apart.
+    id: `manual-block-${range.blockId}-${range.day}-${range.colId}`,
+    data: { type: 'manual-block', block: range },
+    disabled: !range.blockId,
+  });
+
+  const dragStyle = transform ? {
+    transform: CSS.Translate.toString(transform),
+    zIndex: 9999,
+    opacity: isDragging ? 0.85 : 1,
+    boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : undefined,
+  } : {};
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onClick={(e) => { e.stopPropagation(); if (range.blockId) onClick?.(); }}
+      className={`group absolute inset-x-0 flex items-start justify-center pt-1.5 overflow-visible ${range.blockId ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      style={{
+        top: blockTop,
+        height: blockHeight,
+        backgroundColor: 'rgba(217,119,6,0.35)',
+        ...dragStyle,
+      }}
+    >
+      <span className="flex flex-col items-center gap-0.5 text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting text-center">
+        <span>{range.description || 'Not bookable'}</span>
+        <span className="normal-case font-caption-normal opacity-90">{to12h(range.fromTime)}–{to12h(range.toTime)}</span>
+      </span>
+
+      {/* Remove — only if the block has an id (belt-and-suspenders; all blocks fetched via
+          fetchBlocksForRange carry one, this just avoids a dead click on any legacy/
+          malformed row). */}
+      {range.blockId && (
+        <button
+          type="button"
+          onClick={onDeleteClick}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-800 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Remove block"
+        >
+          <Icon name="X" size={10} />
+        </button>
+      )}
+
+      {/* Resize handle — drag the bottom edge to change the block's duration. */}
+      {range.blockId && (
+        <div
+          onMouseDown={onResizeStart}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute bottom-0 inset-x-0 h-1.5 cursor-row-resize opacity-0 group-hover:opacity-100 bg-amber-900/60"
+          title="Drag to resize"
+        />
+      )}
+    </div>
+  );
+}
+
 // Sortable wrapper for draggable column headers
 const SortableColumnHeader = ({ id, children, minWidth }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
@@ -569,6 +641,8 @@ const CalendarGrid = ({
   blockOccurrences,
   onDeleteManualBlock,
   onResizeManualBlock,
+  onEditManualBlock,
+  onEditTransfer,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -769,6 +843,7 @@ const CalendarGrid = ({
       transferStartAt: t.transferStartAt,
       transferredIn: t.transferredIn,
       fromBranch: t.fromBranch,
+      scheduledTransfer: t.scheduledTransfer,
     }));
     cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
     return cols;
@@ -1034,6 +1109,14 @@ const CalendarGrid = ({
         blockId: occ.blockId,
         seriesId: occ.seriesId,
         day: occ.date,
+        // Which column this occurrence is currently rendered under, for a whole-location
+        // block that's the special 'unassigned'-like case of "no specific column" — needed
+        // by drag-to-reschedule to detect whether a drop actually changed column.
+        colId: occ.therapistId || occ.roomId || col.id,
+        // Whether this occurrence is a whole-location block (renders identically in every
+        // column) — drag-to-reschedule must NOT silently narrow it to a single therapist/
+        // room just because one of its N rendered copies got dropped on a specific column.
+        isWholeLocation: !occ.therapistId && !occ.roomId,
       }));
   };
 
@@ -1109,11 +1192,21 @@ const CalendarGrid = ({
       : null;
     const transferReason = getTransferReasonText(col);
     const todayBlock = getManualBlockRanges(col, currentDate ?? days?.[0], blockOccurrences)[0];
+    // A transfer that's been created but hasn't reached its start time yet doesn't move
+    // anything or block the column — it's just not due. Without this, the calendar shows
+    // literally nothing for a transfer staff just scheduled until it actually applies,
+    // which reads exactly like "did this even save?" (see the apply_due_staff_transfers
+    // cron comment in migration-148 for why it's correctly NOT applied yet).
+    const scheduledLabel = col.scheduledTransfer
+      ? `Scheduled — transfer to ${col.scheduledTransfer.toBranch || 'another branch'} at ${to12h(col.scheduledTransfer.startTime)}`
+      : null;
     const headerTooltip = transferReason
       ? `${col.name} — ${transferReason}`
       : todayBlock
-        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''}`
-        : col.name;
+        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''} (${to12h(todayBlock.fromTime)}–${to12h(todayBlock.toTime)})`
+        : scheduledLabel
+          ? `${col.name} — ${scheduledLabel}`
+          : col.name;
     return (
       <div
         key={col.id}
@@ -1156,6 +1249,9 @@ const CalendarGrid = ({
           {col.transferredIn && (
             <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title="Visiting from another branch" />
           )}
+          {!col.transferredOut && !col.transferredIn && scheduledLabel && (
+            <Icon name="Clock" size={11} className="text-amber-600 flex-shrink-0" title={scheduledLabel} />
+          )}
         </div>
         {col.subtitle && (
           <div className="text-[10px] font-caption text-text-secondary uppercase tracking-wider mt-0.5">
@@ -1170,6 +1266,11 @@ const CalendarGrid = ({
         {col.transferredIn && (
           <div className="text-[9px] font-caption text-[#B45309] font-bold uppercase tracking-wider mt-0.5">
             Visiting{col.fromBranch ? ` · from ${col.fromBranch}` : ''}{returnsAtLabel ? ` · until ${returnsAtLabel}` : ''}
+          </div>
+        )}
+        {!col.transferredOut && !col.transferredIn && scheduledLabel && (
+          <div className="text-[9px] font-caption text-amber-600 font-bold uppercase tracking-wider mt-0.5">
+            Transfer at {to12h(col.scheduledTransfer.startTime)}
           </div>
         )}
       </div>
@@ -1295,8 +1396,10 @@ const CalendarGrid = ({
             transfer (migration-145): transferredOut shows the window they're AWAY;
             transferredIn shows everything EXCEPT their visiting window (they're only
             actually here for that slice, even though branch_id points here for the
-            whole active period). pointer-events-none so clicks still reach the
-            column's own onClick, separately blocked in onEmptySlotClick/handleDragEnd.
+            whole active period). Clickable — opens the transfer-management modal (extend/
+            revert/cancel) instead of the empty-slot choice menu; new-booking/drag-drop
+            attempts onto a transferred column are still separately blocked in
+            onEmptySlotClick/handleDragEnd regardless of this overlay's own click handling.
             Sits below the booking cards (rendered after) so cards stay visible. */}
         {col.transferredOut && (() => {
           const range = getTransferBlockRange(col, day);
@@ -1305,7 +1408,8 @@ const CalendarGrid = ({
           const blockHeight = Math.max(timeToHeight(range.fromTime, range.toTime), 20);
           return (
             <div
-              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+              onClick={(e) => { e.stopPropagation(); onEditTransfer?.(col); }}
+              className="absolute inset-x-0 cursor-pointer flex items-start justify-center pt-1.5 overflow-hidden"
               style={{
                 top: blockTop,
                 height: blockHeight,
@@ -1336,7 +1440,8 @@ const CalendarGrid = ({
             return (
               <div
                 key={i}
-                className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+                onClick={(e) => { e.stopPropagation(); onEditTransfer?.(col); }}
+                className="absolute inset-x-0 cursor-pointer flex items-start justify-center pt-1.5 overflow-hidden"
                 style={{ top: segTop, height: segHeight, backgroundColor: 'rgba(15,118,110,0.35)' }}
               >
                 <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
@@ -1381,42 +1486,15 @@ const CalendarGrid = ({
             ? resizingBlock.previewHeight
             : Math.max(timeToHeight(range.fromTime, range.toTime), 20);
           return (
-            <div
+            <ManualBlockOverlay
               key={`manual-block-${i}`}
-              className="group absolute inset-x-0 flex items-start justify-center pt-1.5 overflow-visible"
-              style={{
-                top: blockTop,
-                height: blockHeight,
-                backgroundColor: 'rgba(217,119,6,0.35)',
-              }}
-            >
-              <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
-                {range.description || 'Not bookable'}
-              </span>
-
-              {/* Remove — only if the block has an id (belt-and-suspenders; all blocks
-                  fetched via fetchBlocksForRange carry one, this just avoids a dead click
-                  on any legacy/malformed row). */}
-              {range.blockId && (
-                <button
-                  type="button"
-                  onClick={(e) => handleDeleteBlockClick(e, range, range.day)}
-                  className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-800 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Remove block"
-                >
-                  <Icon name="X" size={10} />
-                </button>
-              )}
-
-              {/* Resize handle — drag the bottom edge to change the block's duration. */}
-              {range.blockId && (
-                <div
-                  onMouseDown={(e) => handleBlockResizeStart(e, range, range.day)}
-                  className="absolute bottom-0 inset-x-0 h-1.5 cursor-row-resize opacity-0 group-hover:opacity-100 bg-amber-900/60"
-                  title="Drag to resize"
-                />
-              )}
-            </div>
+              range={range}
+              blockTop={blockTop}
+              blockHeight={blockHeight}
+              onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
+              onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
+              onClick={() => onEditManualBlock?.(range)}
+            />
           );
         })}
 
