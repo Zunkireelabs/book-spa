@@ -33,6 +33,7 @@ import {
   deleteBlock,
   updateBlock,
   cancelScheduledTransfer,
+  revertStaffTransferNow,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -2150,6 +2151,25 @@ const OperationalCalendar = ({ branchId }) => {
     refreshCalendar();
   }, [refreshCalendar]);
 
+  // Undo an ALREADY-APPLIED (active) transfer directly from the Calendar's teal overlay —
+  // same one-click-with-confirm pattern as the scheduled case above, for the "created it by
+  // mistake" case. Extending/rescheduling the return date still goes through the full
+  // TransferManagementModal (main overlay click → onEditTransfer), since those aren't "undo"
+  // actions. Server-side revert_staff_transfer_now() already refuses this if the therapist
+  // is still booked at the destination branch, explaining the conflicting booking.
+  const handleCancelActiveTransfer = useCallback(async (col) => {
+    if (!col.transferId) return;
+    if (!window.confirm(`Cancel ${col.name}'s transfer and bring them back to this branch now?`)) return;
+
+    const result = await revertStaffTransferNow({ transferId: col.transferId, revertedAt: null });
+    if (result.error) {
+      showToast(result.error.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast(`${col.name}'s transfer cancelled — back at this branch now.`);
+    refreshCalendar();
+  }, [refreshCalendar]);
+
   const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
     const result = await deleteBlock({ blockId, scope, occurrenceDate: day });
     if (result.error) {
@@ -2908,6 +2928,7 @@ const OperationalCalendar = ({ branchId }) => {
                   onEditManualBlock={(range) => setEditingBlock({ blockId: range.blockId, day: range.day })}
                   onEditTransfer={(col) => setEditingTransferTherapist({ id: col.id, name: col.name })}
                   onCancelScheduledTransfer={handleCancelScheduledTransfer}
+                  onCancelActiveTransfer={handleCancelActiveTransfer}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}

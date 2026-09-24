@@ -649,6 +649,7 @@ const CalendarGrid = ({
   onEditManualBlock,
   onEditTransfer,
   onCancelScheduledTransfer,
+  onCancelActiveTransfer,
   onBookingClick,
   onBookingResize,
   onMultiDrag,
@@ -1422,7 +1423,7 @@ const CalendarGrid = ({
           return (
             <div
               onClick={(e) => { e.stopPropagation(); onEditTransfer?.(col); }}
-              className="absolute inset-x-0 cursor-pointer flex items-start justify-center pt-1.5 overflow-hidden"
+              className="group absolute inset-x-0 cursor-pointer flex items-start justify-center pt-1.5 overflow-visible"
               style={{
                 top: blockTop,
                 height: blockHeight,
@@ -1432,6 +1433,20 @@ const CalendarGrid = ({
               <span className="text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-teal-700 border border-teal-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting">
                 {transferReasonText || 'Not bookable'}
               </span>
+              {/* Undo this transfer directly — one click with confirm, same pattern as the
+                  scheduled-transfer badge, for the "created it by mistake" case. Extending/
+                  rescheduling the return date still goes through the full modal (main
+                  overlay click), since those aren't "undo" actions. */}
+              {onCancelActiveTransfer && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onCancelActiveTransfer(col); }}
+                  title="Cancel this transfer — bring them back now"
+                  className="absolute top-1 right-1 w-4 h-4 rounded-full bg-teal-900 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              )}
             </div>
           );
         })()}

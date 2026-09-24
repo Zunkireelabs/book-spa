@@ -4679,6 +4679,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         // Falling back to the live value only if that capture is missing (legacy rows).
         display_order: t.from_display_order ?? t.therapist.display_order,
         transferredOut: true,
+        transferId: t.id,
         returnsAt: t.revert_at,
         // Kathmandu wall-clock instant the transfer actually took effect — lets the
         // calendar shade only the real [start, revert_at] window, not the whole day.
