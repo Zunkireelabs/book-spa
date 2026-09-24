@@ -1438,6 +1438,7 @@ const OperationalCalendar = ({ branchId }) => {
   // Drag state
   const [activeDragId, setActiveDragId] = useState(null);
   const [activeDragBooking, setActiveDragBooking] = useState(null);
+  const [activeDragBlock, setActiveDragBlock] = useState(null);
   const [overSlotData, setOverSlotData] = useState(null); // { hour, minute, day }
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [dragGrabOffset, setDragGrabOffset] = useState(0); // Y offset from card top where user grabbed
@@ -1630,6 +1631,12 @@ const OperationalCalendar = ({ branchId }) => {
     const { active, activatorEvent } = event;
     setActiveDragId(active.id);
 
+    if (active.data.current?.type === 'manual-block') {
+      setActiveDragBlock(active.data.current.block);
+      setDragGrabOffset(0);
+      return;
+    }
+
     const booking = active.data.current?.booking;
     if (booking) {
       setActiveDragBooking(booking);
@@ -1699,6 +1706,28 @@ const OperationalCalendar = ({ branchId }) => {
 
   const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
+
+    if (active.data.current?.type === 'manual-block') {
+      const finalTimeData = over?.data?.current
+        ? calculateTimeFromPointer(over.data.current)
+        : overSlotData;
+      const block = active.data.current.block;
+      setActiveDragId(null);
+      setActiveDragBlock(null);
+      setOverSlotData(null);
+      setDragGrabOffset(0);
+
+      if (!finalTimeData || finalTimeData.hour === undefined) return;
+      const { day: newDate, colId: targetColId, hour, minute } = finalTimeData;
+      const newStartTime = formatTimeFromSlot(hour, minute);
+      const effectiveTargetColId = targetColId || 'unassigned';
+      const sourceColId = block.colId || 'unassigned';
+      if (newDate === block.day && newStartTime === block.fromTime && effectiveTargetColId === sourceColId) {
+        return; // no change
+      }
+      handleMoveManualBlock(block, newDate, newStartTime, targetColId);
+      return;
+    }
 
     // Capture final position before clearing state
     // Fallback to last overSlotData if over is null (same-column drag may not trigger new over)
@@ -1874,7 +1903,7 @@ const OperationalCalendar = ({ branchId }) => {
         timeOnly: true,
       });
     }
-  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData]);
+  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData, handleMoveManualBlock]);
 
   // Execute reschedule with optimistic update (time-only, no column change)
   const executeReschedule = useCallback(async ({ bookingId, newDate, newStartTime, newEndTime, durationMinutes }) => {
@@ -2087,6 +2116,24 @@ const OperationalCalendar = ({ branchId }) => {
     }
     refreshCalendar();
   }, [refreshCalendar]);
+
+  // Drag a block card to a new day/time/column — same "this occurrence" scoping as
+  // resize/delete above (a recurring block's dragged occurrence spins off its own one-off
+  // row via updateBlock's scope:'this' path, leaving the rest of the series untouched).
+  const handleMoveManualBlock = useCallback(async (block, newDate, newStartTime, targetColId) => {
+    const patch = { blockId: block.blockId, scope: 'this', occurrenceDate: block.day, blockDate: newDate, startTime: newStartTime };
+    if (columnMode === 'therapist') {
+      patch.therapistId = targetColId === 'unassigned' ? null : targetColId;
+    } else if (columnMode === 'room') {
+      patch.roomId = targetColId === 'unassigned' ? null : targetColId;
+    }
+    const result = await updateBlock(patch);
+    if (result.error) {
+      showToast(result.error.message || 'Failed to move block.', 'error');
+      return;
+    }
+    refreshCalendar();
+  }, [columnMode, refreshCalendar]);
 
   // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
   const openQuickCreateForSlot = useCallback(async (slotInfo) => {
@@ -2830,6 +2877,16 @@ const OperationalCalendar = ({ branchId }) => {
 
         {/* Drag overlay for visual feedback */}
         <DragOverlay>
+          {activeDragBlock && (() => {
+            const previewStartTime = overSlotData ? formatTimeFromSlot(overSlotData.hour, overSlotData.minute) : activeDragBlock.fromTime;
+            return (
+              <div className="bg-amber-700 text-white rounded-md border-2 border-amber-800 shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
+                <div className="font-data text-sm font-semibold mb-1">{previewStartTime}</div>
+                <div className="font-body text-xs">{activeDragBlock.description || 'Not bookable'}</div>
+                {overSlotData && <div className="font-caption text-[10px] mt-1 opacity-90">Drop here</div>}
+              </div>
+            );
+          })()}
           {activeDragBooking && (() => {
             // Calculate preview time based on hovered slot
             const duration = activeDragBooking.serviceDuration ||
