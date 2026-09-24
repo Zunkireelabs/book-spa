@@ -33,8 +33,9 @@ import {
   deleteBlock,
   updateBlock,
   cancelScheduledTransfer,
+  revertStaffTransferNow,
 } from '../../../../services/api';
-import { transformBooking, toDbStatus } from '../../../../services/bookingTransformers';
+import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
 import { getTransferWindowPhase, isWithinTransferDaySlice } from '../../../../services/transferSlotWindow';
 import CustomSelect from '../../../../components/ui/CustomSelect';
@@ -2150,6 +2151,25 @@ const OperationalCalendar = ({ branchId }) => {
     refreshCalendar();
   }, [refreshCalendar]);
 
+  // Undo an ALREADY-APPLIED (active) transfer directly from the Calendar's teal overlay —
+  // same one-click-with-confirm pattern as the scheduled case above, for the "created it by
+  // mistake" case. Extending/rescheduling the return date still goes through the full
+  // TransferManagementModal (main overlay click → onEditTransfer), since those aren't "undo"
+  // actions. Server-side revert_staff_transfer_now() already refuses this if the therapist
+  // is still booked at the destination branch, explaining the conflicting booking.
+  const handleCancelActiveTransfer = useCallback(async (col) => {
+    if (!col.transferId) return;
+    if (!window.confirm(`Cancel ${col.name}'s transfer and bring them back to this branch now?`)) return;
+
+    const result = await revertStaffTransferNow({ transferId: col.transferId, revertedAt: null });
+    if (result.error) {
+      showToast(result.error.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast(`${col.name}'s transfer cancelled — back at this branch now.`);
+    refreshCalendar();
+  }, [refreshCalendar]);
+
   const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
     const result = await deleteBlock({ blockId, scope, occurrenceDate: day });
     if (result.error) {
@@ -2908,6 +2928,7 @@ const OperationalCalendar = ({ branchId }) => {
                   onEditManualBlock={(range) => setEditingBlock({ blockId: range.blockId, day: range.day })}
                   onEditTransfer={(col) => setEditingTransferTherapist({ id: col.id, name: col.name })}
                   onCancelScheduledTransfer={handleCancelScheduledTransfer}
+                  onCancelActiveTransfer={handleCancelActiveTransfer}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
                   onMultiDrag={(getter) => { getSelectedBookingsRef.current = getter; }}
@@ -2916,8 +2937,6 @@ const OperationalCalendar = ({ branchId }) => {
                   viewMode={viewMode}
                   columnMode={columnMode}
                   activeDragId={activeDragId}
-                  overSlotData={overSlotData}
-                  dragPreviewDurationMinutes={dragPreviewDurationMinutes}
                   gridRef={gridRef}
                   freezeUnassigned={freezeUnassigned}
                   onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
@@ -2936,21 +2955,21 @@ const OperationalCalendar = ({ branchId }) => {
           </div>
         </div>
 
-        {/* Drag overlay for visual feedback */}
-        {/* This cursor-following card intentionally does NOT show a specific clock time —
-            it used to, but that time was one of two competing indicators (this card,
-            positioned near the cursor, vs. the grid-anchored highlight rendered inside
-            CalendarGrid at the actual snapped slot) and could visually overlap existing
-            column content (a transfer/block overlay, another booking) badly enough that
-            staff couldn't tell which one to trust. The grid highlight is now the single
-            source of truth for "what time will this land on" — this card is just an
-            at-a-glance "here's what I'm holding" label. */}
+        {/* Drag overlay for visual feedback — the single on-screen indicator during a
+            block/booking drag (the separate grid-anchored highlight was removed: having
+            both this cursor-following card AND a grid-snapped box on screen at once read
+            as two competing layers rather than one clear signal). This card now shows the
+            actual snapped drop time itself, sourced from overSlotData (the same value the
+            grid highlight used to read), so "here's what I'm holding" and "here's where
+            it'll land" live in one place. */}
         <DragOverlay>
           {activeDragBlock && (
             <div className="bg-amber-700 text-white rounded-md border-2 border-amber-800 shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
               <div className="font-body text-xs font-semibold">{activeDragBlock.description || 'Not bookable'}</div>
-              {dragPreviewDurationMinutes != null && (
-                <div className="font-caption text-[10px] mt-0.5 opacity-90">{dragPreviewDurationMinutes} mins</div>
+              {overSlotData && dragPreviewDurationMinutes != null && (
+                <div className="font-caption text-[10px] mt-0.5 opacity-90">
+                  {to12h(formatTimeFromSlot(overSlotData.hour, overSlotData.minute))} – {to12h(calculateEndTime(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes))}
+                </div>
               )}
             </div>
           )}
@@ -2962,9 +2981,9 @@ const OperationalCalendar = ({ branchId }) => {
               <div className="font-body text-[11px] text-text-secondary">
                 {activeDragBooking.serviceName}
               </div>
-              {dragPreviewDurationMinutes != null && (
+              {overSlotData && dragPreviewDurationMinutes != null && (
                 <span className="font-caption text-[10px] text-text-secondary">
-                  {dragPreviewDurationMinutes} mins
+                  {to12h(formatTimeFromSlot(overSlotData.hour, overSlotData.minute))} – {to12h(calculateEndTime(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes))}
                 </span>
               )}
             </div>

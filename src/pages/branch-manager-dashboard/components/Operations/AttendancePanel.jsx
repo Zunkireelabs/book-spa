@@ -13,6 +13,7 @@ import {
   fetchPendingTransfers,
   cancelScheduledTransfer,
   fetchTherapistTransferStatus,
+  revertStaffTransferNow,
 } from '../../../../services/api';
 
 function formatPrettyDate(d) {
@@ -472,6 +473,23 @@ const AttendancePanel = ({ branchId }) => {
     await loadPendingTransfers();
   };
 
+  // Undo an already-applied (active) transfer directly, same one-click-with-confirm pattern
+  // as the scheduled case above, for the common "created it by mistake" case — extending or
+  // rescheduling the return date still goes through the full TransferManagementModal (opened
+  // via the staff name), since those aren't "undo" actions.
+  const handleCancelActiveTransfer = async (s) => {
+    if (!window.confirm(`Cancel ${s.therapistName}'s transfer and bring them back to this branch now?`)) return;
+    setCancellingTransfer(s.id);
+    const { error: cancelError } = await revertStaffTransferNow({ transferId: s.id, revertedAt: null });
+    setCancellingTransfer(null);
+    if (cancelError) {
+      showToast(cancelError.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to cancel transfer.', 'error');
+      return;
+    }
+    showToast(`${s.therapistName}'s transfer cancelled — back at this branch now.`);
+    await loadData();
+  };
+
   const dirtyCount = Object.values(edits).filter(e => e.dirty && e.status).length;
 
   // ── Loading state ──────────────────────────────────────────
@@ -687,21 +705,28 @@ const AttendancePanel = ({ branchId }) => {
                 key={s.id}
                 className="grid grid-cols-1 md:grid-cols-[1fr_140px_110px_110px_1fr_120px] gap-3 px-5 py-3 items-center bg-[#B45309]/5"
               >
-                {/* Staff name + transfer badge */}
-                <div className="flex items-center space-x-2 min-w-0">
+                {/* Staff name + transfer badge — clicking opens the full management modal
+                    (extend/reschedule the return date); the Action button below is the
+                    quick one-click undo instead. */}
+                <button
+                  type="button"
+                  onClick={() => openTransfer({ therapistId: s.therapistId, therapistName: s.therapistName })}
+                  className="flex items-center space-x-2 min-w-0 text-left"
+                  title={s.isPending ? 'Manage this scheduled transfer' : 'Manage this transfer (extend/reschedule return)'}
+                >
                   <span className="w-4 h-4 flex-shrink-0" />
                   <div className="w-7 h-7 rounded-full bg-[#B45309]/10 flex items-center justify-center flex-shrink-0">
                     <Icon name="ArrowRightLeft" size={14} className="text-[#B45309]" />
                   </div>
                   <div className="min-w-0">
-                    <span className="font-body font-body-medium text-sm text-text-primary truncate block">{s.therapistName}</span>
+                    <span className="font-body font-body-medium text-sm text-text-primary truncate block hover:underline">{s.therapistName}</span>
                     <span className="font-caption text-[11px] text-[#B45309]">
                       {s.isPending
                         ? `Transfer → ${s.toBranch} on ${formatPrettyDate(s.effectiveDate)}`
                         : <>Transferred to {s.toBranch} · back {new Date(s.revertAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</>}
                     </span>
                   </div>
-                </div>
+                </button>
 
                 {/* Status */}
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium bg-[#B45309]/10 text-[#B45309] w-fit">
@@ -723,8 +748,8 @@ const AttendancePanel = ({ branchId }) => {
                   <button
                     onClick={() => s.isPending
                       ? handleCancelTransfer(s.id)
-                      : openTransfer({ therapistId: s.therapistId, therapistName: s.therapistName })}
-                    disabled={s.isPending && cancellingTransfer === s.id}
+                      : handleCancelActiveTransfer(s)}
+                    disabled={cancellingTransfer === s.id}
                     className="inline-flex items-center justify-center h-8 px-3 rounded-spa bg-surface border border-[#B45309]/30 text-[#B45309] hover:bg-[#B45309]/10 spa-transition-fast font-body font-body-medium text-xs whitespace-nowrap disabled:opacity-50"
                   >
                     Cancel Transfer

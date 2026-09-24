@@ -4679,6 +4679,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         // Falling back to the live value only if that capture is missing (legacy rows).
         display_order: t.from_display_order ?? t.therapist.display_order,
         transferredOut: true,
+        transferId: t.id,
         returnsAt: t.revert_at,
         // Kathmandu wall-clock instant the transfer actually took effect — lets the
         // calendar shade only the real [start, revert_at] window, not the whole day.
@@ -4791,7 +4792,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
           .in('id', orphanTherapistIds),
         supabase
           .from('staff_transfers')
-          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
+          .select('id, therapist_id, from_branch_id, to_branch_id, is_permanent, is_return_leg, revert_at, effective_date, start_time, transferred_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
           .in('therapist_id', orphanTherapistIds),
       ]);
       if (orphanTherapistsResult.error) throw orphanTherapistsResult.error;
@@ -4812,6 +4813,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
             ...t,
             transferredOut: transferWindow ? !!transferWindow.transferredOut : true,
             transferredIn: transferWindow ? !!transferWindow.transferredIn : false,
+            transferId: transferWindow?.transferId ?? null,
             returnsAt: transferWindow ? transferWindow.returnsAt : null,
             transferStartAt: transferWindow ? transferWindow.transferStartAt : null,
             fromBranch: transferWindow?.fromBranch || null,
