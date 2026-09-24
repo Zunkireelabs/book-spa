@@ -5211,39 +5211,54 @@ export async function createBooking({
     // flows — so treat it as authoritative: an online booking must never inherit
     // created_by from a staff session that happens to be active in the same browser.
     const authUser = orgSlug ? null : (await supabase.auth.getUser()).data.user;
-    const { data: booking, error: insertError } = await supabase
-      .from('bookings')
-      .insert({
-        branch_id: resolvedBranchId,
-        room_id: availableRoom?.id || null,
-        service_id: serviceId,
-        therapist_id: primaryTherapistId,
-        customer_id: customerId,
-        customer_name: customerName,
-        customer_email: customerEmail || null,
-        customer_phone: toE164(customerPhone),
-        customer_gender: customerGender || null,
-        customer_account_id: customerAccountId || null,
-        companion_name: companionName?.trim() || null,
-        companion_phone: companionPhone ? toE164(companionPhone) : null,
-        date: date,
-        start_time: startTime,
-        base_amount: Number(service.price_npr),
-        discount_amount: 0,
-        special_requests: specialRequests || null,
-        created_by: authUser?.id || null,
-        booking_group_id: bookingGroupId || null,
-        referral_source: referralSource || null,
-        referral_source_detail: referralSourceDetail || null,
-        // Phase 9A: Snapshot fields — preserve original values at booking time
-        service_name_snapshot: service.name,
-        service_duration_snapshot: service.duration_minutes,
-        service_price_snapshot: Number(service.price_npr),
-        room_name_snapshot: availableRoom?.name || null,
-        therapist_name_snapshot: therapistNameSnapshot,
-      })
-      .select()
-      .single();
+    // Public/online flow only — a random, unguessable per-attempt id. Needed because
+    // anon has no SELECT policy on `bookings` (migration-097 closed a cross-org PII
+    // leak there), so `.insert().select()` can't satisfy RETURNING under RLS and would
+    // reject the whole insert. Instead skip .select() below and read the row back
+    // through public_get_booking_by_request_id (migration-223), keyed on this id.
+    const clientRequestId = orgSlug ? crypto.randomUUID() : null;
+    const insertPayload = {
+      branch_id: resolvedBranchId,
+      room_id: availableRoom?.id || null,
+      service_id: serviceId,
+      therapist_id: primaryTherapistId,
+      customer_id: customerId,
+      customer_name: customerName,
+      customer_email: customerEmail || null,
+      customer_phone: toE164(customerPhone),
+      customer_gender: customerGender || null,
+      customer_account_id: customerAccountId || null,
+      companion_name: companionName?.trim() || null,
+      companion_phone: companionPhone ? toE164(companionPhone) : null,
+      date: date,
+      start_time: startTime,
+      base_amount: Number(service.price_npr),
+      discount_amount: 0,
+      special_requests: specialRequests || null,
+      created_by: authUser?.id || null,
+      booking_group_id: bookingGroupId || null,
+      referral_source: referralSource || null,
+      referral_source_detail: referralSourceDetail || null,
+      client_request_id: clientRequestId,
+      // Phase 9A: Snapshot fields — preserve original values at booking time
+      service_name_snapshot: service.name,
+      service_duration_snapshot: service.duration_minutes,
+      service_price_snapshot: Number(service.price_npr),
+      room_name_snapshot: availableRoom?.name || null,
+      therapist_name_snapshot: therapistNameSnapshot,
+    };
+
+    let booking;
+    let insertError;
+    if (orgSlug) {
+      ({ error: insertError } = await supabase.from('bookings').insert(insertPayload));
+    } else {
+      ({ data: booking, error: insertError } = await supabase
+        .from('bookings')
+        .insert(insertPayload)
+        .select()
+        .single());
+    }
 
     if (insertError) {
       if (insertError.code === '23P01') {
@@ -5261,6 +5276,29 @@ export async function createBooking({
         return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: insertError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
       throw insertError;
+    }
+
+    if (orgSlug) {
+      // Read the just-inserted row back via the narrow SECURITY DEFINER RPC —
+      // see the clientRequestId comment above for why a plain .select() can't do this.
+      const { data: fetchedBooking, error: fetchError } = await supabase
+        .rpc('public_get_booking_by_request_id', { p_client_request_id: clientRequestId })
+        .single();
+      if (fetchError || !fetchedBooking) {
+        // The booking itself is already committed at this point (the insert above
+        // succeeded) — only the confirmation read-back failed, e.g. a transient network
+        // blip. Surface a distinct code so the UI doesn't tell the customer to just
+        // "try again", which would create a second, duplicate booking.
+        console.error('[API] public_get_booking_by_request_id failed:', fetchError?.message);
+        return {
+          data: null,
+          error: {
+            code: 'BOOKING_CONFIRMATION_UNAVAILABLE',
+            message: 'Your booking was placed, but we could not load the confirmation details. Please check your email/SMS, or contact the branch to confirm, before trying to book again.',
+          },
+        };
+      }
+      booking = { ...fetchedBooking, branch_id: resolvedBranchId, final_amount: fetchedBooking.base_amount };
     }
 
     // 7a2. Log customer-to-customer referral, if staff supplied one for a genuinely
