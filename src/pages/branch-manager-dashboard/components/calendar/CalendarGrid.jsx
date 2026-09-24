@@ -127,6 +127,14 @@ function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// 'HH:MM' + minutes -> 'HH:MM', for the drop-target indicator's end time.
+function calculateEndTimeStr(startHour, startMinute, durationMinutes) {
+  const totalMinutes = startHour * 60 + startMinute + durationMinutes;
+  const h = Math.floor(totalMinutes / 60) % 24;
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 // Nepal-business-timezone date ("YYYY-MM-DD") + time-of-day ("HH:MM") for an ISO instant —
 // used to shade only the ACTUAL [transfer start, revert_at] window on a transferred-out
 // column, not the whole day, regardless of the viewer's own browser timezone.
@@ -651,6 +659,8 @@ const CalendarGrid = ({
   viewMode = 'day',
   columnMode = 'therapist',
   activeDragId = null,
+  overSlotData = null,
+  dragPreviewDurationMinutes = null,
   gridRef, // Ref to get grid position for time calculation
   freezeUnassigned = true,
   onToggleFreezeUnassigned,
@@ -1595,6 +1605,30 @@ const CalendarGrid = ({
               </div>
             );
           });
+        })()}
+
+        {/* Grid-anchored drop-target indicator — the single, unambiguous source of truth
+            for "what time will this land on" during a drag. The cursor-following
+            DragOverlay preview card alone wasn't enough: it floats near the pointer, not
+            pinned to the grid, and can visually sit on top of existing column content
+            (a transfer/block overlay, another booking) badly enough that staff can't tell
+            what time they're actually about to drop onto. This renders at the REAL snapped
+            position/duration, solid and high-z-index so it reads clearly regardless of
+            what's underneath it. */}
+        {overSlotData && overSlotData.day === day && overSlotData.colId === col.id && dragPreviewDurationMinutes != null && (() => {
+          const dropStartTime = `${String(overSlotData.hour).padStart(2, '0')}:${String(overSlotData.minute).padStart(2, '0')}`;
+          const dropTop = timeToTop(dropStartTime);
+          const dropHeight = Math.max(timeToHeight(dropStartTime, calculateEndTimeStr(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes)), 20);
+          return (
+            <div
+              className="absolute inset-x-0 pointer-events-none z-dropdown flex items-start justify-center pt-1 overflow-hidden rounded-spa border-2 border-primary bg-primary/20"
+              style={{ top: dropTop, height: dropHeight }}
+            >
+              <span className="text-[10px] font-data font-data-medium text-white bg-primary px-1.5 py-0.5 rounded-spa shadow-spa-resting">
+                {to12h(dropStartTime)} – {to12h(calculateEndTimeStr(overSlotData.hour, overSlotData.minute, dragPreviewDurationMinutes))}
+              </span>
+            </div>
+          );
         })()}
       </div>
     );

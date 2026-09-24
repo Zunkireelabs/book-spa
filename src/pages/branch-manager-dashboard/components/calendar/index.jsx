@@ -2568,6 +2568,28 @@ const OperationalCalendar = ({ branchId }) => {
 
   // ── Render ─────────────────────────────────────────────────
 
+  // Duration of whatever's currently being dragged (booking or block), for the
+  // grid-anchored drop-target indicator below — a precise, position-pinned highlight is
+  // the fix for the cursor-following DragOverlay card sometimes overlapping existing
+  // column content (transfer/block overlays, other bookings) badly enough that staff
+  // can't tell exactly what time they're about to drop onto.
+  const dragPreviewDurationMinutes = activeDragBlock
+    ? (() => {
+        const [fh, fm] = activeDragBlock.fromTime.split(':').map(Number);
+        const [th, tm] = activeDragBlock.toTime.split(':').map(Number);
+        return (th * 60 + tm) - (fh * 60 + fm);
+      })()
+    : activeDragBooking
+      ? (activeDragBooking.serviceDuration ||
+          (activeDragBooking.startTime && activeDragBooking.endTime
+            ? (() => {
+                const [sh, sm] = activeDragBooking.startTime.split(':').map(Number);
+                const [eh, em] = activeDragBooking.endTime.split(':').map(Number);
+                return (eh * 60 + em) - (sh * 60 + sm);
+              })()
+            : 60))
+      : null;
+
   return (
     <>
       <DndContext
@@ -2873,6 +2895,8 @@ const OperationalCalendar = ({ branchId }) => {
                   viewMode={viewMode}
                   columnMode={columnMode}
                   activeDragId={activeDragId}
+                  overSlotData={overSlotData}
+                  dragPreviewDurationMinutes={dragPreviewDurationMinutes}
                   gridRef={gridRef}
                   freezeUnassigned={freezeUnassigned}
                   onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
@@ -2892,61 +2916,38 @@ const OperationalCalendar = ({ branchId }) => {
         </div>
 
         {/* Drag overlay for visual feedback */}
+        {/* This cursor-following card intentionally does NOT show a specific clock time —
+            it used to, but that time was one of two competing indicators (this card,
+            positioned near the cursor, vs. the grid-anchored highlight rendered inside
+            CalendarGrid at the actual snapped slot) and could visually overlap existing
+            column content (a transfer/block overlay, another booking) badly enough that
+            staff couldn't tell which one to trust. The grid highlight is now the single
+            source of truth for "what time will this land on" — this card is just an
+            at-a-glance "here's what I'm holding" label. */}
         <DragOverlay>
-          {activeDragBlock && (() => {
-            const previewStartTime = overSlotData ? formatTimeFromSlot(overSlotData.hour, overSlotData.minute) : activeDragBlock.fromTime;
-            return (
-              <div className="bg-amber-700 text-white rounded-md border-2 border-amber-800 shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
-                <div className="font-data text-sm font-semibold mb-1">{previewStartTime}</div>
-                <div className="font-body text-xs">{activeDragBlock.description || 'Not bookable'}</div>
-                {overSlotData && <div className="font-caption text-[10px] mt-1 opacity-90">Drop here</div>}
+          {activeDragBlock && (
+            <div className="bg-amber-700 text-white rounded-md border-2 border-amber-800 shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
+              <div className="font-body text-xs font-semibold">{activeDragBlock.description || 'Not bookable'}</div>
+              {dragPreviewDurationMinutes != null && (
+                <div className="font-caption text-[10px] mt-0.5 opacity-90">{dragPreviewDurationMinutes} mins</div>
+              )}
+            </div>
+          )}
+          {activeDragBooking && (
+            <div className="bg-white rounded-md border-2 border-primary shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
+              <div className="font-body font-semibold text-xs text-text-primary">
+                {activeDragBooking.customerName}
               </div>
-            );
-          })()}
-          {activeDragBooking && (() => {
-            // Calculate preview time based on hovered slot
-            const duration = activeDragBooking.serviceDuration ||
-              (activeDragBooking.startTime && activeDragBooking.endTime
-                ? (() => {
-                    const [sh, sm] = activeDragBooking.startTime.split(':').map(Number);
-                    const [eh, em] = activeDragBooking.endTime.split(':').map(Number);
-                    return (eh * 60 + em) - (sh * 60 + sm);
-                  })()
-                : 60);
-
-            const previewStartTime = overSlotData
-              ? formatTimeFromSlot(overSlotData.hour, overSlotData.minute)
-              : activeDragBooking.startTime?.slice(0, 5) || '';
-
-            const previewEndTime = overSlotData
-              ? calculateEndTime(overSlotData.hour, overSlotData.minute, duration)
-              : activeDragBooking.endTime?.slice(0, 5) || '';
-
-            return (
-              <div className="bg-white rounded-md border-2 border-primary shadow-lg px-3 py-2 opacity-95 min-w-[140px]">
-                {/* Time display - prominent */}
-                <div className="font-data text-sm font-semibold text-text-primary mb-1">
-                  {previewStartTime} – {previewEndTime}
-                </div>
-                <div className="font-body font-semibold text-xs text-text-primary">
-                  {activeDragBooking.customerName}
-                </div>
-                <div className="font-body text-[11px] text-text-secondary">
-                  {activeDragBooking.serviceName}
-                </div>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="font-caption text-[10px] text-text-secondary">
-                    {duration} mins
-                  </span>
-                  {overSlotData && (
-                    <span className="font-caption text-[10px] text-primary font-medium">
-                      Drop here
-                    </span>
-                  )}
-                </div>
+              <div className="font-body text-[11px] text-text-secondary">
+                {activeDragBooking.serviceName}
               </div>
-            );
-          })()}
+              {dragPreviewDurationMinutes != null && (
+                <span className="font-caption text-[10px] text-text-secondary">
+                  {dragPreviewDurationMinutes} mins
+                </span>
+              )}
+            </div>
+          )}
         </DragOverlay>
       </DndContext>
 
