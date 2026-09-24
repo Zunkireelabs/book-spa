@@ -1002,7 +1002,9 @@ const CalendarGrid = ({
     if (!startStr || !endStr) return eSlot;
     const [sh, sm] = startStr.split(':').map(Number);
     const [eh, em] = endStr.split(':').map(Number);
-    return Math.max(((eh * 60 + em) - (sh * 60 + sm)) / 60 * eHH, 24);
+    let rawMinutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (rawMinutes < 0) rawMinutes += 1440; // end time wrapped past midnight
+    return Math.max(rawMinutes / 60 * eHH, 24);
   };
 
   // Drag the bottom edge of a manual block to resize it. `startHeight`/`startY` are
