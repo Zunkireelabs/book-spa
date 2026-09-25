@@ -36,6 +36,34 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     };
   }, []);
   const [expandedItems, setExpandedItems] = useState(['operations']); // Default expanded
+  const [collapsedFlyout, setCollapsedFlyout] = useState(null); // { item, x, y } | null
+  const flyoutRef = useRef(null);
+
+  // Close the collapsed-sidebar flyout on outside click / Escape, mirroring
+  // EmptySlotChoiceMenu.jsx's popover convention.
+  useEffect(() => {
+    if (!collapsedFlyout) return undefined;
+    const handleClickOutside = (e) => {
+      if (flyoutRef.current && !flyoutRef.current.contains(e.target)) setCollapsedFlyout(null);
+    };
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') setCollapsedFlyout(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [collapsedFlyout]);
+
+  // Never leave a stale flyout open after navigating or re-expanding the sidebar.
+  useEffect(() => {
+    setCollapsedFlyout(null);
+  }, [location.pathname, location.search]);
+  useEffect(() => {
+    if (!isCollapsed) setCollapsedFlyout(null);
+  }, [isCollapsed]);
 
   // World Cup 2026 — show the logo-kicks-football animation through July 20, 2026 (Nepal time).
   const showWorldCupKick = new Date() < new Date('2026-07-21T00:00:00+05:45');
@@ -640,28 +668,49 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 <div key={item.id}>
                   {/* Parent item — a plain toggle button, unless it also has its own
                       path (e.g. Memberships), in which case the label navigates and
-                      a separate chevron control expands/collapses the children. */}
+                      a separate chevron control expands/collapses the children.
+                      While collapsed, the whole row instead opens a flyout showing
+                      the sub-pages next to the icon (clicking still navigates too,
+                      for groups that also carry their own `path`). */}
                   {item.path ? (
-                    <div
-                      className={`w-full flex items-center gap-1 rounded-md text-sm font-medium transition-colors ${
-                        parentActive
-                          ? 'bg-background text-gray-900'
-                          : 'text-gray-500 hover:bg-background hover:text-gray-900'
-                      } ${isCollapsed ? 'justify-center' : ''}`}
-                    >
+                    isCollapsed ? (
                       <Link
                         to={item.path}
-                        onClick={() => {
-                          // Expand immediately (synchronous local state) instead of
-                          // waiting on the route change + page data fetch to settle.
-                          if (!isExpanded) toggleExpand(item.id);
+                        onClick={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setCollapsedFlyout({ item, x: rect.right + 8, y: rect.top });
                         }}
-                        className={`flex-1 flex items-center gap-3 px-3 py-2 rounded-md ${isCollapsed ? 'justify-center' : ''}`}
+                        title={item.label}
+                        aria-haspopup="true"
+                        aria-expanded={collapsedFlyout?.item.id === item.id}
+                        className={`w-full flex items-center justify-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          parentActive || collapsedFlyout?.item.id === item.id
+                            ? 'bg-background text-gray-900'
+                            : 'text-gray-500 hover:bg-background hover:text-gray-900'
+                        }`}
                       >
                         <Icon name={item.icon} size={18} className="flex-shrink-0" />
-                        {!isCollapsed && <span>{item.label}</span>}
                       </Link>
-                      {!isCollapsed && (
+                    ) : (
+                      <div
+                        className={`w-full flex items-center gap-1 rounded-md text-sm font-medium transition-colors ${
+                          parentActive
+                            ? 'bg-background text-gray-900'
+                            : 'text-gray-500 hover:bg-background hover:text-gray-900'
+                        }`}
+                      >
+                        <Link
+                          to={item.path}
+                          onClick={() => {
+                            // Expand immediately (synchronous local state) instead of
+                            // waiting on the route change + page data fetch to settle.
+                            if (!isExpanded) toggleExpand(item.id);
+                          }}
+                          className="flex-1 flex items-center gap-3 px-3 py-2 rounded-md"
+                        >
+                          <Icon name={item.icon} size={18} className="flex-shrink-0" />
+                          <span>{item.label}</span>
+                        </Link>
                         <button
                           onClick={() => toggleExpand(item.id)}
                           aria-label={isExpanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
@@ -673,13 +722,23 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                             className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                           />
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )
                   ) : (
                     <button
-                      onClick={() => toggleExpand(item.id)}
+                      onClick={(e) => {
+                        if (isCollapsed) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setCollapsedFlyout({ item, x: rect.right + 8, y: rect.top });
+                        } else {
+                          toggleExpand(item.id);
+                        }
+                      }}
+                      title={isCollapsed ? item.label : undefined}
+                      aria-haspopup={isCollapsed ? 'true' : undefined}
+                      aria-expanded={isCollapsed ? collapsedFlyout?.item.id === item.id : undefined}
                       className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                        parentActive
+                        parentActive || (isCollapsed && collapsedFlyout?.item.id === item.id)
                           ? 'bg-background text-gray-900'
                           : 'text-gray-500 hover:bg-background hover:text-gray-900'
                       } ${isCollapsed ? 'justify-center' : ''}`}
@@ -781,6 +840,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               <Link
                 key={item.id}
                 to={item.path}
+                title={isCollapsed ? item.label : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   isActive(item.path)
                     ? 'bg-background text-gray-900'
@@ -819,6 +879,41 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           )}
         </div>
       </aside>
+
+      {/* Collapsed-sidebar flyout — shows a group's sub-pages next to its icon,
+          since the inline accordion children are hidden while collapsed. */}
+      {collapsedFlyout && (() => {
+        const FLYOUT_WIDTH = 200;
+        const rowHeight = 32;
+        const clampedX = Math.min(collapsedFlyout.x, window.innerWidth - FLYOUT_WIDTH - 8);
+        const clampedY = Math.min(
+          collapsedFlyout.y,
+          window.innerHeight - (collapsedFlyout.item.children.length * rowHeight + 40) - 8
+        );
+        return (
+          <div
+            ref={flyoutRef}
+            className="fixed z-dropdown bg-surface border border-border rounded-spa shadow-spa-elevated py-1"
+            style={{ left: clampedX, top: Math.max(clampedY, 8), width: FLYOUT_WIDTH }}
+          >
+            <div className="px-3 py-1.5 text-xs font-medium text-gray-400">{collapsedFlyout.item.label}</div>
+            {collapsedFlyout.item.children.map((child) => (
+              <Link
+                key={child.id}
+                to={child.path}
+                onClick={() => setCollapsedFlyout(null)}
+                className={`block px-3 py-1.5 text-sm ${
+                  isActive(child.path)
+                    ? 'text-gray-900 font-medium bg-background'
+                    : 'text-gray-500 hover:bg-background hover:text-gray-900'
+                }`}
+              >
+                {child.label}
+              </Link>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Mobile Floating Pill Navigation — icon + label inside the pill; subtle shrink while scrolling */}
       <nav

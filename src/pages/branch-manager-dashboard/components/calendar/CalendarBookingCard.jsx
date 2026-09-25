@@ -280,6 +280,14 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         )}
       </div>
 
+      {booking.isNewCustomer && (
+        <div className="absolute top-0 right-0 w-9 h-9 overflow-hidden pointer-events-none rounded-tr-md z-10">
+          <div className="absolute top-[5px] right-[-19px] w-[68px] rotate-45 bg-red-600 text-white text-[7px] font-bold tracking-wide text-center leading-none py-[3px] shadow-sm">
+            NEW
+          </div>
+        </div>
+      )}
+
       {/* Resize handles for shared booking cards */}
       {canResize && (
         <>
@@ -350,8 +358,15 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
         {/* Customer info */}
         <div className="px-3 pt-2.5 pb-2 border-b border-border">
           <div className="flex items-start justify-between">
-            <div className="font-body font-semibold text-sm text-text-primary">
-              {booking.customerName}
+            <div className="flex items-center gap-1">
+              <div className="font-body font-semibold text-sm text-text-primary">
+                {booking.customerName}
+              </div>
+              {booking.isNewCustomer && (
+                <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-red-600 text-white flex-shrink-0">
+                  New
+                </span>
+              )}
             </div>
             {booking.bookingNumber && (
               <span className="font-data text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded">
