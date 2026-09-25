@@ -297,6 +297,7 @@ const OperationalCalendar = ({ branchId }) => {
             status: b.status,
             paymentStatus: b.payment_status,
             isLocked: b.is_locked || false,
+            isNewCustomer: b.isNewCustomer || false,
             startTime: b.start_time,
             endTime: b.end_time,
           },
@@ -326,7 +327,14 @@ const OperationalCalendar = ({ branchId }) => {
 
     return (
       <div className="group/evt relative px-1.5 py-0.5 text-xs leading-tight overflow-visible">
-        <div className="font-semibold truncate">{props.customerName}</div>
+        <div className="flex items-center gap-1">
+          <div className="font-semibold truncate">{props.customerName}</div>
+          {props.isNewCustomer && (
+            <span className="inline-flex px-1 py-0 rounded text-[9px] leading-tight font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
+              New
+            </span>
+          )}
+        </div>
         <div className="truncate opacity-90">{props.serviceName}</div>
         <div className="flex items-center gap-1 mt-0.5 flex-wrap">
           {isUnpaid && (
