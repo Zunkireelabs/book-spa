@@ -899,6 +899,7 @@ const CalendarGrid = ({
         status: b.status,
         paymentStatus: b.payment_status,
         isLocked: b.is_locked || false,
+        isNewCustomer: b.isNewCustomer || false,
         startTime,
         endTime,
         createdAt: b.created_at || null,
