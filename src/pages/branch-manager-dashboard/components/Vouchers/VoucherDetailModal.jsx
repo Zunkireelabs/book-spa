@@ -134,12 +134,12 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
     <>
       <div className="fixed inset-0 bg-black/40 z-modal" onClick={onClose} aria-hidden="true" />
       <div
-        className="fixed inset-0 z-modal-overlay flex items-center justify-center p-4"
+        className="fixed inset-0 z-modal-overlay flex items-start justify-center p-4 pt-20"
         role="dialog"
         aria-modal="true"
         aria-labelledby="voucher-detail-title"
       >
-        <div className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-xl max-h-[calc(100vh-6rem)] overflow-y-auto">
           <div className="sticky top-0 bg-surface border-b border-border px-5 py-3 flex items-center justify-between z-header">
             <div>
               <h2 id="voucher-detail-title" className="font-heading font-heading-semibold text-base text-text-primary">
