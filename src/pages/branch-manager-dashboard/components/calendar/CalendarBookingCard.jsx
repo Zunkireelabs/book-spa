@@ -242,8 +242,15 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {timeLabel}
           </div>
         )}
-        <div className="font-body font-semibold text-xs text-text-primary leading-tight truncate flex-shrink-0">
-          {booking.customerName}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="font-body font-semibold text-xs text-text-primary leading-tight truncate">
+            {booking.customerName}
+          </div>
+          {booking.isNewCustomer && (
+            <span className="inline-flex px-1 py-0 rounded text-[9px] leading-tight font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
+              New
+            </span>
+          )}
         </div>
         <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
           {booking.serviceName}
@@ -350,8 +357,15 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
         {/* Customer info */}
         <div className="px-3 pt-2.5 pb-2 border-b border-border">
           <div className="flex items-start justify-between">
-            <div className="font-body font-semibold text-sm text-text-primary">
-              {booking.customerName}
+            <div className="flex items-center gap-1">
+              <div className="font-body font-semibold text-sm text-text-primary">
+                {booking.customerName}
+              </div>
+              {booking.isNewCustomer && (
+                <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
+                  New
+                </span>
+              )}
             </div>
             {booking.bookingNumber && (
               <span className="font-data text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded">
