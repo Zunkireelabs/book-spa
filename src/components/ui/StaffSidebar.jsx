@@ -680,6 +680,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                           const rect = e.currentTarget.getBoundingClientRect();
                           setCollapsedFlyout({ item, x: rect.right + 8, y: rect.top });
                         }}
+                        title={item.label}
                         aria-haspopup="true"
                         aria-expanded={collapsedFlyout?.item.id === item.id}
                         className={`w-full flex items-center justify-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -733,6 +734,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                           toggleExpand(item.id);
                         }
                       }}
+                      title={isCollapsed ? item.label : undefined}
                       aria-haspopup={isCollapsed ? 'true' : undefined}
                       aria-expanded={isCollapsed ? collapsedFlyout?.item.id === item.id : undefined}
                       className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -838,6 +840,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               <Link
                 key={item.id}
                 to={item.path}
+                title={isCollapsed ? item.label : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   isActive(item.path)
                     ? 'bg-background text-gray-900'
