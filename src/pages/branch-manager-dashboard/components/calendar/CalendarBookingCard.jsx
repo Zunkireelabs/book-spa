@@ -242,15 +242,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             {timeLabel}
           </div>
         )}
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <div className="font-body font-semibold text-xs text-text-primary leading-tight truncate">
-            {booking.customerName}
-          </div>
-          {booking.isNewCustomer && (
-            <span className="inline-flex px-1 py-0 rounded text-[9px] leading-tight font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
-              New
-            </span>
-          )}
+        <div className="font-body font-semibold text-xs text-text-primary leading-tight truncate flex-shrink-0">
+          {booking.customerName}
         </div>
         <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
           {booking.serviceName}
@@ -286,6 +279,14 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           </div>
         )}
       </div>
+
+      {booking.isNewCustomer && (
+        <div className="absolute top-0 right-0 w-9 h-9 overflow-hidden pointer-events-none rounded-tr-md z-10">
+          <div className="absolute top-[5px] right-[-19px] w-[68px] rotate-45 bg-red-600 text-white text-[7px] font-bold tracking-wide text-center leading-none py-[3px] shadow-sm">
+            NEW
+          </div>
+        </div>
+      )}
 
       {/* Resize handles for shared booking cards */}
       {canResize && (
@@ -362,7 +363,7 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
                 {booking.customerName}
               </div>
               {booking.isNewCustomer && (
-                <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-success/10 text-success flex-shrink-0">
+                <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-red-600 text-white flex-shrink-0">
                   New
                 </span>
               )}
