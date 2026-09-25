@@ -4732,7 +4732,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
-        id, booking_number, customer_name, customer_phone, status, payment_status,
+        id, booking_number, customer_id, customer_name, customer_phone, status, payment_status,
         date, start_time, end_time, start_datetime, end_datetime, created_at,
         therapist_id, room_id,
         base_amount, discount_amount, final_amount, special_requests,
@@ -4750,6 +4750,31 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       .order('start_time');
 
     if (bookingsError) throw bookingsError;
+
+    // "New" tag: same "does this customer have any earlier non-Cancelled booking?" definition
+    // as getCustomerFirstBookingFlag, batched for every customer appearing in this range
+    // instead of one query per booking. No customer_id (walk-in/guest) → always New.
+    const bookingCustomerIds = [...new Set((bookings || []).map(b => b.customer_id).filter(Boolean))];
+    const firstBookingIdByCustomer = {};
+    if (bookingCustomerIds.length > 0) {
+      const { data: historyRows, error: histErr } = await supabase
+        .from('bookings')
+        .select('id, customer_id, date, start_time')
+        .in('customer_id', bookingCustomerIds)
+        .neq('status', 'Cancelled')
+        .order('date', { ascending: true })
+        .order('start_time', { ascending: true });
+      if (histErr) throw histErr;
+      for (const h of (historyRows || [])) {
+        if (!(h.customer_id in firstBookingIdByCustomer)) {
+          firstBookingIdByCustomer[h.customer_id] = h.id;
+        }
+      }
+    }
+    const bookingsWithNewFlag = (bookings || []).map(b => ({
+      ...b,
+      isNewCustomer: !b.customer_id || firstBookingIdByCustomer[b.customer_id] === b.id,
+    }));
 
     // A PERMANENTLY transferred-out therapist gets no proactive column above (by design —
     // see the is_permanent=false filter comment), but a booking made before/at the transfer
@@ -4831,7 +4856,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         },
         therapists: finalTherapists,
         rooms: roomsResult.data || [],
-        bookings: bookings || [],
+        bookings: bookingsWithNewFlag,
         checkedOutByTherapistAndDate,
       },
       error: null,
