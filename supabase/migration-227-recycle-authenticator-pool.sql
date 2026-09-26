@@ -1,5 +1,26 @@
 -- Migration 227: recycle idle `authenticator` pool connections so PostgREST
 -- reopens them under the new 5s idle_in_transaction_session_timeout.
+-- Applied: stage <pending> / prod <pending>.
+--
+-- OPERATIONAL NOTES — read before promoting to production:
+--  1. PRIVILEGE. pg_terminate_backend against an `authenticator`-owned backend
+--     requires superuser, pg_signal_backend membership, or membership in
+--     `authenticator`. If PROD_PGUSER lacks it, this DO block raises,
+--     ON_ERROR_STOP aborts the psql session, the `migrate` job fails, and
+--     deploy.yml's `deploy` job (gated on needs.migrate.result == 'success')
+--     is blocked — i.e. a privilege error here blocks the WHOLE production
+--     deploy, not just this migration. The staging migrate run proves the
+--     privilege for free; confirm it there before promoting.
+--  2. EXPECT A BRIEF BLIP. PostgREST also holds a dedicated LISTEN connection
+--     as `authenticator` in state `idle`, so this terminates that too.
+--     PostgREST reconnects and reloads its schema cache, which can emit a
+--     short burst of 503s. Benign and self-healing, and postgrest-js's own
+--     503 retry absorbs most of it — but don't run this at a traffic peak,
+--     and don't be alarmed by 503s in PostHog for a few seconds afterwards.
+--  3. This is the first migration in this repo whose effect is on live
+--     SESSIONS rather than schema. On a future restore-and-replay of the full
+--     history it will fire again (harmlessly). Don't copy the pattern without
+--     the same care.
 --
 -- Why this exists: migration 226 ran `ALTER ROLE authenticator SET
 -- idle_in_transaction_session_timeout = '5s'`, but ALTER ROLE ... SET applies
@@ -19,12 +40,31 @@
 -- required beyond running this statement.
 --
 -- Why ONLY idle backends: an `active` backend is mid-request, serving a real
--- user. Terminating it would drop that in-flight request. This migration
--- must never do that, so it filters strictly to
+-- user. Terminating it would drop that in-flight request. So this filters to
 -- state IN ('idle', 'idle in transaction', 'idle in transaction (aborted)')
 -- and additionally excludes pg_backend_pid() (the connection running this
 -- migration itself) as a defensive measure, even though this session runs
 -- as `postgres`/the migration role, not `authenticator`.
+--
+-- But the state filter alone is NOT sufficient, and it is worth being precise
+-- about why. PostgREST wraps every request in a transaction, so a backend that
+-- has sent BEGIN and is awaiting its next command reports `idle in transaction`
+-- while a real user request is still in flight — that is exactly the state the
+-- 2026-09-26 investigation observed (query = 'BEGIN ISOLATION LEVEL READ
+-- COMMITTED READ ONLY'). Filtering on state alone would therefore still allow
+-- dropping a live request. pg_stat_activity is also a per-transaction snapshot,
+-- so a backend reported `idle` can become `active` microseconds before the
+-- signal lands (a genuine TOCTOU race).
+--
+-- Both are closed by the `state_change` guard below: a backend that has sat in
+-- its current state for 2+ seconds is provably not mid-request, because
+-- PostgREST transactions are sub-second. Every genuinely idle pool member and
+-- every poisoned `idle in transaction (aborted)` connection still qualifies —
+-- those have been stuck far longer than 2s by definition.
+--
+-- Residual risk after the guard: none material. The worst case would be a
+-- single dropped request, which rolls back cleanly and which PostgREST's own
+-- 503 retry absorbs.
 --
 -- This is a ONE-TIME RECYCLE, not an ongoing mechanism: it drains whatever
 -- authenticator connections are idle at the moment this migration runs, once.
@@ -62,6 +102,10 @@ BEGIN
         FROM pg_stat_activity
        WHERE usename = 'authenticator'
          AND state IN ('idle', 'idle in transaction', 'idle in transaction (aborted)')
+         -- Provably not mid-request: PostgREST transactions are sub-second, so
+         -- 2s in the same state rules out both an in-flight `idle in transaction`
+         -- request and the idle->active TOCTOU race. See header.
+         AND state_change < now() - interval '2 seconds'
          AND pid <> pg_backend_pid()
     ) t
    WHERE t.terminated;

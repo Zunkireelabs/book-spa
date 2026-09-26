@@ -20,7 +20,7 @@ Event name: `api_error`
 
 | Property | Type | Notes |
 |---|---|---|
-| `code` | string \| `null` | PostgREST/Postgres SQLSTATE, e.g. `25P02`. `null` on a 5xx with a non-JSON body (e.g. an HTML 502 from the proxy) or on a network-level throw. |
+| `code` | string \| `null` | PostgREST/Postgres SQLSTATE, e.g. `25P02`. `null` on a 5xx with a non-JSON body (e.g. an HTML 502 from the proxy), and on a network-level throw **only when no earlier attempt saw a code** — a `25P02` followed by a throw reports `code: '25P02'` with `status: 0`. |
 | `status` | number | HTTP status, or `0` for a network-level throw (no HTTP response received). |
 | `table` | string | Table/resource name only (`URL.pathname`'s last segment) — never the query string, which can carry customer PII (e.g. `?customer_phone=eq.977...`). |
 | `method` | string | HTTP method (`GET`, `POST`, ...). |
