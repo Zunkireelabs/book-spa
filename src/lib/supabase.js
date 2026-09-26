@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import { createRetryingFetch } from './supabaseRetry';
+import { captureApiError } from './analytics';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -6,6 +8,12 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables');
 }
+
+// One wrapper shared by all three clients. Retries the transient Postgres errors
+// that a poisoned PostgREST pool connection produces, and reports every API error
+// to PostHog. Placing it here rather than in services/api.js covers every call
+// site in the app — including ones added later — with no per-call changes.
+const retryingFetch = createRetryingFetch({ onError: captureApiError });
 
 // Customer auth is now email-OTP (a 6-digit code typed inline, verified via
 // supabaseCustomer.auth.verifyOtp) rather than email-link redirects, so no
@@ -22,6 +30,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // land on these routes with tokens in the URL now.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { detectSessionInUrl: false },
+  global: { fetch: retryingFetch },
 });
 
 // Separate client for customer-facing auth (own storage key) so a customer
@@ -29,6 +38,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // browser, and vice versa.
 export const supabaseCustomer = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { storageKey: 'zenly-customer-auth' },
+  global: { fetch: retryingFetch },
 });
 
 // Isolated client for the platform super-admin area (own storage key) so a
@@ -38,4 +48,5 @@ export const supabaseCustomer = createClient(supabaseUrl, supabaseAnonKey, {
 // excluded from the URL-token race for the same reason as `supabase` above.
 export const supabasePlatform = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { storageKey: 'zenly-platform-auth', detectSessionInUrl: false },
+  global: { fetch: retryingFetch },
 });
