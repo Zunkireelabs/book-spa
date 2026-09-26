@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, retryingFetch } from '../lib/supabase';
 import { identify, reset, setGroup } from '../lib/analytics';
 
 const AuthContext = createContext(null);
@@ -51,7 +51,11 @@ async function fetchProfile(userId, accessToken) {
     if (accessToken) {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/users`
         + `?select=*,branches!users_branch_id_fkey(name),organizations(id,name,code,slug,industry_type,industries(id,name,staff_label,staff_label_plural,location_label,location_label_plural,enable_rooms,enable_staff_gender))&id=eq.${userId}`;
-      const res = await fetch(url, {
+      // Routed through the shared retryingFetch (not a raw fetch) so this PostgREST
+      // call gets the same 25P02/40001/40P01 retry + telemetry as every request
+      // issued through the supabase-js clients — this is the same poisoned-pool
+      // traffic, just reached via a direct URL instead of the client.
+      const res = await retryingFetch(url, {
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${accessToken}`,

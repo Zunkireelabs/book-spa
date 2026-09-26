@@ -1,0 +1,91 @@
+name: Production Health Check
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub emails the repo owner when a scheduled run fails.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe production PostgREST
+    runs-on: ubuntu-latest
+    # Two separate defenses against this monitor silently watching the wrong
+    # database — do not delete either one as "redundant" with the other:
+    #
+    # 1. `environment: production` pins secret resolution to the `production`
+    #    GitHub Environment. The secret names VITE_SUPABASE_URL/ANON_KEY exist
+    #    at THREE scopes (repo, `production`, `staging`); without an explicit
+    #    `environment:` here, secrets resolve at repo scope, and the repo-level
+    #    pair predates the staging/prod split. That means this workflow could
+    #    probe staging under a job titled "Production Health Check" and stay
+    #    green through a real production outage. Deliberately NOT using the
+    #    production-db environment (a different one): it carries a required
+    #    reviewer, so a scheduled job would block on approval forever. The
+    #    `production` environment (this one) has zero protection rules, so
+    #    scheduled unattended runs still work.
+    # 2. The guard step below is a second, independent check: even after (1),
+    #    a future edit to the `production` environment's secret VALUES (not
+    #    just which environment is selected) could still point this at the
+    #    wrong project. The guard fails loudly, at probe time, if the resolved
+    #    SUPABASE_URL isn't actually the production project ref.
+    environment: production
+    steps:
+      - name: Guard against probing the wrong database
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+        run: |
+          if [[ "$SUPABASE_URL" != *"pmbvogiphelmpjdalmtv"* ]]; then
+            echo "FAIL: SUPABASE_URL does not contain the production project ref (pmbvogiphelmpjdalmtv)."
+            echo "Resolved SUPABASE_URL: $SUPABASE_URL"
+            echo "This job is named 'Production Health Check' but the secret it resolved points at a"
+            echo "non-production database (likely staging). Check which GitHub Environment this job"
+            echo "is running under and that environment's VITE_SUPABASE_URL secret value."
+            exit 1
+          fi
+      - name: Send 20 probes and fail on any aborted transaction
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -uo pipefail
+
+          # 20 probes, not 1. A poisoned PostgREST pool connection is roughly 1
+          # in 10, so a single request has about a 90% chance of missing it and
+          # reporting false health.
+          ATTEMPTS=20
+          failures=0
+          aborted=0
+
+          for i in $(seq 1 $ATTEMPTS); do
+            body="$(curl -s --max-time 15 \
+              -H "apikey: $ANON_KEY" \
+              -H "Authorization: Bearer $ANON_KEY" \
+              "$SUPABASE_URL/rest/v1/branches?select=id&limit=1" || echo '{"code":"CURL_FAILED"}')"
+
+            if printf '%s' "$body" | grep -q '25P02'; then
+              aborted=$((aborted + 1))
+              echo "probe $i: ABORTED TRANSACTION -> $body"
+            elif printf '%s' "$body" | grep -q '"code"'; then
+              failures=$((failures + 1))
+              echo "probe $i: error -> $body"
+            fi
+          done
+
+          echo ""
+          echo "=== $ATTEMPTS probes: $aborted aborted, $failures other errors ==="
+
+          if [ "$aborted" -gt 0 ]; then
+            echo "FAIL: production is returning 25P02 on $aborted/$ATTEMPTS probes."
+            echo "A PostgREST pool connection is stuck in an aborted transaction."
+            echo "Pull Postgres ERROR logs now (Supabase -> Logs -> Postgres) — the"
+            echo "originating error is only visible there, and only briefly."
+            exit 1
+          fi
+
+          if [ "$failures" -gt 0 ]; then
+            echo "FAIL: $failures/$ATTEMPTS probes returned an error."
+            exit 1
+          fi
+
+          echo "OK: production healthy."

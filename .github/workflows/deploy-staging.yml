@@ -89,6 +89,14 @@ jobs:
           PGDATABASE: ${{ secrets.STAGE_PGDATABASE }}
         run: scripts/migrate-apply.sh stage
 
+      - name: Assert no unwrapped RLS helper calls
+        env:
+          PGHOST: ${{ secrets.STAGE_PGHOST }}
+          PGUSER: ${{ secrets.STAGE_PGUSER }}
+          PGPASSWORD: ${{ secrets.STAGE_PGPASSWORD }}
+          PGDATABASE: ${{ secrets.STAGE_PGDATABASE }}
+        run: scripts/check-rls-initplan.sh
+
   deploy:
     name: Deploy to Staging
     runs-on: ubuntu-latest
