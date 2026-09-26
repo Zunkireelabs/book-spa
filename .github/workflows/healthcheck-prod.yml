@@ -1,0 +1,62 @@
+name: Production Health Check
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub emails the repo owner when a scheduled run fails.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe production PostgREST
+    runs-on: ubuntu-latest
+    steps:
+      # Deliberately NOT using the production-db environment: it carries a
+      # required reviewer, so a scheduled job would block on approval forever.
+      # The anon key over HTTPS is enough to detect what users actually see.
+      - name: Send 20 probes and fail on any aborted transaction
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -uo pipefail
+
+          # 20 probes, not 1. A poisoned PostgREST pool connection is roughly 1
+          # in 10, so a single request has about a 90% chance of missing it and
+          # reporting false health.
+          ATTEMPTS=20
+          failures=0
+          aborted=0
+
+          for i in $(seq 1 $ATTEMPTS); do
+            body="$(curl -s --max-time 15 \
+              -H "apikey: $ANON_KEY" \
+              -H "Authorization: Bearer $ANON_KEY" \
+              "$SUPABASE_URL/rest/v1/branches?select=id&limit=1" || echo '{"code":"CURL_FAILED"}')"
+
+            if printf '%s' "$body" | grep -q '25P02'; then
+              aborted=$((aborted + 1))
+              echo "probe $i: ABORTED TRANSACTION -> $body"
+            elif printf '%s' "$body" | grep -q '"code"'; then
+              failures=$((failures + 1))
+              echo "probe $i: error -> $body"
+            fi
+          done
+
+          echo ""
+          echo "=== $ATTEMPTS probes: $aborted aborted, $failures other errors ==="
+
+          if [ "$aborted" -gt 0 ]; then
+            echo "FAIL: production is returning 25P02 on $aborted/$ATTEMPTS probes."
+            echo "A PostgREST pool connection is stuck in an aborted transaction."
+            echo "Pull Postgres ERROR logs now (Supabase -> Logs -> Postgres) — the"
+            echo "originating error is only visible there, and only briefly."
+            exit 1
+          fi
+
+          if [ "$failures" -gt 0 ]; then
+            echo "FAIL: $failures/$ATTEMPTS probes returned an error."
+            exit 1
+          fi
+
+          echo "OK: production healthy."
