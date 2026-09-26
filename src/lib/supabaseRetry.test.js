@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createClient } from '@supabase/supabase-js';
 import {
   RETRYABLE_PG_CODES,
+  BENIGN_PG_CODES,
   isReplayableBody,
   extractTable,
   readPgCode,
@@ -335,5 +337,84 @@ describe('createRetryingFetch', () => {
     await wrapped(new Request('https://x.supabase.co/rest/v1/bookings', { method: 'POST' }));
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  // C2 regression: PostgREST maps a Parse/Bind-class error (undefined column,
+  // often a stale schema cache) to HTTP 400, not 5xx. The old blanket
+  // "ignore all 4xx unless code is retryable" rule suppressed exactly the
+  // class the spec most wants surfaced ahead of the next 25P02 cluster.
+  it('reports a 42xxx (undefined column) on HTTP 400 — the class the denylist must NOT swallow', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(400, { code: '42703', message: 'column does not exist' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: '42703', status: 400, recovered: false })
+    );
+  });
+
+  it('does not report a routine PGRST116 on HTTP 406', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(406, { code: 'PGRST116' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('does not report a unique-violation 23505 on HTTP 409', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(409, { code: '23505' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('does not report an RLS denial 42501 on HTTP 403', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(403, { code: '42501' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('BENIGN_PG_CODES', () => {
+  it('contains exactly the routine-application-outcome codes', () => {
+    expect([...BENIGN_PG_CODES].sort()).toEqual(
+      ['23503', '23505', '42501', 'PGRST116', 'PGRST301'].sort()
+    );
+  });
+});
+
+// C6 regression: this wrapper's entire retry behavior is gated on
+// `typeof input === 'string'`, which depends on supabase-js always calling the
+// injected fetch with a string URL rather than a Request/URL object. That's
+// true today but is an undocumented library internal, not a contract — a
+// future @supabase/supabase-js version bump that starts passing a Request
+// object would silently turn every retry into a no-op with zero coverage
+// anywhere else in this suite. This is a guard against that dependency
+// upgrade, not a behavior test of our own code.
+describe('supabase-js fetch input contract (dependency guard, not a behavior test)', () => {
+  it('calls the injected global.fetch with a string URL, not a Request or URL object', async () => {
+    const spy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    );
+
+    const client = createClient('https://x.supabase.co', 'anon-key', {
+      global: { fetch: spy },
+    });
+
+    await client.from('x').select();
+
+    expect(spy).toHaveBeenCalled();
+    expect(typeof spy.mock.calls[0][0]).toBe('string');
   });
 });

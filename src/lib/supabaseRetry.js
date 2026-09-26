@@ -15,6 +15,15 @@
 // response was lost, so a retry could double-apply it.
 export const RETRYABLE_PG_CODES = new Set(['25P02', '40001', '40P01']);
 
+// Codes that are routine application-level outcomes, never signal a poisoned
+// pool connection, and must not fire onError even though they arrive on a 4xx.
+// PGRST116 ("no rows returned") is ordinary control flow — api.js has 121
+// `.single()` call sites — and an unfiltered PGRST116 would bury the
+// transient-DB signal this event exists to surface. 23505/23503 (unique/FK
+// violation) and 42501 (RLS denial) are expected validation outcomes, not
+// database health signals.
+export const BENIGN_PG_CODES = new Set(['PGRST116', 'PGRST301', '23505', '23503', '42501']);
+
 const DEFAULT_MAX_RETRIES = 2;
 const BASE_DELAY_MS = 150;
 const JITTER_MS = 100;
@@ -60,6 +69,23 @@ export function createRetryingFetch({
   onError = null,
   maxRetries = DEFAULT_MAX_RETRIES,
 } = {}) {
+  // Known limitations of this telemetry, recorded rather than fixed because the
+  // fix isn't free and the blind spot is understood:
+  //
+  // - postgrest-js has its OWN retry layer (`shouldRetry`: GET/HEAD/OPTIONS on
+  //   503 and 520, up to 4 attempts) that runs OUTSIDE this wrapper, invisible
+  //   to it. A 503 therefore produces up to four separate `api_error` events
+  //   for one logical query, each with `attempts: 1` — a PostHog insight built
+  //   on raw event counts overstates 503-class incidents ~4x. The 25P02 path is
+  //   unaffected: PostgREST maps that to HTTP 500, which is not in postgrest-js's
+  //   retryable status list, so this wrapper is the only retry layer for it.
+  //
+  // - A network-level throw (attempt N+1 goes offline/DNS failure after attempt
+  //   N already saw a retryable code) propagates the throw untouched — see the
+  //   comment above the fetchImpl call — and reports nothing, including the
+  //   already-observed `lastCode`. Total Supabase unreachability therefore
+  //   produces zero `api_error` events, not one describing the last known state.
+  //
   // Telemetry must never break a request.
   const report = payload => {
     if (!onError) return;
@@ -118,16 +144,21 @@ export function createRetryingFetch({
       if (!retryable) {
         // Report retryable codes (even ones we're out of attempts for),
         // codes seen partway through a retry sequence that ends differently,
-        // and genuine server failures (5xx) even with no parseable code —
-        // e.g. an HTML 502 from the proxy. Routine 4xx application codes
-        // (PGRST116 "no rows", 23505 unique violation, 42501 RLS denial) must
-        // NOT fire onError: api.js has 121 `.single()` call sites and an
-        // unfiltered PGRST116 on every expected-empty lookup would bury the
-        // transient-DB signal this event exists to surface.
+        // genuine server failures (5xx) even with no parseable code — e.g. an
+        // HTML 502 from the proxy — and any OTHER parseable code that isn't on
+        // the benign denylist above. That last clause matters: PostgREST maps a
+        // Parse/Bind-class error (42xxx — undefined column/table, often from a
+        // stale schema cache) to HTTP 400, not 5xx, and that class is exactly
+        // the "originating error" the spec wants named ahead of the next 25P02
+        // cluster. A blanket "ignore all 4xx" would suppress it. Denylisting
+        // the known-benign codes instead of allowlisting the known-bad ones
+        // means an unrecognized code reports by default, fail-open toward
+        // visibility rather than toward silence.
         const shouldReport =
           (code !== null && RETRYABLE_PG_CODES.has(code)) ||
           lastCode !== null ||
-          response.status >= 500;
+          response.status >= 500 ||
+          (code !== null && !BENIGN_PG_CODES.has(code));
 
         if (shouldReport) {
           report({

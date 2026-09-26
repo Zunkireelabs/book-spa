@@ -51,6 +51,22 @@ SQL
 
 echo "Checking RLS policies on $PGUSER@$PGHOST/$PGDATABASE for unwrapped helper calls..."
 
+# Guard against a vacuous pass. The whole premise of this script is "cannot
+# silently pass" — but it would still print OK and exit 0 if QUERY somehow came
+# out empty (the `read -r -d '' ... || true` above swallows read failures) or if
+# pg_policies legitimately returns zero rows for schemaname='public' (wrong
+# database, wrong schema, or a stale search path). Zero policies inspected is
+# not a pass; it's the check not having looked at anything.
+POLICY_COUNT="$(psql -v ON_ERROR_STOP=1 -tAc "SELECT count(*) FROM pg_policies WHERE schemaname = 'public'")"
+
+if [ "$POLICY_COUNT" -eq 0 ]; then
+  echo ""
+  echo "FAIL: found 0 policies in schema 'public' on $PGUSER@$PGHOST/$PGDATABASE."
+  echo "This almost certainly means the check is connected to the wrong database"
+  echo "or the wrong schema, not that RLS has no policies. Verify PGHOST/PGDATABASE."
+  exit 1
+fi
+
 OFFENDERS="$(psql -v ON_ERROR_STOP=1 -tAc "$QUERY")"
 
 if [ -n "$OFFENDERS" ]; then
@@ -74,4 +90,4 @@ if [ -n "$OFFENDERS" ]; then
   exit 1
 fi
 
-echo "OK: no unwrapped RLS helper calls found."
+echo "OK: no unwrapped RLS helper calls found. Inspected $POLICY_COUNT policies in schema public."

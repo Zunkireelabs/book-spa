@@ -13,7 +13,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // that a poisoned PostgREST pool connection produces, and reports every API error
 // to PostHog. Placing it here rather than in services/api.js covers every call
 // site in the app — including ones added later — with no per-call changes.
-const retryingFetch = createRetryingFetch({ onError: captureApiError });
+//
+// Exported (not module-private) so the one raw-fetch PostgREST call outside the
+// supabase-js clients — AuthContext.jsx's direct /rest/v1/users fetch, used right
+// after signInWithPassword before the client's own session state is ready — can
+// share this exact wrapper instead of a second, divergent one.
+export const retryingFetch = createRetryingFetch({ onError: captureApiError });
 
 // Customer auth is now email-OTP (a 6-digit code typed inline, verified via
 // supabaseCustomer.auth.verifyOtp) rather than email-link redirects, so no
