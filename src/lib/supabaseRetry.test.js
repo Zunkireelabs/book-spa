@@ -7,6 +7,8 @@ import {
   extractTable,
   readPgCode,
   createRetryingFetch,
+  isTransientStatus,
+  ServiceUnavailableError,
 } from './supabaseRetry';
 
 const jsonResponse = (status, body) =>
@@ -504,5 +506,25 @@ describe('supabase-js fetch input contract (dependency guard, not a behavior tes
 
     expect(spy).toHaveBeenCalled();
     expect(typeof spy.mock.calls[0][0]).toBe('string');
+  });
+});
+
+describe('isTransientStatus', () => {
+  it('flags gateway/unavailable/throttle statuses', () => {
+    for (const s of [429, 502, 503, 504]) expect(isTransientStatus(s)).toBe(true);
+  });
+
+  it('does not flag ordinary success or application errors', () => {
+    for (const s of [200, 400, 401, 403, 404, 406, 409, 500]) expect(isTransientStatus(s)).toBe(false);
+  });
+});
+
+describe('ServiceUnavailableError', () => {
+  it('is tagged so the UI can tell an outage from a missing profile', () => {
+    const err = new ServiceUnavailableError(undefined, { status: 503 });
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('ServiceUnavailableError');
+    expect(err.isServiceUnavailable).toBe(true);
+    expect(err.status).toBe(503);
   });
 });

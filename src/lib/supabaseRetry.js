@@ -15,6 +15,35 @@
 // response was lost, so a retry could double-apply it.
 export const RETRYABLE_PG_CODES = new Set(['25P02', '40001', '40P01']);
 
+// HTTP statuses that mean "the database layer is unreachable / not serving",
+// as opposed to an application-level 4xx. These are what a full outage looks
+// like from the client: PostgREST returns 503 when it cannot get a database
+// connection (the 2026-09-26 outage — "Database not usable / CONNECT_TIMEOUT"),
+// 502/504 come from the proxy in front of it, and 429 is throttling. Callers
+// on the auth path use this to tell "service is down, tell the user to retry"
+// apart from "your profile genuinely does not exist" — the two must not show
+// the same message. NOTE: this is a *classification* helper, not a retry list;
+// the retry policy above is deliberately narrower (see the design doc).
+export const TRANSIENT_HTTP_STATUSES = new Set([502, 503, 504, 429]);
+
+export function isTransientStatus(status) {
+  return TRANSIENT_HTTP_STATUSES.has(status);
+}
+
+// Thrown by callers (not by the fetch wrapper itself) when a request failed for
+// an infrastructure reason — a transient HTTP status, a network throw, or a
+// client-side timeout — rather than an application error. Carries `status` (0
+// for a network/timeout failure) so the UI can decide messaging.
+export class ServiceUnavailableError extends Error {
+  constructor(message = 'Service temporarily unavailable. Please try again.', { status = null, cause } = {}) {
+    super(message);
+    this.name = 'ServiceUnavailableError';
+    this.status = status;
+    this.isServiceUnavailable = true;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
 // Codes that are routine application-level outcomes, never signal a poisoned
 // pool connection, and must not fire onError even though they arrive on a 4xx.
 // PGRST116 ("no rows returned") is ordinary control flow — api.js has 121

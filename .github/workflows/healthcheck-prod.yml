@@ -56,30 +56,58 @@ jobs:
           ATTEMPTS=20
           failures=0
           aborted=0
+          unavailable=0
+
+          bodyfile="$(mktemp)"
+          trap 'rm -f "$bodyfile"' EXIT
 
           for i in $(seq 1 $ATTEMPTS); do
-            body="$(curl -s --max-time 15 \
+            # Capture the HTTP status AND the body. Status 000 means curl could
+            # not connect at all (TCP connect timeout — the 2026-09-26 outage,
+            # where the database instance was CPU-saturated and stopped
+            # accepting connections).
+            status="$(curl -s -o "$bodyfile" -w '%{http_code}' --max-time 15 \
               -H "apikey: $ANON_KEY" \
               -H "Authorization: Bearer $ANON_KEY" \
-              "$SUPABASE_URL/rest/v1/branches?select=id&limit=1" || echo '{"code":"CURL_FAILED"}')"
+              "$SUPABASE_URL/rest/v1/branches?select=id&limit=1" || echo '000')"
+            body="$(cat "$bodyfile" 2>/dev/null || echo '')"
 
             if printf '%s' "$body" | grep -q '25P02'; then
+              # Pool connection stuck in an aborted transaction.
               aborted=$((aborted + 1))
-              echo "probe $i: ABORTED TRANSACTION -> $body"
+              echo "probe $i: ABORTED TRANSACTION (25P02) [$status] -> $body"
+            elif [ "$status" = "000" ] || [ "$status" -ge 500 ] 2>/dev/null; then
+              # 000 = could not connect; 5xx = PostgREST/proxy could not serve
+              # (503 = no database connection available). This is the class the
+              # old body-only check missed and stayed green through.
+              unavailable=$((unavailable + 1))
+              echo "probe $i: SERVICE UNAVAILABLE [HTTP $status] -> $body"
+            elif [ "$status" != "200" ]; then
+              failures=$((failures + 1))
+              echo "probe $i: unexpected status [HTTP $status] -> $body"
             elif printf '%s' "$body" | grep -q '"code"'; then
               failures=$((failures + 1))
-              echo "probe $i: error -> $body"
+              echo "probe $i: error body [HTTP $status] -> $body"
             fi
           done
 
           echo ""
-          echo "=== $ATTEMPTS probes: $aborted aborted, $failures other errors ==="
+          echo "=== $ATTEMPTS probes: $aborted aborted, $unavailable unavailable, $failures other errors ==="
 
           if [ "$aborted" -gt 0 ]; then
             echo "FAIL: production is returning 25P02 on $aborted/$ATTEMPTS probes."
             echo "A PostgREST pool connection is stuck in an aborted transaction."
             echo "Pull Postgres ERROR logs now (Supabase -> Logs -> Postgres) — the"
             echo "originating error is only visible there, and only briefly."
+            exit 1
+          fi
+
+          if [ "$unavailable" -gt 0 ]; then
+            echo "FAIL: production is unreachable/5xx on $unavailable/$ATTEMPTS probes."
+            echo "PostgREST cannot serve requests — most often the database instance"
+            echo "is not accepting connections (CPU/connection/resource exhaustion)."
+            echo "Check Supabase -> Reports (Compute/CPU, Memory, connections) and the"
+            echo "project health panel; this is the 2026-09-26 failure class."
             exit 1
           fi
 
