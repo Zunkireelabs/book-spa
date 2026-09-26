@@ -384,12 +384,100 @@ describe('createRetryingFetch', () => {
 
     expect(onError).not.toHaveBeenCalled();
   });
+
+  // GAP 1: this app's own RAISE EXCEPTION business-rule codes (bare RAISE
+  // EXCEPTION defaults to P0001), reachable from ~55 .rpc() call sites, are
+  // routine validation outcomes and must not bury the transient-DB signal.
+  it('does not report a P0001 business-rule error on HTTP 400', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(400, { code: 'P0001', message: 'Invalid status transition' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', { method: 'POST', body: '{}' });
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('does not report a 22007 (bad datetime) business-rule error on HTTP 400', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(400, { code: '22007', message: 'invalid date' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', { method: 'POST', body: '{}' });
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  // Re-confirms the Parse/Bind class (the whole reason the denylist exists
+  // instead of an allowlist) is still NOT swallowed by the GAP 1 additions.
+  it('still reports a 42703 (undefined column) on HTTP 400 after the P0xxx/22007 additions', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(400, { code: '42703', message: 'column does not exist' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: '42703', status: 400, recovered: false })
+    );
+  });
+
+  // GAP 4: a network-level throw must still propagate unchanged and unretried.
+  it('propagates a network throw unchanged and does not retry it (GAP 4)', async () => {
+    const err = new TypeError('Failed to fetch');
+    const fetchImpl = vi.fn().mockRejectedValue(err);
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep });
+
+    await expect(wrapped('https://x.supabase.co/rest/v1/bookings', {})).rejects.toBe(err);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  // GAP 4: total unreachability must now produce exactly one onError call.
+  it('reports a network throw with status 0 and recovered false (GAP 4)', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await expect(wrapped('https://x.supabase.co/rest/v1/bookings', {})).rejects.toThrow('Failed to fetch');
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: null, status: 0, recovered: false, attempts: 1 })
+    );
+  });
+
+  // GAP 4: a 25P02 seen on attempt 1 must not be lost when attempt 2 throws.
+  it('reports the already-seen 25P02 code when a subsequent attempt throws (GAP 4)', async () => {
+    const onError = vi.fn();
+    const err = new TypeError('Network down');
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(500, { code: '25P02' }))
+      .mockRejectedValueOnce(err);
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await expect(wrapped('https://x.supabase.co/rest/v1/bookings', {})).rejects.toBe(err);
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: '25P02', status: 0, recovered: false, attempts: 2 })
+    );
+  });
+
+  // GAP 4 fail-open: onError throwing on the network-throw path must not mask
+  // the original network error.
+  it('still throws the original network error when onError itself throws (GAP 4)', async () => {
+    const err = new TypeError('Failed to fetch');
+    const onError = vi.fn(() => { throw new Error('posthog exploded'); });
+    const fetchImpl = vi.fn().mockRejectedValue(err);
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await expect(wrapped('https://x.supabase.co/rest/v1/bookings', {})).rejects.toBe(err);
+  });
 });
 
 describe('BENIGN_PG_CODES', () => {
   it('contains exactly the routine-application-outcome codes', () => {
     expect([...BENIGN_PG_CODES].sort()).toEqual(
-      ['23503', '23505', '42501', 'PGRST116', 'PGRST301'].sort()
+      ['23503', '23505', '42501', 'PGRST116', 'PGRST301', 'P0001', 'P0002', 'P0003', 'P0004', 'P0005', '22007'].sort()
     );
   });
 });

@@ -22,12 +22,21 @@
 --    connection keeps whatever idle_in_transaction_session_timeout was in
 --    effect when IT connected (60s, per the 2026-09-25 change) until
 --    PostgREST reconnects it or the whole service restarts. Nothing in this
---    migration, and nothing in the deploy pipeline, restarts PostgREST. The
---    post-merge verification query (SELECT rolname, rolconfig FROM pg_roles)
---    will correctly show '5s' in pg_roles while every already-open pool
---    connection is still running under the old 60s value — that query proves
---    the ROLE's default changed, not that the live pool did. The new value
---    only reaches the whole pool once every connection has cycled.
+--    migration, and nothing in the deploy pipeline, restarts PostgREST.
+--
+--    UPDATE: migration-227-recycle-authenticator-pool.sql now performs this
+--    recycle — it terminates idle authenticator backends so PostgREST
+--    reopens them and they inherit this setting. Do NOT rely on
+--    `SELECT rolname, rolconfig FROM pg_roles` alone to verify this reached
+--    the live pool — that query only proves the ROLE's default changed, not
+--    that any open connection picked it up. There is no per-backend view of
+--    a GUC's live value from another session, so the honest verification is
+--    indirect: after 227 runs, confirm via
+--      SELECT pid, backend_start, state FROM pg_stat_activity
+--       WHERE usename = 'authenticator' ORDER BY backend_start;
+--    that authenticator backends show a `backend_start` after 227 ran — a
+--    recent backend_start means that connection is new and so inherited the
+--    5s default. See migration-227's header comment for the full reasoning.
 --
 -- 2. The idle-in-transaction clock RESETS on every command received on that
 --    connection, whether or not the transaction is aborted. A poisoned

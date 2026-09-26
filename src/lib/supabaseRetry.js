@@ -21,8 +21,26 @@ export const RETRYABLE_PG_CODES = new Set(['25P02', '40001', '40P01']);
 // `.single()` call sites — and an unfiltered PGRST116 would bury the
 // transient-DB signal this event exists to surface. 23505/23503 (unique/FK
 // violation) and 42501 (RLS denial) are expected validation outcomes, not
-// database health signals.
-export const BENIGN_PG_CODES = new Set(['PGRST116', 'PGRST301', '23505', '23503', '42501']);
+// database health signals. P0001-P0005 and 22007 are this application's own
+// `RAISE EXCEPTION` business-rule codes raised from Postgres functions (104
+// migration files use RAISE EXCEPTION; a bare RAISE EXCEPTION defaults to
+// P0001), surfaced as HTTP 400 through the ~55 `.rpc()` call sites in
+// api.js — e.g. invalid status transition, double-book, bad date. These are
+// expected validation outcomes, not infrastructure faults, and must not bury
+// the transient-DB signal either.
+export const BENIGN_PG_CODES = new Set([
+  'PGRST116',
+  'PGRST301',
+  '23505',
+  '23503',
+  '42501',
+  'P0001',
+  'P0002',
+  'P0003',
+  'P0004',
+  'P0005',
+  '22007',
+]);
 
 const DEFAULT_MAX_RETRIES = 2;
 const BASE_DELAY_MS = 150;
@@ -82,9 +100,9 @@ export function createRetryingFetch({
   //
   // - A network-level throw (attempt N+1 goes offline/DNS failure after attempt
   //   N already saw a retryable code) propagates the throw untouched — see the
-  //   comment above the fetchImpl call — and reports nothing, including the
-  //   already-observed `lastCode`. Total Supabase unreachability therefore
-  //   produces zero `api_error` events, not one describing the last known state.
+  //   comment above the fetchImpl call — but is now reported first, with
+  //   `status: 0` and the already-observed `lastCode` if one exists, so total
+  //   Supabase unreachability is no longer invisible to telemetry.
   //
   // Telemetry must never break a request.
   const report = payload => {
@@ -111,8 +129,25 @@ export function createRetryingFetch({
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       // A throw here is a network failure: propagate it untouched, exactly as an
       // unwrapped fetch would. Never re-issue, since we cannot know whether a
-      // write landed.
-      const response = await fetchImpl(input, init);
+      // write landed. We DO report it first so total unreachability isn't
+      // invisible to telemetry — and so an already-observed `lastCode` from an
+      // earlier attempt in this same sequence isn't lost — but the report is
+      // best-effort (report() swallows onError's own failures) and the
+      // original error is always re-thrown unchanged.
+      let response;
+      try {
+        response = await fetchImpl(input, init);
+      } catch (err) {
+        report({
+          code: lastCode,
+          status: 0,
+          table: extractTable(input),
+          method,
+          attempts: attempt + 1,
+          recovered: false,
+        });
+        throw err;
+      }
 
       if (response.ok) {
         if (lastCode) {
