@@ -112,6 +112,14 @@ jobs:
           PGDATABASE: ${{ secrets.PROD_PGDATABASE }}
         run: scripts/migrate-apply.sh prod
 
+      - name: Assert no unwrapped RLS helper calls
+        env:
+          PGHOST: ${{ secrets.PROD_PGHOST }}
+          PGUSER: ${{ secrets.PROD_PGUSER }}
+          PGPASSWORD: ${{ secrets.PROD_PGPASSWORD }}
+          PGDATABASE: ${{ secrets.PROD_PGDATABASE }}
+        run: scripts/check-rls-initplan.sh
+
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
