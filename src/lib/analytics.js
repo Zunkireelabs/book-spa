@@ -40,6 +40,22 @@ export function capture(event, properties = {}) {
   posthog.capture(event, properties);
 }
 
+// Emitted from the Supabase fetch wrapper (see lib/supabaseRetry.js), which is the
+// single choke point every request in the app passes through.
+//
+// `table` is a bare table name, never a URL — PostgREST encodes filters into the
+// query string (?customer_phone=eq.977...), so forwarding a URL would leak customer
+// PII into PostHog.
+//
+// `recovered: true` means the retry worked and the user saw nothing. That is the
+// early-warning signal: it says the problem is happening while it is still
+// invisible. `recovered: false` means the user saw an error.
+export function captureApiError(payload = {}) {
+  if (!_initialized) return;
+  const { code, status, table, method, attempts, recovered } = payload;
+  posthog.capture('api_error', { code, status, table, method, attempts, recovered });
+}
+
 export function setGroup(groupType, groupKey, groupProperties = {}) {
   if (!_initialized) return;
   posthog.group(groupType, groupKey, groupProperties);
