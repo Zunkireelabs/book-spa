@@ -70,12 +70,19 @@ export function createRetryingFetch({
     }
   };
 
+  // Fail open on a bad option, not just a bad response. An invalid maxRetries
+  // (NaN, negative, non-number) must never turn every request in the app into
+  // a thrown error via the "unreachable" guard below.
+  const retries = Number.isFinite(maxRetries) && maxRetries >= 0
+    ? Math.floor(maxRetries)
+    : DEFAULT_MAX_RETRIES;
+
   return async function retryingFetch(input, init) {
     const method = init?.method ?? 'GET';
     let lastCode = null;
     let lastStatus = null;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
       // A throw here is a network failure: propagate it untouched, exactly as an
       // unwrapped fetch would. Never re-issue, since we cannot know whether a
       // write landed.
@@ -97,14 +104,32 @@ export function createRetryingFetch({
 
       const code = await readPgCode(response);
 
+      // A Request object's body, once used by fetchImpl, is unreadable on retry
+      // even when `init` (and so `init?.body`) is undefined — the body lives on
+      // `input` itself. Only a plain URL string is safe to hand to fetchImpl a
+      // second time.
       const retryable =
         code !== null &&
         RETRYABLE_PG_CODES.has(code) &&
+        typeof input === 'string' &&
         isReplayableBody(init?.body) &&
-        attempt < maxRetries;
+        attempt < retries;
 
       if (!retryable) {
-        if (code !== null || lastCode !== null) {
+        // Report retryable codes (even ones we're out of attempts for),
+        // codes seen partway through a retry sequence that ends differently,
+        // and genuine server failures (5xx) even with no parseable code —
+        // e.g. an HTML 502 from the proxy. Routine 4xx application codes
+        // (PGRST116 "no rows", 23505 unique violation, 42501 RLS denial) must
+        // NOT fire onError: api.js has 121 `.single()` call sites and an
+        // unfiltered PGRST116 on every expected-empty lookup would bury the
+        // transient-DB signal this event exists to surface.
+        const shouldReport =
+          (code !== null && RETRYABLE_PG_CODES.has(code)) ||
+          lastCode !== null ||
+          response.status >= 500;
+
+        if (shouldReport) {
           report({
             code: code ?? lastCode,
             status: response.status,
@@ -122,8 +147,9 @@ export function createRetryingFetch({
       await sleep(BASE_DELAY_MS * 2 ** attempt + Math.floor(random() * JITTER_MS));
     }
 
-    // Unreachable: the loop always returns. Present so a future edit that changes
-    // the loop bounds fails loudly in tests rather than returning undefined.
+    // Unreachable: the loop always returns, and `retries` is validated above to
+    // be a non-negative integer. Present so a future edit that changes the loop
+    // bounds fails loudly in tests rather than returning undefined.
     throw new Error('retryingFetch: exhausted loop without returning');
   };
 }
