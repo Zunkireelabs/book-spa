@@ -50,6 +50,15 @@
 
 BEGIN;
 
+-- Deliberately SECURITY INVOKER (the default), not SECURITY DEFINER.
+-- pg_terminate_backend against a backend owned by another role requires
+-- pg_signal_backend or superuser. The pg_cron job below runs as the role that
+-- scheduled it (postgres), which has that privilege, so the function works as
+-- scheduled. Called by any lesser role it would fail rather than silently
+-- terminating the wrong thing — which is the safer failure direction for a
+-- function whose whole job is killing connections. Do not "fix" this by adding
+-- SECURITY DEFINER: that would make it callable-and-effective by anyone holding
+-- EXECUTE, turning a maintenance helper into a denial-of-service primitive.
 CREATE OR REPLACE FUNCTION public.reap_aborted_authenticator_backends()
 RETURNS integer
 LANGUAGE plpgsql

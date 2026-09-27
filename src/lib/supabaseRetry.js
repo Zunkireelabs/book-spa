@@ -28,6 +28,20 @@
 // regardless of the current timeout value: an idle-timeout kill is infrastructure
 // terminating the connection, never an application-level failure, so the request
 // itself was never actually served — a fresh connection can safely reattempt it.
+// Same safety property as the other three: PostgreSQL kills the backend and rolls
+// the transaction back, so nothing was committed. The existing retry mechanics
+// already handle this correctly — a retry opens a brand-new request, which
+// PostgREST serves on a different (or freshly reopened) connection, so the user
+// should never see this code at all.
+//
+// LIMIT OF THIS ENTRY (2026-09-27): 25P03 is only retried when PostgREST returns
+// an HTTP *response* whose body carries the code. If the terminated backend
+// instead surfaces as a transport failure, `fetchImpl` throws and the catch
+// branch below rethrows without retrying, by design — a thrown request may have
+// landed. The tests in supabaseRetry.test.js mock a 500 with `{code:'25P03'}`,
+// so they pin the behaviour under that assumption rather than proving PostgREST
+// always reports it that way. Treat "users would never see 25P03" as holding for
+// the response-body path only.
 //
 // Correction (2026-09-27): the ~4200ms/~150ms figures above were measured on a
 // CPU-saturated nano during the incident, not a property of this database at
@@ -36,11 +50,6 @@
 // concurrency multiplier, but it is not a fixed multi-second cost — the nano
 // figures are kept above as the record of what saturation does, not as the
 // baseline.
-// Same safety property as the other three: PostgreSQL kills the backend and rolls
-// the transaction back, so nothing was committed. The existing retry mechanics
-// already handle this correctly — a retry opens a brand-new request, which
-// PostgREST serves on a different (or freshly reopened) connection, so the user
-// should never see this code at all.
 export const RETRYABLE_PG_CODES = new Set(['25P02', '40001', '40P01', '25P03']);
 
 // Codes that are routine application-level outcomes, never signal a poisoned
