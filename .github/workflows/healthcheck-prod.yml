@@ -43,7 +43,7 @@ jobs:
             echo "is running under and that environment's VITE_SUPABASE_URL secret value."
             exit 1
           fi
-      - name: Send 20 probes and fail on any aborted transaction
+      - name: Send 20 probes and fail on aborted transactions or slow cold plans
         env:
           SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -57,42 +57,91 @@ jobs:
           failures=0
           aborted=0
           unavailable=0
+          min_ms=999999
+          max_ms=0
+          over_2s=0
+          over_5s=0
 
           bodyfile="$(mktemp)"
           trap 'rm -f "$bodyfile"' EXIT
 
+          # Probing bookings, not branches: branches?select=id&limit=1 plans in
+          # ~1ms and is blind to RLS cold-plan cost. bookings?select=id&limit=1
+          # forces the planner through the full policy tree for the anon role
+          # (measured on prod: 36ms planning / 243ms execution warm) while
+          # still being cheap enough to run 20x every 10 minutes. anon has no
+          # visibility into bookings rows, so an empty `[]` body here is the
+          # EXPECTED, HEALTHY response — only a body containing "code" is an
+          # error. (A separate single liveness probe against branches runs
+          # after this loop, below, since it's the one that can actually
+          # detect "reachable but returning nothing".)
           for i in $(seq 1 $ATTEMPTS); do
-            # Capture the HTTP status AND the body. Status 000 means curl could
-            # not connect at all (TCP connect timeout — the 2026-09-26 outage,
-            # where the database instance was CPU-saturated and stopped
-            # accepting connections).
-            status="$(curl -s -o "$bodyfile" -w '%{http_code}' --max-time 15 \
+            # One curl capturing status, timing and body together: -w writes
+            # "<http_code> <time_total>" to stdout while -o puts the body in a
+            # file, so a single request yields all three without body and
+            # metadata interleaving.
+            #
+            # Status 000 means curl could not connect at all (TCP connect
+            # timeout — the 2026-09-26 outage, where the database instance was
+            # CPU-saturated and stopped accepting connections).
+            #
+            # Deliberately NO `|| echo` fallback. curl writes its -w output even
+            # when it exits non-zero, so a fallback appends a SECOND value and
+            # leaves status as "000\n000" — which compares unequal to "000" and
+            # would silently skip the unavailable branch on exactly the
+            # total-outage case that branch exists to catch. This step sets
+            # `set -uo pipefail` but NOT `-e`, so a non-zero curl does not abort
+            # it. If meta somehow comes back empty, status is "" and the probe
+            # falls through to the `!= 200` branch and counts as a failure —
+            # fail-closed, not silently OK.
+            meta="$(curl -s -o "$bodyfile" -w '%{http_code} %{time_total}' --max-time 15 \
               -H "apikey: $ANON_KEY" \
               -H "Authorization: Bearer $ANON_KEY" \
-              "$SUPABASE_URL/rest/v1/branches?select=id&limit=1" || echo '000')"
+              "$SUPABASE_URL/rest/v1/bookings?select=id&limit=1")"
+            status="${meta%% *}"
+            time_total="${meta##* }"
             body="$(cat "$bodyfile" 2>/dev/null || echo '')"
+
+            # curl -w emits seconds as a decimal (e.g. 0.243, 4.200, 12.500).
+            # Convert to integer milliseconds via awk so the rest of this
+            # script can use plain bash integer comparisons — no bash
+            # floating-point, and no dependency on how many decimal places
+            # curl happened to print.
+            ms="$(awk -v t="$time_total" 'BEGIN{printf "%d", (t*1000)+0.5}')"
+
+            if [ "$ms" -lt "$min_ms" ]; then min_ms=$ms; fi
+            if [ "$ms" -gt "$max_ms" ]; then max_ms=$ms; fi
+            if [ "$ms" -gt 2000 ]; then over_2s=$((over_2s + 1)); fi
+            if [ "$ms" -gt 5000 ]; then over_5s=$((over_5s + 1)); fi
 
             if printf '%s' "$body" | grep -q '25P02'; then
               # Pool connection stuck in an aborted transaction.
               aborted=$((aborted + 1))
-              echo "probe $i: ABORTED TRANSACTION (25P02) [$status] -> $body"
+              echo "probe $i: ABORTED TRANSACTION (25P02) [HTTP $status] (${ms}ms) -> $body"
+            # The 25P02 check above MUST stay first: PostgREST serves an aborted
+            # transaction as HTTP 500, so testing status before body would
+            # miscount every 25P02 as a generic "unavailable" and lose the
+            # single most actionable signal this monitor has.
             elif [ "$status" = "000" ] || [ "$status" -ge 500 ] 2>/dev/null; then
               # 000 = could not connect; 5xx = PostgREST/proxy could not serve
               # (503 = no database connection available). This is the class the
               # old body-only check missed and stayed green through.
               unavailable=$((unavailable + 1))
-              echo "probe $i: SERVICE UNAVAILABLE [HTTP $status] -> $body"
+              echo "probe $i: SERVICE UNAVAILABLE [HTTP $status] (${ms}ms) -> $body"
             elif [ "$status" != "200" ]; then
               failures=$((failures + 1))
-              echo "probe $i: unexpected status [HTTP $status] -> $body"
+              echo "probe $i: unexpected status [HTTP $status] (${ms}ms) -> $body"
             elif printf '%s' "$body" | grep -q '"code"'; then
               failures=$((failures + 1))
-              echo "probe $i: error body [HTTP $status] -> $body"
+              echo "probe $i: error body [HTTP $status] (${ms}ms) -> $body"
+            else
+              echo "probe $i: ok [HTTP $status] (${ms}ms)"
             fi
           done
 
           echo ""
           echo "=== $ATTEMPTS probes: $aborted aborted, $unavailable unavailable, $failures other errors ==="
+          echo "=== latency: min=${min_ms}ms max=${max_ms}ms | over 2000ms: $over_2s | over 5000ms: $over_5s ==="
 
           if [ "$aborted" -gt 0 ]; then
             echo "FAIL: production is returning 25P02 on $aborted/$ATTEMPTS probes."
@@ -116,4 +165,54 @@ jobs:
             exit 1
           fi
 
-          echo "OK: production healthy."
+          if [ "$over_5s" -gt 0 ]; then
+            echo "FAIL: $over_5s/$ATTEMPTS probes took longer than 5s (max ${max_ms}ms)."
+            echo "The authenticated role's statement_timeout is 8s, so 5s means queries are"
+            echo "close to dying outright. This is almost certainly a cold-plan PostgREST"
+            echo "connection hitting the RLS policy tree — see docs/runbooks/rls-plan-complexity.md."
+            exit 1
+          fi
+
+          if [ "$over_2s" -ge 3 ]; then
+            echo "FAIL: $over_2s/$ATTEMPTS probes took longer than 2s (sustained slow-plan pattern, not a one-off)."
+            echo "This matches cold RLS re-planning after a connection-pool recycle (migration,"
+            echo "PostgREST restart, Supabase-side restart, or ordinary pool churn) — see"
+            echo "docs/runbooks/rls-plan-complexity.md for the measured cause and candidate fixes."
+            exit 1
+          fi
+
+          echo "OK: production healthy (bookings probe latency within bounds)."
+      - name: Liveness probe against branches (expects non-empty result)
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -uo pipefail
+
+          # This is deliberately a second, separate probe from the bookings
+          # loop above — do not delete it as "redundant". The bookings probe
+          # legitimately returns `[]` for anon (anon sees no bookings rows),
+          # so it can never distinguish "database reachable but genuinely
+          # empty" from "database reachable but broken and returning nothing".
+          # branches CAN make that distinction: anon genuinely sees 9 rows
+          # there, so an empty `[]` here means something is actually wrong.
+          body="$(curl -s --max-time 15 \
+            -H "apikey: $ANON_KEY" \
+            -H "Authorization: Bearer $ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/branches?select=id&limit=1" || echo '{"code":"CURL_FAILED"}')"
+
+          if printf '%s' "$body" | grep -q '"code"'; then
+            echo "FAIL: branches liveness probe returned an error -> $body"
+            exit 1
+          fi
+
+          if [ "$(printf '%s' "$body" | tr -d '[:space:]')" = "[]" ]; then
+            echo "FAIL: branches liveness probe returned an empty array."
+            echo "anon should see at least 1 of the 9 branches rows in production. An empty"
+            echo "result here (as opposed to the bookings probe above, which is expected to be"
+            echo "empty for anon) means the database is reachable but not returning real data —"
+            echo "check RLS policies on branches and whether anon's role/grants changed."
+            exit 1
+          fi
+
+          echo "OK: branches liveness probe returned data -> $body"

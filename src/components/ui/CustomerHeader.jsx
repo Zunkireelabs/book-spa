@@ -39,7 +39,11 @@ const CustomerHeader = ({ wide }) => {
 
   return (
     <header ref={headerRef} className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
-      <div className={`relative mx-auto pl-8 pr-2 sm:pl-10 sm:pr-6 lg:pl-14 lg:pr-8 ${wide ? 'max-w-7xl lg:max-w-[1600px]' : 'max-w-7xl'}`}>
+      {/* px-4 and max-w-4xl (widening to max-w-[1600px] only when `wide`) match
+          every caller's own <main> content container exactly, so the logo and
+          right-side actions line up with the page content below instead of
+          sitting in a wider/differently-padded box of their own. */}
+      <div className={`relative mx-auto px-4 ${wide ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl'}`}>
         <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
           <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0 flex-1">

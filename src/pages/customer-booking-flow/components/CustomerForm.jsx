@@ -324,7 +324,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+        <div className="grid grid-cols-2 gap-3 sm:gap-6">
           {/* First Name */}
           <div className="space-y-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
@@ -337,7 +337,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               onChange={handleInputChange}
               onBlur={handleBlur}
               placeholder="Enter your first name"
-              className={errors.firstName ? 'border-error' : ''}
+              className={`!text-xs ${errors.firstName ? 'border-error' : ''}`}
             />
             {errors.firstName && (
               <p className="font-caption font-caption-normal text-xs text-error flex items-center space-x-1">
@@ -359,7 +359,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               onChange={handleInputChange}
               onBlur={handleBlur}
               placeholder="Enter your last name"
-              className={errors.lastName ? 'border-error' : ''}
+              className={`!text-xs ${errors.lastName ? 'border-error' : ''}`}
             />
             {errors.lastName && (
               <p className="font-caption font-caption-normal text-xs text-error flex items-center space-x-1">
@@ -370,7 +370,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           </div>
 
           {/* Email */}
-          <div className="space-y-2">
+          <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
               Email Address
             </label>
@@ -393,7 +393,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           </div>
 
           {/* Phone */}
-          <div className="space-y-2">
+          <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
               Phone Number
             </label>
@@ -402,16 +402,23 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
                 value={customerInfo.phoneCountryCode || '+977'}
                 onChange={(dial) => onCustomerInfoChange({ ...customerInfo, phoneCountryCode: dial })}
               />
-              <Input
-                type="tel"
-                name="phone"
-                data-ph-mask
-                value={customerInfo.phone || ''}
-                onChange={handleInputChange}
-                onBlur={handleBlur}
-                placeholder="9841234567"
-                className={`flex-1 rounded-l-none ${errors.phone ? 'border-error' : ''}`}
-              />
+              {/* Input always renders wrapped in its own <div> (see Input.jsx), so that
+                  div — not the <input> itself — is the actual flex item here; a
+                  `flex-1` passed as Input's className lands on the <input> and has no
+                  effect on the row's layout. Wrapping it in this flex-1 div instead is
+                  what actually makes it grow to fill the row. */}
+              <div className="flex-1">
+                <Input
+                  type="tel"
+                  name="phone"
+                  data-ph-mask
+                  value={customerInfo.phone || ''}
+                  onChange={handleInputChange}
+                  onBlur={handleBlur}
+                  placeholder="9841234567"
+                  className={`w-full rounded-l-none ${errors.phone ? 'border-error' : ''}`}
+                />
+              </div>
             </div>
             {errors.phone && (
               <p className="font-caption font-caption-normal text-xs text-error flex items-center space-x-1">
@@ -422,11 +429,11 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           </div>
 
           {/* Gender */}
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 col-span-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
               Gender *
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
               {[
                 { value: 'male', label: 'Male', icon: 'User' },
                 { value: 'female', label: 'Female', icon: 'User' },
@@ -434,7 +441,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               ].map((option) => (
                 <label
                   key={option.value}
-                  className={`flex items-center space-x-3 p-3 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast spa-touch-target ${
+                  className={`flex items-center justify-center space-x-1.5 sm:justify-start sm:space-x-3 p-2 sm:p-4 rounded-spa border-2 cursor-pointer spa-transition-fast spa-touch-target ${
                     customerInfo.gender === option.value
                       ? 'border-primary bg-primary/5' :'border-border hover:border-primary/50'
                   }`}
@@ -468,7 +475,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
               existing customer's referral is silently ignored by createBooking()
               anyway (see the notice above), so there's no point asking. */}
           {customerCheckStatus === 'new' && (
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 col-span-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
               How did they hear about us? (Optional)
             </label>
@@ -567,7 +574,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           )}
 
           {/* Special Requests */}
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 col-span-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
               Special Requests (Optional)
             </label>
