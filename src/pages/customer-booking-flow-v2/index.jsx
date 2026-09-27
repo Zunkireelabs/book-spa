@@ -300,17 +300,6 @@ const CustomerBookingFlowV2 = () => {
   const handleBranchSelect = (branch) => {
     setSelectedBranch(branch);
     setSelectedService(null); // Reset service when branch changes
-    if (currentStep === 1) {
-      capture('customer_booking_step_completed', {
-        step_index: 1,
-        step_name: stepNames[0],
-        org_slug: orgSlug,
-        branch_id: branch?.id,
-        time_on_step_ms: Date.now() - stepEnteredAt.current,
-        flow_variant: 'v2',
-      });
-      setCurrentStep(2);
-    }
   };
 
   const handleServiceSelect = (service) => {
@@ -618,7 +607,7 @@ const CustomerBookingFlowV2 = () => {
                       By confirming, you agree to our terms and conditions
                     </p>
                   </div>
-                ) : currentStep === 1 ? null : (
+                ) : (
                   <Button
                     variant="primary"
                     onClick={handleNext}
