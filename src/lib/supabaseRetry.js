@@ -8,12 +8,49 @@
 // widgets while the rest render fine. See
 // docs/superpowers/specs/2026-09-26-prod-transient-db-resilience-design.md
 //
-// Only these three SQLSTATEs are retried. All three guarantee the transaction
+// Only these four SQLSTATEs are retried. All four guarantee the transaction
 // rolled back with nothing committed, which is what makes retrying a *write*
 // provably safe rather than merely probably safe. Network errors, timeouts and
 // 57014 are deliberately excluded: there the write may have landed before the
 // response was lost, so a retry could double-apply it.
-export const RETRYABLE_PG_CODES = new Set(['25P02', '40001', '40P01']);
+//
+// 25P02 / 40001 / 40P01 are the original three (aborted transaction, serialization
+// failure, deadlock). 25P03 was added on 2026-09-26 after the idle-in-transaction
+// timeout incident: migration 226 shrank `authenticator`'s
+// idle_in_transaction_session_timeout to 5s, migration 227 recycled the pool to
+// make that reach production, and under this database's real cold-plan cost
+// (~4200ms cold vs ~150ms warm, RLS plans of ~671 nodes / 325+ nested InitPlans)
+// legitimate in-flight requests sat idle-in-transaction past 5s during the
+// dashboard's parallel fan-out and got killed mid-request with:
+//   FATAL: 25P03: terminating connection due to idle-in-transaction timeout
+// (verified empirically against staging by triggering the timeout directly).
+// Migration 228 reverted the timeout to 60s, but 25P03 belongs in this set
+// regardless of the current timeout value: an idle-timeout kill is infrastructure
+// terminating the connection, never an application-level failure, so the request
+// itself was never actually served — a fresh connection can safely reattempt it.
+// Same safety property as the other three: PostgreSQL kills the backend and rolls
+// the transaction back, so nothing was committed. The existing retry mechanics
+// already handle this correctly — a retry opens a brand-new request, which
+// PostgREST serves on a different (or freshly reopened) connection, so the user
+// should never see this code at all.
+//
+// LIMIT OF THIS ENTRY (2026-09-27): 25P03 is only retried when PostgREST returns
+// an HTTP *response* whose body carries the code. If the terminated backend
+// instead surfaces as a transport failure, `fetchImpl` throws and the catch
+// branch below rethrows without retrying, by design — a thrown request may have
+// landed. The tests in supabaseRetry.test.js mock a 500 with `{code:'25P03'}`,
+// so they pin the behaviour under that assumption rather than proving PostgREST
+// always reports it that way. Treat "users would never see 25P03" as holding for
+// the response-body path only.
+//
+// Correction (2026-09-27): the ~4200ms/~150ms figures above were measured on a
+// CPU-saturated nano during the incident, not a property of this database at
+// rest. On MICRO compute, idle: planning 4.139ms / execution 2.762ms for the
+// same query shape (48+ InitPlans). Plan complexity is real and still a
+// concurrency multiplier, but it is not a fixed multi-second cost — the nano
+// figures are kept above as the record of what saturation does, not as the
+// baseline.
+export const RETRYABLE_PG_CODES = new Set(['25P02', '40001', '40P01', '25P03']);
 
 // Codes that are routine application-level outcomes, never signal a poisoned
 // pool connection, and must not fire onError even though they arrive on a 4xx.
