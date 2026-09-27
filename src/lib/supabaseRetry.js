@@ -28,6 +28,14 @@
 // regardless of the current timeout value: an idle-timeout kill is infrastructure
 // terminating the connection, never an application-level failure, so the request
 // itself was never actually served — a fresh connection can safely reattempt it.
+//
+// Correction (2026-09-27): the ~4200ms/~150ms figures above were measured on a
+// CPU-saturated nano during the incident, not a property of this database at
+// rest. On MICRO compute, idle: planning 4.139ms / execution 2.762ms for the
+// same query shape (48+ InitPlans). Plan complexity is real and still a
+// concurrency multiplier, but it is not a fixed multi-second cost — the nano
+// figures are kept above as the record of what saturation does, not as the
+// baseline.
 // Same safety property as the other three: PostgreSQL kills the backend and rolls
 // the transaction back, so nothing was committed. The existing retry mechanics
 // already handle this correctly — a retry opens a brand-new request, which

@@ -39,6 +39,14 @@
 -- from which nothing can ever commit. Terminating one is provably incapable of
 -- dropping an in-flight request, which is exactly the property the 5s timeout
 -- lacked. Plain 'idle in transaction' and 'active' are never touched.
+--
+-- REMOVE ONCE H7/H8 ARE FIXED: this job runs every minute forever and is
+-- currently finding nothing on every run (measured 2026-09-27, ~18h window).
+-- It is a mitigation for the RLS-planning-cost chain above, not a permanent
+-- fixture — once that root cause (see
+-- docs/superpowers/specs/2026-09-27-perf-audit.md) is actually fixed, drop
+-- this cron job rather than leaving it running indefinitely as a safety net
+-- for a problem that no longer exists.
 
 BEGIN;
 

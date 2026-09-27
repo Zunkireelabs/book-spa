@@ -25,6 +25,14 @@
 -- in transaction" longer than 5 seconds during the dashboard's parallel
 -- query fan-out — a legitimate in-flight request, not a poisoned one.
 --
+-- Correction (2026-09-27): ~4200ms/~150ms above were measured on a
+-- CPU-saturated nano during the incident, not a fixed property of this
+-- database. On MICRO compute, idle: planning 4.139ms / execution 2.762ms for
+-- the same query shape (48+ InitPlans). Plan complexity is real and still a
+-- concurrency multiplier under load — this is why the fan-out above still
+-- happened — but it is not a fixed multi-second cost at rest. Kept as the
+-- record of what saturation does, not the baseline.
+--
 -- User-visible symptom: the 5s ceiling then killed those connections
 -- mid-request, surfacing as
 --   FATAL: 25P03: terminating connection due to idle-in-transaction timeout
