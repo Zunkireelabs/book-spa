@@ -1,4 +1,4 @@
--- Migration 229: reap poisoned (aborted-transaction) authenticator backends every minute
+-- Migration 229: reap poisoned (aborted-transaction) authenticator backends every 5 minutes
 -- Idempotent: CREATE OR REPLACE FUNCTION + cron.schedule upserts by job name.
 -- Applied: stage <pending> / prod <pending>.
 --
@@ -40,7 +40,7 @@
 -- dropping an in-flight request, which is exactly the property the 5s timeout
 -- lacked. Plain 'idle in transaction' and 'active' are never touched.
 --
--- REMOVE ONCE H7/H8 ARE FIXED: this job runs every minute forever and is
+-- REMOVE ONCE H7/H8 ARE FIXED: this job runs every 5 minutes forever and is
 -- currently finding nothing on every run (measured 2026-09-27, ~18h window).
 -- It is a mitigation for the RLS-planning-cost chain above, not a permanent
 -- fixture — once that root cause (see
@@ -82,11 +82,41 @@ $function$;
 COMMENT ON FUNCTION public.reap_aborted_authenticator_backends() IS
   'Terminates PostgREST authenticator backends stuck in an aborted transaction, which would otherwise serve 25P02 to every request routed to them. Mitigation for the RLS-planning-cost chain documented in migration 229 and docs/runbooks/rls-plan-complexity.md. Only touches state = ''idle in transaction (aborted)''.';
 
--- Every minute. cron.schedule upserts by job name, so re-running this
+-- Every 5 minutes. cron.schedule upserts by job name, so re-running this
 -- migration updates the existing job rather than creating a duplicate.
+--
+-- WHY 5 MINUTES AND NOT 1 (revised 2026-09-27, before this ever shipped):
+--
+-- An earlier draft of this migration ran every minute. That was redundant, and
+-- the redundancy was not free.
+--
+-- Redundant, because migration 228 (this same PR) sets
+-- idle_in_transaction_session_timeout = '60s' on the authenticator role, and
+-- that timeout applies to 'idle in transaction (aborted)' just as much as to
+-- plain 'idle in transaction' — an aborted transaction is still an open one.
+-- Postgres therefore already terminates a poisoned backend after 60s of idle
+-- time with no reaper involved. The reaper's only marginal contribution is
+-- lowering the MEAN time to detection; it cannot improve the worst case,
+-- because the 60s timeout is the binding constraint either way. Moving from
+-- 1-minute to 5-minute polling weakens the guarantee not at all.
+--
+-- Not free, because pg_cron writes one cron.job_run_details row per execution
+-- and never prunes it. Measured on production 2026-09-27: that table had
+-- reached 18,961 rows, and its own INSERT/UPDATE bookkeeping accounted for
+-- ~15% of ALL query execution time over an 18-hour window — more than every
+-- application query combined (~10.6%). At 1-minute cadence this job alone
+-- would add 1,440 rows/day; at 5 minutes, 288. On a MICRO instance chosen
+-- deliberately over scaling up, spending measurable CPU to record that a no-op
+-- ran 1,440 times a day is precisely the waste this audit exists to find.
+-- (Retention for that table lands separately in migration 230.)
+--
+-- The reaper is kept rather than dropped because it is a real safety net if
+-- idle_in_transaction_session_timeout is ever loosened back toward 0 — the
+-- pre-2026-09-25 setting, which is what let a poisoned connection serve 25P02
+-- indefinitely. It just does not need to run 1,440 times a day to do that.
 SELECT cron.schedule(
   'reap-aborted-authenticator',
-  '* * * * *',
+  '*/5 * * * *',
   $cron$SELECT public.reap_aborted_authenticator_backends()$cron$
 );
 
