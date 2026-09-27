@@ -37,10 +37,24 @@
 --     `VACUUM (ANALYZE) cron.job_run_details;` manually as a one-off — it is
 --     not a schema change and does not belong in the ledger.
 --
--- RETENTION WINDOW: 7 days. The busiest job (outreach-drain-outbox, every 5
--- minutes) produces 288 rows/day, so 7 days across all 5 jobs settles at
--- roughly 2.5k rows — two orders of magnitude below where it was, while still
--- covering a full week of incident history.
+-- RETENTION WINDOW: 7 days. Two jobs run every 5 minutes
+-- (outreach-drain-outbox and apply-due-staff-transfers) at 288 rows/day each,
+-- and the daily jobs add a handful, so the table settles at roughly 4k rows —
+-- about a 5x reduction from 19.8k, while still covering a full week of incident
+-- history.
+--
+-- Measured when applied to staging 2026-09-27: 19,807 rows -> 4,046, with
+-- 15,763 rows older than 7 days deleted and 0 remaining. Re-running the
+-- migration deleted 0 further rows and produced no duplicate cron job or
+-- ledger row, confirming idempotency.
+--
+-- NOTE ON RECLAIM: the row count drops immediately but the on-disk size does
+-- not — DELETE marks rows dead, it does not return pages to the OS. Staging
+-- stayed at 3,760 kB straight after the delete. This matters for expectations
+-- on production: the 54 ms INSERT and 8-second UPDATE will NOT improve the
+-- moment this migration lands. The bloat has to be reclaimed first, by
+-- autovacuum or by the one-off VACUUM noted above. Do not read an unchanged
+-- timing immediately post-deploy as this migration having failed.
 
 BEGIN;
 
