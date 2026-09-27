@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { capture } from '../../lib/analytics';
 import CustomerHeader from '../../components/ui/CustomerHeader';
@@ -14,6 +14,35 @@ import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { splitE164 } from '../../utils/phone';
 import useScrollCollapse from '../../hooks/useScrollCollapse';
+
+// Callback ref, not useRef + a useLayoutEffect keyed on [currentStep]: this page
+// returns an early "Loading..." placeholder while tenant data is still in flight, so
+// on a cold load the measured element's DOM node doesn't exist yet on the first
+// render any [currentStep]-keyed effect would run against. By the time tenant data
+// resolves and the real element mounts, currentStep is still 1 — unchanged — so that
+// effect's dependency never changes and React never re-runs it, leaving the measured
+// height stuck at 0 forever (until currentStep happens to change some other way,
+// e.g. advancing a step and coming back). A spacer sized from that stuck-at-0 height
+// reserves no space, so whatever's fixed above it sits on top of — crops — the
+// content underneath. A callback ref fires exactly when React actually
+// attaches/detaches this specific DOM node, for any reason, so it can't go stale
+// like this.
+function useMeasuredRef(setHeight) {
+  const observerRef = useRef(null);
+  return useCallback((el) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    if (!el) return;
+    setHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver(([entry]) => {
+      setHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(el);
+    observerRef.current = observer;
+  }, [setHeight]);
+}
 
 // v2 of the customer booking flow: identical business logic and steps to
 // pages/customer-booking-flow, except Service Selection + Date & Time are collapsed into a
@@ -41,44 +70,15 @@ const CustomerBookingFlowV2 = () => {
   // hidden at rest, appears once the customer has scrolled a bit, instead of sitting
   // there immediately above "Your Information"/"Confirm Booking" from the first frame.
   const topPreviousProgress = useScrollCollapse(120);
-  const topTitleInnerRef = useRef(null);
   const [topTitleHeight, setTopTitleHeight] = useState(0);
   // The title bar (Previous link + title) is `fixed`, not `sticky` — `sticky` inside
   // this `flex flex-col` <main> wasn't reliably staying put on desktop scroll. `fixed`
   // is the same proven approach CustomerHeader/ProgressIndicator already use, but it
   // takes the bar out of document flow entirely, so its own height has to be measured
   // and reserved as a spacer below it or the step content jumps up underneath it.
-  const topBarRef = useRef(null);
   const [topBarHeight, setTopBarHeight] = useState(0);
-
-  // useLayoutEffect + an immediate synchronous measurement (not a plain useEffect
-  // that waits for the ResizeObserver's first, inherently-async callback) — same
-  // reasoning as the scroll-reset effect above. Without this, topBarHeight/
-  // topTitleHeight briefly hold 0 (first mount) or the previous step's stale
-  // height (step change) for a frame, so the spacer under the fixed title bar is
-  // the wrong size: content renders cropped behind the bar, or a leftover gap
-  // shows where a taller title used to reserve space, until the observer catches up.
-  useLayoutEffect(() => {
-    const el = topTitleInnerRef.current;
-    if (!el) return;
-    setTopTitleHeight(el.getBoundingClientRect().height);
-    const observer = new ResizeObserver(([entry]) => {
-      setTopTitleHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [currentStep]);
-
-  useLayoutEffect(() => {
-    const el = topBarRef.current;
-    if (!el) return;
-    setTopBarHeight(el.getBoundingClientRect().height);
-    const observer = new ResizeObserver(([entry]) => {
-      setTopBarHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [currentStep]);
+  const topTitleInnerRef = useMeasuredRef(setTopTitleHeight);
+  const topBarRef = useMeasuredRef(setTopBarHeight);
 
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);

@@ -88,7 +88,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
     // has the data cached), which made it look like the crop only happened
     // "sometimes."
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-16 sm:pt-12 animate-pulse">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-4 sm:pt-6 animate-pulse">
         {[1, 2].map(i => (
           <div key={i} className="bg-surface rounded-spa-lg border-2 border-border overflow-hidden">
             <div className="h-40 sm:h-56 bg-border/40" />
@@ -109,7 +109,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-16 sm:pt-12">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-4 sm:pt-6">
       {branches.map((branch) => {
         const isSelected = selectedBranch?.id === branch.id;
         return (

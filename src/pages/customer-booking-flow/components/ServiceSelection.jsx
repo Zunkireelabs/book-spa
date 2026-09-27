@@ -164,6 +164,14 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
   const categoryBtnRefs = useRef({});
   const [categoriesHeight, setCategoriesHeight] = useState(0);
   const [firstRowCount, setFirstRowCount] = useState(null);
+  // Mobile's at-rest wrap (below): each row gets justify-between ONLY if it's
+  // already packed near-full (>=70% of the row's width) — same reasoning as
+  // row 1 on desktop. Applying it unconditionally to every wrapped line looked
+  // right for full rows but stretched a sparse trailing row (e.g. 3 pills left
+  // over on their own line) into huge, uneven gaps between just those few
+  // pills, which is worse than the dead space it was meant to fix.
+  const ROW_FILL_THRESHOLD = 0.7;
+  const [categoryRows, setCategoryRows] = useState([]);
   // Scrolled view: a single row, spreading to fill the width if it fits, or
   // scrolling horizontally (with a solid edge cover, never a mid-pill cut) if it
   // doesn't.
@@ -253,6 +261,48 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
 
     measure();
     const rafId = requestAnimationFrame(measure); // covers layout not yet settled this tick
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories.join('|'), selectedService]);
+
+  // Groups every category into its wrapped row (via the same offsetTop-clone
+  // technique as firstRowCount above, generalized past just row 1) and marks
+  // each row as "full" or "sparse" so the mobile render below can pick
+  // justify-between vs justify-start per row — see ROW_FILL_THRESHOLD.
+  useEffect(() => {
+    const container = categoriesInnerRef.current;
+    if (!container || categories.length === 0) return;
+
+    const measure = () => {
+      const containerWidth = container.offsetWidth;
+      if (!containerWidth) return;
+      const rows = [];
+      let currentTop = null;
+      for (const cat of categories) {
+        const el = categoryBtnRefs.current[cat];
+        if (!el) return; // not all buttons mounted yet
+        const top = el.offsetTop;
+        if (top !== currentTop) {
+          rows.push({ items: [], rightEdge: 0 });
+          currentTop = top;
+        }
+        const row = rows[rows.length - 1];
+        row.items.push(cat);
+        row.rightEdge = el.offsetLeft + el.offsetWidth;
+      }
+      setCategoryRows(rows.map(r => ({
+        items: r.items,
+        fillsRow: r.rightEdge / containerWidth >= ROW_FILL_THRESHOLD,
+      })));
+    };
+
+    measure();
+    const rafId = requestAnimationFrame(measure);
     const observer = new ResizeObserver(measure);
     observer.observe(container);
     return () => {
@@ -507,8 +557,27 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
 
                 return (
                   <>
-                    <div className="lg:hidden flex flex-wrap justify-start gap-x-1.5 gap-y-1.5 pr-2">
-                      {categories.map(renderPill)}
+                    {/* Each row rendered separately (categoryRows, measured above) so
+                        justify-between/justify-start can be picked per row — a full row
+                        fills to the edge, a sparse trailing row stays left-packed instead
+                        of stretching into huge gaps between just a couple of pills.
+                        Falls back to one plain justify-start wrap before the first
+                        measurement lands, so pills are never missing on first paint. */}
+                    <div className="lg:hidden">
+                      {categoryRows.length > 0 ? (
+                        categoryRows.map((row, i) => (
+                          <div
+                            key={i}
+                            className={`flex flex-wrap ${row.fillsRow ? 'justify-between' : 'justify-start'} gap-x-1.5 gap-y-1.5 pr-2 ${i > 0 ? 'mt-1.5' : ''}`}
+                          >
+                            {row.items.map((cat) => renderPill(cat))}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex flex-wrap justify-start gap-x-1.5 gap-y-1.5 pr-2">
+                          {categories.map(renderPill)}
+                        </div>
+                      )}
                     </div>
                     <div className="hidden lg:block">
                       {/* flex-wrap (not nowrap) on row 1 too — if firstRowCount is ever
@@ -548,7 +617,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
               <div
                 ref={compactCategoriesRef}
                 className={`flex flex-nowrap gap-1.5 sm:gap-1.5 ${
-                  compactCategoriesFit ? 'justify-between' : 'overflow-x-auto no-scrollbar snap-x snap-mandatory'
+                  compactCategoriesFit ? 'justify-between' : 'overflow-x-auto no-scrollbar snap-x snap-mandatory pr-6'
                 }`}
               >
                 {categories.map((category) => (
@@ -569,13 +638,22 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
                   categories, the compact row can fail to fit even on desktop's wider
                   (but still max-w-4xl-capped) column, silently clipping the last pill
                   with no signal that more is scrollable. Shown on all breakpoints now;
-                  still only rendered at all when `!compactCategoriesFit`. */}
+                  still only rendered at all when `!compactCategoriesFit`.
+                  The row above reserves `pr-6` in this state so the chevron always has
+                  clear space of its own — it used to sit directly over the last pill's
+                  trailing text (e.g. overlapping the "g" in "Threading") whenever that
+                  pill happened to end flush with the row's edge, with nothing reserved
+                  for it. A short fade (bg-background → transparent) behind the chevron
+                  also covers the case where the user has scrolled to a position where a
+                  pill sits partway under it, same "never a mid-pill cut" idea as the
+                  desktop seam-cover elsewhere in this file. */}
               {!compactCategoriesFit && (
                 <div
-                  className="pointer-events-none absolute inset-y-0 right-1 flex items-center spa-transition-fast"
+                  className="pointer-events-none absolute inset-y-0 right-0 flex items-center spa-transition-fast"
                   style={{ opacity: compactCategoriesAtEnd ? 0 : 1 }}
                 >
-                  <Icon name="ChevronRight" size={14} className="text-text-secondary" />
+                  <div className="h-full w-8 bg-gradient-to-r from-transparent to-background to-60%" />
+                  <Icon name="ChevronRight" size={14} className="text-text-secondary -ml-5" />
                 </div>
               )}
             </div>
