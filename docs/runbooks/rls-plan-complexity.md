@@ -110,3 +110,15 @@ problem.
 comparison before and after. The 2026-09-25 sweep used 336 comparisons across 56 tables × 6
 principals and found 0 mismatches — that's the bar. A plan-complexity optimization that silently
 changes who can see what is a materially worse outcome than the slow queries it was meant to fix.
+
+## Correction (2026-09-27)
+
+The 4200ms cold / 150ms warm baseline above was measured on a **CPU-saturated nano** during the
+2026-09-26 incident — it is a property of that saturation, not a fixed cost of this database.
+Re-measured on **MICRO** compute, idle, 2026-09-27, same query shape: planning 4.139ms /
+execution 2.762ms (48+ nested InitPlans). Plan complexity is still real and is still a
+concurrency multiplier — under enough parallel load it can still inflate the way the original
+4200ms figure shows — but it is not a several-second cost at rest. Keeping the original numbers
+above as the record of what saturation does under load; don't read them as the current baseline.
+See `docs/superpowers/specs/2026-09-27-perf-audit.md` for the fuller measured baseline (idle,
+prod, `pg_stat_statements`) and the ranked fix list this runbook feeds into.
