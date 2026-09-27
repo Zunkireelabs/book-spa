@@ -190,8 +190,20 @@ const LoginForm = () => {
         submit: 'Login succeeded but your staff profile was not found. Please contact an administrator.'
       });
     } catch (error) {
+      // Infrastructure failure (DB unreachable — 503/timeout, or an auth service
+      // 5xx) must not read as "wrong password" or "contact an administrator".
+      // Tell the user it's the server, and to retry.
+      const authStatus = Number(error?.status);
+      const isServiceDown =
+        error?.name === 'ServiceUnavailableError' ||
+        error?.isServiceUnavailable === true ||
+        authStatus >= 500 ||
+        error?.message === 'Failed to fetch';
+
       setErrors({
-        submit: error.message === 'Invalid login credentials'
+        submit: isServiceDown
+          ? "We're having trouble reaching the server right now. Please wait a moment and try again."
+          : error.message === 'Invalid login credentials'
           ? 'Invalid email or password/PIN. Please try again.'
           : error.message || 'An unexpected error occurred. Please try again.'
       });

@@ -56,10 +56,14 @@ jobs:
           ATTEMPTS=20
           failures=0
           aborted=0
+          unavailable=0
           min_ms=999999
           max_ms=0
           over_2s=0
           over_5s=0
+
+          bodyfile="$(mktemp)"
+          trap 'rm -f "$bodyfile"' EXIT
 
           # Probing bookings, not branches: branches?select=id&limit=1 plans in
           # ~1ms and is blind to RLS cold-plan cost. bookings?select=id&limit=1
@@ -72,14 +76,31 @@ jobs:
           # after this loop, below, since it's the one that can actually
           # detect "reachable but returning nothing".)
           for i in $(seq 1 $ATTEMPTS); do
-            response="$(curl -s --max-time 15 -w $'\nTIME:%{time_total}' \
+            # One curl capturing status, timing and body together: -w writes
+            # "<http_code> <time_total>" to stdout while -o puts the body in a
+            # file, so a single request yields all three without body and
+            # metadata interleaving.
+            #
+            # Status 000 means curl could not connect at all (TCP connect
+            # timeout — the 2026-09-26 outage, where the database instance was
+            # CPU-saturated and stopped accepting connections).
+            #
+            # Deliberately NO `|| echo` fallback. curl writes its -w output even
+            # when it exits non-zero, so a fallback appends a SECOND value and
+            # leaves status as "000\n000" — which compares unequal to "000" and
+            # would silently skip the unavailable branch on exactly the
+            # total-outage case that branch exists to catch. This step sets
+            # `set -uo pipefail` but NOT `-e`, so a non-zero curl does not abort
+            # it. If meta somehow comes back empty, status is "" and the probe
+            # falls through to the `!= 200` branch and counts as a failure —
+            # fail-closed, not silently OK.
+            meta="$(curl -s -o "$bodyfile" -w '%{http_code} %{time_total}' --max-time 15 \
               -H "apikey: $ANON_KEY" \
               -H "Authorization: Bearer $ANON_KEY" \
-              "$SUPABASE_URL/rest/v1/bookings?select=id&limit=1" \
-              || echo -e '{"code":"CURL_FAILED"}\nTIME:15.000')"
-
-            time_total="$(printf '%s' "$response" | grep '^TIME:' | tail -1 | sed 's/^TIME://')"
-            body="$(printf '%s' "$response" | sed '$d')"
+              "$SUPABASE_URL/rest/v1/bookings?select=id&limit=1")"
+            status="${meta%% *}"
+            time_total="${meta##* }"
+            body="$(cat "$bodyfile" 2>/dev/null || echo '')"
 
             # curl -w emits seconds as a decimal (e.g. 0.243, 4.200, 12.500).
             # Convert to integer milliseconds via awk so the rest of this
@@ -94,18 +115,32 @@ jobs:
             if [ "$ms" -gt 5000 ]; then over_5s=$((over_5s + 1)); fi
 
             if printf '%s' "$body" | grep -q '25P02'; then
+              # Pool connection stuck in an aborted transaction.
               aborted=$((aborted + 1))
-              echo "probe $i: ABORTED TRANSACTION (${ms}ms) -> $body"
+              echo "probe $i: ABORTED TRANSACTION (25P02) [HTTP $status] (${ms}ms) -> $body"
+            # The 25P02 check above MUST stay first: PostgREST serves an aborted
+            # transaction as HTTP 500, so testing status before body would
+            # miscount every 25P02 as a generic "unavailable" and lose the
+            # single most actionable signal this monitor has.
+            elif [ "$status" = "000" ] || [ "$status" -ge 500 ] 2>/dev/null; then
+              # 000 = could not connect; 5xx = PostgREST/proxy could not serve
+              # (503 = no database connection available). This is the class the
+              # old body-only check missed and stayed green through.
+              unavailable=$((unavailable + 1))
+              echo "probe $i: SERVICE UNAVAILABLE [HTTP $status] (${ms}ms) -> $body"
+            elif [ "$status" != "200" ]; then
+              failures=$((failures + 1))
+              echo "probe $i: unexpected status [HTTP $status] (${ms}ms) -> $body"
             elif printf '%s' "$body" | grep -q '"code"'; then
               failures=$((failures + 1))
-              echo "probe $i: error (${ms}ms) -> $body"
+              echo "probe $i: error body [HTTP $status] (${ms}ms) -> $body"
             else
-              echo "probe $i: ok (${ms}ms)"
+              echo "probe $i: ok [HTTP $status] (${ms}ms)"
             fi
           done
 
           echo ""
-          echo "=== $ATTEMPTS probes: $aborted aborted, $failures other errors ==="
+          echo "=== $ATTEMPTS probes: $aborted aborted, $unavailable unavailable, $failures other errors ==="
           echo "=== latency: min=${min_ms}ms max=${max_ms}ms | over 2000ms: $over_2s | over 5000ms: $over_5s ==="
 
           if [ "$aborted" -gt 0 ]; then
@@ -113,6 +148,15 @@ jobs:
             echo "A PostgREST pool connection is stuck in an aborted transaction."
             echo "Pull Postgres ERROR logs now (Supabase -> Logs -> Postgres) — the"
             echo "originating error is only visible there, and only briefly."
+            exit 1
+          fi
+
+          if [ "$unavailable" -gt 0 ]; then
+            echo "FAIL: production is unreachable/5xx on $unavailable/$ATTEMPTS probes."
+            echo "PostgREST cannot serve requests — most often the database instance"
+            echo "is not accepting connections (CPU/connection/resource exhaustion)."
+            echo "Check Supabase -> Reports (Compute/CPU, Memory, connections) and the"
+            echo "project health panel; this is the 2026-09-26 failure class."
             exit 1
           fi
 

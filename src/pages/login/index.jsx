@@ -104,6 +104,14 @@ const StaffLoginAuthentication = () => {
             Access your staff portal
           </p>
 
+          {/* Service-unavailable banner: shown when the health probe can't reach
+              the database, so staff aren't left guessing why login fails. */}
+          {dbStatus === 'offline' && (
+            <div className="w-full mb-5 px-4 py-3 rounded-spa bg-warning/10 border border-warning/30 text-sm text-warning text-center">
+              We're having trouble reaching the server. Login may not work right now — please try again shortly.
+            </div>
+          )}
+
           {/* Login Form Card */}
           <div className="w-full">
             <LoginForm />
