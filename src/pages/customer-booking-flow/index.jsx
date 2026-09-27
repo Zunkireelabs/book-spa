@@ -408,9 +408,16 @@ const CustomerBookingFlow = () => {
 
       {/* Main Content */}
       <main className="max-w-4xl mx-auto px-4 py-4 lg:py-6">
-        {/* Step Header — Step 2 renders its own header inside ServiceSelection */}
+        {/* Step Header — Step 2 renders its own (collapsing) sticky header inside
+            ServiceSelection. This one is plain (no collapse animation), so it
+            can stay pinned with just `sticky` + an opaque background — no
+            scroll-driven height juggling needed, since its own height never
+            changes, only what's-selected-below it in the DOM. */}
         {currentStep !== 2 && (
-          <div className="text-center mb-4">
+          <div
+            className="sticky z-sticky-filter bg-background text-center pt-4 pb-4 mb-4"
+            style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
+          >
             <div className="flex items-center justify-center space-x-2 mb-2">
               <Icon name="Sparkles" size={20} className="text-primary" />
               <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">

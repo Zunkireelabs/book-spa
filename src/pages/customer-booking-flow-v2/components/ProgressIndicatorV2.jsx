@@ -18,18 +18,20 @@ const ProgressIndicatorV2 = ({ currentStep, totalSteps, wide }) => {
   return (
     <div
       ref={barRef}
-      className="w-full bg-surface border-b border-border sticky left-0 right-0 z-header"
+      className="w-full bg-surface border-b border-border fixed left-0 right-0 z-header"
       style={{ top: 'var(--customer-header-h, 64px)' }}
     >
       {/* The outer bar matches the header's own widening (`wide`, same as
           CustomerHeader) so the two stay consistent once the page expands for the
           drawer — only on this page, only once it's actually expanded. The inner
-          icon row itself, though, always stays a fixed compact width: letting it
-          stretch to fill that wider bar (or capping each connector segment
-          individually) is what made the connecting lines look broken/disconnected
-          before. It just recenters within whichever width the outer bar is. */}
+          icon row widens a step too (max-w-2xl -> max-w-4xl) so it isn't left as a
+          small fixed island in a much wider bar, but stays capped well short of the
+          full 95vw bar — the connector lines are `flex-1` and stretch to fill
+          whatever width they're given, so letting them stretch the *entire* bar
+          made them disproportionately long/"broken-looking" next to the icons. */}
       <div className={`mx-auto px-4 py-1 sm:py-2 ${wide ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl'}`}>
-        <div className="flex items-center mx-auto max-w-2xl -translate-x-24">
+        <div className="flex justify-center">
+          <div className={`flex items-center w-full ${wide ? 'max-w-[280px] sm:max-w-3xl' : 'max-w-[280px] sm:max-w-2xl'}`}>
           {steps.map((step, index) => (
             <React.Fragment key={step.id}>
               <div className="flex flex-col items-center flex-shrink-0">
@@ -56,6 +58,7 @@ const ProgressIndicatorV2 = ({ currentStep, totalSteps, wide }) => {
               )}
             </React.Fragment>
           ))}
+        </div>
         </div>
 
         <div className="sm:hidden mt-2 text-center leading-tight">
