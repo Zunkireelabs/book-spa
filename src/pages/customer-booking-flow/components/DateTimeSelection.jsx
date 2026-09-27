@@ -230,10 +230,15 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
     return null;
   };
 
-  const formatQuickPickLabel = (slot) => {
+  // Split into date/time parts (rather than one combined string) so the button can
+  // always render date on its own line and time on the next — a single wrapped
+  // string breaks at whatever width happens to be available, which split "11:30 AM"
+  // itself across lines rather than the clean "date, then time" split every card
+  // should have.
+  const formatQuickPickParts = (slot) => {
     const dateInfo = dates.find((d) => d.fullDate === slot.date);
     const dayLabel = dateInfo?.isToday ? 'Today' : dateInfo ? `${dateInfo.dayName} ${dateInfo.dayNumber}` : slot.date;
-    return `${dayLabel}, ${slot.time12}`;
+    return { dayLabel, time: slot.time12 };
   };
 
   return (
@@ -308,25 +313,29 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
 
       {/* Quick picks — nearest real openings across the whole window */}
       {!loadingSlots && nearestSlots.length > 0 && (
-        <div className="bg-surface rounded-spa-lg border border-border p-6">
-          <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
+        <div className="bg-surface rounded-spa-lg border border-border p-4">
+          <h3 className="font-heading font-heading-medium text-base text-text-primary mb-3">
             Quick Picks — Next Available
           </h3>
           <div className="grid grid-cols-3 gap-2">
-            {nearestSlots.map((slot, i) => (
-              <button
-                key={`${slot.date}-${slot.time24}-${i}`}
-                onClick={() => handleQuickPick(slot)}
-                className={`flex flex-col items-center justify-center text-center gap-1 px-2 py-2 rounded-spa border spa-transition-fast spa-touch-target ${
-                  selectedDate === slot.date && selectedTime === slot.time24
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-border hover:border-primary/50 text-text-primary'
-                }`}
-              >
-                <Icon name="Zap" size={14} />
-                <span className="font-body font-body-medium text-xs sm:text-sm min-w-0 break-words">{formatQuickPickLabel(slot)}</span>
-              </button>
-            ))}
+            {nearestSlots.map((slot, i) => {
+              const { dayLabel, time } = formatQuickPickParts(slot);
+              return (
+                <button
+                  key={`${slot.date}-${slot.time24}-${i}`}
+                  onClick={() => handleQuickPick(slot)}
+                  className={`flex flex-col items-center justify-center text-center gap-0.5 px-2 py-1.5 rounded-spa border spa-transition-fast spa-touch-target ${
+                    selectedDate === slot.date && selectedTime === slot.time24
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border hover:border-primary/50 text-text-primary'
+                  }`}
+                >
+                  <Icon name="Zap" size={12} className="shrink-0" />
+                  <span className="font-body font-body-medium text-xs">{dayLabel}</span>
+                  <span className="font-body font-body-medium text-xs">{time}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -365,7 +374,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
               <button
                 key={date.fullDate}
                 onClick={() => handleDateSelect(date.fullDate)}
-                className={`relative flex flex-col items-center p-3 rounded-spa spa-transition-fast spa-touch-target ${
+                className={`relative flex flex-col items-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
                   isSelected
                     ? 'bg-primary text-primary-foreground'
                     : isFull
@@ -386,17 +395,17 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                     {isFull ? 'Full' : 'Low'}
                   </span>
                 )}
-                <span className="font-caption font-caption-normal text-xs mb-1">
+                <span className="font-caption font-caption-normal text-[10px] mb-0.5">
                   {date.dayName}
                 </span>
-                <span className="font-heading font-heading-semibold text-lg">
+                <span className="font-heading font-heading-semibold text-base">
                   {date.dayNumber}
                 </span>
-                <span className="font-caption font-caption-normal text-xs">
+                <span className="font-caption font-caption-normal text-[10px]">
                   {date.monthName}
                 </span>
                 {date.isToday && (
-                  <div className={`w-1 h-1 rounded-full mt-1 ${isSelected ? 'bg-primary-foreground' : 'bg-accent'}`}></div>
+                  <div className={`w-1 h-1 rounded-full mt-0.5 ${isSelected ? 'bg-primary-foreground' : 'bg-accent'}`}></div>
                 )}
               </button>
             );
@@ -417,13 +426,13 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
               <p className="font-body font-body-normal text-text-secondary">Checking availability...</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 @sm:grid-cols-5 @2xl:grid-cols-6 gap-3">
+            <div className="grid grid-cols-3 @sm:grid-cols-5 @2xl:grid-cols-6 gap-2">
               {timeSlots.map((slot) => (
                 <button
                   key={slot.time24}
                   onClick={() => slot.isAvailable && handleTimeSelect(slot.time24)}
                   disabled={!slot.isAvailable}
-                  className={`flex flex-col items-center p-3 rounded-spa spa-transition-fast spa-touch-target ${
+                  className={`flex flex-col items-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
                     !slot.isAvailable
                       ? 'opacity-50 cursor-not-allowed bg-background text-text-secondary'
                       : selectedTime === slot.time24
@@ -431,7 +440,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                         : 'hover:bg-background text-text-secondary hover:text-text-primary border border-border hover:border-primary/50'
                   }`}
                 >
-                  <span className="font-body font-body-medium text-sm mb-1">
+                  <span className="font-body font-body-medium text-xs mb-0.5">
                     {slot.time12}
                   </span>
                   {slot.isAvailable && (
@@ -440,7 +449,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                     </div>
                   )}
                   {slot.isPast && (
-                    <span className="font-caption text-xs text-text-secondary">Past</span>
+                    <span className="font-caption text-[10px] text-text-secondary">Past</span>
                   )}
                 </button>
               ))}
