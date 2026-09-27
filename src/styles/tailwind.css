@@ -192,6 +192,39 @@
     min-height: 44px;
     min-width: 44px;
   }
+
+  /* Hides the scrollbar on a horizontally-scrollable strip (category chips)
+     while keeping it scrollable — the scrollbar itself adds nothing for a
+     touch/swipe strip and looks out of place under the pills. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Cards/text fade + rise in as they scroll into view, and fade + lift out as
+     they scroll past — driven natively by the scroll position itself
+     (animation-timeline: view()) instead of a JS scroll listener, so it's
+     compositor-driven and never adds scroll jank. @supports gates the whole
+     rule (including the `animation` shorthand): browsers without support get
+     no animation at all and stay at the default opacity: 1 — visible, never
+     stuck hidden. */
+  @supports (animation-timeline: view()) {
+    .scroll-reveal {
+      animation: spa-scroll-reveal linear both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+  }
+}
+
+@keyframes spa-scroll-reveal {
+  0% { opacity: 0; transform: translateY(16px); }
+  20% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-10px); }
 }
 
 /* ── FullCalendar Zenly Theme ─────────────────────────────── */
@@ -361,6 +394,16 @@
 
 .bookspa-calendar .fc .fc-scroller::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ── Fully hidden scrollbar (scroll still works, e.g. horizontal pill rows) ── */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 /* ── Sidebar thin scrollbar ──────────────────────────────────── */

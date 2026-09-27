@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { capture } from '../../lib/analytics';
 import CustomerHeader from '../../components/ui/CustomerHeader';
@@ -13,6 +13,7 @@ import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { splitE164 } from '../../utils/phone';
+import useScrollCollapse from '../../hooks/useScrollCollapse';
 
 // v2 of the customer booking flow: identical business logic and steps to
 // pages/customer-booking-flow, except Service Selection + Date & Time are collapsed into a
@@ -26,22 +27,58 @@ const CustomerBookingFlowV2 = () => {
   const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  // Step 2's floating "Previous" button only appears once the customer has
-  // scrolled past the top of the service list (at the top it would just
-  // duplicate a control that's already in reach) AND the real Previous button
-  // — rendered in its normal spot right after the service grid, see prevBtnRef
-  // — has scrolled out of view. That way it never doubles up with, or floats
-  // on top of, the real one once the customer reaches the bottom of the page.
+  // Desktop-only floating "Previous" (see the `hidden lg:block` on its wrapper below):
+  // shows once the customer has scrolled past the top of the service list AND the
+  // real Previous button — rendered by ServiceBookingPanel right after the service
+  // grid, see prevBtnRef — has scrolled out of view. It docks at that same real
+  // button's left edge, so with only a few cards (real button already on screen,
+  // nothing to scroll past) it never appears — the real one is simply visible in
+  // place below the cards instead.
   const [showFloatingPrev, setShowFloatingPrev] = useState(false);
   const [floatingPrevLeft, setFloatingPrevLeft] = useState(null);
   const prevBtnRef = useRef(null);
-  // Same pattern for step 1's "Enter Details" button: floats on the right from the
-  // moment the customer lands on the branch list, then stops (hides) the instant
-  // the real button — rendered in its normal spot right after the branch cards,
-  // right-aligned even on mobile, see enterDetailsBtnRef — scrolls into view. It
-  // "docks" there instead of continuing to float past it.
-  const [showFloatingEnterDetails, setShowFloatingEnterDetails] = useState(false);
-  const enterDetailsBtnRef = useRef(null);
+  // Same fade-in-on-scroll treatment as step 2's (Choose Service) inline "Previous" —
+  // hidden at rest, appears once the customer has scrolled a bit, instead of sitting
+  // there immediately above "Your Information"/"Confirm Booking" from the first frame.
+  const topPreviousProgress = useScrollCollapse(120);
+  const topTitleInnerRef = useRef(null);
+  const [topTitleHeight, setTopTitleHeight] = useState(0);
+  // The title bar (Previous link + title) is `fixed`, not `sticky` — `sticky` inside
+  // this `flex flex-col` <main> wasn't reliably staying put on desktop scroll. `fixed`
+  // is the same proven approach CustomerHeader/ProgressIndicator already use, but it
+  // takes the bar out of document flow entirely, so its own height has to be measured
+  // and reserved as a spacer below it or the step content jumps up underneath it.
+  const topBarRef = useRef(null);
+  const [topBarHeight, setTopBarHeight] = useState(0);
+
+  // useLayoutEffect + an immediate synchronous measurement (not a plain useEffect
+  // that waits for the ResizeObserver's first, inherently-async callback) — same
+  // reasoning as the scroll-reset effect above. Without this, topBarHeight/
+  // topTitleHeight briefly hold 0 (first mount) or the previous step's stale
+  // height (step change) for a frame, so the spacer under the fixed title bar is
+  // the wrong size: content renders cropped behind the bar, or a leftover gap
+  // shows where a taller title used to reserve space, until the observer catches up.
+  useLayoutEffect(() => {
+    const el = topTitleInnerRef.current;
+    if (!el) return;
+    setTopTitleHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver(([entry]) => {
+      setTopTitleHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [currentStep]);
+
+  useLayoutEffect(() => {
+    const el = topBarRef.current;
+    if (!el) return;
+    setTopBarHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver(([entry]) => {
+      setTopBarHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [currentStep]);
 
   // Booking state
   const [selectedBranch, setSelectedBranch] = useState(null);
@@ -89,6 +126,18 @@ const CustomerBookingFlowV2 = () => {
   const totalSteps = 5;
   const stepNames = ['branch_selection', 'service_datetime_selection', 'customer_details', 'booking_confirmation', 'booking_success'];
   const stepEnteredAt = useRef(Date.now());
+
+  // useLayoutEffect (not useEffect) — must run and repaint BEFORE the browser
+  // shows the new step's first frame. Without this, moving to the next step
+  // keeps whatever scroll position the previous step was left at (e.g.
+  // scrolling down the branch list before tapping one), so the new step's
+  // scroll-collapse chrome (ServiceSelection's sticky header, the "Previous"
+  // fade-in, the floating Previous button) reads that leftover scrollY on its
+  // very first render — a regular useEffect fires only after that stale frame
+  // has already painted, which is exactly the glitch/flash this was seeing.
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [currentStep]);
 
   useEffect(() => {
     if (currentStep >= 5) return;
@@ -172,10 +221,9 @@ const CustomerBookingFlowV2 = () => {
       const realBtnRect = prevBtnRef.current?.getBoundingClientRect();
       const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
       setShowFloatingPrev(pastTop && !realBtnVisible);
-      // Measured from the real inline button's own position rather than a
-      // viewport-width calc — the content's left edge/width has changed several
-      // times (max-w-3xl, max-w-2xl, max-w-4xl...) and a calc tuned to any one of
-      // those silently drifts out of alignment the next time it changes again.
+      // Measured from the real inline button's own position so the floating copy
+      // docks exactly where the real one sits, rather than a hardcoded left offset
+      // that would drift whenever the layout's max-width changes.
       if (realBtnRect) {
         setFloatingPrevLeft(realBtnRect.left);
       }
@@ -195,30 +243,6 @@ const CustomerBookingFlowV2 = () => {
       resizeObserver.disconnect();
     };
   }, [currentStep, selectedService]);
-
-  useEffect(() => {
-    if (currentStep !== 1) {
-      setShowFloatingEnterDetails(false);
-      return;
-    }
-    const onScroll = () => {
-      const realBtnRect = enterDetailsBtnRef.current?.getBoundingClientRect();
-      const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
-      setShowFloatingEnterDetails(!realBtnVisible);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-    // Same as above: branches load async, so the real button's position (right
-    // after the branch cards) can shift after this effect's initial measurement.
-    const resizeObserver = new ResizeObserver(onScroll);
-    resizeObserver.observe(document.body);
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-      resizeObserver.disconnect();
-    };
-  }, [currentStep, selectedBranch]);
 
   const handleNext = async () => {
     if (!canProceed()) return;
@@ -276,6 +300,17 @@ const CustomerBookingFlowV2 = () => {
   const handleBranchSelect = (branch) => {
     setSelectedBranch(branch);
     setSelectedService(null); // Reset service when branch changes
+    if (currentStep === 1) {
+      capture('customer_booking_step_completed', {
+        step_index: 1,
+        step_name: stepNames[0],
+        org_slug: orgSlug,
+        branch_id: branch?.id,
+        time_on_step_ms: Date.now() - stepEnteredAt.current,
+        flow_variant: 'v2',
+      });
+      setCurrentStep(2);
+    }
   };
 
   const handleServiceSelect = (service) => {
@@ -363,6 +398,8 @@ const CustomerBookingFlowV2 = () => {
             onGenderPreferenceChange={handleGenderPreferenceChange}
             onContinue={handleNext}
             canContinue={!!selectedDateTime.date && !!selectedDateTime.time}
+            onPrevious={handlePrevious}
+            prevButtonRef={prevBtnRef}
           />
         );
 
@@ -448,7 +485,18 @@ const CustomerBookingFlowV2 = () => {
   const wideOpen = currentStep === 2 && selectedService !== null;
 
   return (
-    <div className="min-h-screen bg-background" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+    <div
+      className="min-h-screen bg-background"
+      style={{
+        // ProgressIndicatorV2 is `fixed`, not `sticky` (see that component for why),
+        // so unlike sticky it no longer auto-reserves its own space in the page's
+        // normal flow — that space has to be added here explicitly, and only while
+        // it's actually rendered (currentStep < 5), or content starts underneath it.
+        paddingTop: currentStep < 5
+          ? 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))'
+          : 'var(--customer-header-h, 64px)',
+      }}
+    >
       <CustomerHeader wide={wideOpen} />
 
       {currentStep < 5 && (
@@ -461,108 +509,154 @@ const CustomerBookingFlowV2 = () => {
 
       <main
         className={
-          (wideOpen
-            ? 'mx-auto px-4 py-4 lg:py-6 max-w-4xl lg:max-w-[1600px]'
-            : 'mx-auto px-4 py-4 lg:py-6 max-w-4xl') + ' flex flex-col'
+          'mx-auto px-4 py-4 lg:py-6 flex flex-col ' +
+          (wideOpen ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl')
         }
         style={{ minHeight: 'calc(100vh - var(--customer-header-h, 64px) - var(--progress-indicator-h, 0px))' }}
       >
         {currentStep !== 2 && (
-          <div className="text-center mb-4">
-            <div className="flex items-center justify-center space-x-2 mb-2">
-              <Icon name="Sparkles" size={20} className="text-primary" />
-              <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                {getStepTitle()}
-              </h1>
+          <>
+            {/* Fixed pinned bar (matching the service page's title/search block) whose
+                title collapses away as "Previous" fades in once scrolled — hidden at
+                rest so it doesn't sit there from the very first frame. `fixed`, not
+                `sticky` — sticky inside this flex-col <main> wasn't reliably staying
+                pinned on desktop scroll, same proven approach as CustomerHeader/
+                ProgressIndicatorV2 instead. Being `fixed` takes it out of document
+                flow, so its own rendered height is measured (topBarRef/topBarHeight)
+                and reserved via the spacer div right after it, so content doesn't
+                jump up underneath it. The inner div mirrors <main>'s own
+                mx-auto/px-4/max-w so the bar's content lines up with the page below it. */}
+            <div
+              ref={topBarRef}
+              className="fixed left-0 right-0 z-sticky-filter bg-background"
+              style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
+            >
+              <div className={'mx-auto px-4 py-2 ' + (wideOpen ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl')}>
+                {/* Mobile only — desktop already has a real "Previous" button in the
+                    bottom nav row, so this compact fading link would just duplicate it. */}
+                {currentStep > 1 && currentStep < 5 && (
+                  <div
+                    className="lg:hidden overflow-hidden [overflow-anchor:none]"
+                    style={{
+                      maxHeight: 32 * topPreviousProgress,
+                      opacity: topPreviousProgress,
+                      marginBottom: 4 * topPreviousProgress,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={handlePrevious}
+                      className="flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast spa-touch-target"
+                    >
+                      <Icon name="ChevronLeft" size={16} />
+                      <span className="font-body font-body-medium text-sm">Previous</span>
+                    </button>
+                  </div>
+                )}
+                {/* Collapses away as "Previous" fades in (both driven by the same
+                    topPreviousProgress), same as step 2's title — so once scrolled, only
+                    "Previous" remains in this pinned bar, not both stacked together.
+                    Desktop has nothing to fade INTO (no Previous link there, see above),
+                    so its title stays fully visible instead of collapsing to nothing. */}
+                <div
+                  className="text-center overflow-hidden [overflow-anchor:none] lg:!max-h-none lg:!opacity-100"
+                  style={{
+                    maxHeight: topTitleHeight ? topTitleHeight * (1 - topPreviousProgress) : undefined,
+                    opacity: 1 - topPreviousProgress,
+                  }}
+                >
+                  <div ref={topTitleInnerRef}>
+                    <div className="flex items-center justify-center space-x-2 mb-1">
+                      <Icon name="Sparkles" size={20} className="text-primary" />
+                      <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                        {getStepTitle()}
+                      </h1>
+                    </div>
+                    {currentStep < 5 && (
+                      <p className="font-body font-body-normal text-text-secondary">
+                        Step {currentStep} of 4 - {getBookingJourneyText()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-            {currentStep < 5 && (
-              <p className="font-body font-body-normal text-text-secondary">
-                Step {currentStep} of 4 - {getBookingJourneyText()}
-              </p>
-            )}
-          </div>
+            <div style={{ height: topBarHeight }} className="mb-2" />
+          </>
         )}
 
         <div className="mb-4 sm:mb-8">
           {renderStepContent()}
         </div>
 
-        {/* Navigation — step 2 has its own Continue button inside the booking panel */}
+        {/* Navigation — step 2 has its own Continue button inside the booking panel.
+            Previous/Enter Details always share one row (justify-between), even on
+            mobile — Find Existing Booking gets its own row below instead of
+            crowding into that same row. */}
         {currentStep < 5 && currentStep !== 2 && (
-          <div ref={currentStep === 1 ? enterDetailsBtnRef : undefined} className="flex flex-col sm:flex-row gap-2 sm:gap-4 justify-between mt-auto pt-6">
-            <div className="flex space-x-4">
-              {currentStep > 1 && (
-                <Button
-                  variant="outline"
-                  onClick={handlePrevious}
-                  iconName="ChevronLeft"
-                  iconSize={16}
-                  disabled={isLoading}
-                >
-                  Previous
-                </Button>
-              )}
+          <div className="flex flex-col gap-3 mt-6">
+            <div className="flex items-center justify-end lg:justify-between gap-2">
+              {/* Desktop only — mobile uses the sticky fading "Previous" link at the
+                  top of the page instead (see above). */}
+              <div className="hidden lg:block">
+                {currentStep > 1 && (
+                  <Button
+                    variant="outline"
+                    onClick={handlePrevious}
+                    iconName="ChevronLeft"
+                    iconSize={16}
+                    disabled={isLoading}
+                  >
+                    Previous
+                  </Button>
+                )}
+              </div>
+              <div>
+                {currentStep === 4 ? (
+                  <div className="text-center">
+                    <p className="font-caption font-caption-normal text-xs text-text-secondary mb-2">
+                      By confirming, you agree to our terms and conditions
+                    </p>
+                  </div>
+                ) : currentStep === 1 ? null : (
+                  <Button
+                    variant="primary"
+                    onClick={handleNext}
+                    iconName="ChevronRight"
+                    iconPosition="right"
+                    iconSize={16}
+                    disabled={!canProceed() || isLoading}
+                    loading={isLoading}
+                    className="spa-touch-target"
+                  >
+                    Enter Details
+                  </Button>
+                )}
+              </div>
+            </div>
 
+            <div className="flex justify-center sm:justify-start">
               <Button
                 variant="text"
                 onClick={() => navigate('/booking-management-portal')}
                 iconName="Search"
                 iconSize={16}
                 disabled={isLoading}
+                className="text-primary"
               >
                 Find Existing Booking
               </Button>
             </div>
-
-            <div className="flex space-x-4">
-              {currentStep === 4 ? (
-                <div className="text-center">
-                  <p className="font-caption font-caption-normal text-xs text-text-secondary mb-2">
-                    By confirming, you agree to our terms and conditions
-                  </p>
-                </div>
-              ) : (
-                <Button
-                  variant="primary"
-                  onClick={handleNext}
-                  iconName="ChevronRight"
-                  iconPosition="right"
-                  iconSize={16}
-                  disabled={!canProceed() || isLoading}
-                  loading={isLoading}
-                  className="spa-touch-target"
-                >
-                  Enter Details
-                </Button>
-              )}
-            </div>
           </div>
         )}
 
-        {/* Step 2's own back control — lives in its normal spot right after the
-            service grid. The service grid is long, so a floating copy (below)
-            keeps it reachable while scrolling; it hides once this real one
-            scrolls into view, so at the bottom of the page it's exactly here —
-            never stacked on top of the footer. */}
-        {currentStep === 2 && (
-          <div ref={prevBtnRef} className="mt-4">
-            <Button
-              variant="outline"
-              onClick={handlePrevious}
-              iconName="ChevronLeft"
-              iconSize={16}
-            >
-              Previous
-            </Button>
-          </div>
-        )}
-
-        {/* Positioned from the real inline button's measured left edge (floatingPrevLeft),
-            minus its own width plus a small gap, so it sits just left of the content
-            no matter what width `main` is currently using. */}
+        {/* Desktop-only floating "Previous" — sits in the gutter to the left of the
+            real button/grid (measured from the real button's own left edge minus its
+            width plus a gap), never on top of the cards, and docks there once the
+            real button scrolls into view. */}
         {currentStep === 2 && showFloatingPrev && (
           <div
-            className={`fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 lg:bottom-6 z-dropdown ${selectedService ? 'hidden lg:block' : ''}`}
+            className="hidden lg:block fixed bottom-6 z-dropdown"
             style={floatingPrevLeft !== null ? { left: `max(1rem, ${floatingPrevLeft - 136}px)` } : undefined}
           >
             <Button
@@ -577,22 +671,6 @@ const CustomerBookingFlowV2 = () => {
           </div>
         )}
 
-        {currentStep === 1 && showFloatingEnterDetails && (
-          <div className="lg:hidden fixed bottom-4 right-4 z-dropdown">
-            <Button
-              variant="primary"
-              onClick={handleNext}
-              iconName="ChevronRight"
-              iconPosition="right"
-              iconSize={16}
-              disabled={!canProceed() || isLoading}
-              loading={isLoading}
-              className="spa-touch-target shadow-spa-elevated"
-            >
-              Enter Details
-            </Button>
-          </div>
-        )}
       </main>
 
       <footer className="bg-surface border-t border-border mt-16">

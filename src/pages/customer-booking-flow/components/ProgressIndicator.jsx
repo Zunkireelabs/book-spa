@@ -17,8 +17,8 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
   return (
     <div
       ref={barRef}
-      className="w-full bg-surface border-b border-border fixed left-0 right-0 z-header"
-      style={{ top: 'var(--customer-header-h, 64px)' }}
+      className="w-full bg-surface fixed left-0 right-0 z-header"
+      style={{ top: 'var(--customer-header-h, 88px)' }}
     >
       <div className="max-w-4xl mx-auto px-4 py-1 sm:py-2">
         <div className="flex items-center">
@@ -57,6 +57,16 @@ const ProgressIndicator = ({ currentStep, totalSteps }) => {
           </span>
         </div>
       </div>
+      <div
+        className="pointer-events-none absolute left-0 right-0 -bottom-5 h-5"
+        style={{
+          background: `linear-gradient(to bottom,
+            color-mix(in srgb, var(--color-surface) 55%, transparent) 0%,
+            color-mix(in srgb, var(--color-surface) 30%, transparent) 30%,
+            color-mix(in srgb, var(--color-surface) 12%, transparent) 60%,
+            transparent 100%)`,
+        }}
+      />
     </div>
   );
 };

@@ -79,40 +79,75 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   }
 
   if (loading) {
+    // Mirrors the real card's structure/height exactly (image block + text rows
+    // below it) rather than a single placeholder box — a skeleton with a
+    // different height than the real card causes a layout jump the instant the
+    // branches finish loading. That jump is most visible on a cold page load
+    // (slow, uncached branch + image fetches leave the skeleton on screen for a
+    // while) and easy to miss on a warm one (e.g. re-entering this step already
+    // has the data cached), which made it look like the crop only happened
+    // "sometimes."
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-pulse">
-        {[1, 2].map(i => <div key={i} className="h-64 bg-surface rounded-spa-lg border-2 border-border" />)}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-16 sm:pt-12 animate-pulse">
+        {[1, 2].map(i => (
+          <div key={i} className="bg-surface rounded-spa-lg border-2 border-border overflow-hidden">
+            <div className="h-40 sm:h-56 bg-border/40" />
+            <div className="p-3 sm:p-5 space-y-1.5 sm:space-y-3">
+              <div className="space-y-1.5">
+                <div className="h-4 sm:h-5 w-2/3 bg-border/40 rounded" />
+                <div className="h-3 w-1/2 bg-border/40 rounded" />
+              </div>
+              <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-border/50">
+                <div className="h-3 w-1/3 bg-border/40 rounded" />
+                <div className="h-3 w-16 bg-border/40 rounded" />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-16 sm:pt-12">
       {branches.map((branch) => {
+        const isSelected = selectedBranch?.id === branch.id;
         return (
           <div
             key={branch.id}
             onClick={() => onBranchSelect(branch)}
-            className={"bg-surface rounded-spa-lg border-2 cursor-pointer transition-all " + (selectedBranch?.id === branch.id ? 'border-primary bg-primary/5 shadow-md' : 'border-border hover:border-primary/50')}
+            // No `scroll-reveal` here: these cards render above the fold on the
+            // very first paint, before the branch images have loaded and settled
+            // the page's scroll range — the animation-timeline: view() animation
+            // used elsewhere gets stuck mid-transition in that case, showing a
+            // cropped-looking card until the component remounts.
+            className={"bg-surface rounded-spa-lg border-2 cursor-pointer transition-all " +
+              (isSelected ? 'border-primary bg-primary/5 shadow-md' : 'border-border hover:border-primary/50')}
           >
-            <div className="relative h-56 sm:h-64 overflow-hidden rounded-t-spa-lg">
-              <Image src={branch.image} alt={branch.name} className="w-full h-full object-cover" />
-              {selectedBranch?.id === branch.id && (
+            <div className="relative h-40 sm:h-56 overflow-hidden rounded-t-spa-lg">
+              <Image
+                src={branch.image}
+                alt={branch.name}
+                className="w-full h-full object-cover"
+                loading="eager"
+                fetchpriority="high"
+              />
+              {isSelected && (
                 <div className="absolute top-2 right-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center">
                   <Icon name="Check" size={14} className="text-white" />
                 </div>
               )}
             </div>
 
-            <div className="p-5 space-y-3">
+            <div className="p-3 sm:p-5 space-y-1.5 sm:space-y-3">
               <div>
-                <h3 className="font-heading font-semibold text-lg text-text-primary">{branch.name}</h3>
+                <h3 className="font-heading font-semibold text-sm sm:text-lg text-text-primary">{branch.name}</h3>
                 <p className="text-xs text-text-secondary flex items-center gap-1">
                   <Icon name="MapPin" size={12} /> {branch.address}
                 </p>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-border/50">
+              <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-border/50">
                 <span className="text-xs text-text-secondary flex items-center gap-1">
                   <Icon name="Clock" size={12} /> {branch.openHours}
                 </span>
