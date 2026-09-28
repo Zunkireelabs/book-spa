@@ -1,107 +1,174 @@
-# Handoff: Zennly platform audit + efficiency work
+# Handoff: Zennly production perf audit
 
-For: Anish (and his Claude). From: Sadin. Date: 2026-09-26.
+> Supersedes the original briefing note of the same name (Sadin -> Anish: what
+> happened, access, guardrails, and a prompt to paste). That version is preserved
+> in git history at `stage:80ee4fd -- tasks/HANDOFF-zennly-perf-audit.md`. Its
+> durable parts are carried forward below under "Frame" and "Hard rules"; the
+> rest was setup instructions that have since been executed.
 
-Two parts: **A) a note for Anish**, **B) a prompt to paste into his Claude Code session**.
+Started: 2026-09-27. Owner: Claude (this session), for @sthasadin.
 
----
+## Incident that triggered this
 
-## A) Note for Anish
+2026-09-26 ~19:00–20:30 NPT: Nuad Thai staff locked out ~90 min. Prod Supabase
+(`pmbvogiphelmpjdalmtv`, nano/t4g, ap-northeast-2) CPU ~98%; PostgREST 503;
+Auth/Storage flapping Unhealthy. DB reboot did not help. Moving to Pro org and
+bumping compute to MICRO fixed it immediately. Disk was 6% — not a factor.
 
-### What happened
-On 2026-09-26 (~19:00-20:30 NPT) Nuad Thai staff could not log in. Prod was down for about 90 minutes.
+## Frame (per @sthasadin, do not relitigate)
 
-- Prod Supabase project `pmbvogiphelmpjdalmtv` was on the **Free tier, `t4g.nano`** (ap-northeast-2).
-- The dashboard showed **CPU/compute at ~98%**, "Conns Unavailable", and Advisor criticals: "Database not usable, CONNECT_TIMEOUT after 5002ms" and "Data API error rate persistently high".
-- PostgREST, Auth and Storage flapped Unhealthy. From the app: `HEAD /rest/v1/` returned 503, and the profile/org queries hung. Login could not finish.
-- Disk was **6%** (the "83%" number we first saw was not the issue).
-- Rebooting (fast DB reboot) did **not** fix it. Transferring the project to a Pro org moved compute to **MICRO** and everything went green.
-- Same project ref, so no code or secret changes were needed.
+Compute stays at **MICRO**. One tenant (Nuad Thai Spa), ~1,000 bookings/month
+(~33/day), ~41 therapists. That load should be trivial for MICRO. If it
+saturated a nano, the app/DB is doing far more work than data volume
+justifies — find and remove that work, don't buy headroom.
 
-### Why we are NOT just buying a bigger instance
-Zennly has **one tenant**. Roughly 1,000 bookings a month, 41 therapists, a few branches. That should sit comfortably on a micro. If it saturates a nano and might saturate a micro, something in the app or DB is doing far more work than it should. We want to find it and fix it. **Compute stays at MICRO for now.**
+## Status of each hypothesis (2026-09-27)
 
-### What is verified vs. what is a guess
-Verified:
-- Nano instance, CPU ~98%, health flapping, 503s from PostgREST, recovery after the compute bump.
-- The CPU graph was mostly 25-60% for the week of Sep 19-26, with a sharp jump only at the end of Sep 26.
+- **H1 (client retry amplification)** — FALSIFIED on our side.
+  `src/lib/supabaseRetry.js` retries only `25P02`, `40001`, `40P01`; max 2
+  retries, 150ms base + 100ms jitter. `503` and network errors/timeouts are
+  explicitly excluded. Codes don't overlap a 503 storm. **Still unchecked:**
+  whether `postgrest-js`/`supabase-js` itself retries 503 on GET/HEAD — verify
+  against the pinned version in `node_modules` before fully closing this out.
+- **H7 (migrations 224/225 moved cost from execution to planning)** —
+  UNTESTABLE via `pg_stat_statements` right now (`track_planning = off`, so
+  `total_plan_time` reads 0 for everything). One ad hoc `EXPLAIN ANALYZE` on
+  `public.bookings` on idle MICRO prod supports it: planning 4.139ms >
+  execution 2.762ms, 48+ nested InitPlans. Needs `track_planning = on` (or
+  more targeted EXPLAINs) to become a real measurement instead of one sample.
+- **H8 (idle-tab polling fan-out, `useAutoRefresh` × 11 call sites + raw
+  `setInterval`s + 4 concurrent Realtime channels)** — DEMOTED as the lead.
+  It's real (~10–20 queries/min/idle tab, 100–200/min across ~10 staff tabs)
+  but the measured prod baseline shows app queries are only ~10.6% of exec
+  time at idle. Still worth fixing (cheap, zero DB risk) and still unmeasured
+  during business hours — the idle-window numbers understate it.
+- **H6 (RLS helper call-count hotspot)** — PARTIALLY OPEN. `users` and
+  `branches` are tiny tables where a seq scan is the right plan, but
+  `get_user_role()`/`get_user_org_id()` still fire many times per request even
+  after 225's InitPlan wrapping (94 seq-scans/min on `users`, `idx_scan = 0`).
 
-Not verified (hypotheses to test, do not treat as findings):
-1. **Correlation with deploy #341** (your transient-DB resilience PR). It deployed 12:40 UTC (18:25 NPT), the outage started shortly after. Migration 227 killed the authenticator pool, and the retry wrapper adds requests. On a starved box, retries could amplify load. postgrest-js also retries GET/HEAD on 503 up to 4x, on top of ours. **Please actively try to falsify or confirm this.** I said earlier it was "not the cause" and I had no evidence to be that confident.
-2. The Sep 25-26 `25P02` incidents may have been early symptoms of the same CPU pressure, not a separate bug.
-3. App-side load: the dashboard fans out ~10 parallel queries per load; the login page polls `HEAD /rest/v1/` every 30s; Realtime subscriptions; RLS policy nesting (calendar query plan had ~671 nodes / 325+ nested InitPlans); PostHog; large `api.js`.
-4. Something changed on Sep 25 that added load: flags for Products, Campaigns, Outreach and Platform Admin were switched on in prod (#336/#333), plus RLS migrations 224/225.
+## Measured baseline (prod, read-only, 2026-09-27, pg_stat_statements since
+2026-09-26 14:37:42 UTC restart, 18h02m window — **near-idle, mostly Nepal
+overnight, not a business-hours sample**)
 
-### What we want back
-1. A written audit (`docs/superpowers/specs/2026-09-27-perf-audit.md` or similar): ranked findings, each with evidence (query text, numbers, plan), estimated CPU impact, and proposed fix.
-2. Fixes as small PRs to `stage`, highest impact first.
-3. A repeatable way to prove it: a load test on staging that reproduces "one busy day at Nuad Thai" and a before/after CPU comparison.
-4. Alerting that pages us **before** users notice (CPU, connection count, 5xx rate). The synthetic monitor is now in PR #344.
-5. A short recommendation on sizing: what load profile would justify Small, and what would not.
+Total exec time ≈ 1.1% average CPU from queries in this window. Breakdown:
 
-### Access
-- Read-only DB role. I will create it and put `AUDIT_DATABASE_URL` in your `.env.local`. Use the **Session pooler** (port 5432). Do not use the service role. Drop the role when done.
-- Supabase dashboard: Reports (CPU, memory, connections, DB requests), Logs > Postgres, Advisors (Performance + Security). You will need access to the Pro org that now owns the project.
-- Postgres ERROR logs were never set up before. Turn on and save a query for `severity = ERROR`. The original 25P02 error is still unknown because of that.
+| Rank | What | Share | Detail |
+|---|---|---|---|
+| 1 | Realtime WAL polling | 37.7% | 43,773 calls, 6.32ms mean, ~40 calls/min constant |
+| 2 | pg_cron bookkeeping | ~15% | `insert into cron.job_run_details` 1,514 calls/54ms mean; one `update` averaging 8,032ms |
+| 3 | Dashboard extension list | 8.6% | My own dashboard reads — ignore |
+| 4 | `payments` select | 5.0% | 1,665 calls, 22.09ms mean |
+| 5 | `pg_timezone_names` | 4.9% | 16 calls, 2,240ms mean — PostgREST schema-cache reload cost |
+| 6 | `bookings` select | 3.2% | 1,800 calls, 13.17ms mean |
+| — | reaper (`reap_aborted_authenticator_backends`) | 1.3% | 1,073 calls, finding nothing |
+| — | all app queries combined | ~10.6% | payments + bookings + attendance + rooms |
 
-### Guardrails
-- Do not touch prod data. Read-only on prod. Anything that writes goes to staging first.
-- Staging is a **separate DB with much less data**, so it will not show per-row RLS cost. Seed it to prod scale before trusting any staging number (this is already flagged as out of scope in your resilience design doc, now it is in scope).
-- Branch flow: `feature/*` or `fix/*` to PR into `stage`, then `stage` to `main`. Never straight to `main`.
-- Schema changes only as `supabase/migration-NNN-*.sql` files that self-record into `public.schema_migrations`. Next number is **228**. No ad hoc dashboard edits.
-- Migration 227 is the only migration that acts on live sessions. Do not copy that pattern casually.
-- Do not add native `<select>`; use `CustomSelect`. Nepal timezone for datetimes. Only anon keys in env files.
-- Do not split `api.js` unless it directly explains load. The monolith is intentional per CLAUDE.md.
+Overhead (Realtime + cron) ≈ 53% of exec time doing zero user-facing work, at idle.
 
-### Already done today (do not redo)
-- Compute moved to Pro/MICRO; services healthy.
-- PR #344 to `stage`: graceful degradation on 503 (Reconnecting screen, better login errors) and `healthcheck-prod.yml` now fails on 000/5xx.
-- Memory note saved locally by Sadin's Claude about this incident.
+Scan pressure (`pg_stat_user_tables`, same window): `users` 101,768 seq scans /
+0 idx scans (13 rows/scan — table is tiny, this is cheap but call-count is
+high); `branches` 64,988 seq scans; `bookings` full-scanned 187× at 5,958
+rows/scan despite 63,919 healthy idx scans elsewhere; `customers`
+full-scanned 95× at 2,005 rows/scan. The `bookings`/`customers` full scans
+don't fit the rest of the pattern — some query isn't using an index. Not yet
+identified which one.
 
----
+`cron.job_run_details` is unpruned: 18,961 rows back to 2026-06-13, 3,640kB.
+Job 4 (`outreach_drain_outbox`, every 5min) contributes most of the volume;
+job 6 (the reaper, every minute) adds relatively little. Pruning + slowing the
+reaper's cadence is the cheapest fix available (~15% of exec time, zero risk).
 
-## B) Prompt to paste into Anish's Claude Code
+## Revised fix ranking
 
-```
-You are helping me audit and optimise the Zennly production platform (repo: book-spa, React 18 + Vite SPA on Supabase). Read CLAUDE.md first and follow it. Then read tasks/HANDOFF-zennly-perf-audit.md (part A) for full context, and docs/superpowers/specs/2026-09-26-prod-transient-db-resilience-design.md.
+1. Prune `cron.job_run_details` + reduce reaper cadence off "every minute".
+2. Investigate Realtime's 37.7% — check whether `notifications` needs to stay
+   in the publication (only `bookings` + `notifications` are published today;
+   both replication slots healthy, 56-byte lag — so this is fixed polling
+   overhead, not a runaway subscription).
+3. Find the `bookings`/`customers` full-table-scan query.
+4. Re-measure everything during business hours before acting on H8.
+5. Turn on `track_planning` so H7 is finally testable.
 
-## Situation
-On 2026-09-26 prod login was down ~90 minutes. The Supabase DB instance (Free, t4g.nano) was CPU-saturated at ~98%, PostgREST returned 503, Auth/Storage flapped. It recovered only after the project moved to a Pro org (compute now MICRO). We have ONE tenant (Nuad Thai Spa): ~1,000 bookings/month, ~41 therapists, a few branches. That load should not stress a micro instance. We are deliberately NOT scaling compute up. Your job is to find out why this workload is expensive and make the app efficient.
+## Ledger / migration state (resolved 2026-09-27, see spec doc for detail)
 
-## Goal
-Reduce steady-state and peak DB CPU and connection use so a single tenant runs comfortably on MICRO with wide headroom, and so we could add several more tenants before resizing. Prove every improvement with numbers.
+Prod `schema_migrations` has 225/226/227/229; missing 228. PR #343
+(`fix/idle-timeout-revert`) carries 228 (idempotent `ALTER ROLE ... SET
+idle_in_transaction_session_timeout='60s'`, matches prod's already-live
+value) and 229 (idempotent cron-job upsert, already applied by hand on prod).
+Merging #343 fixes the ledger gap as a harmless re-apply — not a risk. No
+separate reconciliation migration needed. Next free migration number for new
+work is **230**.
 
-## Hypotheses to test (none are confirmed; try to falsify each)
-1. Deploy #341 (retry wrapper in src/lib/supabaseRetry.js + migrations 226/227) amplified load on an already-starved instance. Note postgrest-js also retries GET/HEAD on 503 up to 4x, so retries may stack. Check request volume before/after 12:40 UTC 2026-09-26 in Supabase Reports/Logs.
-2. The 25P02 incidents of Sep 25-26 were early symptoms of the same CPU pressure.
-3. App-side amplification: dashboard fan-out (~10 parallel queries per load), the 30s HEAD /rest/v1/ poll on the login page (src/pages/login/index.jsx), Realtime subscriptions and re-subscribe loops, polling intervals, duplicate fetches on mount (React strict/re-render), N+1 patterns in src/services/api.js, unbounded selects, missing pagination.
-4. RLS cost: nested policies, unwrapped helpers, per-row function calls, the calendar query plan (~671 nodes, 325+ nested InitPlans). Also check with_check clauses, which earlier scans skipped.
-5. Load added on Sep 25: Products/Campaigns/Outreach/Platform Admin flags enabled in prod, RLS migrations 224/225, stock/branch-stock views (migration 219).
-6. Missing or unused indexes, bloat, autovacuum, pg_cron jobs, large JSON columns, heavy views.
+## Open PRs — keep all three, do not close, merge in this order
 
-## Method
-1. Baseline first. Using the READ-ONLY connection in .env.local (AUDIT_DATABASE_URL, session pooler), set statement_timeout = '5s' on your session and run ONLY read-only queries. Show me each query before you run it. Collect: pg_stat_statements (top by total_exec_time, mean_exec_time, calls), pg_stat_activity (connections by state/application), pg_stat_user_tables (seq scans, dead tuples), pg_stat_user_indexes (unused), pg_locks, pg_policies, cron.job_run_details, and Supabase Reports (CPU, memory, connections, DB requests, API request counts by endpoint).
-2. Rank by impact: total time = calls x mean. Fix the biggest first; do not micro-optimise things that are cheap.
-3. Trace each expensive query back to the code path (which page, which service function in src/services/api.js, how often it fires). Use the browser or a Playwright/devtools network capture on staging to count requests per page load for: login, dashboard, calendar, bookings list, customer flow.
-4. Reproduce on staging. Staging is a separate DB with far less data. Seed it to prod scale (bookings, customers, therapists, memberships, packages, vouchers) BEFORE trusting any staging number. Write a load script that simulates one busy Nuad Thai day (concurrent staff sessions, dashboard refreshes, calendar use, bookings created, customer booking flow) and record CPU/latency before and after each change.
-5. Fix in small PRs. One concern per PR.
+`#343` → `#342` → `#344`. None depend on instance size; the compute bump
+removed urgency, not the underlying defects (a monitor that stayed green
+through a live outage, and users being told their password is wrong when the
+DB is actually just unreachable, both recur regardless of box size).
 
-## Deliverables
-- docs/superpowers/specs/<date>-perf-audit.md: ranked findings, each with evidence (query text, calls, ms, EXPLAIN ANALYZE output), root cause, proposed fix, expected impact, and status. Clearly separate CONFIRMED from HYPOTHESIS.
-- PRs into `stage` (never main), each with before/after numbers.
-- A load-test script and instructions to rerun it.
-- Alerting recommendations that would have paged us before users noticed: CPU, connection count, 5xx/503 rate, slow-query threshold. Reuse .github/workflows/healthcheck-prod.yml where sensible.
-- A short sizing recommendation: what load would justify Small, and what would not.
+Known merge conflicts to resolve by hand:
+- `#342` and `#344` both rewrite the healthcheck probe loop in
+  `healthcheck-prod.yml` in different directions (#342: probe `bookings`
+  instead of `branches`; #344: add HTTP-status handling to the `branches`
+  probe). Resolve so the final loop probes `bookings`, checks status code
+  (000/5xx), and keeps the `branches` liveness probe.
+- `#343` and `#344` both edit the `RETRYABLE_PG_CODES` region of
+  `supabaseRetry.js` — textual conflict only, semantically independent (#343
+  adds `25P03`; #344 adds `TRANSIENT_HTTP_STATUSES`/`isTransientStatus`/
+  `ServiceUnavailableError` below it). Keep both.
+- Correct the "~4200ms cold plan vs ~150ms warm" figure asserted in #342's
+  runbook and #343's migration comment — that was measured on a saturated
+  *nano*. On MICRO, idle, today: planning 4.139ms / execution 2.762ms. Add a
+  dated correction rather than deleting the original number (it's still the
+  useful record of what saturation does under load).
+- Add an explicit "remove once H7/H8 are fixed" note to migration 229's
+  reaper — it runs forever and masks the real cause if left unlabeled.
 
-## Hard rules
-- Prod is read-only for you. No writes, no DDL, no restarts, no pg_terminate_backend on prod. Anything that writes goes to staging first.
-- Never put a service_role key in any env file. Only anon keys there. Do not paste secrets in chat or commit them.
-- Schema changes only as supabase/migration-NNN-*.sql (next is 228) that self-record into public.schema_migrations; CI applies them to prod behind the production-db reviewer. Ad hoc DB edits are not allowed. New RLS policies must wrap helper calls in (SELECT ...) InitPlan style.
-- Branch flow: feature/* or fix/* -> PR to stage -> stage to main. Never merge feature branches to main.
-- Do not split src/services/api.js unless it directly explains the load. Do not change the state machine, discount limits, payment immutability, or Nepal-timezone rules.
-- npm run build and npm test must pass before every PR. Do not claim an improvement without a measured before/after.
-- Git attribution per CLAUDE.md: no Claude branding; co-author sthasadin; PR footer "Created by @sthasadin".
-- If you cannot verify something, say so plainly. Do not present a hypothesis as a finding.
+## Ownership handover (2026-09-28)
 
-Start by reading the docs above, then tell me your plan and the first three read-only queries you want to run. Do not run anything on prod until I approve them.
-```
+@sthasadin handed this work over to @anish in full. The items previously listed
+here as "blocked, needs @sthasadin" were resolved by direct measurement against
+production rather than by asking him:
+
+- **Prod `psql` access — WORKING.** Reads go through `~/.pgpass`
+  (`aws-1-ap-northeast-2.pooler.supabase.com`, `postgres.pmbvogiphelmpjdalmtv`)
+  with `default_transaction_read_only = on`. A dedicated read-only audit role
+  and `AUDIT_DATABASE_URL` were never needed and are no longer requested.
+- **The 228 ledger gap — CLOSED.** Prod's ledger reads
+  `220,221,222,223,224,225,226,227,229`. Migration 228 sets only
+  `authenticator`'s `idle_in_transaction_session_timeout` to `60s`, and prod
+  measurably already holds `60s`. So 228 is confirmed a safe idempotent
+  re-apply on promotion. This is now a direct measurement, not an inference
+  from file contents.
+- **Hand-applied `statement_timeout` — CODIFIED.** Measured 2026-09-28:
+  `authenticator` 30s, `authenticated` 30s, `anon` 3s, `service_role` none on
+  prod, against 8s/8s/3s/none on staging. Migration 231
+  (`fix/codify-role-statement-timeouts`, PR #347) writes these values as a
+  tracked migration — a no-op on prod, and raises staging to match. It no
+  longer depends on Sadin confirming what he typed.
+- **`track_planning` — confirmed `off` on prod.** A settable parameter, not a
+  piece of missing knowledge. H7 stays untestable only until someone turns it
+  on.
+
+Still genuinely unavailable, and now nobody's blocker to clear:
+
+- **Pro-org dashboard (Reports, Logs > Postgres, Advisors).** Needed only for
+  the request-count graph around the 12:40 UTC 2026-09-26 deploy — the single
+  test of the deploy-amplification idea. Not worth chasing unless the incident
+  recurs.
+- **Postgres `ERROR`-severity logging.** Not currently on, so the original
+  25P02 trigger event stays unnamed. This is a dashboard setting somebody with
+  Pro-org access can enable; it is not knowledge locked in Sadin's head.
+
+## Hard rules (carried forward, do not violate)
+
+Prod read-only, no writes/DDL/restarts/`pg_terminate_backend`. Compute stays
+MICRO — don't propose scaling. New migrations self-record, next number 232 (231 taken by PR #347).
+New RLS policies wrap helper calls in `(SELECT ...)` InitPlan style. Migration
+227's live-session-termination pattern must not be repeated. `feature/*` or
+`fix/*` → PR to `stage` → `stage` to `main`, never straight to `main`. Anon
+keys only in env files, no `service_role` anywhere in env/chat/commits. Don't
+touch state machine, discount limits, payment immutability, or Nepal-timezone
+rules. No native `<select>` — use `CustomSelect`. Hypotheses stay labelled
+HYPOTHESIS until measured.
