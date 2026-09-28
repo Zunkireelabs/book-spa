@@ -672,10 +672,24 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
                 // overlap can show a 1px seam at that boundary. Overlapping into the
                 // box guarantees there's no gap for that seam to appear in.
                 top: 'calc(100% - 2px)',
-                height: 40 + 192 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
-                // Gradient, not a flat fill — cards scrolling up underneath this bar
-                // used to just vanish behind a hard opaque edge; fading it to
-                // transparent instead makes them ease out of view under the pills.
+                height: 16 + 192 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
+                background: 'var(--color-background)',
+              }}
+            />
+            {/* Fades cards as they scroll up underneath this bar, instead of the hard
+                clip the seam-cover above gives at rest. Tied to collapseProgress (raw
+                scroll amount, 0 at the very top) rather than categoriesCollapseProgress
+                (which is also 0 once the page is FULLY scrolled past the categories'
+                own short collapse distance) — that distinction matters: this needs to
+                stay visible for as long as the user keeps scrolling, not just during
+                the categories' own brief transition window. Zero height/opacity at
+                rest, so it never paints over the grid before any scrolling happens. */}
+            <div
+              className="pointer-events-none absolute left-0 right-0 hidden lg:block"
+              style={{
+                top: '100%',
+                height: 40 * collapseProgress,
+                opacity: collapseProgress,
                 background: 'linear-gradient(to bottom, var(--color-background) 0%, var(--color-background) 40%, transparent 100%)',
               }}
             />
@@ -692,9 +706,17 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
               className="pointer-events-none absolute left-0 right-0 lg:hidden"
               style={{
                 top: 'calc(100% - 2px)',
-                height: 40 + 416 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
-                // Gradient, not a flat fill — same fade-instead-of-hard-clip treatment
-                // as the desktop cover above.
+                height: 16 + 416 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
+                background: 'var(--color-background)',
+              }}
+            />
+            {/* Same scroll-tied fade as the desktop cover above — zero at rest. */}
+            <div
+              className="pointer-events-none absolute left-0 right-0 lg:hidden"
+              style={{
+                top: '100%',
+                height: 40 * collapseProgress,
+                opacity: collapseProgress,
                 background: 'linear-gradient(to bottom, var(--color-background) 0%, var(--color-background) 40%, transparent 100%)',
               }}
             />
