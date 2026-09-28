@@ -10,9 +10,52 @@ set -euo pipefail
 BASE_REF="${1:?usage: check-migrations.sh <base-ref>}"
 LEDGER_FLOOR=28
 
-git fetch origin "${BASE_REF#origin/}" --depth=1 >/dev/null 2>&1 || true
+# Make sure the base ref is present locally, WITHOUT changing the clone's depth.
+# This used to pass `--depth=1`, which re-shallowed an otherwise complete clone
+# on every run: `git fetch --depth=1` writes `.git/shallow` even when the repo
+# was full, and a shallow base ref has no merge base with HEAD. The symptom is
+# `fatal: no merge base` from the `A...B` diff below — harmless-looking, and in
+# CI it was masked by the ref already being present so the fetch was a no-op.
+# Locally it broke every run. If the clone really is shallow (not how ci.yml
+# checks out — it uses fetch-depth: 0 — but possible elsewhere), deepen it
+# instead of shallowing further.
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  git fetch origin "${BASE_REF#origin/}" --unshallow >/dev/null 2>&1 \
+    || git fetch origin "${BASE_REF#origin/}" >/dev/null 2>&1 || true
+else
+  git fetch origin "${BASE_REF#origin/}" >/dev/null 2>&1 || true
+fi
 
-mapfile -t FILES < <(git diff --name-only --diff-filter=AM "$BASE_REF"...HEAD -- 'supabase/migration-*.sql' || true)
+# Fail closed, part 1: no merge base means the `A...B` diff below cannot be
+# computed at all. Previously that case printed "nothing to check" and exited
+# 0 — a green check that inspected no migrations. For a guard whose entire job
+# is to catch an unrecorded migration before it reaches production, silently
+# passing is the worst available failure.
+if ! git merge-base "$BASE_REF" HEAD >/dev/null 2>&1; then
+  echo "FAIL: no merge base between $BASE_REF and HEAD."
+  echo "      Cannot determine which migrations changed, so this guard cannot"
+  echo "      verify anything. Refusing to report success."
+  echo "      Likely cause: a shallow clone. Fetch full history"
+  echo "      (actions/checkout with fetch-depth: 0), or run"
+  echo "      'git fetch --unshallow' locally."
+  exit 1
+fi
+
+# Fail closed, part 2: run the diff where its exit status is actually visible.
+# `mapfile -t FILES < <(git diff ...)` reports mapfile's status, not git's, so
+# a git failure inside the process substitution is invisible — `set -e` cannot
+# see it and a trailing `|| true` changes nothing. Assigning through a command
+# substitution in an `if` makes the status checkable, so any git failure other
+# than the merge-base case above is also caught rather than being read as "no
+# migrations changed".
+if ! diff_out="$(git diff --name-only --diff-filter=AM "$BASE_REF"...HEAD -- 'supabase/migration-*.sql')"; then
+  echo "FAIL: 'git diff $BASE_REF...HEAD' failed."
+  echo "      Cannot determine which migrations changed. Refusing to report"
+  echo "      success."
+  exit 1
+fi
+
+mapfile -t FILES < <(printf '%s' "$diff_out" | grep -v '^[[:space:]]*$' || true)
 
 if [ "${#FILES[@]}" -eq 0 ]; then
   echo "No migration files added or modified — nothing to check."

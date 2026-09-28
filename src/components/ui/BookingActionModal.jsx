@@ -6,6 +6,7 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
+import AdminCorrectionModal from './AdminCorrectionModal';
 import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
@@ -100,6 +101,7 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAdminCorrection, setShowAdminCorrection] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
@@ -929,6 +931,18 @@ const BookingActionModal = ({
                       <span className={`font-body font-body-medium text-xs ${banner.textColor}`}>
                         {banner.label}
                       </span>
+                      {/* The only route past this lock. Admin-only, and every use is
+                          recorded in audit_logs with a mandatory reason. */}
+                      {userRole === 'admin' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAdminCorrection(true)}
+                          className="ml-auto inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px]"
+                        >
+                          <Icon name="Wrench" size={12} />
+                          <span>Correct as admin</span>
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
@@ -2438,6 +2452,21 @@ const BookingActionModal = ({
           isSubmitting={isLoading}
           onClose={() => setPendingStatus(null)}
           onConfirm={(reason) => handleStatusUpdate(pendingStatus, reason)}
+        />
+      )}
+
+      {/* Admin correction — the only path past the lock/immutability banner.
+          On success the booking row has changed underneath us (or is gone
+          entirely, after a delete), so close this modal outright and let the
+          parent re-fetch rather than rendering stale data. */}
+      {showAdminCorrection && (
+        <AdminCorrectionModal
+          booking={booking}
+          onClose={() => setShowAdminCorrection(false)}
+          onSuccess={() => {
+            setShowAdminCorrection(false);
+            if (onClose) onClose();
+          }}
         />
       )}
 

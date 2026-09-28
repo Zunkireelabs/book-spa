@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import ServiceSelection from '../../customer-booking-flow/components/ServiceSelection';
@@ -26,9 +26,50 @@ const ServiceBookingPanel = ({
   onGenderPreferenceChange,
   onContinue,
   canContinue,
+  onPrevious,
+  prevButtonRef,
 }) => {
+  // Same fade-out-on-scroll treatment as "Your Information"'s title (index.jsx) and
+  // the service page's own title — except this drawer scrolls *internally*
+  // (overflow-y-auto on its own div, see below), not the window, so it needs its
+  // own scroll listener on that container rather than the window-based
+  // useScrollCollapse hook. "Back to services" stays outside this scrollable area
+  // (shrink-0) so it's already always visible without needing a fade-in.
+  const drawerScrollRef = useRef(null);
+  const drawerTitleRef = useRef(null);
+  const [drawerTitleHeight, setDrawerTitleHeight] = useState(0);
+  const [drawerScrollProgress, setDrawerScrollProgress] = useState(0);
+  const DRAWER_TITLE_COLLAPSE_DISTANCE = 60;
+
+  useEffect(() => {
+    if (!drawerTitleRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setDrawerTitleHeight(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+    });
+    observer.observe(drawerTitleRef.current);
+    return () => observer.disconnect();
+  }, [selectedService?.id]);
+
+  useEffect(() => {
+    const el = drawerScrollRef.current;
+    if (!el) return;
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      setDrawerScrollProgress(Math.min(1, Math.max(0, el.scrollTop / DRAWER_TITLE_COLLAPSE_DISTANCE)));
+    };
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(update);
+    };
+    update();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [selectedService?.id]);
+
   return (
-    <div className="lg:flex lg:items-start lg:justify-center lg:gap-8">
+    <div className="lg:flex lg:items-start lg:justify-center lg:gap-10">
       {/* Capped (not flex-1/growing) so cards don't keep stretching wider as `main`
           grows to 1600px for the drawer — 3 columns of ever-wider cards read as
           flat/"fat" rather than more content. `justify-center` on the row means any
@@ -39,23 +80,53 @@ const ServiceBookingPanel = ({
           selectedService={selectedService}
           onServiceSelect={onServiceSelect}
           selectedBranch={selectedBranch}
+          onPrevious={onPrevious}
         />
+
+        {/* Sits right under the grid itself (not after the whole row), so with
+            only one or two cards visible it lands just below them instead of
+            trailing all the way down to match the taller drawer sibling. */}
+        <div ref={prevButtonRef} className="mt-4">
+          <Button
+            variant="outline"
+            onClick={onPrevious}
+            iconName="ChevronLeft"
+            iconSize={16}
+          >
+            Previous
+          </Button>
+        </div>
       </div>
 
       {/* `top`/`max-h` match the same --customer-header-h / --progress-indicator-h
           vars the service grid's sticky title uses (ServiceSelection.jsx), instead
           of a hardcoded px offset that goes stale whenever the header or stepper's
-          own height changes. */}
+          own height changes. On mobile this drawer used to be `inset-0` (covering
+          the site header and step progress bar entirely) — starting it below both
+          instead keeps them visible, same as desktop. */}
       {selectedService && (
-        <div className="fixed inset-0 z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[460px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px)+12px)] lg:max-h-[calc(100dvh-var(--customer-header-h,64px)-var(--progress-indicator-h,67px)-28px)]">
-          <button
-            type="button"
-            onClick={() => onServiceSelect(null)}
-            className="lg:hidden shrink-0 flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast p-4 pb-0"
+        <div className="fixed inset-x-0 bottom-0 top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px))] z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[460px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px)+12px)] lg:max-h-[calc(100dvh-var(--customer-header-h,64px)-var(--progress-indicator-h,67px)-28px)]">
+          {/* Hidden at rest, fades in once scrolled (drawerScrollProgress) — same
+              pattern as "Your Information"'s Previous fading in as its title fades
+              out. Stays outside the scrollable area (shrink-0) so once visible it
+              doesn't itself scroll away. */}
+          <div
+            className="lg:hidden shrink-0 overflow-hidden [overflow-anchor:none] px-4"
+            style={{
+              maxHeight: 32 * drawerScrollProgress,
+              opacity: drawerScrollProgress,
+              paddingTop: 16 * drawerScrollProgress,
+            }}
           >
-            <Icon name="ChevronLeft" size={18} />
-            <span className="font-body font-body-medium text-sm">Back to services</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => onServiceSelect(null)}
+              className="flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast"
+            >
+              <Icon name="ChevronLeft" size={18} />
+              <span className="font-body font-body-medium text-sm">Back to services</span>
+            </button>
+          </div>
 
           {/* Scrollable content — the footer below is a separate flex sibling, never a
               sticky overlay, so it can never overlap this area no matter how tall it gets.
@@ -65,19 +136,27 @@ const ServiceBookingPanel = ({
               On desktop (lg:) the outer wrapper is `sticky` and height-capped to the
               viewport, so this scrolls internally once content is taller than that —
               the drawer stays pinned alongside the service grid either way. */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
-            <h2 className="font-heading font-heading-semibold text-xl text-text-primary mb-3">
-              Book Your Visit
-            </h2>
-            <div className="flex items-center justify-between gap-3 p-3 mb-4 bg-primary/5 border border-primary/10 rounded-spa">
-              <div>
-                <p className="font-heading font-heading-medium text-text-primary">{selectedService.name}</p>
-                <p className="font-body font-body-normal text-sm text-text-secondary flex items-center gap-1 mt-0.5">
+          <div ref={drawerScrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
+            <div
+              className="overflow-hidden [overflow-anchor:none]"
+              style={{
+                maxHeight: drawerTitleHeight ? drawerTitleHeight * (1 - drawerScrollProgress) : undefined,
+                opacity: 1 - drawerScrollProgress,
+              }}
+            >
+              <h2 ref={drawerTitleRef} className="font-heading font-heading-semibold text-xl text-text-primary mb-3 text-center">
+                Book Your Visit
+              </h2>
+            </div>
+            <div className="flex items-center justify-between gap-2 sm:gap-3 p-2 sm:p-3 mb-3 sm:mb-4 bg-primary/5 border border-primary/10 rounded-spa">
+              <div className="min-w-0">
+                <p className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">{selectedService.name}</p>
+                <p className="font-body font-body-normal text-xs sm:text-sm text-text-secondary flex items-center gap-1 mt-0.5">
                   <Icon name="Clock" size={12} />
                   {selectedService.duration}
                 </p>
               </div>
-              <span className="font-heading font-heading-semibold text-primary whitespace-nowrap">
+              <span className="font-heading font-heading-semibold text-sm sm:text-base text-primary whitespace-nowrap">
                 {formatPrice(selectedService.price)}
               </span>
             </div>
@@ -96,6 +175,7 @@ const ServiceBookingPanel = ({
           <div className="shrink-0 border-t border-border bg-surface p-4">
             <Button
               variant="primary"
+              size="sm"
               onClick={onContinue}
               disabled={!canContinue}
               iconName="ChevronRight"
