@@ -403,7 +403,7 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
           label="Correct remaining balance (NPR)"
           currentLabel={`${formatNPR(voucher.remainingBalance)} remaining of ${formatNPR(voucher.totalAmountIssued)} issued`}
           kind="number"
-          warning="Remaining is calculated as issued minus claims, so this adjusts the issued total and leaves the claim history intact. To remove a claim that never happened, void that claim instead."
+          warning={`Remaining is calculated as issued minus claims, so this adjusts the issued total and leaves the claim history intact. Because it changes the issued figure, the "Gift vouchers distributed" report total for ${formatDate(voucher.issuedDate)} will change to match. Cash reconciliation is unaffected. To remove a claim that never happened, void that claim instead.`}
           onSubmit={({ value, reason }) =>
             adminCorrectVoucherBalance({ voucherId, newRemaining: value, reason })
           }

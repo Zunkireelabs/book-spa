@@ -52,6 +52,17 @@
 -- level flag would be a genuine security hole.
 --
 --
+-- Why `is_locked` is NOT correctable
+--
+-- It was in the whitelist and has been removed. Setting is_locked = false
+-- reopens a closed day permanently, after which ordinary staff can edit it
+-- through the normal paths with no reason and no audit row — one audited action
+-- silently converting into an unaudited open door. Nothing needs it: these
+-- functions already bypass the lock for the specific booking being corrected,
+-- which is the whole point, so reopening the day buys nothing a correction
+-- cannot already do.
+--
+--
 -- Why 'admin' and not 'admin_viewer'
 --
 -- `admin_viewer` is a read-only role (2 such accounts exist in production
@@ -152,10 +163,14 @@ DECLARE
     'therapist_id', 'room_id', 'service_id', 'branch_id',
     'base_amount', 'discount_amount', 'discount_status', 'discount_reason',
     'customer_name', 'customer_phone', 'customer_id',
-    'special_requests', 'notes', 'is_locked'
+    'special_requests', 'notes'
   ];
+  -- Tables whose org must be re-checked when a correction repoints the booking
+  -- at a different row. See the org-scoping block below.
+  v_bad     text;
   v_sql       text;
   v_sets      text[] := '{}';
+  v_paid      numeric;
 BEGIN
   IF v_role IS DISTINCT FROM 'admin' THEN
     RAISE EXCEPTION 'admin_correct_booking: admin role required'
@@ -200,6 +215,59 @@ BEGIN
           AND a.attname = v_key AND a.attnum > 0));
   END LOOP;
 
+  -- Org-scope every foreign key the correction repoints.
+  --
+  -- Checking that the *booking* belongs to the caller's org is not enough: the
+  -- whitelist lets a correction write branch_id / customer_id / therapist_id /
+  -- service_id / room_id, and nothing else validates those values. Writing
+  -- another tenant's branch_id moves the booking into that tenant's view,
+  -- because the RLS read policies are org-scoped on exactly that column. This
+  -- is a multi-tenant boundary and must not depend on nobody pasting the wrong
+  -- UUID.
+  --
+  -- rooms carries no org_id, only branch_id, so it is validated one hop out
+  -- through branches.
+  IF p_changes ? 'branch_id' AND p_changes->>'branch_id' IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.branches
+                    WHERE id = (p_changes->>'branch_id')::uuid AND org_id = v_org) THEN
+      v_bad := 'branch_id';
+    END IF;
+  END IF;
+
+  IF v_bad IS NULL AND p_changes ? 'customer_id' AND p_changes->>'customer_id' IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.customers
+                    WHERE id = (p_changes->>'customer_id')::uuid AND org_id = v_org) THEN
+      v_bad := 'customer_id';
+    END IF;
+  END IF;
+
+  IF v_bad IS NULL AND p_changes ? 'therapist_id' AND p_changes->>'therapist_id' IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.therapists
+                    WHERE id = (p_changes->>'therapist_id')::uuid AND org_id = v_org) THEN
+      v_bad := 'therapist_id';
+    END IF;
+  END IF;
+
+  IF v_bad IS NULL AND p_changes ? 'service_id' AND p_changes->>'service_id' IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.services
+                    WHERE id = (p_changes->>'service_id')::uuid AND org_id = v_org) THEN
+      v_bad := 'service_id';
+    END IF;
+  END IF;
+
+  IF v_bad IS NULL AND p_changes ? 'room_id' AND p_changes->>'room_id' IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.rooms r
+                     JOIN public.branches b ON b.id = r.branch_id
+                    WHERE r.id = (p_changes->>'room_id')::uuid AND b.org_id = v_org) THEN
+      v_bad := 'room_id';
+    END IF;
+  END IF;
+
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'admin_correct_booking: % does not belong to your organization', v_bad
+      USING ERRCODE = 'P0003';
+  END IF;
+
   PERFORM set_config('app.admin_correction', 'on', true);
 
   v_sql := format('UPDATE public.bookings SET %s WHERE id = %L',
@@ -207,6 +275,22 @@ BEGIN
   EXECUTE v_sql USING p_changes;
 
   SELECT to_jsonb(b) INTO v_new FROM public.bookings b WHERE b.id = p_booking_id;
+
+  -- Do not let a correction leave the booking owing less than was actually
+  -- collected. trg_compute_final_amount recomputes final_amount from
+  -- base_amount/discount_amount, but the payments rows do not move and
+  -- payment_status stays 'paid' — so lowering the price on a settled booking
+  -- silently produces a row that claims to be paid in full for less money than
+  -- the drawer received. Checked after the UPDATE so the trigger-computed
+  -- final_amount is the value being judged, and raising here rolls the whole
+  -- transaction back.
+  SELECT COALESCE(SUM(amount), 0) INTO v_paid FROM public.payments WHERE booking_id = p_booking_id;
+
+  IF v_paid > 0 AND (v_new->>'final_amount')::numeric < v_paid THEN
+    RAISE EXCEPTION 'CORRECTION_BELOW_PAID: this correction would set the total to % while % has already been paid. Record a refund first, then correct the amount.',
+      (v_new->>'final_amount')::numeric, v_paid
+      USING ERRCODE = 'P0004';
+  END IF;
 
   INSERT INTO public.audit_logs
     (branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, reason)
@@ -246,6 +330,7 @@ DECLARE
   v_old      jsonb;
   v_branch   uuid;
   v_blockers text[] := '{}';
+  v_links    jsonb;
   v_n        int;
 BEGIN
   IF v_role IS DISTINCT FROM 'admin' THEN
@@ -291,10 +376,27 @@ BEGIN
 
   -- Audit BEFORE the delete: once the row is gone there is nothing left to
   -- copy, and a delete with no record of what was deleted is not an audit.
+  --
+  -- membership_transactions.booking_id and voucher_claims.booking_id are
+  -- ON DELETE SET NULL, so those rows survive but lose all trace of what they
+  -- were for. Balances stay correct either way; what is lost is the ability to
+  -- answer "why was this wallet deducted". Capture the links in the audit row
+  -- so the trail outlives the booking.
+  SELECT jsonb_build_object(
+           'membership_transaction_ids',
+           COALESCE((SELECT jsonb_agg(id) FROM public.membership_transactions WHERE booking_id = p_booking_id), '[]'::jsonb),
+           'voucher_claim_ids',
+           COALESCE((SELECT jsonb_agg(id) FROM public.voucher_claims WHERE booking_id = p_booking_id), '[]'::jsonb),
+           'booking_therapist_ids',
+           COALESCE((SELECT jsonb_agg(id) FROM public.booking_therapists WHERE booking_id = p_booking_id), '[]'::jsonb)
+         )
+    INTO v_links;
+
   INSERT INTO public.audit_logs
     (branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, reason)
   VALUES
-    (v_branch, 'bookings', p_booking_id, 'ADMIN_DELETE', v_old, NULL, auth.uid(), btrim(p_reason));
+    (v_branch, 'bookings', p_booking_id, 'ADMIN_DELETE',
+     v_old || jsonb_build_object('__unlinked', v_links), NULL, auth.uid(), btrim(p_reason));
 
   PERFORM set_config('app.admin_correction', 'on', true);
 
