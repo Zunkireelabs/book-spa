@@ -378,7 +378,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
   const showStickyBlock = !loading && !error && services.length > 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {activeCampaign && <CampaignBanner campaign={activeCampaign} />}
 
       {!showStickyBlock && (
@@ -433,12 +433,14 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
       {showStickyBlock && (
         <>
           <div
-            className="sticky z-sticky-filter bg-background pb-2 relative"
+            className="sticky z-sticky-filter bg-background pb-1 relative"
             style={{
               top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))',
-              // 24px at rest to match the "Book Your Visit" drawer's own top padding
-              // (lg:p-6) exactly, so the two headings sit on the same line.
-              paddingTop: 24 - 20 * collapseProgress,
+              // <main>'s own py-4 lg:py-6 already provides the top gap here (unlike the
+              // Branch step's title bar, which is `fixed` and bypasses main's padding
+              // entirely) — a smaller base keeps the two steps' top gap consistent
+              // instead of stacking both paddings.
+              paddingTop: 8 - 6 * collapseProgress,
             }}
           >
             <div
@@ -446,7 +448,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
               style={{
                 maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
                 opacity: 1 - collapseProgress,
-                marginBottom: 12 * (1 - collapseProgress),
+                marginBottom: 8 * (1 - collapseProgress),
               }}
             >
               <div ref={titleInnerRef}>
@@ -462,25 +464,18 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
               </div>
             </div>
             {onPrevious && (
-              // Appears in the space the collapsing title vacates, once the
-              // customer has scrolled far enough that just the search bar is
-              // showing — not present at rest, so it doesn't compete with
-              // "Choose Service" at the top of the page.
-              <div
-                className="lg:hidden overflow-hidden [overflow-anchor:none]"
-                style={{
-                  maxHeight: 32 * collapseProgress,
-                  opacity: collapseProgress,
-                  marginBottom: 8 * collapseProgress,
-                }}
-              >
+              // Always visible from the top, not tied to scroll — same affordance
+              // whether the customer has scrolled or not, on mobile and desktop alike.
+              // Icon-only (no "Previous" label) — a back arrow reads as "go back"
+              // on its own, same as a browser/app back button.
+              <div className="mb-1">
                 <button
                   type="button"
                   onClick={onPrevious}
-                  className="flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast spa-touch-target"
+                  aria-label="Previous"
+                  className="flex items-center justify-center w-8 h-8 rounded-full text-text-secondary hover:text-text-primary hover:bg-background spa-transition-fast spa-touch-target"
                 >
-                  <Icon name="ChevronLeft" size={16} />
-                  <span className="font-body font-body-medium text-sm">Previous</span>
+                  <Icon name="ChevronLeft" size={20} />
                 </button>
               </div>
             )}
@@ -677,8 +672,11 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
                 // overlap can show a 1px seam at that boundary. Overlapping into the
                 // box guarantees there's no gap for that seam to appear in.
                 top: 'calc(100% - 2px)',
-                height: 16 + 192 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
-                background: 'var(--color-background)',
+                height: 40 + 192 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
+                // Gradient, not a flat fill — cards scrolling up underneath this bar
+                // used to just vanish behind a hard opaque edge; fading it to
+                // transparent instead makes them ease out of view under the pills.
+                background: 'linear-gradient(to bottom, var(--color-background) 0%, var(--color-background) 40%, transparent 100%)',
               }}
             />
             {/* Mobile (single-column grid, much taller cards): same parabola shape as
@@ -694,8 +692,10 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
               className="pointer-events-none absolute left-0 right-0 lg:hidden"
               style={{
                 top: 'calc(100% - 2px)',
-                height: 16 + 416 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
-                background: 'var(--color-background)',
+                height: 40 + 416 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
+                // Gradient, not a flat fill — same fade-instead-of-hard-clip treatment
+                // as the desktop cover above.
+                background: 'linear-gradient(to bottom, var(--color-background) 0%, var(--color-background) 40%, transparent 100%)',
               }}
             />
           </div>

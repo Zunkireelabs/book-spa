@@ -27,7 +27,6 @@ const ServiceBookingPanel = ({
   onContinue,
   canContinue,
   onPrevious,
-  prevButtonRef,
 }) => {
   // Same fade-out-on-scroll treatment as "Your Information"'s title (index.jsx) and
   // the service page's own title — except this drawer scrolls *internally*
@@ -86,7 +85,7 @@ const ServiceBookingPanel = ({
         {/* Sits right under the grid itself (not after the whole row), so with
             only one or two cards visible it lands just below them instead of
             trailing all the way down to match the taller drawer sibling. */}
-        <div ref={prevButtonRef} className="mt-4">
+        <div className="mt-4">
           <Button
             variant="outline"
             onClick={onPrevious}
@@ -106,25 +105,17 @@ const ServiceBookingPanel = ({
           instead keeps them visible, same as desktop. */}
       {selectedService && (
         <div className="fixed inset-x-0 bottom-0 top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px))] z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[460px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px)+12px)] lg:max-h-[calc(100dvh-var(--customer-header-h,64px)-var(--progress-indicator-h,67px)-28px)]">
-          {/* Hidden at rest, fades in once scrolled (drawerScrollProgress) — same
-              pattern as "Your Information"'s Previous fading in as its title fades
-              out. Stays outside the scrollable area (shrink-0) so once visible it
-              doesn't itself scroll away. */}
-          <div
-            className="lg:hidden shrink-0 overflow-hidden [overflow-anchor:none] px-4"
-            style={{
-              maxHeight: 32 * drawerScrollProgress,
-              opacity: drawerScrollProgress,
-              paddingTop: 16 * drawerScrollProgress,
-            }}
-          >
+          {/* Icon-only, always visible — same treatment as the other steps' top
+              Previous button, not tied to scroll. Stays outside the scrollable area
+              (shrink-0) so it never scrolls away. */}
+          <div className="lg:hidden shrink-0 px-4 pt-2">
             <button
               type="button"
               onClick={() => onServiceSelect(null)}
-              className="flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast"
+              aria-label="Back to services"
+              className="flex items-center justify-center w-8 h-8 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface spa-transition-fast spa-touch-target"
             >
-              <Icon name="ChevronLeft" size={18} />
-              <span className="font-body font-body-medium text-sm">Back to services</span>
+              <Icon name="ChevronLeft" size={20} />
             </button>
           </div>
 

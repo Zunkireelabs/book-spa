@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { capture } from '../../lib/analytics';
 import CustomerHeader from '../../components/ui/CustomerHeader';
 import Button from '../../components/ui/Button';
@@ -50,22 +50,11 @@ function useMeasuredRef(setHeight) {
 // v1 BranchSelection / CustomerForm / BookingConfirmation / BookingSuccess components and the
 // v1 ServiceSelection / DateTimeSelection components unchanged — no parallel booking system.
 const CustomerBookingFlowV2 = () => {
-  const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
   const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  // Desktop-only floating "Previous" (see the `hidden lg:block` on its wrapper below):
-  // shows once the customer has scrolled past the top of the service list AND the
-  // real Previous button — rendered by ServiceBookingPanel right after the service
-  // grid, see prevBtnRef — has scrolled out of view. It docks at that same real
-  // button's left edge, so with only a few cards (real button already on screen,
-  // nothing to scroll past) it never appears — the real one is simply visible in
-  // place below the cards instead.
-  const [showFloatingPrev, setShowFloatingPrev] = useState(false);
-  const [floatingPrevLeft, setFloatingPrevLeft] = useState(null);
-  const prevBtnRef = useRef(null);
   // Same fade-in-on-scroll treatment as step 2's (Choose Service) inline "Previous" —
   // hidden at rest, appears once the customer has scrolled a bit, instead of sitting
   // there immediately above "Your Information"/"Confirm Booking" from the first frame.
@@ -136,7 +125,11 @@ const CustomerBookingFlowV2 = () => {
   // very first render — a regular useEffect fires only after that stale frame
   // has already painted, which is exactly the glitch/flash this was seeing.
   useLayoutEffect(() => {
-    window.scrollTo(0, 0);
+    // 'instant' explicitly overrides the global `scroll-behavior: smooth` (see
+    // tailwind.css) — this reset must happen before paint with no visible
+    // animation, or it reintroduces the stale-scroll flash this effect exists
+    // to prevent (see the big comment above).
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [currentStep]);
 
   useEffect(() => {
@@ -211,39 +204,6 @@ const CustomerBookingFlowV2 = () => {
     localStorage.setItem(`bookingFlowV2:${orgSlug}`, JSON.stringify(bookingState));
   }, [orgSlug, currentStep, selectedBranch, selectedService, selectedDateTime, genderPreference, customerInfo]);
 
-  useEffect(() => {
-    if (currentStep !== 2) {
-      setShowFloatingPrev(false);
-      return;
-    }
-    const onScroll = () => {
-      const pastTop = window.scrollY > 280;
-      const realBtnRect = prevBtnRef.current?.getBoundingClientRect();
-      const realBtnVisible = realBtnRect ? realBtnRect.top < window.innerHeight : false;
-      setShowFloatingPrev(pastTop && !realBtnVisible);
-      // Measured from the real inline button's own position so the floating copy
-      // docks exactly where the real one sits, rather than a hardcoded left offset
-      // that would drift whenever the layout's max-width changes.
-      if (realBtnRect) {
-        setFloatingPrevLeft(realBtnRect.left);
-      }
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-    // The real button's position shifts once the step's data (services, slots)
-    // finishes an async load, which fires neither a scroll nor a resize event —
-    // watch the page's own height so a late-loading list doesn't leave the
-    // floating button's visibility stuck on a stale pre-load position.
-    const resizeObserver = new ResizeObserver(onScroll);
-    resizeObserver.observe(document.body);
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-      resizeObserver.disconnect();
-    };
-  }, [currentStep, selectedService]);
-
   const handleNext = async () => {
     if (!canProceed()) return;
 
@@ -298,8 +258,22 @@ const CustomerBookingFlowV2 = () => {
   };
 
   const handleBranchSelect = (branch) => {
+    if (!branch) return;
+
     setSelectedBranch(branch);
     setSelectedService(null); // Reset service when branch changes
+
+    if (currentStep === 1) {
+      capture('customer_booking_step_completed', {
+        step_index: 1,
+        step_name: stepNames[0],
+        org_slug: orgSlug,
+        branch_id: branch?.id,
+        time_on_step_ms: Date.now() - stepEnteredAt.current,
+        flow_variant: 'v2',
+      });
+      setCurrentStep(2);
+    }
   };
 
   const handleServiceSelect = (service) => {
@@ -388,7 +362,6 @@ const CustomerBookingFlowV2 = () => {
             onContinue={handleNext}
             canContinue={!!selectedDateTime.date && !!selectedDateTime.time}
             onPrevious={handlePrevious}
-            prevButtonRef={prevBtnRef}
           />
         );
 
@@ -501,7 +474,6 @@ const CustomerBookingFlowV2 = () => {
           'mx-auto px-4 py-4 lg:py-6 flex flex-col ' +
           (wideOpen ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl')
         }
-        style={{ minHeight: 'calc(100vh - var(--customer-header-h, 64px) - var(--progress-indicator-h, 0px))' }}
       >
         {currentStep !== 2 && (
           <>
@@ -520,25 +492,19 @@ const CustomerBookingFlowV2 = () => {
               className="fixed left-0 right-0 z-sticky-filter bg-background"
               style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
             >
-              <div className={'mx-auto px-4 py-2 ' + (wideOpen ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl')}>
-                {/* Mobile only — desktop already has a real "Previous" button in the
-                    bottom nav row, so this compact fading link would just duplicate it. */}
+              <div className={'mx-auto px-4 pb-2 ' + (currentStep === 3 ? 'pt-3 ' : 'pt-6 ') + (wideOpen ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl')}>
+                {/* Icon-only, always visible from the top — mobile and desktop alike,
+                    not tied to scroll. Desktop's bottom nav row no longer has its own
+                    Previous button, so this is the only one now. */}
                 {currentStep > 1 && currentStep < 5 && (
-                  <div
-                    className="lg:hidden overflow-hidden [overflow-anchor:none]"
-                    style={{
-                      maxHeight: 32 * topPreviousProgress,
-                      opacity: topPreviousProgress,
-                      marginBottom: 4 * topPreviousProgress,
-                    }}
-                  >
+                  <div className="mb-1">
                     <button
                       type="button"
                       onClick={handlePrevious}
-                      className="flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast spa-touch-target"
+                      aria-label="Previous"
+                      className="flex items-center justify-center w-8 h-8 rounded-full text-text-secondary hover:text-text-primary hover:bg-background spa-transition-fast spa-touch-target"
                     >
-                      <Icon name="ChevronLeft" size={16} />
-                      <span className="font-body font-body-medium text-sm">Previous</span>
+                      <Icon name="ChevronLeft" size={20} />
                     </button>
                   </div>
                 )}
@@ -570,93 +536,42 @@ const CustomerBookingFlowV2 = () => {
                 </div>
               </div>
             </div>
-            <div style={{ height: topBarHeight }} className="mb-2" />
+            <div style={{ height: topBarHeight }} className="mb-1" />
           </>
         )}
 
-        <div className="mb-4 sm:mb-8">
+        <div className={currentStep === 1 ? 'mb-2' : 'mb-4 sm:mb-8'}>
           {renderStepContent()}
         </div>
 
-        {/* Navigation — step 2 has its own Continue button inside the booking panel.
-            Previous/Enter Details always share one row (justify-between), even on
-            mobile — Find Existing Booking gets its own row below instead of
-            crowding into that same row. */}
-        {currentStep < 5 && currentStep !== 2 && (
-          <div className="flex flex-col gap-3 mt-6">
-            <div className="flex items-center justify-end lg:justify-between gap-2">
-              {/* Desktop only — mobile uses the sticky fading "Previous" link at the
-                  top of the page instead (see above). */}
-              <div className="hidden lg:block">
-                {currentStep > 1 && (
-                  <Button
-                    variant="outline"
-                    onClick={handlePrevious}
-                    iconName="ChevronLeft"
-                    iconSize={16}
-                    disabled={isLoading}
-                  >
-                    Previous
-                  </Button>
-                )}
-              </div>
-              <div>
-                {currentStep === 4 ? (
-                  <div className="text-center">
-                    <p className="font-caption font-caption-normal text-xs text-text-secondary mb-2">
-                      By confirming, you agree to our terms and conditions
-                    </p>
-                  </div>
-                ) : (
-                  <Button
-                    variant="primary"
-                    onClick={handleNext}
-                    iconName="ChevronRight"
-                    iconPosition="right"
-                    iconSize={16}
-                    disabled={!canProceed() || isLoading}
-                    loading={isLoading}
-                    className="spa-touch-target"
-                  >
-                    Enter Details
-                  </Button>
-                )}
-              </div>
+        {/* Navigation — step 1 (branch) auto-advances on card click/tap, so it has no
+            Previous/Continue row of its own (nothing to go back to, nothing to confirm
+            before advancing) — nothing renders here for it. Step 2 has its own Continue
+            button inside the booking panel. */}
+        {currentStep > 1 && currentStep < 5 && currentStep !== 2 && (
+          <div className="flex items-center justify-end gap-2 mt-6">
+            <div>
+              {currentStep === 4 ? (
+                <div className="text-center">
+                  <p className="font-caption font-caption-normal text-xs text-text-secondary mb-2">
+                    By confirming, you agree to our terms and conditions
+                  </p>
+                </div>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={handleNext}
+                  iconName="ChevronRight"
+                  iconPosition="right"
+                  iconSize={16}
+                  disabled={!canProceed() || isLoading}
+                  loading={isLoading}
+                  className="spa-touch-target"
+                >
+                  Enter Details
+                </Button>
+              )}
             </div>
-
-            <div className="flex justify-center sm:justify-start">
-              <Button
-                variant="text"
-                onClick={() => navigate('/booking-management-portal')}
-                iconName="Search"
-                iconSize={16}
-                disabled={isLoading}
-                className="text-primary"
-              >
-                Find Existing Booking
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Desktop-only floating "Previous" — sits in the gutter to the left of the
-            real button/grid (measured from the real button's own left edge minus its
-            width plus a gap), never on top of the cards, and docks there once the
-            real button scrolls into view. */}
-        {currentStep === 2 && showFloatingPrev && (
-          <div
-            className="hidden lg:block fixed bottom-6 z-dropdown"
-            style={floatingPrevLeft !== null ? { left: `max(1rem, ${floatingPrevLeft - 136}px)` } : undefined}
-          >
-            <Button
-              variant="outline"
-              onClick={handlePrevious}
-              iconName="ChevronLeft"
-              iconSize={16}
-              className="bg-surface shadow-spa-elevated"
-            >
-              Previous
-            </Button>
           </div>
         )}
 

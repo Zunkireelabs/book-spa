@@ -121,6 +121,19 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
+  /* Smooth scrolling for normal user-driven scrolling (wheel/touch/anchor
+     links). Programmatic resets that must be instant (e.g. the booking flow's
+     scroll-to-top on step change) explicitly pass `behavior: 'instant'` to
+     override this per-call, rather than this being toggled globally. */
+  html {
+    scroll-behavior: smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
   /* Hide the floating mobile nav pill + FAB while an overlay panel is open
      (e.g. Quick Booking side panel) so its action buttons aren't obscured. */
   body.mobile-panel-open .js-mobile-floating-ui {

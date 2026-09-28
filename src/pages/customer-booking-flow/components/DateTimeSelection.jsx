@@ -426,13 +426,13 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
               <p className="font-body font-body-normal text-text-secondary">Checking availability...</p>
             </div>
           ) : (
-            <div className="grid grid-cols-3 @sm:grid-cols-5 @2xl:grid-cols-6 gap-2">
+            <div className="grid grid-cols-4 @sm:grid-cols-6 @2xl:grid-cols-8 gap-2">
               {timeSlots.map((slot) => (
                 <button
                   key={slot.time24}
                   onClick={() => slot.isAvailable && handleTimeSelect(slot.time24)}
                   disabled={!slot.isAvailable}
-                  className={`flex flex-col items-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
+                  className={`aspect-[5/4] flex flex-col items-center justify-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
                     !slot.isAvailable
                       ? 'opacity-50 cursor-not-allowed bg-background text-text-secondary'
                       : selectedTime === slot.time24
