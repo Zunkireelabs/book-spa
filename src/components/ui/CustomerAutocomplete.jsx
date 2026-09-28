@@ -16,7 +16,10 @@ const CustomerAutocomplete = ({
   onSelect,
   branchId,
   searchBy = 'name',
-  placeholder = searchBy === 'phone' ? '98XXXXXXXX' : searchBy === 'email' ? 'Enter customer email' : 'Enter customer name',
+  placeholder = searchBy === 'phone' ? '98XXXXXXXX'
+    : searchBy === 'email' ? 'Enter customer email'
+    : searchBy === 'any' ? 'Search by name, phone or email…'
+    : 'Enter customer name',
   inputClassName,
   inputRef: externalRef,
   onBlur,
@@ -53,10 +56,26 @@ const CustomerAutocomplete = ({
       .filter((c) => {
         if (searchBy === 'phone') return c.phone && c.phone.includes(term);
         if (searchBy === 'email') return c.email && c.email.toLowerCase().includes(term);
+        if (searchBy === 'any') {
+          // Phone is compared digits-only on both sides so a typed local number
+          // still matches a stored international one — "9841221840" finds
+          // "+977 9841221840", which a plain substring test would miss.
+          const digits = term.replace(/\D/g, '');
+          const phoneHit = digits.length >= 2
+            && c.phone
+            && c.phone.replace(/\D/g, '').includes(digits);
+          return (
+            (c.full_name && c.full_name.toLowerCase().includes(term))
+            || (c.email && c.email.toLowerCase().includes(term))
+            || phoneHit
+          );
+        }
         return c.full_name.toLowerCase().includes(term);
       })
       .slice(0, 8);
-  }, [value, customers]);
+    // searchBy belongs in the deps: without it, switching mode kept the old
+    // filter's results until the query changed.
+  }, [value, customers, searchBy]);
 
   // Show/hide suggestions based on matches
   useEffect(() => {
@@ -134,7 +153,7 @@ const CustomerAutocomplete = ({
       {showSuggestions && (
         <div
           ref={listRef}
-          className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-48 overflow-y-auto"
+          className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1 max-h-48 overflow-y-auto"
         >
           {suggestions.map((customer, index) => {
             const m = customer.primaryMembership;
@@ -153,6 +172,11 @@ const CustomerAutocomplete = ({
                   <span className="font-medium text-text-primary">{customer.full_name}</span>
                   {customer.phone && (
                     <span className="ml-2 text-text-secondary">{customer.phone}</span>
+                  )}
+                  {/* In 'any' mode the match may have been on email, so show it —
+                      otherwise a row matched by email looks like a false hit. */}
+                  {searchBy === 'any' && customer.email && (
+                    <span className="ml-2 text-text-tertiary text-xs">{customer.email}</span>
                   )}
                 </span>
                 {m && (

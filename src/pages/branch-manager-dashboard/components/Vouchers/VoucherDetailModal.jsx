@@ -4,12 +4,14 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQuickEdit';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useBranch } from '../../../../contexts/BranchContext';
+import AdminValueCorrectionModal from '../../../../components/ui/AdminValueCorrectionModal';
 import {
   fetchVoucher,
   fetchVoucherClaims,
   fetchBranchesByOrgId,
   fetchServicesByOrgId,
   claimVoucher,
+  adminCorrectVoucherBalance,
 } from '../../../../services/api';
 
 function formatNPR(amount) {
@@ -40,6 +42,8 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
   const { branchId: currentBranchId, isOverall } = useBranch();
   const orgId = profile?.org_id;
 
+  const isAdmin = profile?.role === 'admin';
+  const [showCorrectBalance, setShowCorrectBalance] = useState(false);
   const [voucher, setVoucher] = useState(null);
   const [claims, setClaims] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -228,7 +232,21 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
                   <p className="font-data font-data-semibold text-sm text-warning">{formatNPR(voucher.totalClaimed)}</p>
                 </div>
                 <div className="bg-primary/5 rounded-spa border border-primary/20 p-3">
-                  <p className="font-caption text-[10px] text-primary uppercase tracking-wide mb-1">Remaining</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-caption text-[10px] text-primary uppercase tracking-wide">Remaining</p>
+                    {/* remainingBalance is computed (issued - claims), so the
+                        correction adjusts the issued total and leaves the real
+                        claim history untouched. */}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCorrectBalance(true)}
+                        className="font-caption text-[10px] text-warning hover:underline"
+                      >
+                        Correct
+                      </button>
+                    )}
+                  </div>
                   <p className="font-data font-data-semibold text-sm text-primary">{formatNPR(voucher.remainingBalance)}</p>
                 </div>
               </div>
@@ -378,6 +396,25 @@ const VoucherDetailModal = ({ voucherId, onClose, onChanged }) => {
           )}
         </div>
       </div>
+
+      {showCorrectBalance && voucher && (
+        <AdminValueCorrectionModal
+          title="Correct voucher balance"
+          label="Correct remaining balance (NPR)"
+          currentLabel={`${formatNPR(voucher.remainingBalance)} remaining of ${formatNPR(voucher.totalAmountIssued)} issued`}
+          kind="number"
+          warning={`Remaining is calculated as issued minus claims, so this adjusts the issued total and leaves the claim history intact. Because it changes the issued figure, the "Gift vouchers distributed" report total for ${formatDate(voucher.issuedDate)} will change to match. Cash reconciliation is unaffected. To remove a claim that never happened, void that claim instead.`}
+          onSubmit={({ value, reason }) =>
+            adminCorrectVoucherBalance({ voucherId, newRemaining: value, reason })
+          }
+          onClose={() => setShowCorrectBalance(false)}
+          onSuccess={() => {
+            setShowCorrectBalance(false);
+            loadData();
+            onChanged?.();
+          }}
+        />
+      )}
     </>
   );
 };
