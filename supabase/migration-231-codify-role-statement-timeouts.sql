@@ -4,7 +4,8 @@
 --
 -- Idempotent: ALTER ROLE ... SET is last-write-wins, safe to re-run.
 -- Reversible (manual):
---   ALTER ROLE authenticator  SET statement_timeout = '8s';
+--   ALTER ROLE authenticator  SET statement_timeout = '30s';  -- prod prior value
+--   ALTER ROLE authenticator  SET statement_timeout = '8s';   -- stage prior value
 --   ALTER ROLE authenticated  SET statement_timeout = '8s';
 --   ALTER ROLE anon           SET statement_timeout = '3s';
 --
@@ -29,35 +30,95 @@
 --
 -- Measured state before this migration (2026-09-28, read-only psql)
 --
---   role            stage    prod
---   authenticator   8s       30s
---   authenticated   8s       30s
---   anon            3s       3s
---   service_role    (none)   (none)
+--   role            stage    prod     -> this migration
+--   authenticator   8s       30s         60s
+--   authenticated   8s       30s         30s
+--   anon            3s       3s          3s
+--   service_role    (none)   (none)      (none, inherits authenticator)
 --
--- So this migration is a **no-op on production** — it writes back the values
--- prod already holds — and a **real change on staging**, which it raises from
--- 8s to 30s. That direction is deliberate: staging should reproduce
--- production's timeout behavior, not a stricter one. A load test that passes
--- on staging under an 8s ceiling tells us nothing about a prod running 30s.
+-- On production this is a near-no-op: `authenticated` and `anon` are written
+-- back unchanged, and only `authenticator` moves (30s -> 60s) for the reason
+-- given below. On staging it is a real change, raising `authenticator` and
+-- `authenticated` from 8s.
+--
+-- That direction is deliberate: staging should reproduce production's timeout
+-- behaviour, not a stricter one, because a load test that passes under an 8s
+-- ceiling tells us nothing about a prod running 30s.
+--
+-- The obvious objection is that staging thereby loses an early-warning signal
+-- — a query that used to fail at 8s now passes. The measurement below answers
+-- it: the worst observed request-path statement on prod is 1,614ms, so
+-- neither 8s nor 30s is reached in normal operation and no such warning was
+-- ever actually firing. The real early-warning signal is the prod healthcheck
+-- workflow (`.github/workflows/healthcheck-prod.yml`), which gates at 2s and
+-- 5s — an order of magnitude below any of these ceilings, and unaffected by
+-- them. Slow-query detection belongs there and in `pg_stat_statements`, not
+-- in a timeout.
+--
+-- Rejected alternative: adding `log_min_duration_statement` per role as a
+-- staging canary. `ALTER ROLE` accepts it, but that GUC is `context=superuser`
+-- (verified via `pg_settings` on 2026-09-28), and PostgREST applies
+-- impersonated-role settings with `set_config` inside *every* request
+-- transaction. A role that cannot legally set it would error on every request.
+-- That is an outage generator, not a canary.
 --
 --
--- Why 30s, and why it is a ceiling to lower rather than a target
+-- How these three values interact (PostgREST semantics, not guesswork)
 --
--- 30s is not an engineering choice. It is the number that stopped the
--- bleeding on a saturated t4g.nano, kept because it is proven rather than
--- because it is right. A 30-second ceiling means a single pathological query
--- can hold a PostgREST pool connection for half a minute; at MICRO's
--- connection count that is a meaningful share of the pool. The correct fix is
--- the one migration 228's header already names: reduce the RLS plan
--- complexity (671-node plans, 325+ nested InitPlans) so queries finish well
--- inside 8s again, then lower this back. Ordering matters — lowering the
--- timeout before the plan cost is addressed is how 226 turned a tuning change
--- into an incident.
+-- Per PostgREST's own docs (references/transactions.rst, "Impersonated Role
+-- Settings"): PostgreSQL applies the *connection* role's settings — that is
+-- `authenticator` — and PostgREST then applies the *impersonated* role's
+-- settings (`authenticated` / `anon`) as transaction-scoped values that
+-- override them. Its documented example is literally this pair of statements.
+-- So:
 --
--- Do NOT lower `authenticator` or `authenticated` below 30s until that work
--- lands and business-hours measurement confirms it. See
--- `docs/superpowers/specs/2026-09-27-perf-audit.md`.
+--   * every API request runs under `authenticated` (30s) or `anon` (3s);
+--   * work PostgREST does on the connection itself, with no impersonation —
+--     most importantly the schema-cache reload — runs under `authenticator`.
+--
+-- This is why the three values are not the same number, and why raising
+-- `authenticator` does NOT loosen the request path.
+--
+--
+-- Why `authenticator` is 60s and not 30s
+--
+-- Measured on prod 2026-09-28 from `pg_stat_statements` (window since the
+-- 2026-09-26 14:37 UTC restart), worst observed statement per role:
+--
+--   anon            86ms        over 1,801 calls
+--   authenticated   1,614ms     over 177,566 calls
+--   authenticator   29,799ms    over 38,641 calls
+--
+-- That 29,799ms is `SELECT name FROM pg_timezone_names` — PostgREST's
+-- schema-cache reload — against a 30s ceiling. 99.3% of the budget. Had it
+-- crossed, the schema cache would have failed to build and PostgREST would
+-- have stopped serving entirely, which is a worse outcome than the slow
+-- reload the timeout was meant to bound. The mean for that statement is
+-- 1,098ms across 37 calls, so the 29.8s figure is a saturation-era outlier
+-- from the incident window rather than normal behaviour — but surviving
+-- saturation is the entire reason this ceiling exists, so the outlier is the
+-- case that matters, not the mean.
+--
+-- 60s therefore applies only to non-impersonated connection work. Request
+-- latency stays bounded at 30s / 3s by the impersonated settings above.
+-- `service_role` inherits this 60s (it sets no value of its own), which is
+-- intended — see below.
+--
+--
+-- Why `authenticated` is 30s, and why it is a ceiling to lower
+--
+-- 30s is not an engineering choice. It is the number a human typed during the
+-- 2026-09-26 incident to stop requests being killed mid-flight on a saturated
+-- t4g.nano, kept because it is proven rather than because it is right. The
+-- measurement above shows the request path's real worst case is 1,614ms —
+-- under 6% of even the old 8s default — so in normal operation neither 8s nor
+-- 30s is ever reached. The difference only matters under saturation.
+--
+-- The correct fix is the one migration 228's header already names: reduce the
+-- RLS plan complexity (671-node plans, 325+ nested InitPlans) so queries stay
+-- fast under load, then lower this back toward 8s. Ordering matters —
+-- tightening the timeout before the plan cost is addressed is how 226 turned
+-- a tuning change into an incident.
 --
 --
 -- Why `anon` stays at 3s
@@ -75,11 +136,13 @@
 -- Why `service_role` is left alone
 --
 -- `service_role` bypasses RLS and is used only server-side (Edge Functions).
--- It has no role-level timeout today and this migration does not add one:
--- giving it a ceiling here would silently cap long-running maintenance and
--- backfill work that legitimately runs longer than any request-path query,
--- and those callers should set their own timeout deliberately rather than
--- inherit a request-shaped one.
+-- It has no role-level timeout of its own and this migration does not add
+-- one, so it inherits `authenticator`'s 60s. Giving it a tighter ceiling here
+-- would silently cap long-running maintenance and backfill work that
+-- legitimately runs longer than any request-path query; those callers should
+-- set their own timeout deliberately rather than inherit a request-shaped
+-- one. Measured worst case on prod for this role in the current window:
+-- 6,983ms over 33 calls.
 --
 --
 -- What this does NOT do
@@ -94,7 +157,7 @@
 
 BEGIN;
 
-ALTER ROLE authenticator SET statement_timeout = '30s';
+ALTER ROLE authenticator SET statement_timeout = '60s';
 ALTER ROLE authenticated SET statement_timeout = '30s';
 ALTER ROLE anon          SET statement_timeout = '3s';
 
