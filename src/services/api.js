@@ -13603,3 +13603,69 @@ export async function getAdminCorrections({ limit = 100 } = {}) {
     return { data: null, error };
   }
 }
+
+// --- Voucher / package corrections (migration 233) --------------------------
+// voucher_balances and package_balances are VIEWS — remaining_balance and
+// sessions_remaining are computed, not stored, so there is nothing to UPDATE.
+// Each pair below changes one side of that arithmetic: correct the issued
+// figure, or void a claim/redemption that never happened.
+
+async function callAdminCorrection(rpc, args, { reason, event, meta }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can make corrections.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+
+    const { data, error } = await supabase.rpc(rpc, { ...args, p_reason: reason.trim() });
+    if (error) {
+      // These RPCs raise a prefixed code when a correction is refused for a
+      // substantive reason (money attached, redeemed sessions). Strip the
+      // prefix so the UI shows the explanation, not the machine tag.
+      const m = typeof error.message === 'string'
+        ? error.message.match(/(CLAIM_HAS_PAYMENT|REDEMPTION_HAS_BOOKING):\s*(.*)/)
+        : null;
+      if (m) return { data: null, error: { code: m[1], message: m[2] } };
+      throw error;
+    }
+
+    capture(event, meta);
+    return { data, error: null };
+  } catch (error) {
+    console.error(`[API] ${rpc} error:`, error.message);
+    return { data: null, error };
+  }
+}
+
+/** Set a voucher's remaining balance to `newRemaining`; adjusts the issued total. */
+export async function adminCorrectVoucherBalance({ voucherId, newRemaining, reason }) {
+  return callAdminCorrection('admin_correct_voucher_balance',
+    { p_voucher_id: voucherId, p_new_remaining: Number(newRemaining) },
+    { reason, event: 'admin_voucher_balance_corrected', meta: { voucher_id: voucherId } });
+}
+
+/** Remove a voucher claim that never happened. Refused if a payment is linked. */
+export async function adminVoidVoucherClaim({ claimId, reason }) {
+  return callAdminCorrection('admin_void_voucher_claim',
+    { p_claim_id: claimId },
+    { reason, event: 'admin_voucher_claim_voided', meta: { claim_id: claimId } });
+}
+
+/** Correct a package's total session count. Cannot go below sessions already redeemed. */
+export async function adminCorrectPackageSessions({ packageId, newSessionsTotal, reason }) {
+  return callAdminCorrection('admin_correct_package_sessions',
+    { p_package_id: packageId, p_new_sessions_total: Number(newSessionsTotal) },
+    { reason, event: 'admin_package_sessions_corrected', meta: { package_id: packageId } });
+}
+
+/** Remove a package redemption that never happened. Refused if a booking is linked. */
+export async function adminVoidPackageRedemption({ redemptionId, reason }) {
+  return callAdminCorrection('admin_void_package_redemption',
+    { p_redemption_id: redemptionId },
+    { reason, event: 'admin_package_redemption_voided', meta: { redemption_id: redemptionId } });
+}

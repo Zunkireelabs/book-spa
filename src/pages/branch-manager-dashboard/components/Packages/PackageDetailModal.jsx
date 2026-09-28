@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomerContactQuickEdit from '../../../../components/ui/CustomerContactQuickEdit';
-import { fetchPackage, fetchPackageRedemptions } from '../../../../services/api';
+import AdminValueCorrectionModal from '../../../../components/ui/AdminValueCorrectionModal';
+import { fetchPackage, fetchPackageRedemptions, adminCorrectPackageSessions } from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -25,14 +27,16 @@ const STATUS_CONFIG = {
 // redeem_package_session() at booking checkout (see PaymentModal /
 // recordPayment's SessionPackage tender handling, Task 2/3), so this modal
 // stays read-only rather than opening a second, parallel write path for the
-// same action outside the booking flow. `onChanged` is accepted (mirroring
-// VoucherDetailModal's prop shape for the parent) but unused since nothing
-// here mutates package state.
-const PackageDetailModal = ({ packageId, onClose, onChanged: _onChanged }) => {
+// same action outside the booking flow. `onChanged` fires when an admin
+// corrects the session total, so the parent list can re-fetch.
+const PackageDetailModal = ({ packageId, onClose, onChanged }) => {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const [pkg, setPkg] = useState(null);
   const [redemptions, setRedemptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [showCorrectSessions, setShowCorrectSessions] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -163,7 +167,20 @@ const PackageDetailModal = ({ packageId, onClose, onChanged: _onChanged }) => {
                   <p className="font-data font-data-semibold text-sm text-warning">{pkg.sessionsUsed}</p>
                 </div>
                 <div className="bg-primary/5 rounded-spa border border-primary/20 p-3">
-                  <p className="font-caption text-[10px] text-primary uppercase tracking-wide mb-1">Remaining</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-caption text-[10px] text-primary uppercase tracking-wide">Remaining</p>
+                    {/* sessionsRemaining is computed (total - redemptions), so the
+                        correction targets the total, not this number. */}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCorrectSessions(true)}
+                        className="font-caption text-[10px] text-warning hover:underline"
+                      >
+                        Correct
+                      </button>
+                    )}
+                  </div>
                   <p className="font-data font-data-semibold text-sm text-primary">{pkg.sessionsRemaining}</p>
                 </div>
               </div>
@@ -255,6 +272,25 @@ const PackageDetailModal = ({ packageId, onClose, onChanged: _onChanged }) => {
           )}
         </div>
       </div>
+
+      {showCorrectSessions && pkg && (
+        <AdminValueCorrectionModal
+          title="Correct package sessions"
+          label="Total sessions on this package"
+          currentLabel={`${pkg.sessionsTotal} total, ${pkg.sessionsUsed} used`}
+          kind="integer"
+          warning="Sessions remaining is calculated as total minus redemptions, so this corrects the total. It cannot be set below the number already redeemed — void the incorrect redemption first."
+          onSubmit={({ value, reason }) =>
+            adminCorrectPackageSessions({ packageId, newSessionsTotal: value, reason })
+          }
+          onClose={() => setShowCorrectSessions(false)}
+          onSuccess={() => {
+            setShowCorrectSessions(false);
+            loadData();
+            onChanged?.();
+          }}
+        />
+      )}
     </>
   );
 };
