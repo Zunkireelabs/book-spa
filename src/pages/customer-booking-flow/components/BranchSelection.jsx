@@ -58,7 +58,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
         setBranches(activeBranches);
 
         if (activeBranches.length === 1 && !selectedBranch) {
-          onBranchSelect(activeBranches[0]);
+          onBranchSelect(activeBranches[0], false);
         }
         setLoading(false);
       } catch (err) {

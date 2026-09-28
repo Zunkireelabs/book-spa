@@ -116,7 +116,9 @@ const ServiceBookingPanel = ({
                 type="button"
                 onClick={() => onServiceSelect(null)}
                 aria-label="Back to services"
-                className="lg:hidden absolute left-4 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast"
+                // Visual circle stays w-7 h-7 (28px); the ::before pseudo-element pads the
+                // actual hit area out to 44px (spa-touch-target) without growing the chrome.
+                className="lg:hidden absolute left-4 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast before:absolute before:-inset-2 before:content-['']"
               >
                 <Icon name="ChevronLeft" size={16} />
               </button>

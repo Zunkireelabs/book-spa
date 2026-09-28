@@ -257,13 +257,16 @@ const CustomerBookingFlowV2 = () => {
     return true;
   };
 
-  const handleBranchSelect = (branch) => {
+  const handleBranchSelect = (branch, isUserAction = true) => {
     if (!branch) return;
 
     setSelectedBranch(branch);
     setSelectedService(null); // Reset service when branch changes
 
-    if (currentStep === 1) {
+    // Only a real card tap should advance the step / log step-completion — BranchSelection
+    // also calls this to auto-select a tenant's sole branch on load, and that time-to-select
+    // is page-load latency, not user engagement.
+    if (currentStep === 1 && isUserAction) {
       capture('customer_booking_step_completed', {
         step_index: 1,
         step_name: stepNames[0],
@@ -512,7 +515,10 @@ const CustomerBookingFlowV2 = () => {
                       type="button"
                       onClick={handlePrevious}
                       aria-label="Previous"
-                      className="absolute left-0 top-0 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast"
+                      // Visual circle stays w-7 h-7 (28px); the ::before pseudo-element pads
+                      // the actual hit area out to 44px (spa-touch-target) without growing
+                      // the chrome or shifting the title's absolute-positioned layout.
+                      className="absolute left-0 top-0 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast before:absolute before:-inset-2 before:content-['']"
                     >
                       <Icon name="ChevronLeft" size={16} />
                     </button>
