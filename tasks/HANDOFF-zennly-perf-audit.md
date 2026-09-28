@@ -125,25 +125,46 @@ Known merge conflicts to resolve by hand:
 - Add an explicit "remove once H7/H8 are fixed" note to migration 229's
   reaper — it runs forever and masks the real cause if left unlabeled.
 
-## What's still blocked (needs @sthasadin)
+## Ownership handover (2026-09-28)
 
-- Read-only audit role + `AUDIT_DATABASE_URL` (session pooler, port 5432) —
-  not in `.env.local` yet.
-- Pro-org dashboard access (Reports, Logs > Postgres, Advisors).
-- Postgres `ERROR`-severity logging turned on + a saved query — without this
-  the original 25P02 trigger event stays unnamed.
-- Confirmation of exactly what was applied by hand on prod during the
-  incident (needed to fully close the 228/229 ledger question above —
-  current read is "228 is a safe no-op re-apply" based on file contents +
-  the measured live 60s value, not a direct confirmation from Sadin).
-- Prod `psql` access is blocked by the local permission classifier
-  independent of the role existing — every prod query needs explicit
-  approval regardless.
+@sthasadin handed this work over to @anish in full. The items previously listed
+here as "blocked, needs @sthasadin" were resolved by direct measurement against
+production rather than by asking him:
+
+- **Prod `psql` access — WORKING.** Reads go through `~/.pgpass`
+  (`aws-1-ap-northeast-2.pooler.supabase.com`, `postgres.pmbvogiphelmpjdalmtv`)
+  with `default_transaction_read_only = on`. A dedicated read-only audit role
+  and `AUDIT_DATABASE_URL` were never needed and are no longer requested.
+- **The 228 ledger gap — CLOSED.** Prod's ledger reads
+  `220,221,222,223,224,225,226,227,229`. Migration 228 sets only
+  `authenticator`'s `idle_in_transaction_session_timeout` to `60s`, and prod
+  measurably already holds `60s`. So 228 is confirmed a safe idempotent
+  re-apply on promotion. This is now a direct measurement, not an inference
+  from file contents.
+- **Hand-applied `statement_timeout` — CODIFIED.** Measured 2026-09-28:
+  `authenticator` 30s, `authenticated` 30s, `anon` 3s, `service_role` none on
+  prod, against 8s/8s/3s/none on staging. Migration 231
+  (`fix/codify-role-statement-timeouts`, PR #347) writes these values as a
+  tracked migration — a no-op on prod, and raises staging to match. It no
+  longer depends on Sadin confirming what he typed.
+- **`track_planning` — confirmed `off` on prod.** A settable parameter, not a
+  piece of missing knowledge. H7 stays untestable only until someone turns it
+  on.
+
+Still genuinely unavailable, and now nobody's blocker to clear:
+
+- **Pro-org dashboard (Reports, Logs > Postgres, Advisors).** Needed only for
+  the request-count graph around the 12:40 UTC 2026-09-26 deploy — the single
+  test of the deploy-amplification idea. Not worth chasing unless the incident
+  recurs.
+- **Postgres `ERROR`-severity logging.** Not currently on, so the original
+  25P02 trigger event stays unnamed. This is a dashboard setting somebody with
+  Pro-org access can enable; it is not knowledge locked in Sadin's head.
 
 ## Hard rules (carried forward, do not violate)
 
 Prod read-only, no writes/DDL/restarts/`pg_terminate_backend`. Compute stays
-MICRO — don't propose scaling. New migrations self-record, next number 230.
+MICRO — don't propose scaling. New migrations self-record, next number 232 (231 taken by PR #347).
 New RLS policies wrap helper calls in `(SELECT ...)` InitPlan style. Migration
 227's live-session-termination pattern must not be repeated. `feature/*` or
 `fix/*` → PR to `stage` → `stage` to `main`, never straight to `main`. Anon
