@@ -1,6 +1,14 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, retryingFetch } from '../lib/supabase';
 import { identify, reset, setGroup } from '../lib/analytics';
+import { isTransientStatus, ServiceUnavailableError } from '../lib/supabaseRetry';
+
+// Ceiling on how long the profile fetch may run before we give up and treat it
+// as "service unavailable" rather than leaving the app on a spinner forever.
+// A poisoned/unreachable database (503 / TCP connect timeout) is exactly the
+// case this bounds — without it, a down database leaves logged-in staff staring
+// at "Loading..." indefinitely.
+const PROFILE_FETCH_TIMEOUT_MS = 12000;
 
 const AuthContext = createContext(null);
 
@@ -55,16 +63,35 @@ async function fetchProfile(userId, accessToken) {
       // call gets the same 25P02/40001/40P01 retry + telemetry as every request
       // issued through the supabase-js clients — this is the same poisoned-pool
       // traffic, just reached via a direct URL instead of the client.
-      const res = await retryingFetch(url, {
-        headers: {
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/vnd.pgrst.object+json',
-        },
-      });
+      //
+      // Bounded by an AbortController: when the database is unreachable (503 /
+      // TCP connect timeout, the 2026-09-26 outage) the request can otherwise
+      // hang until the browser's default timeout, leaving the user on a spinner.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PROFILE_FETCH_TIMEOUT_MS);
+      let res;
+      try {
+        res = await retryingFetch(url, {
+          signal: controller.signal,
+          headers: {
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/vnd.pgrst.object+json',
+          },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) {
         const body = await res.text();
         console.error('[Auth] Profile fetch failed:', res.status, body);
+        // Distinguish "database is down" from "this account has no profile":
+        // a transient/5xx status means the user should be told to retry, not
+        // that their account is broken. A genuine 4xx (e.g. 406 no row) falls
+        // through to `return null` and is handled as a missing profile.
+        if (isTransientStatus(res.status) || res.status >= 500) {
+          throw new ServiceUnavailableError(undefined, { status: res.status });
+        }
         return null;
       }
       return await res.json();
@@ -79,12 +106,22 @@ async function fetchProfile(userId, accessToken) {
 
     if (error) {
       console.error('[Auth] Profile fetch error:', error.message);
+      // PostgREST surfaces the SQLSTATE/status on the error object. A transient
+      // infrastructure failure (503/network) must be reported as unavailable so
+      // the caller can prompt a retry instead of logging the user out.
+      const status = Number(error.status ?? error.code);
+      if (isTransientStatus(status) || status >= 500 || error.message === 'Failed to fetch') {
+        throw new ServiceUnavailableError(undefined, { status: Number.isFinite(status) ? status : 0, cause: error });
+      }
       return null;
     }
     return data;
   } catch (err) {
+    if (err instanceof ServiceUnavailableError) throw err;
+    // A network throw or AbortController timeout — the database was unreachable,
+    // not a missing profile. Surface it as unavailable, not as null.
     console.error('[Auth] Profile fetch exception:', err);
-    return null;
+    throw new ServiceUnavailableError(undefined, { status: 0, cause: err });
   }
 }
 
@@ -92,6 +129,11 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  // True when we have an authenticated session but the profile could not be
+  // loaded because the database was unreachable (503 / timeout), NOT because the
+  // profile is missing. Lets the UI show "reconnecting, retry" instead of
+  // bouncing the user to login or hanging on a spinner during a DB outage.
+  const [authUnavailable, setAuthUnavailable] = useState(false);
 
   // Guard: when signIn() is actively running, the useEffect must not
   // race with its own profile fetch.
@@ -115,6 +157,7 @@ export const AuthProvider = ({ children }) => {
 
       setUser(data.user);
       setProfile(userProfile);
+      setAuthUnavailable(false);
       setLoading(false);
 
       if (userProfile) {
@@ -172,6 +215,36 @@ export const AuthProvider = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Load the profile for the current session. Shared by the refresh effect and
+  // by retryProfile() (the "Try again" button shown during a DB outage).
+  // Distinguishes a genuinely missing profile (setProfile(null)) from an
+  // unreachable database (setAuthUnavailable(true)) so the UI can respond
+  // differently to each.
+  const loadProfile = useCallback(async (userId) => {
+    setLoading(true);
+    try {
+      const p = await fetchProfile(userId);
+      setProfile(p);
+      setAuthUnavailable(false);
+      return p;
+    } catch (err) {
+      if (err instanceof ServiceUnavailableError) {
+        // Database unreachable — keep the session, don't wipe to "no profile"
+        // (which would bounce the user to login). Let the UI offer a retry.
+        setAuthUnavailable(true);
+        return null;
+      }
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const retryProfile = useCallback(() => {
+    if (user?.id) return loadProfile(user.id);
+    return Promise.resolve(null);
+  }, [user?.id, loadProfile]);
+
   // Fetch profile on page refresh (INITIAL_SESSION with an existing session).
   // Skipped when signIn already set both user + profile in the same render.
   useEffect(() => {
@@ -191,18 +264,16 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
-    setLoading(true);
-
-    // No explicit token — supabase client uses localStorage session
-    fetchProfile(user.id)
-      .then((p) => { if (!cancelled) setProfile(p); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    // No explicit token — supabase client uses localStorage session.
+    // loadProfile swallows ServiceUnavailableError into authUnavailable state;
+    // guard the promise so nothing rejects unhandled if state changed meanwhile.
+    loadProfile(user.id).catch(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [user?.id]);
+  }, [user?.id, loadProfile]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, authUnavailable, retryProfile, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

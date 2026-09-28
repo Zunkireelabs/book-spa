@@ -7,6 +7,8 @@ import {
   extractTable,
   readPgCode,
   createRetryingFetch,
+  isTransientStatus,
+  ServiceUnavailableError,
 } from './supabaseRetry';
 
 const jsonResponse = (status, body) =>
@@ -18,8 +20,8 @@ const jsonResponse = (status, body) =>
 const noSleep = () => Promise.resolve();
 
 describe('RETRYABLE_PG_CODES', () => {
-  it('contains exactly the three rolled-back-transaction codes', () => {
-    expect([...RETRYABLE_PG_CODES].sort()).toEqual(['25P02', '40001', '40P01']);
+  it('contains exactly the four rolled-back-transaction codes', () => {
+    expect([...RETRYABLE_PG_CODES].sort()).toEqual(['25P02', '25P03', '40001', '40P01']);
   });
 });
 
@@ -472,6 +474,67 @@ describe('createRetryingFetch', () => {
 
     await expect(wrapped('https://x.supabase.co/rest/v1/bookings', {})).rejects.toBe(err);
   });
+
+  // 2026-09-26 idle-in-transaction-timeout incident: 25P03 must be retried
+  // exactly like 25P02/40001/40P01, since PostgreSQL guarantees the killed
+  // connection's transaction rolled back with nothing committed.
+  it('retries a 25P03 and returns the eventual success', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(500, { code: '25P03' }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep });
+
+    const res = await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(res.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a 25P03 recovery with recovered=true', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(500, { code: '25P03' }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    await wrapped('https://x.supabase.co/rest/v1/bookings', { method: 'GET' });
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: '25P03', status: 500, attempts: 2, recovered: true })
+    );
+  });
+
+  it('reports recovered=false when a 25P03 exhausts all attempts', async () => {
+    const onError = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(500, { code: '25P03' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep, onError });
+
+    const res = await wrapped('https://x.supabase.co/rest/v1/bookings', {});
+
+    expect(res.status).toBe(500);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenLastCalledWith(
+      expect.objectContaining({ code: '25P03', recovered: false, attempts: 3 })
+    );
+  });
+
+  // Pins the "provably safe because nothing committed" property for a WRITE,
+  // not just a GET — an idle-timeout kill terminates the connection and rolls
+  // back the transaction, so replaying the POST cannot double-apply it.
+  it('retries a POST with a string body on 25P03, since nothing committed', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(500, { code: '25P03' }))
+      .mockResolvedValueOnce(jsonResponse(201, { id: 'b1' }));
+    const wrapped = createRetryingFetch({ fetchImpl, sleep: noSleep });
+
+    const res = await wrapped('https://x.supabase.co/rest/v1/bookings', {
+      method: 'POST',
+      body: '{"customer_name":"A"}',
+    });
+
+    expect(res.status).toBe(201);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('BENIGN_PG_CODES', () => {
@@ -504,5 +567,25 @@ describe('supabase-js fetch input contract (dependency guard, not a behavior tes
 
     expect(spy).toHaveBeenCalled();
     expect(typeof spy.mock.calls[0][0]).toBe('string');
+  });
+});
+
+describe('isTransientStatus', () => {
+  it('flags gateway/unavailable/throttle statuses', () => {
+    for (const s of [429, 502, 503, 504]) expect(isTransientStatus(s)).toBe(true);
+  });
+
+  it('does not flag ordinary success or application errors', () => {
+    for (const s of [200, 400, 401, 403, 404, 406, 409, 500]) expect(isTransientStatus(s)).toBe(false);
+  });
+});
+
+describe('ServiceUnavailableError', () => {
+  it('is tagged so the UI can tell an outage from a missing profile', () => {
+    const err = new ServiceUnavailableError(undefined, { status: 503 });
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('ServiceUnavailableError');
+    expect(err.isServiceUnavailable).toBe(true);
+    expect(err.status).toBe(503);
   });
 });

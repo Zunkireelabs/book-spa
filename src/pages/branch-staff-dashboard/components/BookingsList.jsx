@@ -404,7 +404,10 @@ const BookingsList = ({ bookings, therapists = [], onStatusUpdate, onAssignThera
       {/* Booking Action Modal */}
       <BookingActionModal
         isOpen={showActionModal}
-        onClose={() => setShowActionModal(false)}
+        // Refresh on close, matching the two calendar call sites. Without this
+        // an admin correction (or any other in-modal mutation) leaves this list
+        // showing the pre-change row until something else triggers a reload.
+        onClose={() => { setShowActionModal(false); if (onRefresh) onRefresh(); }}
         booking={selectedBooking}
         therapists={therapists}
         onAssignTherapist={onAssignTherapist}
