@@ -13481,3 +13481,125 @@ export async function deleteCampaign({ campaignId }) {
     return { data: null, error };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Admin corrections
+// ---------------------------------------------------------------------------
+// Bookings on a closed day, or a Completed booking, are frozen by the DB
+// trigger enforce_booking_immutability(). These two helpers are the only way
+// past it, and both go through SECURITY DEFINER RPCs that re-check the admin
+// role server-side, require a reason, and write an audit_logs row. Deliberately
+// NOT routed through validateBookingMutation(): that guard stays absolute for
+// every ordinary code path, so nothing can bypass a lock by accident.
+
+/** Minimum reason length. Mirrors the CHECK inside the RPCs — keep in sync. */
+const CORRECTION_REASON_MIN = 10;
+
+/**
+ * Correct a booking that immutability would otherwise block.
+ *
+ * @param {string} bookingId  booking UUID (booking.bookingId, never booking.id)
+ * @param {object} changes    flat { column: value }; server whitelists columns
+ * @param {string} reason     >= 10 chars, stored on the audit row
+ */
+export async function adminCorrectBooking({ bookingId, changes, reason }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    // Checked here purely so the UI can fail fast with a clear message; the
+    // RPC re-checks both, and that check is the one that actually protects.
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can correct a locked or completed booking.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+    if (!changes || Object.keys(changes).length === 0) {
+      return { data: null, error: { code: 'NO_CHANGES', message: 'No changes were supplied.' } };
+    }
+
+    const { data, error } = await supabase.rpc('admin_correct_booking', {
+      p_booking_id: bookingId,
+      p_changes: changes,
+      p_reason: reason.trim(),
+    });
+    if (error) throw error;
+
+    capture('admin_booking_corrected', { booking_id: bookingId, fields: Object.keys(changes) });
+    return { data: { bookingId: data }, error: null };
+  } catch (error) {
+    console.error('[API] adminCorrectBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Permanently delete a booking that should never have existed.
+ *
+ * Refuses when payments, refunds, referrals or package redemptions reference
+ * the booking — those FKs are RESTRICT/NO ACTION so the database would refuse
+ * regardless. The RPC raises BOOKING_HAS_FINANCIAL_RECORDS naming what blocked
+ * it; surface that message rather than a generic failure, because the caller's
+ * next step (cancel with a reason instead) depends on knowing why.
+ */
+export async function adminDeleteBooking({ bookingId, reason }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can delete a booking.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+
+    const { data, error } = await supabase.rpc('admin_delete_booking', {
+      p_booking_id: bookingId,
+      p_reason: reason.trim(),
+    });
+    if (error) {
+      if (typeof error.message === 'string' && error.message.includes('BOOKING_HAS_FINANCIAL_RECORDS')) {
+        return {
+          data: null,
+          error: {
+            code: 'BOOKING_HAS_FINANCIAL_RECORDS',
+            message: error.message.replace(/^.*BOOKING_HAS_FINANCIAL_RECORDS:\s*/, ''),
+          },
+        };
+      }
+      throw error;
+    }
+
+    capture('admin_booking_deleted', { booking_id: bookingId });
+    return { data: { bookingId: data }, error: null };
+  } catch (error) {
+    console.error('[API] adminDeleteBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Corrections history for the admin log view. Reads audit_logs rows written by
+ * the two functions above (RLS already restricts reads to manager/admin).
+ */
+export async function getAdminCorrections({ limit = 100 } = {}) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('id, table_name, record_id, action_type, old_data, new_data, reason, changed_by, changed_at')
+      .in('action_type', ['ADMIN_CORRECTION', 'ADMIN_DELETE'])
+      .order('changed_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] getAdminCorrections error:', error.message);
+    return { data: null, error };
+  }
+}
