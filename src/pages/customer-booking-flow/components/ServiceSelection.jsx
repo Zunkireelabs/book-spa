@@ -436,49 +436,55 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
             className="sticky z-sticky-filter bg-background pb-1 relative"
             style={{
               top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))',
-              // <main>'s own py-4 lg:py-6 already provides the top gap here (unlike the
-              // Branch step's title bar, which is `fixed` and bypasses main's padding
-              // entirely) — a smaller base keeps the two steps' top gap consistent
-              // instead of stacking both paddings.
-              paddingTop: 8 - 6 * collapseProgress,
+              // Small fixed top gap so the back arrow never touches the progress bar's
+              // bottom edge once this block is actually stuck there (`main`'s own py-4
+              // lg:py-6 only provides gap before it engages — once stuck/scrolled, this
+              // is the only padding between the two).
+              paddingTop: 8,
             }}
           >
-            <div
-              className="text-center overflow-hidden [overflow-anchor:none]"
-              style={{
-                maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
-                opacity: 1 - collapseProgress,
-                marginBottom: 8 * (1 - collapseProgress),
-              }}
-            >
-              <div ref={titleInnerRef}>
-                <div className="flex items-center justify-center space-x-2 mb-1">
-                  <Icon name="Sparkles" size={20} className="text-primary" />
-                  <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                    Choose Service
-                  </h1>
-                </div>
-                <p className="font-body font-body-normal text-text-secondary">
-                  Step 2 of 5 - Complete your spa booking journey
-                </p>
-              </div>
-            </div>
-            {onPrevious && (
-              // Always visible from the top, not tied to scroll — same affordance
-              // whether the customer has scrolled or not, on mobile and desktop alike.
-              // Icon-only (no "Previous" label) — a back arrow reads as "go back"
-              // on its own, same as a browser/app back button.
-              <div className="mb-1">
+            <div className="relative mb-2" style={{ minHeight: onPrevious ? 28 : undefined }}>
+              {/* Back arrow — a sibling of the collapsing title below, not inside it,
+                  so it stays always visible (never fades on scroll) while still
+                  lining up on the same row as the title text at rest. The wrapper's
+                  own minHeight (matching the arrow's 28px box) stops the title's
+                  collapse from shrinking this all the way to 0 once fully scrolled —
+                  without it, the search bar below would ride up far enough to sit
+                  underneath (overlapping) the arrow. The wrapper's own mb-2 is fixed
+                  (not tied to collapseProgress like the title's marginBottom is), so
+                  the arrow keeps breathing room below it even once fully collapsed —
+                  otherwise the search bar rode up flush against the arrow's circle. */}
+              {onPrevious && (
                 <button
                   type="button"
                   onClick={onPrevious}
                   aria-label="Previous"
-                  className="flex items-center justify-center w-8 h-8 rounded-full text-text-secondary hover:text-text-primary hover:bg-background spa-transition-fast spa-touch-target"
+                  className="absolute left-0 top-0 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast"
                 >
-                  <Icon name="ChevronLeft" size={20} />
+                  <Icon name="ChevronLeft" size={16} />
                 </button>
+              )}
+              <div
+                className="text-center overflow-hidden [overflow-anchor:none]"
+                style={{
+                  maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
+                  opacity: 1 - collapseProgress,
+                  marginBottom: 8 * (1 - collapseProgress),
+                }}
+              >
+                <div ref={titleInnerRef}>
+                  <div className="flex items-center justify-center space-x-2 mb-1">
+                    <Icon name="Sparkles" size={20} className="text-primary" />
+                    <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                      Choose Service
+                    </h1>
+                  </div>
+                  <p className="font-body font-body-normal text-text-secondary">
+                    Step 2 of 5 - Complete your spa booking journey
+                  </p>
+                </div>
               </div>
-            )}
+            </div>
             <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input

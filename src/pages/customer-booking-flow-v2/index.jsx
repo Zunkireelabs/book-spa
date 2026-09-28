@@ -281,14 +281,19 @@ const CustomerBookingFlowV2 = () => {
     setSelectedDateTime({ date: '', time: '' }); // Duration differs per service — a stale slot may no longer fit
   };
 
-  const handleDateTimeSelect = (dateTime) => {
+  // Stable references (useCallback) — DateTimeSelection is memoized (it re-renders a
+  // large calendar grid) since it's a child of this page, which re-renders every scroll
+  // animation frame (topPreviousProgress, see useScrollCollapse above); without stable
+  // callback props, that memoization would be defeated by a fresh function each frame,
+  // and the calendar would re-render on every frame of scrolling — visible as jitter.
+  const handleDateTimeSelect = useCallback((dateTime) => {
     setSelectedDateTime(dateTime);
-  };
+  }, []);
 
-  const handleGenderPreferenceChange = (preference) => {
+  const handleGenderPreferenceChange = useCallback((preference) => {
     setGenderPreference(preference);
     setSelectedDateTime({ date: '', time: '' }); // Reset time when preference changes
-  };
+  }, []);
 
   const handleCustomerInfoChange = (info) => {
     setCustomerInfo(info);
@@ -493,45 +498,45 @@ const CustomerBookingFlowV2 = () => {
               style={{ top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))' }}
             >
               <div className={'mx-auto px-4 pb-2 ' + (currentStep === 3 ? 'pt-3 ' : 'pt-6 ') + (wideOpen ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl')}>
-                {/* Icon-only, always visible from the top — mobile and desktop alike,
-                    not tied to scroll. Desktop's bottom nav row no longer has its own
-                    Previous button, so this is the only one now. */}
-                {currentStep > 1 && currentStep < 5 && (
-                  <div className="mb-1">
+                {/* Back arrow + title on one row — arrow is icon-only, always visible
+                    from the top (mobile and desktop alike, not tied to scroll) and
+                    absolutely positioned so the title can independently collapse away
+                    on scroll (topPreviousProgress) without shifting the arrow. Desktop
+                    has its title pinned fully visible (lg:!max-h-none/!opacity-100). */}
+                <div
+                  className="relative"
+                  style={{ minHeight: currentStep > 1 && currentStep < 5 ? 28 : undefined }}
+                >
+                  {currentStep > 1 && currentStep < 5 && (
                     <button
                       type="button"
                       onClick={handlePrevious}
                       aria-label="Previous"
-                      className="flex items-center justify-center w-8 h-8 rounded-full text-text-secondary hover:text-text-primary hover:bg-background spa-transition-fast spa-touch-target"
+                      className="absolute left-0 top-0 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast"
                     >
-                      <Icon name="ChevronLeft" size={20} />
+                      <Icon name="ChevronLeft" size={16} />
                     </button>
-                  </div>
-                )}
-                {/* Collapses away as "Previous" fades in (both driven by the same
-                    topPreviousProgress), same as step 2's title — so once scrolled, only
-                    "Previous" remains in this pinned bar, not both stacked together.
-                    Desktop has nothing to fade INTO (no Previous link there, see above),
-                    so its title stays fully visible instead of collapsing to nothing. */}
-                <div
-                  className="text-center overflow-hidden [overflow-anchor:none] lg:!max-h-none lg:!opacity-100"
-                  style={{
-                    maxHeight: topTitleHeight ? topTitleHeight * (1 - topPreviousProgress) : undefined,
-                    opacity: 1 - topPreviousProgress,
-                  }}
-                >
-                  <div ref={topTitleInnerRef}>
-                    <div className="flex items-center justify-center space-x-2 mb-1">
-                      <Icon name="Sparkles" size={20} className="text-primary" />
-                      <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                        {getStepTitle()}
-                      </h1>
+                  )}
+                  <div
+                    className="text-center overflow-hidden [overflow-anchor:none] lg:!max-h-none lg:!opacity-100"
+                    style={{
+                      maxHeight: topTitleHeight ? topTitleHeight * (1 - topPreviousProgress) : undefined,
+                      opacity: 1 - topPreviousProgress,
+                    }}
+                  >
+                    <div ref={topTitleInnerRef}>
+                      <div className="flex items-center justify-center space-x-2 mb-1">
+                        <Icon name="Sparkles" size={20} className="text-primary" />
+                        <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                          {getStepTitle()}
+                        </h1>
+                      </div>
+                      {currentStep < 5 && (
+                        <p className="font-body font-body-normal text-text-secondary">
+                          Step {currentStep} of 4 - {getBookingJourneyText()}
+                        </p>
+                      )}
                     </div>
-                    {currentStep < 5 && (
-                      <p className="font-body font-body-normal text-text-secondary">
-                        Step {currentStep} of 4 - {getBookingJourneyText()}
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>

@@ -15,7 +15,12 @@ import {
 
 const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetch covers all of them
 
-const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) => {
+// Memoized — this renders a full calendar + time-slot grid, and its parent (the "Book
+// Your Visit" drawer / booking flow page) re-renders on every scroll animation frame to
+// drive the collapsing header (see useScrollCollapse). Without this, the whole calendar
+// re-rendered on every one of those frames too, which is what made scrolling feel janky/
+// stuttery rather than smooth — same fix as ServiceCard in ServiceSelection.jsx.
+const DateTimeSelection = React.memo(({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) => {
   const { enableStaffGender, enableRooms, staffLabel } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
@@ -530,6 +535,6 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
       </div>
     </div>
   );
-};
+});
 
 export default DateTimeSelection;

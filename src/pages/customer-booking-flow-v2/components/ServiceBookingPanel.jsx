@@ -28,12 +28,12 @@ const ServiceBookingPanel = ({
   canContinue,
   onPrevious,
 }) => {
-  // Same fade-out-on-scroll treatment as "Your Information"'s title (index.jsx) and
-  // the service page's own title — except this drawer scrolls *internally*
-  // (overflow-y-auto on its own div, see below), not the window, so it needs its
-  // own scroll listener on that container rather than the window-based
-  // useScrollCollapse hook. "Back to services" stays outside this scrollable area
-  // (shrink-0) so it's already always visible without needing a fade-in.
+  // "Book Your Visit" fades out on scroll, same treatment as the "Choose Service"
+  // header above it — the back arrow is absolutely positioned (see below) so it
+  // stays fixed in place and visible the whole time, regardless of the title's
+  // collapse. This drawer scrolls *internally* (overflow-y-auto on its own div,
+  // see below), not the window, so it needs its own scroll listener on that
+  // container rather than the window-based useScrollCollapse hook.
   const drawerScrollRef = useRef(null);
   const drawerTitleRef = useRef(null);
   const [drawerTitleHeight, setDrawerTitleHeight] = useState(0);
@@ -105,18 +105,33 @@ const ServiceBookingPanel = ({
           instead keeps them visible, same as desktop. */}
       {selectedService && (
         <div className="fixed inset-x-0 bottom-0 top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px))] z-modal bg-background flex flex-col overflow-hidden lg:static lg:z-auto lg:flex-none lg:w-[460px] lg:shrink-0 lg:bg-surface lg:rounded-spa-lg lg:border lg:border-border lg:shadow-spa-elevated lg:sticky lg:top-[calc(var(--customer-header-h,64px)+var(--progress-indicator-h,67px)+12px)] lg:max-h-[calc(100dvh-var(--customer-header-h,64px)-var(--progress-indicator-h,67px)-28px)]">
-          {/* Icon-only, always visible — same treatment as the other steps' top
-              Previous button, not tied to scroll. Stays outside the scrollable area
-              (shrink-0) so it never scrolls away. */}
-          <div className="lg:hidden shrink-0 px-4 pt-2">
-            <button
-              type="button"
-              onClick={() => onServiceSelect(null)}
-              aria-label="Back to services"
-              className="flex items-center justify-center w-8 h-8 rounded-full text-text-secondary hover:text-text-primary hover:bg-surface spa-transition-fast spa-touch-target"
+          {/* Back arrow + title on one row — mobile only shows the arrow (desktop has
+              no drawer-closing action, the grid is always visible alongside it). The
+              arrow is absolutely positioned within this shrink-0 row (fixed minHeight)
+              so it never scrolls or moves, while the title fades out as the content
+              below scrolls (same treatment as the "Choose Service" header above it). */}
+          <div className="shrink-0 relative px-4 pt-3 pb-3 lg:px-6 lg:pt-4 lg:pb-3" style={{ minHeight: 40 }}>
+            {onServiceSelect && (
+              <button
+                type="button"
+                onClick={() => onServiceSelect(null)}
+                aria-label="Back to services"
+                className="lg:hidden absolute left-4 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast"
+              >
+                <Icon name="ChevronLeft" size={16} />
+              </button>
+            )}
+            <div
+              className="overflow-hidden [overflow-anchor:none]"
+              style={{
+                maxHeight: drawerTitleHeight ? drawerTitleHeight * (1 - drawerScrollProgress) : undefined,
+                opacity: 1 - drawerScrollProgress,
+              }}
             >
-              <Icon name="ChevronLeft" size={20} />
-            </button>
+              <h2 ref={drawerTitleRef} className="font-heading font-heading-semibold text-xl text-text-primary text-center">
+                Book Your Visit
+              </h2>
+            </div>
           </div>
 
           {/* Scrollable content — the footer below is a separate flex sibling, never a
@@ -127,18 +142,7 @@ const ServiceBookingPanel = ({
               On desktop (lg:) the outer wrapper is `sticky` and height-capped to the
               viewport, so this scrolls internally once content is taller than that —
               the drawer stays pinned alongside the service grid either way. */}
-          <div ref={drawerScrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
-            <div
-              className="overflow-hidden [overflow-anchor:none]"
-              style={{
-                maxHeight: drawerTitleHeight ? drawerTitleHeight * (1 - drawerScrollProgress) : undefined,
-                opacity: 1 - drawerScrollProgress,
-              }}
-            >
-              <h2 ref={drawerTitleRef} className="font-heading font-heading-semibold text-xl text-text-primary mb-3 text-center">
-                Book Your Visit
-              </h2>
-            </div>
+          <div ref={drawerScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 pt-1 lg:px-6 lg:pb-6">
             <div className="flex items-center justify-between gap-2 sm:gap-3 p-2 sm:p-3 mb-3 sm:mb-4 bg-primary/5 border border-primary/10 rounded-spa">
               <div className="min-w-0">
                 <p className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">{selectedService.name}</p>
