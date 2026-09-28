@@ -284,7 +284,17 @@ BEGIN
   -- the drawer received. Checked after the UPDATE so the trigger-computed
   -- final_amount is the value being judged, and raising here rolls the whole
   -- transaction back.
-  SELECT COALESCE(SUM(amount), 0) INTO v_paid FROM public.payments WHERE booking_id = p_booking_id;
+  --
+  -- Scoped to corrections that actually move money. An already-overpaid booking
+  -- (possible via group payments recorded against one row) would otherwise have
+  -- every correction blocked, including harmless ones like fixing a misspelt
+  -- customer name — a guard that punishes the wrong edit. Production currently
+  -- has zero such bookings, so this is about not leaving a trap behind.
+  IF (p_changes ? 'base_amount' OR p_changes ? 'discount_amount') THEN
+    SELECT COALESCE(SUM(amount), 0) INTO v_paid FROM public.payments WHERE booking_id = p_booking_id;
+  ELSE
+    v_paid := 0;
+  END IF;
 
   IF v_paid > 0 AND (v_new->>'final_amount')::numeric < v_paid THEN
     RAISE EXCEPTION 'CORRECTION_BELOW_PAID: this correction would set the total to % while % has already been paid. Record a refund first, then correct the amount.',
