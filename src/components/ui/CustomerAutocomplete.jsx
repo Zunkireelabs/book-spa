@@ -153,7 +153,7 @@ const CustomerAutocomplete = ({
       {showSuggestions && (
         <div
           ref={listRef}
-          className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-48 overflow-y-auto"
+          className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1 max-h-48 overflow-y-auto"
         >
           {suggestions.map((customer, index) => {
             const m = customer.primaryMembership;
