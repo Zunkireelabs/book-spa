@@ -6,6 +6,7 @@ import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
 import ProgressIndicatorV2 from './components/ProgressIndicatorV2';
 import ServiceBookingPanel from './components/ServiceBookingPanel';
+import { scrollToTopInstant } from 'utils/scroll';
 import BranchSelection from '../customer-booking-flow/components/BranchSelection';
 import CustomerForm from '../customer-booking-flow/components/CustomerForm';
 import BookingConfirmation from '../customer-booking-flow/components/BookingConfirmation';
@@ -125,12 +126,18 @@ const CustomerBookingFlowV2 = () => {
   // very first render — a regular useEffect fires only after that stale frame
   // has already painted, which is exactly the glitch/flash this was seeing.
   useLayoutEffect(() => {
-    // 'instant' explicitly overrides the global `scroll-behavior: smooth` (see
-    // tailwind.css) — this reset must happen before paint with no visible
-    // animation, or it reintroduces the stale-scroll flash this effect exists
-    // to prevent (see the big comment above).
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    // Overrides the `html.smooth-scroll` behavior (see tailwind.css) — this reset must
+    // happen before paint with no visible animation, or it reintroduces the
+    // stale-scroll flash this effect exists to prevent (see the big comment above).
+    scrollToTopInstant();
   }, [currentStep]);
+
+  // Smooth scrolling is opt-in for this flow only; a global rule would also animate
+  // document-level scrollIntoView() calls in staff dropdowns/calendar.
+  useEffect(() => {
+    document.documentElement.classList.add('smooth-scroll');
+    return () => document.documentElement.classList.remove('smooth-scroll');
+  }, []);
 
   useEffect(() => {
     if (currentStep >= 5) return;
@@ -237,7 +244,6 @@ const CustomerBookingFlowV2 = () => {
 
   const canProceed = () => {
     switch (currentStep) {
-      case 1: return selectedBranch !== null;
       case 2: return selectedService !== null && !!selectedDateTime.date && !!selectedDateTime.time;
       case 3: return isCustomerInfoValid();
       case 4: return customerInfo.agreeToTerms;
@@ -354,6 +360,7 @@ const CustomerBookingFlowV2 = () => {
           <BranchSelection
             selectedBranch={selectedBranch}
             onBranchSelect={handleBranchSelect}
+            showSingleBranchContinue
           />
         );
 

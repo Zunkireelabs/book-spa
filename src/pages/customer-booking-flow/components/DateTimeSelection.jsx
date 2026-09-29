@@ -445,7 +445,7 @@ const DateTimeSelection = React.memo(({ selectedDateTime, onDateTimeSelect, sele
                         : 'hover:bg-background text-text-secondary hover:text-text-primary border border-border hover:border-primary/50'
                   }`}
                 >
-                  <span className="font-body font-body-medium text-xs mb-0.5">
+                  <span className="font-body font-body-medium text-xs mb-0.5 whitespace-nowrap">
                     {slot.time12}
                   </span>
                   {slot.isAvailable && (

@@ -121,15 +121,13 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
-  /* Smooth scrolling for normal user-driven scrolling (wheel/touch/anchor
-     links). Programmatic resets that must be instant (e.g. the booking flow's
-     scroll-to-top on step change) explicitly pass `behavior: 'instant'` to
-     override this per-call, rather than this being toggled globally. */
-  html {
+  /* Smooth scrolling, opt-in: the customer booking flow adds `smooth-scroll` to <html>
+     while mounted. Programmatic resets that must be instant use utils/scroll.js. */
+  html.smooth-scroll {
     scroll-behavior: smooth;
   }
   @media (prefers-reduced-motion: reduce) {
-    html {
+    html.smooth-scroll {
       scroll-behavior: auto;
     }
   }
