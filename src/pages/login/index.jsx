@@ -12,13 +12,22 @@ const StaffLoginAuthentication = () => {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        // Simple fetch to check if Supabase is reachable
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/`, {
-          method: 'HEAD',
-          headers: {
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-        });
+        // Simple fetch to check if Supabase is reachable. Must hit a real
+        // table, not the bare /rest/v1/ root: that root is PostgREST's
+        // OpenAPI discovery endpoint, which Supabase's newer sb_publishable_/
+        // sb_secret_ key format restricts to secret keys only — it 401s
+        // unconditionally with a publishable/anon key regardless of whether
+        // the database is actually reachable, which made this check a
+        // permanent false positive once the anon key moved to that format.
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/organizations?select=id&limit=1`,
+          {
+            method: 'HEAD',
+            headers: {
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            },
+          }
+        );
         setDbStatus(response.ok ? 'online' : 'offline');
       } catch {
         setDbStatus('offline');
