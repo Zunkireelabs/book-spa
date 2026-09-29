@@ -20,7 +20,7 @@ const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetc
 // drive the collapsing header (see useScrollCollapse). Without this, the whole calendar
 // re-rendered on every one of those frames too, which is what made scrolling feel janky/
 // stuttery rather than smooth — same fix as ServiceCard in ServiceSelection.jsx.
-const DateTimeSelection = React.memo(({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) => {
+const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) {
   const { enableStaffGender, enableRooms, staffLabel } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
