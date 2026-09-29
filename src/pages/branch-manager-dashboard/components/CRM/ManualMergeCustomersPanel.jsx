@@ -51,8 +51,8 @@ const CustomerSlot = ({ slot, customer, branchId, onSelect, onClear }) => {
         onChange={setQuery}
         onSelect={(c) => { onSelect(c); setQuery(''); }}
         branchId={branchId}
-        searchBy="name"
-        placeholder="Search by name…"
+        searchBy="any"
+        placeholder="Search by name, phone or email…"
       />
     </div>
   );
