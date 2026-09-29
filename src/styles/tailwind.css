@@ -121,6 +121,17 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
+  /* Smooth scrolling, opt-in: the customer booking flow adds `smooth-scroll` to <html>
+     while mounted. Programmatic resets that must be instant use utils/scroll.js. */
+  html.smooth-scroll {
+    scroll-behavior: smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html.smooth-scroll {
+      scroll-behavior: auto;
+    }
+  }
+
   /* Hide the floating mobile nav pill + FAB while an overlay panel is open
      (e.g. Quick Booking side panel) so its action buttons aren't obscured. */
   body.mobile-panel-open .js-mobile-floating-ui {
