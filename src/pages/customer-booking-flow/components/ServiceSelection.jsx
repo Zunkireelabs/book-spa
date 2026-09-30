@@ -378,7 +378,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
   const showStickyBlock = !loading && !error && services.length > 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {activeCampaign && <CampaignBanner campaign={activeCampaign} />}
 
       {!showStickyBlock && (
@@ -433,57 +433,58 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
       {showStickyBlock && (
         <>
           <div
-            className="sticky z-sticky-filter bg-background pb-2 relative"
+            className="sticky z-sticky-filter bg-background pb-1 relative"
             style={{
               top: 'calc(var(--customer-header-h, 64px) + var(--progress-indicator-h, 67px))',
-              // 24px at rest to match the "Book Your Visit" drawer's own top padding
-              // (lg:p-6) exactly, so the two headings sit on the same line.
-              paddingTop: 24 - 20 * collapseProgress,
+              // Small fixed top gap so the back arrow never touches the progress bar's
+              // bottom edge once this block is actually stuck there (`main`'s own py-4
+              // lg:py-6 only provides gap before it engages — once stuck/scrolled, this
+              // is the only padding between the two).
+              paddingTop: 8,
             }}
           >
-            <div
-              className="text-center overflow-hidden [overflow-anchor:none]"
-              style={{
-                maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
-                opacity: 1 - collapseProgress,
-                marginBottom: 12 * (1 - collapseProgress),
-              }}
-            >
-              <div ref={titleInnerRef}>
-                <div className="flex items-center justify-center space-x-2 mb-1">
-                  <Icon name="Sparkles" size={20} className="text-primary" />
-                  <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
-                    Choose Service
-                  </h1>
-                </div>
-                <p className="font-body font-body-normal text-text-secondary">
-                  Step 2 of 5 - Complete your spa booking journey
-                </p>
-              </div>
-            </div>
-            {onPrevious && (
-              // Appears in the space the collapsing title vacates, once the
-              // customer has scrolled far enough that just the search bar is
-              // showing — not present at rest, so it doesn't compete with
-              // "Choose Service" at the top of the page.
-              <div
-                className="lg:hidden overflow-hidden [overflow-anchor:none]"
-                style={{
-                  maxHeight: 32 * collapseProgress,
-                  opacity: collapseProgress,
-                  marginBottom: 8 * collapseProgress,
-                }}
-              >
+            <div className="relative mb-2" style={{ minHeight: onPrevious ? 28 : undefined }}>
+              {/* Back arrow — a sibling of the collapsing title below, not inside it,
+                  so it stays always visible (never fades on scroll) while still
+                  lining up on the same row as the title text at rest. The wrapper's
+                  own minHeight (matching the arrow's 28px box) stops the title's
+                  collapse from shrinking this all the way to 0 once fully scrolled —
+                  without it, the search bar below would ride up far enough to sit
+                  underneath (overlapping) the arrow. The wrapper's own mb-2 is fixed
+                  (not tied to collapseProgress like the title's marginBottom is), so
+                  the arrow keeps breathing room below it even once fully collapsed —
+                  otherwise the search bar rode up flush against the arrow's circle. */}
+              {onPrevious && (
                 <button
                   type="button"
                   onClick={onPrevious}
-                  className="flex items-center gap-1 text-text-secondary hover:text-text-primary spa-transition-fast spa-touch-target"
+                  aria-label="Previous"
+                  className="absolute left-0 top-0 z-10 flex items-center justify-center w-7 h-7 rounded-full border border-border bg-surface text-text-secondary shadow-spa-resting hover:text-text-primary hover:bg-background active:scale-95 spa-transition-fast"
                 >
                   <Icon name="ChevronLeft" size={16} />
-                  <span className="font-body font-body-medium text-sm">Previous</span>
                 </button>
+              )}
+              <div
+                className="text-center overflow-hidden [overflow-anchor:none]"
+                style={{
+                  maxHeight: titleHeight ? titleHeight * (1 - collapseProgress) : undefined,
+                  opacity: 1 - collapseProgress,
+                  marginBottom: 8 * (1 - collapseProgress),
+                }}
+              >
+                <div ref={titleInnerRef}>
+                  <div className="flex items-center justify-center space-x-2 mb-1">
+                    <Icon name="Sparkles" size={20} className="text-primary" />
+                    <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">
+                      Choose Service
+                    </h1>
+                  </div>
+                  <p className="font-body font-body-normal text-text-secondary">
+                    Step 2 of 5 - Complete your spa booking journey
+                  </p>
+                </div>
               </div>
-            )}
+            </div>
             <div className="relative mb-3">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input
@@ -681,6 +682,23 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
                 background: 'var(--color-background)',
               }}
             />
+            {/* Fades cards as they scroll up underneath this bar, instead of the hard
+                clip the seam-cover above gives at rest. Tied to collapseProgress (raw
+                scroll amount, 0 at the very top) rather than categoriesCollapseProgress
+                (which is also 0 once the page is FULLY scrolled past the categories'
+                own short collapse distance) — that distinction matters: this needs to
+                stay visible for as long as the user keeps scrolling, not just during
+                the categories' own brief transition window. Zero height/opacity at
+                rest, so it never paints over the grid before any scrolling happens. */}
+            <div
+              className="pointer-events-none absolute left-0 right-0 hidden lg:block"
+              style={{
+                top: '100%',
+                height: 40 * collapseProgress,
+                opacity: collapseProgress,
+                background: 'linear-gradient(to bottom, var(--color-background) 0%, var(--color-background) 40%, transparent 100%)',
+              }}
+            />
             {/* Mobile (single-column grid, much taller cards): same parabola shape as
                 desktop above — 16px seam-cover at both rest and fully-collapsed
                 (where the box's real height already matches its content and nothing
@@ -696,6 +714,16 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
                 top: 'calc(100% - 2px)',
                 height: 16 + 416 * categoriesCollapseProgress * (1 - categoriesCollapseProgress),
                 background: 'var(--color-background)',
+              }}
+            />
+            {/* Same scroll-tied fade as the desktop cover above — zero at rest. */}
+            <div
+              className="pointer-events-none absolute left-0 right-0 lg:hidden"
+              style={{
+                top: '100%',
+                height: 40 * collapseProgress,
+                opacity: collapseProgress,
+                background: 'linear-gradient(to bottom, var(--color-background) 0%, var(--color-background) 40%, transparent 100%)',
               }}
             />
           </div>

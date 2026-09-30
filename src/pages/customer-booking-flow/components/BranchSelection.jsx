@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
+import Button from '../../../components/ui/Button';
 import { useTenant } from '../../../contexts/TenantContext';
 import { fetchBranchesByOrgId } from '../../../services/api';
 
@@ -22,7 +23,7 @@ const BRANCH_IMAGES = {
 };
 const DEFAULT_OPEN_HOURS = '10:00 AM - 8:00 PM';
 
-const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
+const BranchSelection = ({ selectedBranch, onBranchSelect, showSingleBranchContinue = false }) => {
   const { orgId, industryType, loading: tenantLoading, error: tenantError } = useTenant();
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -58,7 +59,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
         setBranches(activeBranches);
 
         if (activeBranches.length === 1 && !selectedBranch) {
-          onBranchSelect(activeBranches[0]);
+          onBranchSelect(activeBranches[0], false);
         }
         setLoading(false);
       } catch (err) {
@@ -88,7 +89,7 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
     // has the data cached), which made it look like the crop only happened
     // "sometimes."
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-4 sm:pt-6 animate-pulse">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-2 sm:pt-3 animate-pulse">
         {[1, 2].map(i => (
           <div key={i} className="bg-surface rounded-spa-lg border-2 border-border overflow-hidden">
             <div className="h-40 sm:h-56 bg-border/40" />
@@ -109,7 +110,8 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-4 sm:pt-6">
+    <>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-2 sm:pt-3">
       {branches.map((branch) => {
         const isSelected = selectedBranch?.id === branch.id;
         return (
@@ -161,6 +163,23 @@ const BranchSelection = ({ selectedBranch, onBranchSelect }) => {
         );
       })}
     </div>
+    {/* A sole branch is auto-selected without advancing, so the card already reads as
+        selected — give the customer an explicit way forward. */}
+    {showSingleBranchContinue && branches.length === 1 && selectedBranch && (
+      <div className="flex justify-end mt-6">
+        <Button
+          variant="primary"
+          onClick={() => onBranchSelect(branches[0])}
+          iconName="ChevronRight"
+          iconPosition="right"
+          iconSize={16}
+          className="spa-touch-target"
+        >
+          Continue
+        </Button>
+      </div>
+    )}
+    </>
   );
 };
 

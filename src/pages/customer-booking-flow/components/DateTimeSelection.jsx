@@ -15,7 +15,12 @@ import {
 
 const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetch covers all of them
 
-const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) => {
+// Memoized — this renders a full calendar + time-slot grid, and its parent (the "Book
+// Your Visit" drawer / booking flow page) re-renders on every scroll animation frame to
+// drive the collapsing header (see useScrollCollapse). Without this, the whole calendar
+// re-rendered on every one of those frames too, which is what made scrolling feel janky/
+// stuttery rather than smooth — same fix as ServiceCard in ServiceSelection.jsx.
+const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) {
   const { enableStaffGender, enableRooms, staffLabel } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
@@ -426,13 +431,13 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
               <p className="font-body font-body-normal text-text-secondary">Checking availability...</p>
             </div>
           ) : (
-            <div className="grid grid-cols-3 @sm:grid-cols-5 @2xl:grid-cols-6 gap-2">
+            <div className="grid grid-cols-4 @sm:grid-cols-6 @2xl:grid-cols-8 gap-2">
               {timeSlots.map((slot) => (
                 <button
                   key={slot.time24}
                   onClick={() => slot.isAvailable && handleTimeSelect(slot.time24)}
                   disabled={!slot.isAvailable}
-                  className={`flex flex-col items-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
+                  className={`aspect-[5/4] flex flex-col items-center justify-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
                     !slot.isAvailable
                       ? 'opacity-50 cursor-not-allowed bg-background text-text-secondary'
                       : selectedTime === slot.time24
@@ -440,7 +445,7 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
                         : 'hover:bg-background text-text-secondary hover:text-text-primary border border-border hover:border-primary/50'
                   }`}
                 >
-                  <span className="font-body font-body-medium text-xs mb-0.5">
+                  <span className="font-body font-body-medium text-xs mb-0.5 whitespace-nowrap">
                     {slot.time12}
                   </span>
                   {slot.isAvailable && (
@@ -530,6 +535,6 @@ const DateTimeSelection = ({ selectedDateTime, onDateTimeSelect, selectedService
       </div>
     </div>
   );
-};
+});
 
 export default DateTimeSelection;
