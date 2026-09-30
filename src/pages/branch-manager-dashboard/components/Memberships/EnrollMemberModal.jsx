@@ -18,6 +18,10 @@ function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 }
 
+function toDateInputValue(date) {
+  return date.toISOString().slice(0, 10);
+}
+
 function normalizePhone(v) {
   return String(v || '').replace(/\D/g, '');
 }
@@ -38,6 +42,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
   const { branchId } = useBranch();
   const { paymentMethods } = useOrg();
   const orgId = profile?.org_id;
+  const isAdmin = profile?.role === 'admin';
 
   const paymentTree = useMemo(() => buildPaymentMethodTree(paymentMethods), [paymentMethods]);
 
@@ -58,6 +63,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
   const [deposit, setDeposit] = useState('');
   const [paymentMode, setPaymentMode] = useState(() => firstLeafValue(paymentTree));
   const [notes, setNotes] = useState('');
+  const [activationDate, setActivationDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -165,6 +171,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
       paymentMode,
       notes: notes.trim() || null,
       branchId,
+      activationDate: activationDate || null,
     });
     setSubmitting(false);
 
@@ -382,6 +389,24 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
                 />
               </div>
             </div>
+
+            {isAdmin && (
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                  Backdate activation (admin only, optional)
+                </label>
+                <input
+                  type="date"
+                  value={activationDate}
+                  onChange={(e) => setActivationDate(e.target.value)}
+                  max={toDateInputValue(new Date())}
+                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+                <p className="mt-1 font-caption text-[11px] text-text-tertiary">
+                  Leave blank to activate today. Only applies if this deposit meets the tier threshold.
+                </p>
+              </div>
+            )}
 
             {selectedTier && depositNum > 0 && (
               <div className="bg-background border border-border rounded-spa px-3 py-2">
