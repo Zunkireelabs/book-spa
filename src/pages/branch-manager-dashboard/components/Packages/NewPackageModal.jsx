@@ -8,13 +8,10 @@ import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchPackageTypes, createPackageType, fetchServicesForManagement, issuePackage } from '../../../../services/api';
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 const EMPTY_NEW_TYPE = { name: '', serviceId: '', defaultSessions: '', standardPrice: '', validityDays: '365' };
@@ -536,6 +533,9 @@ const NewPackageModal = ({ userRole, onClose, onIssued }) => {
                     onChange={(e) => handleIssuedDateChange(e.target.value)}
                     className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
+                  <p className="mt-1.5 font-caption text-[11px] text-text-tertiary">
+                    Defaults to today — pick an earlier date to record a back-dated issuance.
+                  </p>
                 </div>
                 <div>
                   <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">Expiry date</label>

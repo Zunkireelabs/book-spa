@@ -10574,7 +10574,7 @@ export async function getCustomerMembershipTransactions(membershipId) {
   }
 }
 
-export async function enrollMember({ customerId, tierId, initialDeposit, paymentMode, notes = null, branchId = null }) {
+export async function enrollMember({ customerId, tierId, initialDeposit, paymentMode, notes = null, branchId = null, activationDate = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -10586,6 +10586,7 @@ export async function enrollMember({ customerId, tierId, initialDeposit, payment
       p_payment_mode: paymentMode,
       p_notes: notes,
       p_branch_id: isOverallBranch(branchId) ? null : branchId,
+      p_activation_date: activationDate,
     });
     if (error) throw error;
     capture('staff_membership_enrolled', { tier_id: tierId, initial_deposit: initialDeposit, payment_mode: paymentMode });
