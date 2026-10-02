@@ -13,13 +13,10 @@ import {
   findOrCreateCustomer,
   enrollMember,
 } from '../../../../services/api';
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 function normalizePhone(v) {

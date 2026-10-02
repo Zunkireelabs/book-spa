@@ -51,6 +51,15 @@
 -- override, a backdated enrollment would still show up as sold "today" --
 -- the same gap packages/vouchers avoid by having issued_date as an explicit,
 -- already-settable column instead of relying on created_at.
+--
+-- Both overrides stamp Nepal midnight, not UTC midnight: casting the date
+-- straight to timestamptz (`p_activation_date::timestamptz`) is interpreted
+-- in the session/server's timezone (effectively UTC here), which is 5:45h
+-- behind v_today's own Asia/Kathmandu basis -- an internal inconsistency,
+-- even though the UI only ever displays the date part. Explicit
+-- `::timestamp AT TIME ZONE 'Asia/Kathmandu'` treats the naive timestamp as
+-- Nepal wall-clock time and converts it to the correct UTC-backed
+-- timestamptz.
 
 BEGIN;
 
@@ -139,11 +148,11 @@ BEGIN
     UPDATE public.memberships
        SET activation_date = p_activation_date,
            expiry_date     = p_activation_date + (v_validity || ' days')::interval,
-           created_at      = p_activation_date::timestamptz
+           created_at      = p_activation_date::timestamp AT TIME ZONE 'Asia/Kathmandu'
      WHERE id = v_membership;
 
     UPDATE public.membership_transactions
-       SET created_at = p_activation_date::timestamptz
+       SET created_at = p_activation_date::timestamp AT TIME ZONE 'Asia/Kathmandu'
      WHERE membership_id = v_membership AND kind = 'deposit';
   END IF;
 

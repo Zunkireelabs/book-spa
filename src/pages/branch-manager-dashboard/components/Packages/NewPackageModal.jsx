@@ -8,13 +8,10 @@ import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchPackageTypes, createPackageType, fetchServicesForManagement, issuePackage } from '../../../../services/api';
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 const EMPTY_NEW_TYPE = { name: '', serviceId: '', defaultSessions: '', standardPrice: '', validityDays: '365' };

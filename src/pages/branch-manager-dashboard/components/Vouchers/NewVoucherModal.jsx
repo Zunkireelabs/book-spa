@@ -11,6 +11,7 @@ import { useOrg } from '../../../../contexts/OrgContext';
 import { fetchVoucherTypes, issueVoucher, createVoucherType, fetchMembershipForCustomer } from '../../../../services/api';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
 import { MEMBERSHIP_ENABLED } from '../../../../lib/featureFlags';
+import { toDateInputValue } from '../../../../utils/date';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
@@ -23,10 +24,6 @@ const VOUCHER_TYPE_CATEGORIES = [
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
-}
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 const DEFAULT_VALIDITY_DAYS = 90;
