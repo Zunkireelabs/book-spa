@@ -13,10 +13,7 @@ import {
   deleteCampaign,
   uploadCampaignBanner,
 } from '../../../../services/api';
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
-}
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatDate(d) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });

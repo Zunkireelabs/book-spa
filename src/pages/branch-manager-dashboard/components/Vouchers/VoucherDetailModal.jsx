@@ -13,6 +13,7 @@ import {
   claimVoucher,
   adminCorrectVoucherBalance,
 } from '../../../../services/api';
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -21,10 +22,6 @@ function formatNPR(amount) {
 function formatDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 const STATUS_CONFIG = {
