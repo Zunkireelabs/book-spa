@@ -196,8 +196,8 @@ export async function fetchServices(branchId) {
     }
 
     const { data, error } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, effective_price_npr, is_on_offer, original_price_npr')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -1673,6 +1673,76 @@ export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
     };
   } catch (error) {
     console.error('[API] getServiceRevenueByBranch error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function getCategoryRevenueByBranch({ branchId, from, to } = {}) {
+  try {
+    const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
+    const bookings = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      let query = supabase
+        .from('bookings')
+        .select('final_amount, branch_id, service_category_snapshot, branches(name)')
+        .eq('payment_status', 'paid');
+      if (from) query = query.gte('date', from);
+      if (to) query = query.lte('date', to);
+      query = withBranch(query, branchId);
+      const { data: page, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+      if (error) throw error;
+      bookings.push(...(page || []));
+      if (!page || page.length < PAGE_SIZE) break;
+    }
+
+    const branchMap = new Map();     // branch_id -> branch name
+    const categoryMap = new Map();   // category name -> { [branchId]: { revenue, count } }
+    const branchTotals = {};         // branch_id -> { revenue, count }
+    let grandTotalRevenue = 0;
+    let grandTotalCount = 0;
+
+    for (const b of (bookings || [])) {
+      const cat = b.service_category_snapshot || 'Uncategorized';
+      const bId = b.branch_id;
+      const bName = b.branches?.name || 'Unknown Branch';
+      const amount = Number(b.final_amount) || 0;
+
+      if (!branchMap.has(bId)) branchMap.set(bId, bName);
+      if (!categoryMap.has(cat)) categoryMap.set(cat, {});
+      const catRow = categoryMap.get(cat);
+      if (!catRow[bId]) catRow[bId] = { revenue: 0, count: 0 };
+      catRow[bId].revenue = Math.round((catRow[bId].revenue + amount) * 100) / 100;
+      catRow[bId].count += 1;
+
+      if (!branchTotals[bId]) branchTotals[bId] = { revenue: 0, count: 0 };
+      branchTotals[bId].revenue = Math.round((branchTotals[bId].revenue + amount) * 100) / 100;
+      branchTotals[bId].count += 1;
+
+      grandTotalRevenue = Math.round((grandTotalRevenue + amount) * 100) / 100;
+      grandTotalCount += 1;
+    }
+
+    const branches = Array.from(branchMap.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const categories = Array.from(categoryMap.entries()).map(([name, byBranch]) => {
+      const totalRevenue = branches.reduce((s, br) => s + (byBranch[br.id]?.revenue || 0), 0);
+      const totalCount = branches.reduce((s, br) => s + (byBranch[br.id]?.count || 0), 0);
+      return {
+        categoryName: name,
+        byBranch,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        totalCount,
+      };
+    }).sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    return {
+      data: { branches, categories, branchTotals, grandTotalRevenue, grandTotalCount },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getCategoryRevenueByBranch error:', error.message);
     return { data: null, error };
   }
 }
@@ -4899,8 +4969,8 @@ export async function createBooking({
 
     // 1. Fetch service for duration + price
     const { data: service, error: serviceError } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, is_couple')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category')
       .eq('id', serviceId)
       .single();
 
@@ -5257,7 +5327,7 @@ export async function createBooking({
       companion_phone: companionPhone ? toE164(companionPhone) : null,
       date: date,
       start_time: startTime,
-      base_amount: Number(service.price_npr),
+      base_amount: Number(service.effective_price_npr),
       discount_amount: 0,
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
@@ -5268,7 +5338,8 @@ export async function createBooking({
       // Phase 9A: Snapshot fields — preserve original values at booking time
       service_name_snapshot: service.name,
       service_duration_snapshot: service.duration_minutes,
-      service_price_snapshot: Number(service.price_npr),
+      service_price_snapshot: Number(service.effective_price_npr),
+      service_category_snapshot: service.category,
       room_name_snapshot: availableRoom?.name || null,
       therapist_name_snapshot: therapistNameSnapshot,
     };

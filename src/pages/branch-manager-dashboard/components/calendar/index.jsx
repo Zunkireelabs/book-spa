@@ -660,7 +660,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     { value: '', label: 'Select a service' },
                     ...(services || []).map((s) => ({
                       value: s.id,
-                      label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                      label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                     })),
                   ]}
                   placeholder="Select a service"
@@ -1019,7 +1019,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       // Book those via Individual + 2 therapists instead.
                       ...(services || []).filter(s => !s.is_couple).map((s) => ({
                         value: s.id,
-                        label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                        label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                       })),
                     ]}
                     placeholder={<>Select a service <span className="text-error">*</span></>}
@@ -1139,7 +1139,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                           // billed to one person's row here would still be a mis-charge.
                           ...(services || []).filter(s => !s.is_couple).map((s) => ({
                             value: s.id,
-                            label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                            label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                           })),
                         ]}
                         placeholder={<>Select a service <span className="text-error">*</span></>}
