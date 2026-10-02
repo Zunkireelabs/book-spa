@@ -350,7 +350,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                         <span>{svc.duration_minutes} min</span>
                       </span>
                       <span className="font-medium text-primary">
-                        NPR {Number(svc.price_npr).toLocaleString('en-IN')}
+                        NPR {Number(svc.effective_price_npr ?? svc.price_npr).toLocaleString('en-IN')}
                       </span>
                     </div>
                     {svc.description && (
@@ -633,7 +633,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
               <div className="border-t border-gray-200 pt-3 flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-900">Total</span>
                 <span className="text-lg font-semibold text-primary">
-                  NPR {Number(selectedService?.price_npr).toLocaleString('en-IN')}
+                  NPR {Number(selectedService?.effective_price_npr ?? selectedService?.price_npr).toLocaleString('en-IN')}
                 </span>
               </div>
             </div>

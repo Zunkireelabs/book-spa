@@ -196,8 +196,8 @@ export async function fetchServices(branchId) {
     }
 
     const { data, error } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, effective_price_npr, is_on_offer, original_price_npr')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -4969,8 +4969,8 @@ export async function createBooking({
 
     // 1. Fetch service for duration + price
     const { data: service, error: serviceError } = await supabase
-      .from('services')
-      .select('id, name, duration_minutes, price_npr, is_couple')
+      .from('services_with_offer_pricing')
+      .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple')
       .eq('id', serviceId)
       .single();
 
@@ -5327,7 +5327,7 @@ export async function createBooking({
       companion_phone: companionPhone ? toE164(companionPhone) : null,
       date: date,
       start_time: startTime,
-      base_amount: Number(service.price_npr),
+      base_amount: Number(service.effective_price_npr),
       discount_amount: 0,
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
@@ -5338,7 +5338,7 @@ export async function createBooking({
       // Phase 9A: Snapshot fields — preserve original values at booking time
       service_name_snapshot: service.name,
       service_duration_snapshot: service.duration_minutes,
-      service_price_snapshot: Number(service.price_npr),
+      service_price_snapshot: Number(service.effective_price_npr),
       room_name_snapshot: availableRoom?.name || null,
       therapist_name_snapshot: therapistNameSnapshot,
     };
