@@ -41,6 +41,17 @@
 -- "not correctable." Locked bookings simply keep service_category_snapshot
 -- NULL and fall back to "Uncategorized" in the report, same as the
 -- deleted-service case above.
+--
+-- Same wall, second trigger: trg_enforce_therapist_required
+-- (enforce_therapist_for_active_bookings(), migration-168) blocks any UPDATE
+-- to a row whose *current* state is status IN ('In-Progress','Completed') +
+-- therapist_id IS NULL + the room requires a therapist (requires_therapist
+-- defaults true) -- it checks row state, not which columns changed, so the
+-- backfill trips it too. The WHERE clause below mirrors the trigger's exact
+-- condition so only rows that would actually fail are skipped -- self-service
+-- Sauna/Steam/Jacuzzi bookings (requires_therapist = false) still get
+-- backfilled. Skipped rows keep service_category_snapshot NULL, same
+-- "Uncategorized" fallback as above.
 
 ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS service_category_snapshot text;
 
@@ -49,7 +60,12 @@ SET service_category_snapshot = services.category
 FROM public.services
 WHERE bookings.service_id = services.id
   AND bookings.service_category_snapshot IS NULL
-  AND bookings.is_locked IS NOT TRUE;
+  AND bookings.is_locked IS NOT TRUE
+  AND NOT (
+    bookings.status IN ('In-Progress', 'Completed')
+    AND bookings.therapist_id IS NULL
+    AND COALESCE((SELECT r.requires_therapist FROM rooms r WHERE r.id = bookings.room_id), true)
+  );
 
 INSERT INTO public.schema_migrations (version, name)
 VALUES ('235', 'booking-category-snapshot')
