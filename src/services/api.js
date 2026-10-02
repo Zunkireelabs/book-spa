@@ -1684,7 +1684,7 @@ export async function getCategoryRevenueByBranch({ branchId, from, to } = {}) {
     for (let offset = 0; ; offset += PAGE_SIZE) {
       let query = supabase
         .from('bookings')
-        .select('final_amount, branch_id, branches(name), services(category)')
+        .select('final_amount, branch_id, service_category_snapshot, branches(name)')
         .eq('payment_status', 'paid');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
@@ -1702,7 +1702,7 @@ export async function getCategoryRevenueByBranch({ branchId, from, to } = {}) {
     let grandTotalCount = 0;
 
     for (const b of (bookings || [])) {
-      const cat = b.services?.category || 'Uncategorized';
+      const cat = b.service_category_snapshot || 'Uncategorized';
       const bId = b.branch_id;
       const bName = b.branches?.name || 'Unknown Branch';
       const amount = Number(b.final_amount) || 0;
@@ -4970,7 +4970,7 @@ export async function createBooking({
     // 1. Fetch service for duration + price
     const { data: service, error: serviceError } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple')
+      .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category')
       .eq('id', serviceId)
       .single();
 
@@ -5339,6 +5339,7 @@ export async function createBooking({
       service_name_snapshot: service.name,
       service_duration_snapshot: service.duration_minutes,
       service_price_snapshot: Number(service.effective_price_npr),
+      service_category_snapshot: service.category,
       room_name_snapshot: availableRoom?.name || null,
       therapist_name_snapshot: therapistNameSnapshot,
     };

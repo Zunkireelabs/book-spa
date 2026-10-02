@@ -1,0 +1,44 @@
+-- Migration 235: service_category_snapshot on bookings
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS + backfill only where NULL.
+-- Additive, reversible (manual): DROP COLUMN public.bookings.service_category_snapshot.
+-- Portable: no hardcoded UUIDs.
+--
+--
+-- Why this exists
+--
+-- The Sales by Category dashboard report (getCategoryRevenueByBranch(), api.js)
+-- grouped bookings by joining bookings.service_id -> services.category live at
+-- query time. That means recategorizing a service (or deleting it) silently
+-- rewrites history: a booking made in September under "Massage" starts showing
+-- under "Wellness" in the report the moment someone edits the service's category
+-- in October, with no indication anything changed. Every other historical field
+-- on a booking (service name, duration, price) is already snapshotted at
+-- booking time (service_name_snapshot / service_duration_snapshot /
+-- service_price_snapshot, Phase 9A) for exactly this reason. Category was
+-- missed because the report was added after that snapshot work, in a separate
+-- later change. This migration closes that gap the same way.
+--
+--
+-- Backfill note
+--
+-- Existing rows get a best-effort backfill from the service's *current*
+-- category, since no snapshot existed before now -- this is not perfectly
+-- accurate for any booking whose service has already been recategorized, but
+-- it's the best available data and stops further drift going forward. Rows
+-- whose service_id has since been deleted stay NULL (same pre-existing gap
+-- service_name_snapshot has for deleted services) and the application falls
+-- back to "Uncategorized", mirroring the service-revenue report's existing
+-- "Unknown Service" fallback for the same situation.
+
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS service_category_snapshot text;
+
+UPDATE public.bookings
+SET service_category_snapshot = services.category
+FROM public.services
+WHERE bookings.service_id = services.id
+  AND bookings.service_category_snapshot IS NULL;
+
+INSERT INTO public.schema_migrations (version, name)
+VALUES ('235', 'booking-category-snapshot')
+ON CONFLICT (version) DO NOTHING;
