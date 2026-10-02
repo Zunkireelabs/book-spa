@@ -49,6 +49,7 @@ import CustomerReferralsReportPanel from './components/Referrals/CustomerReferra
 import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
 import RewardCatalogPanel from './components/Referrals/RewardCatalogPanel';
 import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
+import CategoryRevenueReportPanel from './components/CategoryRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPanel from './components/Memberships/MembershipsPanel';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from '../../lib/featureFlags';
@@ -652,6 +653,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'referral-wallet' && CUSTOMER_REFERRALS_ENABLED && <ReferralWalletPanel branchId={branchId} />}
               {viewMode === 'reward-catalog' && CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) && <RewardCatalogPanel />}
               {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
+              {viewMode === 'category-revenue' && <CategoryRevenueReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
               {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
               {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
