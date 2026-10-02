@@ -30,6 +30,17 @@
 -- service_name_snapshot has for deleted services) and the application falls
 -- back to "Uncategorized", mirroring the service-revenue report's existing
 -- "Unknown Service" fallback for the same situation.
+--
+-- Locked (day-closed) rows are excluded from the backfill entirely --
+-- trg_enforce_booking_immutability (schema.sql:350) raises DAY_LOCKED for any
+-- UPDATE to a row with is_locked = true, unconditionally, which would abort
+-- this whole statement. migration-158 hit this same wall for its
+-- titlecase-name backfill and solved it the same way: exclude locked rows
+-- from the WHERE clause rather than disabling/bypassing the trigger --
+-- migration-232 already establishes is_locked as deliberately
+-- "not correctable." Locked bookings simply keep service_category_snapshot
+-- NULL and fall back to "Uncategorized" in the report, same as the
+-- deleted-service case above.
 
 ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS service_category_snapshot text;
 
@@ -37,7 +48,8 @@ UPDATE public.bookings
 SET service_category_snapshot = services.category
 FROM public.services
 WHERE bookings.service_id = services.id
-  AND bookings.service_category_snapshot IS NULL;
+  AND bookings.service_category_snapshot IS NULL
+  AND bookings.is_locked IS NOT TRUE;
 
 INSERT INTO public.schema_migrations (version, name)
 VALUES ('235', 'booking-category-snapshot')
