@@ -78,6 +78,20 @@
 -- up front, which is exactly the v_already = true case the trigger takes
 -- unconditionally (plain balance/total_deposited recompute, no activation
 -- stamping).
+--
+--
+-- Why closed days are rejected
+--
+-- closeDay() (src/services/api.js) inserts a permanent daily_reports snapshot
+-- (cash_total/net_revenue/etc.) for a branch+date that is never recomputed
+-- afterward — there is no "reopen a closed day" mechanism anywhere in the
+-- codebase. Every other mutation path respects that lock (the DAY_LOCKED
+-- guards at src/services/api.js). Without the same check here, an admin could
+-- backdate a transaction into an already-closed day: memberships.balance
+-- updates immediately (real, spendable money), but the closed day's reported
+-- revenue is never touched — a permanent, silent discrepancy with no fix short
+-- of a manual DB edit. Mirrors the DAY_LOCKED posture those other paths
+-- already enforce.
 
 BEGIN;
 
@@ -141,6 +155,20 @@ BEGIN
 
   IF v_activation IS NULL THEN
     RAISE EXCEPTION 'record_membership_transaction_backdated: membership is not yet active — use enroll_member backdating instead';
+  END IF;
+
+  -- A closed day's daily_reports snapshot is permanent and never recomputed (no
+  -- reopen mechanism exists) — backdating into it would leave memberships.balance
+  -- correct but that day's reported revenue silently wrong forever. Mirror the
+  -- DAY_LOCKED posture other mutation paths already enforce for closed days.
+  IF p_branch_id IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM public.daily_reports
+      WHERE branch_id = p_branch_id
+        AND report_date = p_backdated_at
+    ) THEN
+      RAISE EXCEPTION 'record_membership_transaction_backdated: that day has already been closed for this branch';
+    END IF;
   END IF;
 
   -- Per-kind sign/business-rule checks (mirrors record_membership_transaction).
