@@ -49,7 +49,18 @@
 -- classifyPaymentMode() bucketing exactly (Cash -> cash, anything containing
 -- 'Card' -> card, everything else -> fonepay), kept as a local CASE rather
 -- than a shared SQL function since this is the only PL/pgSQL call site that
--- needs it.
+-- needs it. It also mirrors the WALLET_MODES/'SessionPackage' exclusion every
+-- bucketing loop in api.js applies before classifying at all (e.g.
+-- `if (p.payment_mode === 'SessionPackage' || WALLET_MODES.has(p.payment_mode)) continue;`
+-- at api.js:382 and every call site that reuses it) — those modes are money
+-- already recognized as revenue when the membership/voucher/package was
+-- originally purchased, never counted in cash_total/card_total/fonepay_total
+-- in the first place. A bucket of NULL for those modes keeps the later
+-- `WHEN v_old_bucket = 'cash' THEN ... ELSE 0` arithmetic correct without any
+-- other change: NULL never equals 'cash'/'card'/'fonepay', so every term
+-- falls through to its ELSE 0, and `v_old_bucket IS DISTINCT FROM v_new_bucket`
+-- is false when both are NULL, skipping the daily_reports UPDATE entirely for
+-- an excluded-to-excluded correction.
 
 BEGIN;
 
@@ -117,12 +128,20 @@ BEGIN
       USING ERRCODE = 'P0003';
   END IF;
 
-  v_old_bucket := CASE WHEN v_old_mode = 'Cash' THEN 'cash'
-                       WHEN v_old_mode ILIKE '%Card%' THEN 'card'
-                       ELSE 'fonepay' END;
-  v_new_bucket := CASE WHEN btrim(p_new_mode) = 'Cash' THEN 'cash'
-                       WHEN btrim(p_new_mode) ILIKE '%Card%' THEN 'card'
-                       ELSE 'fonepay' END;
+  -- NULL for wallet/session-package modes — never counted in any
+  -- daily_reports bucket in the first place (see header rationale).
+  v_old_bucket := CASE
+    WHEN v_old_mode = ANY (ARRAY['SessionPackage','Membership','ReferralWallet','VoucherWallet','ReferralVoucher']) THEN NULL
+    WHEN v_old_mode = 'Cash' THEN 'cash'
+    WHEN v_old_mode ILIKE '%Card%' THEN 'card'
+    ELSE 'fonepay'
+  END;
+  v_new_bucket := CASE
+    WHEN btrim(p_new_mode) = ANY (ARRAY['SessionPackage','Membership','ReferralWallet','VoucherWallet','ReferralVoucher']) THEN NULL
+    WHEN btrim(p_new_mode) = 'Cash' THEN 'cash'
+    WHEN btrim(p_new_mode) ILIKE '%Card%' THEN 'card'
+    ELSE 'fonepay'
+  END;
 
   UPDATE public.payments
      SET payment_mode = btrim(p_new_mode)
