@@ -403,27 +403,43 @@ async function getWalletProductSalesForDate(branchId, date) {
   const nextDayBoundary = new Date(`${date}T00:00:00+05:45`);
   nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
 
+  // Mode breakdown accumulates alongside the totals below so callers can fold
+  // this cash into paymentBreakdown/modeTotals the same way voucher/product
+  // sales already do — membership and package sales are real tendered cash
+  // (Cash/Card/MobileBanking) too, not a wallet mode themselves.
+  const modeBreakdown = { cash: 0, card: 0, fonepay: 0 };
+
   let depositsQuery = supabase
     .from('membership_transactions')
-    .select('amount')
+    .select('amount, payment_mode')
     .eq('kind', 'deposit')
     .gte('created_at', `${date}T00:00:00+05:45`)
     .lt('created_at', nextDayBoundary.toISOString());
   depositsQuery = withBranch(depositsQuery, branchId);
   const { data: deposits, error: depositsError } = await depositsQuery;
   if (depositsError) throw depositsError;
-  const membershipSoldTotal = (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0);
+  let membershipSoldTotal = 0;
+  for (const d of (deposits || [])) {
+    const amount = Number(d.amount);
+    membershipSoldTotal += amount;
+    modeBreakdown[classifyPaymentMode(d.payment_mode || '')] += amount;
+  }
 
   let packagesQuery = supabase
     .from('packages')
-    .select('paid_amount')
+    .select('paid_amount, payment_method')
     .eq('issued_date', date);
   packagesQuery = withBranch(packagesQuery, branchId);
   const { data: packagesIssued, error: packagesError } = await packagesQuery;
   if (packagesError) throw packagesError;
-  const packageSoldTotal = (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0);
+  let packageSoldTotal = 0;
+  for (const p of (packagesIssued || [])) {
+    const amount = Number(p.paid_amount);
+    packageSoldTotal += amount;
+    modeBreakdown[classifyPaymentMode(p.payment_method || '')] += amount;
+  }
 
-  return { membershipSoldTotal, packageSoldTotal };
+  return { membershipSoldTotal, packageSoldTotal, modeBreakdown };
 }
 
 // Persists the org's admin-configured payment method list (organizations.settings
@@ -3328,8 +3344,11 @@ export async function getDailySummary(branchId, date) {
 
     // 4c. Membership top-ups + package sales collected today — same
     // recognized-once-at-sale-time policy as vouchers above.
-    const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
+    const { membershipSoldTotal, packageSoldTotal, modeBreakdown } = await getWalletProductSalesForDate(branchId, date);
     netRevenue += membershipSoldTotal + packageSoldTotal;
+    paymentBreakdown.cash += modeBreakdown.cash;
+    paymentBreakdown.card += modeBreakdown.card;
+    paymentBreakdown.fonepay += modeBreakdown.fonepay;
 
     // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
     let existingReport = null;
@@ -3494,7 +3513,7 @@ export async function getTodayInsights(branchId, from, to) {
     nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
     let depositsQuery = supabase
       .from('membership_transactions')
-      .select('amount, created_at')
+      .select('amount, created_at, payment_mode')
       .eq('kind', 'deposit')
       .gte('created_at', `${rangeStart}T00:00:00+05:45`)
       .lt('created_at', nextDayBoundary.toISOString());
@@ -3505,6 +3524,14 @@ export async function getTodayInsights(branchId, from, to) {
       count: (deposits || []).length,
       value: (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0),
     };
+    // Real tendered cash (Cash/Card/MobileBanking), same as vouchers/products
+    // below — folds into totalSales/modeTotals so the Dashboard's payment-mode
+    // breakdown isn't missing membership top-up cash.
+    for (const d of (deposits || [])) {
+      const amount = Number(d.amount);
+      totalSales += amount;
+      modeTotals[d.payment_mode] = (modeTotals[d.payment_mode] || 0) + amount;
+    }
 
     // 5b. Memberships redeemed (deductions) in range, branch-scoped — direct
     // ledger filter, consistent with Sold (migration-156).
@@ -3525,7 +3552,7 @@ export async function getTodayInsights(branchId, from, to) {
     // 6. Packages sold (issued) in range, branch-scoped.
     let packagesIssuedQuery = supabase
       .from('packages')
-      .select('paid_amount')
+      .select('paid_amount, payment_method')
       .gte('issued_date', rangeStart)
       .lte('issued_date', rangeEnd);
     packagesIssuedQuery = withBranch(packagesIssuedQuery, branchId);
@@ -3535,6 +3562,12 @@ export async function getTodayInsights(branchId, from, to) {
       count: (packagesIssued || []).length,
       value: (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0),
     };
+    // Real tendered cash, same as memberships above — folds into totalSales/modeTotals.
+    for (const p of (packagesIssued || [])) {
+      const amount = Number(p.paid_amount);
+      totalSales += amount;
+      modeTotals[p.payment_method] = (modeTotals[p.payment_method] || 0) + amount;
+    }
 
     // 7. Packages redeemed (sessions used) in range, branch-scoped. No per-redemption
     // currency amount — sessions are counted, not priced individually.
