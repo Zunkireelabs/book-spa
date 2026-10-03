@@ -10711,23 +10711,35 @@ export async function enrollMember({ customerId, tierId, initialDeposit, payment
   }
 }
 
-export async function topUpMembership({ membershipId, amount, paymentMode, notes = null, branchId = null }) {
+export async function topUpMembership({ membershipId, amount, paymentMode, notes = null, branchId = null, backdatedAt = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { data, error } = await supabase.rpc('record_membership_transaction', {
-      p_membership_id: membershipId,
-      p_kind: 'deposit',
-      p_amount: amount,
-      p_payment_mode: paymentMode,
-      p_booking_id: null,
-      p_payment_id: null,
-      p_notes: notes,
-      p_branch_id: isOverallBranch(branchId) ? null : branchId,
-    });
+    // backdatedAt routes through migration-236's admin-only RPC instead — see
+    // adjustMembership below for the same pattern.
+    const { data, error } = backdatedAt
+      ? await supabase.rpc('record_membership_transaction_backdated', {
+          p_membership_id: membershipId,
+          p_kind: 'deposit',
+          p_amount: amount,
+          p_payment_mode: paymentMode,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+          p_backdated_at: backdatedAt,
+        })
+      : await supabase.rpc('record_membership_transaction', {
+          p_membership_id: membershipId,
+          p_kind: 'deposit',
+          p_amount: amount,
+          p_payment_mode: paymentMode,
+          p_booking_id: null,
+          p_payment_id: null,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+        });
     if (error) throw error;
-    capture('staff_membership_topup', { membership_id: membershipId, amount, payment_mode: paymentMode });
+    capture('staff_membership_topup', { membership_id: membershipId, amount, payment_mode: paymentMode, backdated: !!backdatedAt });
     return { data: { transactionId: data }, error: null };
   } catch (error) {
     console.error('[API] topUpMembership error:', error.message);
@@ -10836,23 +10848,36 @@ export async function giftBirthdayPerk({ membershipId, notes = null, branchId = 
 
 // Admin-only correction (positive OR negative amount). The DB CHECK enforces a non-zero
 // value, and the SECURITY DEFINER fn enforces the role + required note.
-export async function adjustMembership({ membershipId, amount, notes, branchId = null }) {
+export async function adjustMembership({ membershipId, amount, notes, branchId = null, backdatedAt = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { data, error } = await supabase.rpc('record_membership_transaction', {
-      p_membership_id: membershipId,
-      p_kind: 'adjustment',
-      p_amount: amount,
-      p_payment_mode: null,
-      p_booking_id: null,
-      p_payment_id: null,
-      p_notes: notes,
-      p_branch_id: isOverallBranch(branchId) ? null : branchId,
-    });
+    // backdatedAt routes through migration-236's record_membership_transaction_backdated
+    // (admin-only, every kind, required backdated date) instead of the shared RPC —
+    // see that migration's header for why it's a separate function.
+    const { data, error } = backdatedAt
+      ? await supabase.rpc('record_membership_transaction_backdated', {
+          p_membership_id: membershipId,
+          p_kind: 'adjustment',
+          p_amount: amount,
+          p_payment_mode: null,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+          p_backdated_at: backdatedAt,
+        })
+      : await supabase.rpc('record_membership_transaction', {
+          p_membership_id: membershipId,
+          p_kind: 'adjustment',
+          p_amount: amount,
+          p_payment_mode: null,
+          p_booking_id: null,
+          p_payment_id: null,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+        });
     if (error) throw error;
-    capture('staff_membership_adjusted', { membership_id: membershipId, amount });
+    capture('staff_membership_adjusted', { membership_id: membershipId, amount, backdated: !!backdatedAt });
     return { data: { transactionId: data }, error: null };
   } catch (error) {
     console.error('[API] adjustMembership error:', error.message);

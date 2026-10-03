@@ -2,15 +2,21 @@ import React, { useState, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { topUpMembership, MEMBERSHIP_DEPOSIT_MODES } from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 }
 
 const TopUpModal = ({ membership, branchId, onClose, onSuccess }) => {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
   const [notes, setNotes] = useState('');
+  const [backdatedAt, setBackdatedAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -38,6 +44,7 @@ const TopUpModal = ({ membership, branchId, onClose, onSuccess }) => {
       paymentMode,
       notes: notes.trim() || null,
       branchId,
+      backdatedAt: (isAdmin && backdatedAt) || null,
     });
     setSubmitting(false);
     if (rpcError) {
@@ -107,6 +114,24 @@ const TopUpModal = ({ membership, branchId, onClose, onSuccess }) => {
                 className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               />
             </div>
+
+            {isAdmin && (
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                  Backdate (admin only, optional)
+                </label>
+                <input
+                  type="date"
+                  value={backdatedAt}
+                  onChange={(e) => setBackdatedAt(e.target.value)}
+                  max={toDateInputValue(new Date())}
+                  className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                />
+                <p className="mt-1 font-caption text-[11px] text-text-tertiary">
+                  Leave blank to record as today.
+                </p>
+              </div>
+            )}
 
             {willActivate && (
               <div className="bg-success/5 border border-success/20 rounded-spa px-3 py-2 flex items-start space-x-2">
