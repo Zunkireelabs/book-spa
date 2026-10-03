@@ -403,27 +403,47 @@ async function getWalletProductSalesForDate(branchId, date) {
   const nextDayBoundary = new Date(`${date}T00:00:00+05:45`);
   nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
 
+  // Mode breakdown accumulates alongside the totals below so callers can fold
+  // this cash into paymentBreakdown/modeTotals the same way voucher/product
+  // sales already do — membership and package sales are real tendered cash
+  // (Cash/Card/MobileBanking) too, not a wallet mode themselves.
+  const modeBreakdown = { cash: 0, card: 0, fonepay: 0 };
+
   let depositsQuery = supabase
     .from('membership_transactions')
-    .select('amount')
+    .select('amount, payment_mode')
     .eq('kind', 'deposit')
     .gte('created_at', `${date}T00:00:00+05:45`)
     .lt('created_at', nextDayBoundary.toISOString());
   depositsQuery = withBranch(depositsQuery, branchId);
   const { data: deposits, error: depositsError } = await depositsQuery;
   if (depositsError) throw depositsError;
-  const membershipSoldTotal = (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0);
+  let membershipSoldTotal = 0;
+  for (const d of (deposits || [])) {
+    const amount = Number(d.amount);
+    membershipSoldTotal += amount;
+    // payment_mode is nullable (migration-060) — default to Cash rather than
+    // falling through classifyPaymentMode('') into the fonepay bucket.
+    modeBreakdown[classifyPaymentMode(d.payment_mode || 'Cash')] += amount;
+  }
 
   let packagesQuery = supabase
     .from('packages')
-    .select('paid_amount')
+    .select('paid_amount, payment_method')
     .eq('issued_date', date);
   packagesQuery = withBranch(packagesQuery, branchId);
   const { data: packagesIssued, error: packagesError } = await packagesQuery;
   if (packagesError) throw packagesError;
-  const packageSoldTotal = (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0);
+  let packageSoldTotal = 0;
+  for (const p of (packagesIssued || [])) {
+    const amount = Number(p.paid_amount);
+    packageSoldTotal += amount;
+    // payment_method is nullable (migration-185) with no "required when paid"
+    // check — default to Cash rather than falling through into fonepay.
+    modeBreakdown[classifyPaymentMode(p.payment_method || 'Cash')] += amount;
+  }
 
-  return { membershipSoldTotal, packageSoldTotal };
+  return { membershipSoldTotal, packageSoldTotal, modeBreakdown };
 }
 
 // Persists the org's admin-configured payment method list (organizations.settings
@@ -3328,8 +3348,11 @@ export async function getDailySummary(branchId, date) {
 
     // 4c. Membership top-ups + package sales collected today — same
     // recognized-once-at-sale-time policy as vouchers above.
-    const { membershipSoldTotal, packageSoldTotal } = await getWalletProductSalesForDate(branchId, date);
+    const { membershipSoldTotal, packageSoldTotal, modeBreakdown } = await getWalletProductSalesForDate(branchId, date);
     netRevenue += membershipSoldTotal + packageSoldTotal;
+    paymentBreakdown.cash += modeBreakdown.cash;
+    paymentBreakdown.card += modeBreakdown.card;
+    paymentBreakdown.fonepay += modeBreakdown.fonepay;
 
     // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
     let existingReport = null;
@@ -3494,7 +3517,7 @@ export async function getTodayInsights(branchId, from, to) {
     nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
     let depositsQuery = supabase
       .from('membership_transactions')
-      .select('amount, created_at')
+      .select('amount, created_at, payment_mode')
       .eq('kind', 'deposit')
       .gte('created_at', `${rangeStart}T00:00:00+05:45`)
       .lt('created_at', nextDayBoundary.toISOString());
@@ -3505,6 +3528,17 @@ export async function getTodayInsights(branchId, from, to) {
       count: (deposits || []).length,
       value: (deposits || []).reduce((sum, d) => sum + Number(d.amount), 0),
     };
+    // Real tendered cash (Cash/Card/MobileBanking), same as vouchers/products
+    // below — folds into totalSales/modeTotals so the Dashboard's payment-mode
+    // breakdown isn't missing membership top-up cash.
+    for (const d of (deposits || [])) {
+      const amount = Number(d.amount);
+      totalSales += amount;
+      // payment_mode is nullable (migration-060) — default to Cash so the
+      // amount lands in a real bucket instead of a stray "null" key.
+      const mode = d.payment_mode || 'Cash';
+      modeTotals[mode] = (modeTotals[mode] || 0) + amount;
+    }
 
     // 5b. Memberships redeemed (deductions) in range, branch-scoped — direct
     // ledger filter, consistent with Sold (migration-156).
@@ -3525,7 +3559,7 @@ export async function getTodayInsights(branchId, from, to) {
     // 6. Packages sold (issued) in range, branch-scoped.
     let packagesIssuedQuery = supabase
       .from('packages')
-      .select('paid_amount')
+      .select('paid_amount, payment_method')
       .gte('issued_date', rangeStart)
       .lte('issued_date', rangeEnd);
     packagesIssuedQuery = withBranch(packagesIssuedQuery, branchId);
@@ -3535,6 +3569,15 @@ export async function getTodayInsights(branchId, from, to) {
       count: (packagesIssued || []).length,
       value: (packagesIssued || []).reduce((sum, p) => sum + Number(p.paid_amount), 0),
     };
+    // Real tendered cash, same as memberships above — folds into totalSales/modeTotals.
+    for (const p of (packagesIssued || [])) {
+      const amount = Number(p.paid_amount);
+      totalSales += amount;
+      // payment_method is nullable (migration-185) with no "required when
+      // paid" check — default to Cash so the amount lands in a real bucket.
+      const mode = p.payment_method || 'Cash';
+      modeTotals[mode] = (modeTotals[mode] || 0) + amount;
+    }
 
     // 7. Packages redeemed (sessions used) in range, branch-scoped. No per-redemption
     // currency amount — sessions are counted, not priced individually.
@@ -4550,7 +4593,7 @@ export async function fetchBookingById(bookingId) {
         service:services(id, name, duration_minutes, price_npr),
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
-        payments(amount, payment_mode, created_at),
+        payments(id, amount, payment_mode, created_at),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
       .eq('id', bookingId)
@@ -10668,23 +10711,35 @@ export async function enrollMember({ customerId, tierId, initialDeposit, payment
   }
 }
 
-export async function topUpMembership({ membershipId, amount, paymentMode, notes = null, branchId = null }) {
+export async function topUpMembership({ membershipId, amount, paymentMode, notes = null, branchId = null, backdatedAt = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { data, error } = await supabase.rpc('record_membership_transaction', {
-      p_membership_id: membershipId,
-      p_kind: 'deposit',
-      p_amount: amount,
-      p_payment_mode: paymentMode,
-      p_booking_id: null,
-      p_payment_id: null,
-      p_notes: notes,
-      p_branch_id: isOverallBranch(branchId) ? null : branchId,
-    });
+    // backdatedAt routes through migration-236's admin-only RPC instead — see
+    // adjustMembership below for the same pattern.
+    const { data, error } = backdatedAt
+      ? await supabase.rpc('record_membership_transaction_backdated', {
+          p_membership_id: membershipId,
+          p_kind: 'deposit',
+          p_amount: amount,
+          p_payment_mode: paymentMode,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+          p_backdated_at: backdatedAt,
+        })
+      : await supabase.rpc('record_membership_transaction', {
+          p_membership_id: membershipId,
+          p_kind: 'deposit',
+          p_amount: amount,
+          p_payment_mode: paymentMode,
+          p_booking_id: null,
+          p_payment_id: null,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+        });
     if (error) throw error;
-    capture('staff_membership_topup', { membership_id: membershipId, amount, payment_mode: paymentMode });
+    capture('staff_membership_topup', { membership_id: membershipId, amount, payment_mode: paymentMode, backdated: !!backdatedAt });
     return { data: { transactionId: data }, error: null };
   } catch (error) {
     console.error('[API] topUpMembership error:', error.message);
@@ -10793,23 +10848,36 @@ export async function giftBirthdayPerk({ membershipId, notes = null, branchId = 
 
 // Admin-only correction (positive OR negative amount). The DB CHECK enforces a non-zero
 // value, and the SECURITY DEFINER fn enforces the role + required note.
-export async function adjustMembership({ membershipId, amount, notes, branchId = null }) {
+export async function adjustMembership({ membershipId, amount, notes, branchId = null, backdatedAt = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { data, error } = await supabase.rpc('record_membership_transaction', {
-      p_membership_id: membershipId,
-      p_kind: 'adjustment',
-      p_amount: amount,
-      p_payment_mode: null,
-      p_booking_id: null,
-      p_payment_id: null,
-      p_notes: notes,
-      p_branch_id: isOverallBranch(branchId) ? null : branchId,
-    });
+    // backdatedAt routes through migration-236's record_membership_transaction_backdated
+    // (admin-only, every kind, required backdated date) instead of the shared RPC —
+    // see that migration's header for why it's a separate function.
+    const { data, error } = backdatedAt
+      ? await supabase.rpc('record_membership_transaction_backdated', {
+          p_membership_id: membershipId,
+          p_kind: 'adjustment',
+          p_amount: amount,
+          p_payment_mode: null,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+          p_backdated_at: backdatedAt,
+        })
+      : await supabase.rpc('record_membership_transaction', {
+          p_membership_id: membershipId,
+          p_kind: 'adjustment',
+          p_amount: amount,
+          p_payment_mode: null,
+          p_booking_id: null,
+          p_payment_id: null,
+          p_notes: notes,
+          p_branch_id: isOverallBranch(branchId) ? null : branchId,
+        });
     if (error) throw error;
-    capture('staff_membership_adjusted', { membership_id: membershipId, amount });
+    capture('staff_membership_adjusted', { membership_id: membershipId, amount, backdated: !!backdatedAt });
     return { data: { transactionId: data }, error: null };
   } catch (error) {
     console.error('[API] adjustMembership error:', error.message);
@@ -13602,6 +13670,40 @@ export async function adminCorrectBooking({ bookingId, changes, reason }) {
     return { data: { bookingId: data }, error: null };
   } catch (error) {
     console.error('[API] adminCorrectBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only correction of a recorded payment's method (migration-237). The
+// RPC re-checks role, reason length, and the same closed-day guard migration-236
+// uses for membership backdating — the pre-checks here are purely for a fast,
+// clear UI error, not the actual protection.
+export async function correctPaymentMode({ paymentId, newMode, reason }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can correct a payment method.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+    if (!newMode || !newMode.trim()) {
+      return { data: null, error: { code: 'MODE_REQUIRED', message: 'A new payment mode is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('admin_correct_payment_mode', {
+      p_payment_id: paymentId,
+      p_new_mode: newMode.trim(),
+      p_reason: reason.trim(),
+    });
+    if (error) throw error;
+
+    capture('admin_payment_mode_corrected', { payment_id: paymentId, new_mode: newMode.trim() });
+    return { data: { auditLogId: data }, error: null };
+  } catch (error) {
+    console.error('[API] correctPaymentMode error:', error.message);
     return { data: null, error };
   }
 }
