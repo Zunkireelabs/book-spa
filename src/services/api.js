@@ -422,7 +422,9 @@ async function getWalletProductSalesForDate(branchId, date) {
   for (const d of (deposits || [])) {
     const amount = Number(d.amount);
     membershipSoldTotal += amount;
-    modeBreakdown[classifyPaymentMode(d.payment_mode || '')] += amount;
+    // payment_mode is nullable (migration-060) — default to Cash rather than
+    // falling through classifyPaymentMode('') into the fonepay bucket.
+    modeBreakdown[classifyPaymentMode(d.payment_mode || 'Cash')] += amount;
   }
 
   let packagesQuery = supabase
@@ -436,7 +438,9 @@ async function getWalletProductSalesForDate(branchId, date) {
   for (const p of (packagesIssued || [])) {
     const amount = Number(p.paid_amount);
     packageSoldTotal += amount;
-    modeBreakdown[classifyPaymentMode(p.payment_method || '')] += amount;
+    // payment_method is nullable (migration-185) with no "required when paid"
+    // check — default to Cash rather than falling through into fonepay.
+    modeBreakdown[classifyPaymentMode(p.payment_method || 'Cash')] += amount;
   }
 
   return { membershipSoldTotal, packageSoldTotal, modeBreakdown };
@@ -3530,7 +3534,10 @@ export async function getTodayInsights(branchId, from, to) {
     for (const d of (deposits || [])) {
       const amount = Number(d.amount);
       totalSales += amount;
-      modeTotals[d.payment_mode] = (modeTotals[d.payment_mode] || 0) + amount;
+      // payment_mode is nullable (migration-060) — default to Cash so the
+      // amount lands in a real bucket instead of a stray "null" key.
+      const mode = d.payment_mode || 'Cash';
+      modeTotals[mode] = (modeTotals[mode] || 0) + amount;
     }
 
     // 5b. Memberships redeemed (deductions) in range, branch-scoped — direct
@@ -3566,7 +3573,10 @@ export async function getTodayInsights(branchId, from, to) {
     for (const p of (packagesIssued || [])) {
       const amount = Number(p.paid_amount);
       totalSales += amount;
-      modeTotals[p.payment_method] = (modeTotals[p.payment_method] || 0) + amount;
+      // payment_method is nullable (migration-185) with no "required when
+      // paid" check — default to Cash so the amount lands in a real bucket.
+      const mode = p.payment_method || 'Cash';
+      modeTotals[mode] = (modeTotals[mode] || 0) + amount;
     }
 
     // 7. Packages redeemed (sessions used) in range, branch-scoped. No per-redemption
