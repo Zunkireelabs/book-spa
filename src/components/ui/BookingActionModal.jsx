@@ -7,9 +7,11 @@ import ConfirmDialog from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import AdminCorrectionModal from './AdminCorrectionModal';
+import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
+import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 
 function getNepalNow() {
@@ -87,6 +89,7 @@ const BookingActionModal = ({
   onViewBooking,
 }) => {
   const { branchId } = useBranch();
+  const { paymentMethods } = useOrg();
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
@@ -102,6 +105,7 @@ const BookingActionModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showAdminCorrection, setShowAdminCorrection] = useState(false);
+  const [correctingPayment, setCorrectingPayment] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
@@ -2003,6 +2007,24 @@ const BookingActionModal = ({
                         <span className="font-body font-body-normal text-xs text-text-secondary">Already Paid</span>
                         <span className="font-data text-sm text-success">- NPR {Number(booking.amountPaid || 0).toLocaleString('en-IN')}</span>
                       </div>
+                      {(booking.payments || []).map((p) => (
+                        <div key={p.id || `${p.paymentMode}-${p.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
+                          <span className="text-text-tertiary">{p.paymentMode}</span>
+                          <div className="flex items-center space-x-1.5">
+                            <span className="font-data text-text-tertiary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
+                            {userRole === 'admin' && p.id && (
+                              <button
+                                type="button"
+                                onClick={() => setCorrectingPayment(p)}
+                                title="Correct payment method"
+                                className="p-0.5 rounded hover:bg-background text-text-tertiary hover:text-primary"
+                              >
+                                <Icon name="Pencil" size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                       <div className="flex items-center justify-between border-t border-border pt-2">
                         <span className="font-body font-body-medium text-xs text-text-primary">Balance Due</span>
                         <span className="font-data font-data-medium text-sm text-warning">NPR {Number(booking.amountDue || 0).toLocaleString('en-IN')}</span>
@@ -2189,9 +2211,29 @@ const BookingActionModal = ({
                   </Button>
                 )}
                 {booking.paymentStatus === 'paid' && (
-                  <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
-                    <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
-                    <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-success/10 border border-success/20">
+                      <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
+                      <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
+                    </div>
+                    {(booking.payments || []).map((p) => (
+                      <div key={p.id || `${p.paymentMode}-${p.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                        <span className="text-text-secondary">{p.paymentMode}</span>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-data text-text-primary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
+                          {userRole === 'admin' && p.id && (
+                            <button
+                              type="button"
+                              onClick={() => setCorrectingPayment(p)}
+                              title="Correct payment method"
+                              className="p-1 rounded hover:bg-background text-text-secondary hover:text-primary"
+                            >
+                              <Icon name="Pencil" size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -2465,6 +2507,22 @@ const BookingActionModal = ({
           onClose={() => setShowAdminCorrection(false)}
           onSuccess={() => {
             setShowAdminCorrection(false);
+            if (onClose) onClose();
+          }}
+        />
+      )}
+
+      {/* Payment mode correction — admin-only, from the pencil icon next to a
+          recorded payment on the Payment tab. Same "close and let the parent
+          re-fetch" posture as AdminCorrectionModal above, since this component
+          doesn't own the booking data it's rendering. */}
+      {correctingPayment && (
+        <PaymentModeCorrectionModal
+          payment={correctingPayment}
+          paymentMethods={paymentMethods}
+          onClose={() => setCorrectingPayment(null)}
+          onSuccess={() => {
+            setCorrectingPayment(null);
             if (onClose) onClose();
           }}
         />

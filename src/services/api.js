@@ -4593,7 +4593,7 @@ export async function fetchBookingById(bookingId) {
         service:services(id, name, duration_minutes, price_npr),
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
-        payments(amount, payment_mode, created_at),
+        payments(id, amount, payment_mode, created_at),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
       .eq('id', bookingId)
@@ -13670,6 +13670,40 @@ export async function adminCorrectBooking({ bookingId, changes, reason }) {
     return { data: { bookingId: data }, error: null };
   } catch (error) {
     console.error('[API] adminCorrectBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only correction of a recorded payment's method (migration-237). The
+// RPC re-checks role, reason length, and the same closed-day guard migration-236
+// uses for membership backdating — the pre-checks here are purely for a fast,
+// clear UI error, not the actual protection.
+export async function correctPaymentMode({ paymentId, newMode, reason }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can correct a payment method.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+    if (!newMode || !newMode.trim()) {
+      return { data: null, error: { code: 'MODE_REQUIRED', message: 'A new payment mode is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('admin_correct_payment_mode', {
+      p_payment_id: paymentId,
+      p_new_mode: newMode.trim(),
+      p_reason: reason.trim(),
+    });
+    if (error) throw error;
+
+    capture('admin_payment_mode_corrected', { payment_id: paymentId, new_mode: newMode.trim() });
+    return { data: { auditLogId: data }, error: null };
+  } catch (error) {
+    console.error('[API] correctPaymentMode error:', error.message);
     return { data: null, error };
   }
 }

@@ -139,7 +139,7 @@ export function transformBooking(dbBooking) {
     isLocked: dbBooking.is_locked || false,
     bookingGroupId: dbBooking.booking_group_id || null,
     payments: paymentRows
-      ? paymentRows.map(p => ({ amount: Number(p.amount || 0), paymentMode: p.payment_mode, createdAt: p.created_at }))
+      ? paymentRows.map(p => ({ id: p.id || null, amount: Number(p.amount || 0), paymentMode: p.payment_mode, createdAt: p.created_at }))
       : [],
   };
 }
