@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { adjustMembership } from '../../../../services/api';
+import { toDateInputValue } from '../../../../utils/date';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -11,6 +12,7 @@ const AdjustmentModal = ({ membership, branchId, onClose, onSuccess }) => {
   const [direction, setDirection] = useState('credit');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [backdatedAt, setBackdatedAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -45,6 +47,7 @@ const AdjustmentModal = ({ membership, branchId, onClose, onSuccess }) => {
       amount: signedAmount,
       notes: notes.trim(),
       branchId,
+      backdatedAt: backdatedAt || null,
     });
     setSubmitting(false);
     if (rpcError) {
@@ -117,6 +120,22 @@ const AdjustmentModal = ({ membership, branchId, onClose, onSuccess }) => {
                 placeholder="Required. Explain why this adjustment is being made."
                 className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
               />
+            </div>
+
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                Backdate (admin only, optional)
+              </label>
+              <input
+                type="date"
+                value={backdatedAt}
+                onChange={(e) => setBackdatedAt(e.target.value)}
+                max={toDateInputValue(new Date())}
+                className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+              <p className="mt-1 font-caption text-[11px] text-text-tertiary">
+                Leave blank to record as today.
+              </p>
             </div>
 
             {error && (
