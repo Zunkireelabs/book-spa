@@ -80,8 +80,8 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
             <div className="bg-warning/5 border border-warning/20 rounded-spa px-3 py-2 flex items-start space-x-2">
               <Icon name="AlertTriangle" size={14} className="text-warning flex-shrink-0 mt-0.5" />
               <p className="font-body text-xs text-text-secondary">
-                Admin-only correction. Every change is recorded in the audit log with the required reason. A payment on an
-                already-closed day cannot be corrected.
+                Admin-only correction. Every change is recorded in the audit log with the required reason, including corrections
+                on already-closed days.
               </p>
             </div>
 
