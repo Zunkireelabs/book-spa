@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, pointerWithin } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import BookingActionModal from '../../../../components/ui/BookingActionModal';
-import StatusLegend from '../../../../components/ui/StatusLegend';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import CalendarGrid, { HOUR_HEIGHT } from './CalendarGrid';
 import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
@@ -64,6 +63,12 @@ function addDays(dateStr, days) {
   return toLocalISO(d);
 }
 
+function addMonths(dateStr, months) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setMonth(d.getMonth() + months);
+  return toLocalISO(d);
+}
+
 function formatDateTitle(dateStr, viewMode) {
   const d = new Date(dateStr + 'T00:00:00');
   if (viewMode === '4day') {
@@ -73,13 +78,11 @@ function formatDateTitle(dateStr, viewMode) {
     const endStr = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     return `${startStr} – ${endStr}`;
   }
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  if (dateStr === todayStr) return 'Today';
-  return d.toLocaleDateString('en-GB', {
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
     day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    year: '2-digit',
   });
 }
 
@@ -93,6 +96,19 @@ function getDateRange(dateStr, viewMode) {
 function getStepDays(viewMode) {
   return viewMode === '4day' ? 4 : 1;
 }
+
+const JUMP_OPTIONS = [
+  { label: '1 week', unit: 'week', amount: 1 },
+  { label: '2 weeks', unit: 'week', amount: 2 },
+  { label: '3 weeks', unit: 'week', amount: 3 },
+  { label: '4 weeks', unit: 'week', amount: 4 },
+  { label: '5 weeks', unit: 'week', amount: 5 },
+  { label: '6 weeks', unit: 'week', amount: 6 },
+  { label: '7 weeks', unit: 'week', amount: 7 },
+  { label: '8 weeks', unit: 'week', amount: 8 },
+  { label: '6 months', unit: 'month', amount: 6 },
+  { label: '1 year', unit: 'year', amount: 1 },
+];
 
 function formatTimeFromSlot(hour, minute) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
@@ -1363,7 +1379,6 @@ const OperationalCalendar = ({ branchId }) => {
   const staffLabel = industry?.staff_label || 'Therapist';
   const staffLabelPlural = industry?.staff_label_plural || 'Therapists';
   const locationLabel = industry?.location_label || 'Room';
-  const locationLabelPlural = industry?.location_label_plural || 'Rooms';
   const enableRooms = industry?.enable_rooms !== false;
 
   // View state
@@ -1376,7 +1391,13 @@ const OperationalCalendar = ({ branchId }) => {
   const [selectedPositions, setSelectedPositions] = useState([]); // empty = all
   const [positionDropdownOpen, setPositionDropdownOpen] = useState(false);
   const positionDropdownRef = useRef(null);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
+  const dateDropdownRef = useRef(null);
+  const [tipOpen, setTipOpen] = useState(false);
+  const tipRef = useRef(null);
+  const [jumpMenuOpen, setJumpMenuOpen] = useState(null); // 'prev' | 'next' | null
+  const prevJumpRef = useRef(null);
+  const nextJumpRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Calendar data state
@@ -1432,6 +1453,37 @@ const OperationalCalendar = ({ branchId }) => {
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, [positionDropdownOpen]);
+
+  // Close date popover on outside click
+  useEffect(() => {
+    if (!dateDropdownOpen) return;
+    const handle = (e) => {
+      if (dateDropdownRef.current && !dateDropdownRef.current.contains(e.target)) setDateDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [dateDropdownOpen]);
+
+  // Close tip popover on outside click (mobile tap)
+  useEffect(() => {
+    if (!tipOpen) return;
+    const handle = (e) => {
+      if (tipRef.current && !tipRef.current.contains(e.target)) setTipOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [tipOpen]);
+
+  // Close jump-options menu on outside click
+  useEffect(() => {
+    if (!jumpMenuOpen) return;
+    const activeRef = jumpMenuOpen === 'prev' ? prevJumpRef : nextJumpRef;
+    const handle = (e) => {
+      if (activeRef.current && !activeRef.current.contains(e.target)) setJumpMenuOpen(null);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [jumpMenuOpen]);
 
   // Modal state
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -1581,6 +1633,14 @@ const OperationalCalendar = ({ branchId }) => {
   const goToday = () => setCurrentDate(todayStr());
   const goPrev = () => setCurrentDate(addDays(currentDate, -getStepDays(viewMode)));
   const goNext = () => setCurrentDate(addDays(currentDate, getStepDays(viewMode)));
+  const applyJump = (sign, unit, amount) => {
+    const nextDate = unit === 'week'
+      ? addDays(currentDate, sign * amount * 7)
+      : unit === 'month'
+        ? addMonths(currentDate, sign * amount)
+        : addMonths(currentDate, sign * amount * 12);
+    setCurrentDate(nextDate);
+  };
 
   // Ref to track current pointer Y position during drag (synchronous updates)
   const pointerYRef = useRef(null);
@@ -2644,74 +2704,151 @@ const OperationalCalendar = ({ branchId }) => {
         <div className="bg-surface overflow-hidden flex flex-col h-full pb-2">
           {/* Top toolbar — stacks into 3 rows on mobile (left controls / centered date / Day+Filter),
               single row on sm+ */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 px-3 sm:px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
-            {/* Left: Navigation (desktop only — panel button is folded into the center row on mobile) */}
-            <div className="hidden sm:flex items-center space-x-2">
-              <div className="flex items-center border border-border rounded-spa overflow-hidden">
+          <div className="flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-stretch sm:items-center gap-2 px-3 sm:px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
+            {/* Left: View By toggle */}
+            <div className="flex items-center gap-2 flex-wrap justify-self-start">
+              {enableRooms ? (
+                <div className="flex items-center border border-border rounded-spa overflow-hidden">
+                  <button
+                    onClick={() => setColumnMode('therapist')}
+                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 text-sm font-body font-body-medium spa-transition-fast ${
+                      columnMode === 'therapist'
+                        ? 'bg-primary text-white'
+                        : 'text-text-primary hover:bg-background'
+                    }`}
+                  >
+                    <Icon name="User" size={14} />
+                    <span>{staffLabel}</span>
+                  </button>
+                  <button
+                    onClick={() => setColumnMode('room')}
+                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 text-sm font-body font-body-medium spa-transition-fast border-l border-border ${
+                      columnMode === 'room'
+                        ? 'bg-primary text-white'
+                        : 'text-text-primary hover:bg-background'
+                    }`}
+                  >
+                    <Icon name="DoorOpen" size={14} />
+                    <span>{locationLabel}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-1 text-sm text-text-primary font-body">
+                  <Icon name="User" size={14} className="text-text-secondary" />
+                  <span>{staffLabelPlural}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Center: Date navigation cluster */}
+            <div className="flex items-center gap-2 flex-wrap justify-center justify-self-center">
+              <div className="relative" ref={prevJumpRef}>
                 <button
-                  onClick={goPrev}
-                  className="px-2 py-1.5 hover:bg-background spa-transition-fast border-r border-border"
-                  aria-label="Previous day"
+                  onClick={() => setJumpMenuOpen(prev => (prev === 'prev' ? null : 'prev'))}
+                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  aria-label="Jump back"
                 >
-                  <Icon name="ChevronLeft" size={16} className="text-text-secondary" />
+                  <Icon name="ChevronsLeft" size={16} className="text-text-secondary" />
                 </button>
-                <button
-                  onClick={goNext}
-                  className="px-2 py-1.5 hover:bg-background spa-transition-fast"
-                  aria-label="Next day"
-                >
-                  <Icon name="ChevronRight" size={16} className="text-text-secondary" />
-                </button>
+                {jumpMenuOpen === 'prev' && (
+                  <div className="absolute left-0 top-full mt-1 w-32 max-h-72 overflow-y-auto bg-surface border border-border rounded-spa shadow-lg z-dropdown py-1">
+                    {JUMP_OPTIONS.map(opt => (
+                      <button
+                        key={opt.label}
+                        onClick={() => { applyJump(-1, opt.unit, opt.amount); setJumpMenuOpen(null); }}
+                        className="w-full text-left px-3 py-1.5 text-sm text-text-primary hover:bg-primary/5"
+                      >
+                        -{opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <button
+                onClick={goPrev}
+                className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                aria-label="Previous day"
+              >
+                <Icon name="ChevronLeft" size={16} className="text-text-secondary" />
+              </button>
+              <button
                 onClick={goToday}
-                className="hidden sm:inline-flex px-3 py-1.5 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
+                className="inline-flex px-3 py-1.5 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
               >
                 Today
               </button>
-            </div>
-
-            {/* Center: Date title with navigation.
-                Mobile: 3-col grid — panel-toggle on the left, centered date group, balancing spacer on the right.
-                Desktop: plain flex row in the normal toolbar position. */}
-            <div className="grid grid-cols-[auto_1fr_auto] sm:flex items-center sm:space-x-3 w-full sm:w-auto">
-              {/* Panel toggle (mobile only) */}
-              <button
-                onClick={() => setMobileSidebarOpen(true)}
-                className="sm:hidden p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast justify-self-start"
-                aria-label="Show calendar tools"
-              >
-                <Icon name="PanelLeftOpen" size={18} className="text-text-secondary" />
-              </button>
-
-              {/* Date + chevrons (centered in the middle grid column) */}
-              <div className="flex items-center justify-center space-x-3">
+              <div className="relative" ref={dateDropdownRef}>
                 <button
-                  onClick={goPrev}
-                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
-                  aria-label="Previous"
+                  onClick={() => setDateDropdownOpen(prev => !prev)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-body font-body-medium text-text-primary border rounded-spa hover:bg-background spa-transition-fast min-w-[110px] sm:min-w-[140px] justify-between ${
+                    dateDropdownOpen ? 'border-primary ring-1 ring-primary' : 'border-border'
+                  }`}
                 >
-                  <Icon name="ChevronLeft" size={18} className="text-text-secondary" />
+                  <span>{formatDateTitle(currentDate, viewMode)}</span>
+                  <Icon name="ChevronDown" size={14} className={`text-text-secondary spa-transition-fast ${dateDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
-                <h2 className="font-heading font-heading-semibold text-sm sm:text-base text-text-primary min-w-[110px] sm:min-w-[140px] text-center">
-                  {formatDateTitle(currentDate, viewMode)}
-                </h2>
-                <button
-                  onClick={goNext}
-                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
-                  aria-label="Next"
-                >
-                  <Icon name="ChevronRight" size={18} className="text-text-secondary" />
-                </button>
+                {dateDropdownOpen && (
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 bg-surface border border-border rounded-spa shadow-lg z-dropdown p-3">
+                    <MiniMonthCalendar
+                      selectedDate={currentDate}
+                      onDateSelect={(d) => { setCurrentDate(d); setDateDropdownOpen(false); }}
+                    />
+                  </div>
+                )}
               </div>
-
-              {/* Right-side spacer balancing the panel button so the date stays screen-centered (mobile only) */}
-              <div className="sm:hidden w-9" aria-hidden="true" />
+              <button
+                onClick={goNext}
+                className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                aria-label="Next day"
+              >
+                <Icon name="ChevronRight" size={16} className="text-text-secondary" />
+              </button>
+              <div className="relative" ref={nextJumpRef}>
+                <button
+                  onClick={() => setJumpMenuOpen(prev => (prev === 'next' ? null : 'next'))}
+                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  aria-label="Jump forward"
+                >
+                  <Icon name="ChevronsRight" size={16} className="text-text-secondary" />
+                </button>
+                {jumpMenuOpen === 'next' && (
+                  <div className="absolute right-0 top-full mt-1 w-32 max-h-72 overflow-y-auto bg-surface border border-border rounded-spa shadow-lg z-dropdown py-1">
+                    {JUMP_OPTIONS.map(opt => (
+                      <button
+                        key={opt.label}
+                        onClick={() => { applyJump(1, opt.unit, opt.amount); setJumpMenuOpen(null); }}
+                        className="w-full text-left px-3 py-1.5 text-sm text-text-primary hover:bg-primary/5"
+                      >
+                        +{opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Right: Position filter + View toggle
-                On mobile: own row spreading full width — Day/4-Day on the left, Position filter on the right */}
-            <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end flex-row-reverse sm:flex-row">
+            {/* Right: Position filter + Tip + View toggle */}
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end justify-self-end">
+              <div className="relative" ref={tipRef}>
+                <button
+                  type="button"
+                  onClick={() => setTipOpen(prev => !prev)}
+                  className="group relative p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  aria-label="Drag and drop tip"
+                >
+                  <Icon name="Info" size={16} className="text-text-secondary" />
+                  <span className="hidden sm:block pointer-events-none absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-spa shadow-lg z-dropdown p-2 text-xs text-text-secondary leading-relaxed opacity-0 invisible group-hover:opacity-100 group-hover:visible spa-transition-fast text-left">
+                    Drag Pending bookings to reschedule. Confirmed, in-progress, paid, completed,
+                    cancelled, and day-closed bookings are locked.
+                  </span>
+                </button>
+                {tipOpen && (
+                  <div className="sm:hidden absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-spa shadow-lg z-dropdown p-2 text-xs text-text-secondary leading-relaxed text-left">
+                    Drag Pending bookings to reschedule. Confirmed, in-progress, paid, completed,
+                    cancelled, and day-closed bookings are locked.
+                  </div>
+                )}
+              </div>
               {columnMode === 'therapist' && calendarPositionOptions.length > 0 && (
                 <div className="relative" ref={positionDropdownRef}>
                   <button
@@ -2778,142 +2915,8 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
           </div>
 
-          {/* Main content area: Sidebar + Grid */}
-          <div className="flex flex-1 min-h-0">
-            {/* Left sidebar: Mini calendar + Legend
-                - desktop (md+): always visible inline
-                - mobile: rendered inline when toggled — pushes the grid right, which scrolls horizontally */}
-            <div className={`${mobileSidebarOpen ? 'flex' : 'hidden'} md:flex w-64 md:w-52 flex-shrink-0 border-r border-border bg-surface p-3 flex-col overflow-y-auto sidebar-scroll`}>
-              {/* Mobile close button */}
-              <div className="md:hidden flex justify-end mb-2">
-                <button
-                  onClick={() => setMobileSidebarOpen(false)}
-                  className="p-1.5 rounded-spa hover:bg-background spa-transition-fast"
-                  aria-label="Hide calendar tools"
-                >
-                  <Icon name="X" size={18} className="text-text-secondary" />
-                </button>
-              </div>
-              <MiniMonthCalendar
-                selectedDate={currentDate}
-                onDateSelect={setCurrentDate}
-              />
-
-              {/* View By toggle - only show if rooms are enabled, otherwise just show staff */}
-              <div className="mt-4 pt-4 border-t border-border">
-                <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                  View By
-                </div>
-                {enableRooms ? (
-                  <div className="flex border border-border rounded-spa overflow-hidden">
-                    <button
-                      onClick={() => setColumnMode('therapist')}
-                      className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-body font-body-medium spa-transition-fast ${
-                        columnMode === 'therapist'
-                          ? 'bg-primary text-white'
-                          : 'text-text-primary hover:bg-background'
-                      }`}
-                    >
-                      <Icon name="User" size={12} />
-                      <span>{staffLabel}</span>
-                    </button>
-                    <button
-                      onClick={() => setColumnMode('room')}
-                      className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-body font-body-medium spa-transition-fast border-l border-border ${
-                        columnMode === 'room'
-                          ? 'bg-primary text-white'
-                          : 'text-text-primary hover:bg-background'
-                      }`}
-                    >
-                      <Icon name="DoorOpen" size={12} />
-                      <span>{locationLabel}</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
-                    <Icon name="User" size={14} className="text-text-secondary" />
-                    <span>{staffLabelPlural}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-border">
-                <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                  Status
-                </div>
-                <StatusLegend showPayment showTransferBlocked compact />
-              </div>
-
-              {/* Drag hint */}
-              <div className="mt-4 pt-4 border-t border-border">
-                <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                  Tip
-                </div>
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  Drag Pending bookings to reschedule. Confirmed, in-progress, paid, completed,
-                  cancelled, and day-closed bookings are locked.
-                </p>
-              </div>
-
-              {/* Resource count */}
-              {calendarData && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  {columnMode === 'therapist' || !enableRooms ? (
-                    <>
-                      <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                        {staffLabelPlural}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
-                        <Icon name="Users" size={14} className="text-text-secondary" />
-                        <span>{filteredTherapists.length} active</span>
-                      </div>
-                      <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                        <button
-                          type="button"
-                          onClick={() => setShowServiceOnly(prev => !prev)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full spa-transition-fast ${
-                            showServiceOnly ? 'bg-primary' : 'bg-border'
-                          }`}
-                        >
-                          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white spa-transition-fast transform ${
-                            showServiceOnly ? 'translate-x-4' : 'translate-x-0.5'
-                          }`} />
-                        </button>
-                        <span className="font-caption text-xs text-text-secondary">Service staff only</span>
-                      </label>
-                      {Object.keys(attendanceMap).length > 0 && (
-                        <div className="mt-1.5 space-y-1">
-                          {Object.entries(attendanceMap).map(([tid, status]) => {
-                            const t = calendarData.therapists.find(th => th.id === tid);
-                            if (!t) return null;
-                            return (
-                              <div key={tid} className="flex items-center gap-1.5 text-xs text-text-secondary">
-                                <span className={`w-1.5 h-1.5 rounded-full ${status === 'Absent' ? 'bg-error' : 'bg-warning'}`} />
-                                <span className="truncate">{t.name}</span>
-                                <span className="opacity-60">({status})</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <div className="font-caption font-semibold text-[10px] text-text-secondary uppercase tracking-wider mb-2">
-                        {locationLabelPlural}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-sm text-text-primary font-body">
-                        <Icon name="DoorOpen" size={14} className="text-text-secondary" />
-                        <span>{calendarData.rooms?.length || 0} active</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Calendar grid */}
-            <div className="flex-1 overflow-x-auto md:overflow-hidden">
+          {/* Calendar grid */}
+          <div className="flex-1 min-h-0 overflow-x-auto md:overflow-hidden">
               {calendarData ? (
                 <CalendarGrid
                   therapists={filteredTherapists}
@@ -2951,7 +2954,6 @@ const OperationalCalendar = ({ branchId }) => {
                   </div>
                 </div>
               )}
-            </div>
           </div>
         </div>
 
