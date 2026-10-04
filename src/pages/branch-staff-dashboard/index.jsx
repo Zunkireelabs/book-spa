@@ -14,10 +14,11 @@ import OperationalCalendar from '../branch-manager-dashboard/components/calendar
 import EnrollMemberModal from '../branch-manager-dashboard/components/Memberships/EnrollMemberModal';
 import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
 import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
+import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
 import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
@@ -392,10 +393,18 @@ const BranchStaffDashboard = () => {
   // Wire to real API: recordPayment
   const handleRecordPayment = async (bookingId, opts) => {
     setActionError(null);
-    const result = await recordPayment({ bookingId, ...opts });
+    const { tipAmount, tipReceivedBy, ...paymentOpts } = opts;
+    const result = await recordPayment({ bookingId, ...paymentOpts });
 
     if (result.error) {
       return { error: result.error };
+    }
+
+    // Best-effort — tip is logged separately (migration-240) and must never
+    // undo or block a payment that already succeeded.
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
 
     showSuccess('Payment recorded successfully');
@@ -677,6 +686,9 @@ const BranchStaffDashboard = () => {
                   />
                 </div>
               </div>
+
+              {/* Tips — not revenue, kept visually separate, last section on the page */}
+              <TipsSummaryCard branchId={branchId} userRole={userRole} />
             </div>
           ) : viewMode === 'bookings' ? (
             <BookingsViewPanel branchId={branchId} />

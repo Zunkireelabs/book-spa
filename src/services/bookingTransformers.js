@@ -100,6 +100,10 @@ export function transformBooking(dbBooking) {
   }
   const amountDue = Math.max(finalAmount - amountPaid, 0);
 
+  // Customer gratuity (migration-240) — NOT revenue, NOT part of amountPaid/amountDue.
+  const tipRows = Array.isArray(dbBooking.booking_tips) ? dbBooking.booking_tips : [];
+  const tipTotal = tipRows.reduce((s, t) => s + Number(t.amount || 0), 0);
+
   return {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
@@ -141,6 +145,8 @@ export function transformBooking(dbBooking) {
     payments: paymentRows
       ? paymentRows.map(p => ({ id: p.id || null, amount: Number(p.amount || 0), paymentMode: p.payment_mode, createdAt: p.created_at }))
       : [],
+    tips: tipRows.map(t => ({ id: t.id || null, amount: Number(t.amount || 0), createdAt: t.created_at, receivedByName: t.receiver?.full_name || null })),
+    tipTotal,
   };
 }
 

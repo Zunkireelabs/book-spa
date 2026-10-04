@@ -17,6 +17,7 @@ import {
   updateBookingStatus,
   assignTherapist,
   recordPayment,
+  recordTip,
   fetchAttendance,
   LEAVE_LIKE_ATTENDANCE_STATUSES,
   rescheduleBooking,
@@ -1518,8 +1519,11 @@ const OperationalCalendar = ({ branchId }) => {
   const [editingBlock, setEditingBlock] = useState(null);
   const [editingTransferTherapist, setEditingTransferTherapist] = useState(null);
 
-  // Rebook "pick and place" mode
-  // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
+  // Rebook / Reschedule "pick and place" mode — shared mechanism, distinguished
+  // by isReschedule. Rebook creates a new booking and leaves the original
+  // untouched; Reschedule creates a new booking at the picked slot then
+  // cancels the original (see handleEmptySlotClick).
+  // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration, isReschedule?, originalBookingId? }
   const [rebookSource, setRebookSource] = useState(null);
   const [rebookFallback, setRebookFallback] = useState(false);
 
@@ -1553,6 +1557,11 @@ const OperationalCalendar = ({ branchId }) => {
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && rebookSource) {
+        if (rebookSource.isReschedule) {
+          // No inline fallback form for Reschedule — just drop out of pick mode.
+          setRebookSource(null);
+          return;
+        }
         // Reopen modal with rebook inline form
         setSelectedBooking(rebookSource.booking);
         setModalOpen(true);
@@ -2152,7 +2161,7 @@ const OperationalCalendar = ({ branchId }) => {
       }
     }
 
-    // Rebook mode — place booking at clicked slot
+    // Rebook / Reschedule mode — place booking at clicked slot
     if (rebookSource) {
       // Capture and immediately clear to prevent double-click duplicates
       const source = rebookSource;
@@ -2173,9 +2182,25 @@ const OperationalCalendar = ({ branchId }) => {
         roomId,
       });
       if (result.error) {
-        showToast(result.error.message || 'Failed to rebook.', 'error');
-        // Restore rebook mode on failure so user can retry
+        showToast(result.error.message || (source.isReschedule ? 'Failed to reschedule.' : 'Failed to rebook.'), 'error');
+        // Restore pick mode on failure so user can retry — the original
+        // booking hasn't been touched yet either way.
         setRebookSource(source);
+      } else if (source.isReschedule) {
+        // New booking is in; now close out the original. The new booking
+        // already exists regardless of this call's outcome, so a failure
+        // here just surfaces a toast rather than rolling anything back.
+        const cancelResult = await updateBookingStatus({
+          bookingId: source.originalBookingId,
+          newStatus: toDbStatus('cancelled'),
+          reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
+        });
+        if (cancelResult.error) {
+          showToast(`Rescheduled, but couldn't close the original booking: ${cancelResult.error.message || 'unknown error'}`, 'error');
+        } else {
+          showToast('Booking rescheduled successfully.');
+        }
+        refreshCalendar();
       } else {
         showToast('Rebooked successfully — payment will be collected at the new appointment.');
         refreshCalendar();
@@ -2380,6 +2405,24 @@ const OperationalCalendar = ({ branchId }) => {
 
   const handleRebookCancel = useCallback(() => setRebookSource(null), []);
 
+  // "Reschedule" — same pick-and-place mechanism as Rebook, but marks the
+  // source as isReschedule so handleEmptySlotClick cancels the original
+  // booking once the new one is successfully created (see there).
+  const handleRescheduleStart = useCallback((booking) => {
+    setRebookSource({
+      booking,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      serviceId: booking.serviceId,
+      serviceName: booking.service,
+      duration: booking.duration,
+      isReschedule: true,
+      originalBookingId: booking.bookingId,
+    });
+    setModalOpen(false);
+    setSelectedBooking(null);
+  }, []);
+
   // ── Event click → modal ────────────────────────────────────
 
   const handleBookingClick = useCallback(async (booking) => {
@@ -2539,9 +2582,16 @@ const OperationalCalendar = ({ branchId }) => {
   };
 
   const handleRecordPayment = async (bookingId, opts) => {
-    const result = await recordPayment({ bookingId, ...opts });
+    const { tipAmount, tipReceivedBy, ...paymentOpts } = opts;
+    const result = await recordPayment({ bookingId, ...paymentOpts });
     if (result.error) {
       return { error: result.error };
+    }
+    // Best-effort — tip is a separate, independent record (migration-240) and must
+    // never undo or block a payment that already succeeded.
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
     showToast('Payment recorded successfully');
     // Only refresh the modal's displayed booking when this payment was for the
@@ -2993,13 +3043,13 @@ const OperationalCalendar = ({ branchId }) => {
         </DragOverlay>
       </DndContext>
 
-      {/* Rebook floating cursor card */}
+      {/* Rebook / Reschedule floating cursor card */}
       {rebookSource && (
         <div
           ref={rebookCardRef}
           role="status"
           aria-live="polite"
-          aria-label={`Rebook mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
+          aria-label={`${rebookSource.isReschedule ? 'Reschedule' : 'Rebook'} mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
           className="fixed pointer-events-none z-notification"
           style={{ left: -9999, top: -9999, opacity: 0 }}
         >
@@ -3015,7 +3065,7 @@ const OperationalCalendar = ({ branchId }) => {
                 {rebookSource.duration}
               </span>
               <span className="font-caption text-[10px] text-primary font-medium">
-                Click to place
+                {rebookSource.isReschedule ? 'Click to move' : 'Click to place'}
               </span>
             </div>
           </div>
@@ -3048,6 +3098,7 @@ const OperationalCalendar = ({ branchId }) => {
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
         onRebookStart={handleRebookStart}
+        onRescheduleStart={handleRescheduleStart}
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}

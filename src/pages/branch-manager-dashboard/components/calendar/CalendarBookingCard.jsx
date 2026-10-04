@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -161,13 +161,14 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       if (cardRef.current) {
         const rect = cardRef.current.getBoundingClientRect();
         const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
-        // Clamp top so popover stays within viewport (estimate ~280px popover height)
-        const popoverHeight = 280;
-        const maxTop = window.innerHeight - popoverHeight - 10;
-        const clampedTop = Math.min(rect.top, maxTop);
+        // Vertical clamping against the popover's REAL (content-dependent)
+        // height happens inside BookingHoverPreview itself, post-render — its
+        // content varies a lot (notes, discount line, etc.) so a fixed-height
+        // guess here previously ran it off the bottom of the viewport for
+        // taller cards. This is just the initial anchor.
         setPopoverPos({
           side,
-          top: Math.max(10, clampedTop),
+          top: Math.max(10, rect.top),
           left: side === 'right' ? rect.right + 8 : rect.left - 288,
         });
       }
@@ -335,13 +336,33 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
     ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
     : '';
 
+  const cardRef = useRef(null);
+  const [top, setTop] = useState(position?.top ?? 0);
+
+  // Re-anchor to the new target's initial estimate whenever a different
+  // booking/position comes in (new hover), then re-clamp below once the
+  // real height is known.
+  useEffect(() => {
+    setTop(position?.top ?? 0);
+  }, [position?.top, position?.left]);
+
+  useLayoutEffect(() => {
+    if (!position || !cardRef.current) return;
+    const height = cardRef.current.offsetHeight;
+    const margin = 10;
+    const maxTop = window.innerHeight - height - margin;
+    const clamped = Math.max(margin, Math.min(position.top, maxTop));
+    if (Math.abs(clamped - top) > 0.5) setTop(clamped);
+  }, [position, top]);
+
   if (!position) return null;
 
   return createPortal(
     <div
+      ref={cardRef}
       className="fixed z-dropdown pointer-events-none"
       style={{
-        top: position.top,
+        top,
         left: position.left,
         width: 280,
       }}

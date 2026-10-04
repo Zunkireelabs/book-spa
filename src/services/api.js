@@ -7,6 +7,7 @@ import { toE164, samePhone } from '../utils/phone';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
+import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -846,6 +847,149 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     };
   } catch (error) {
     console.error('[API] recordPayment error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Logs a customer gratuity against a booking (migration-240) — NOT company revenue.
+// Deliberately decoupled from recordPayment's tender-bucketing/OVERPAYMENT logic: a
+// separate table, a separate insert, no FK/trigger relationship to `payments`. Called
+// as a second, best-effort write immediately after recordPayment() succeeds (see each
+// page's handleRecordPayment) — a failure here must never undo or block the payment
+// itself, which has already been recorded. `receivedBy` (migration-242) is the staff
+// member who actually received the tip — not necessarily the assigned therapist, since
+// a guest may hand it to whoever they interacted with (service or support staff) —
+// optional, a users.id, not a therapists.id (support staff may have no therapist row).
+export async function recordTip({ bookingId, amount, notes, receivedBy }) {
+  try {
+    const tipAmount = Math.round(Number(amount) * 100) / 100;
+    if (!tipAmount || tipAmount <= 0) {
+      return { data: null, error: { code: 'INVALID_TIP_AMOUNT', message: 'Tip amount must be greater than zero.' } };
+    }
+
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, is_locked, status')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+      throw fetchError;
+    }
+
+    const mutationError = validateBookingMutation(booking);
+    if (mutationError) return { data: null, error: mutationError };
+
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('booking_tips')
+      .insert({ booking_id: bookingId, amount: tipAmount, recorded_by: user.id, received_by: receivedBy || null, notes: notes || null })
+      .select('id, amount, created_at')
+      .single();
+    if (error) throw error;
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] recordTip error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Every working staff member at a branch — service staff (therapists, via their
+// users row) AND support/front-desk staff — for the "who received this tip"
+// picker (migration-242). Deliberately reads `users`, not `therapists`: a tip
+// can go to someone with no therapists row at all.
+export async function fetchBranchStaffUsers(branchId) {
+  try {
+    let query = supabase
+      .from('users')
+      .select('id, full_name, role')
+      .in('role', ['staff', 'manager', 'admin'])
+      .eq('is_active', true)
+      .order('full_name');
+    query = withBranch(query, branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return { data: (data || []).map(u => ({ id: u.id, name: u.full_name, role: u.role })), error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchStaffUsers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Running Today / This Month / All-time tip totals for a branch (migration-240/241/242),
+// split into pending vs distributed — "distributed" meaning a manager/admin has
+// confirmed the cash was actually handed to staff (markTipsDistributed below), not
+// just recorded in the app — plus an all-time per-staff breakdown (byStaff) so it's
+// clear not just how much but WHO received it. Bucketed by the booking's own `date`
+// (same "today"/"this month" semantics every other report in this file uses), not the
+// tip row's created_at — a tip recorded today against an older booking's payment still
+// counts toward that booking's own day, consistent with getDailySummary/
+// getDailyOperationalReport. Single query, bucketed client-side, rather than 4 separate
+// round trips (3 periods + a staff breakdown).
+export async function getTipsSummary(branchId) {
+  try {
+    const today = getTodayISO();
+    const { startDate: monthStart } = getPeriodRange('monthly');
+
+    let query = supabase
+      .from('booking_tips')
+      .select('amount, distributed_at, received_by, receiver:users!received_by(full_name), booking:bookings!inner(branch_id, date)');
+    query = isOverallBranch(branchId) ? query : query.eq('booking.branch_id', resolveBranchId(branchId));
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const bucket = () => ({ total: 0, distributed: 0, pending: 0 });
+    const sums = { today: bucket(), thisMonth: bucket(), allTime: bucket() };
+    const byStaffMap = new Map();
+
+    for (const t of (data || [])) {
+      const amt = Number(t.amount);
+      const isDistributed = !!t.distributed_at;
+      const date = t.booking?.date;
+      const addTo = (b) => { b.total += amt; if (isDistributed) b.distributed += amt; else b.pending += amt; };
+
+      addTo(sums.allTime);
+      if (date && date >= monthStart) addTo(sums.thisMonth);
+      if (date === today) addTo(sums.today);
+
+      const key = t.received_by || 'unspecified';
+      if (!byStaffMap.has(key)) {
+        byStaffMap.set(key, { id: t.received_by, name: t.receiver?.full_name || 'Unspecified', ...bucket() });
+      }
+      addTo(byStaffMap.get(key));
+    }
+
+    const byStaff = Array.from(byStaffMap.values()).sort((a, b) => b.total - a.total);
+
+    return {
+      data: { today: sums.today, thisMonth: sums.thisMonth, allTime: sums.allTime, byStaff },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getTipsSummary error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Bulk-marks every currently-pending tip for a branch as distributed (migration-241
+// RPC, admin/manager only — no client UPDATE policy exists on booking_tips at all,
+// same immutable-except-via-RPC posture as payments/admin_correct_payment_mode).
+// Branch-wide and bulk, not per-tip, to match how the total is surfaced (a running
+// pending/distributed figure, not an itemized list) — returns the count updated.
+export async function markTipsDistributed(branchId) {
+  try {
+    const { data, error } = await supabase.rpc('mark_tips_distributed', {
+      p_branch_id: resolveBranchId(branchId),
+    });
+    if (error) throw error;
+    return { data: { count: data }, error: null };
+  } catch (error) {
+    console.error('[API] markTipsDistributed error:', error.message);
     return { data: null, error };
   }
 }
@@ -3354,6 +3498,20 @@ export async function getDailySummary(branchId, date) {
     paymentBreakdown.card += modeBreakdown.card;
     paymentBreakdown.fonepay += modeBreakdown.fonepay;
 
+    // 4d. Tips collected today — NOT revenue (migration-240). Reported separately,
+    // deliberately NEVER folded into netRevenue/paymentBreakdown, same "visible but
+    // excluded" treatment as SessionPackage/WALLET_MODES above for a different reason
+    // (those are already-recognized revenue; a tip was never company revenue at all).
+    let tipsTotal = 0;
+    if (settledBookingIds.length > 0) {
+      const { data: tips, error: tipsError } = await supabase
+        .from('booking_tips')
+        .select('amount')
+        .in('booking_id', settledBookingIds);
+      if (tipsError) throw tipsError;
+      tipsTotal = (tips || []).reduce((s, t) => s + Number(t.amount), 0);
+    }
+
     // 5. Check if day is already closed — Overall always live-computes (no per-branch close)
     let existingReport = null;
     if (!overall) {
@@ -3376,6 +3534,7 @@ export async function getDailySummary(branchId, date) {
         netRevenue,
         paymentBreakdown,
         voucherSalesTotal,
+        tipsTotal,
         unpaidCount,
         isClosed: !!existingReport,
         closedAt: existingReport?.closed_at || null,
@@ -4004,12 +4163,27 @@ export async function getDailyOperationalReport(branchId, date) {
         };
       });
 
+    // Tips collected today — NOT revenue (migration-240). Computed live regardless of
+    // isClosed; v1 deliberately does NOT add a tips column to daily_reports, so a
+    // closed day's tip total is always a live query, never a frozen snapshot value
+    // the way gross/net revenue are.
+    let tipsTotal = 0;
+    if (bookingIds.length > 0) {
+      const { data: tips, error: tipsError } = await supabase
+        .from('booking_tips')
+        .select('amount')
+        .in('booking_id', bookingIds);
+      if (tipsError) throw tipsError;
+      tipsTotal = (tips || []).reduce((s, t) => s + Number(t.amount), 0);
+    }
+
     return {
       data: {
         bookings: bookingsList,
         totals,
         paymentBreakdown,
         voucherSalesTotal,
+        tipsTotal,
         staffDiscountSummary,
         therapistRevenueSummary,
         unpaidBookings,
@@ -4594,6 +4768,7 @@ export async function fetchBookingById(bookingId) {
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
         payments(id, amount, payment_mode, created_at),
+        booking_tips(id, amount, created_at, receiver:users!received_by(full_name)),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
       .eq('id', bookingId)
@@ -4846,7 +5021,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       .from('bookings')
       .select(`
         id, booking_number, customer_id, customer_name, customer_phone, status, payment_status,
-        date, start_time, end_time, start_datetime, end_datetime, created_at,
+        date, start_time, end_time, start_datetime, end_datetime, created_at, created_by,
         therapist_id, room_id,
         base_amount, discount_amount, final_amount, special_requests,
         service:services(name, duration_minutes),
