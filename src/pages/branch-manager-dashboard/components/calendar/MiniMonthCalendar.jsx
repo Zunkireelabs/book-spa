@@ -2,11 +2,18 @@ import React, { useState, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const YEAR_GRID_SIZE = 12;
 
 const MiniMonthCalendar = ({ selectedDate, onDateSelect }) => {
   const selected = useMemo(() => new Date(selectedDate + 'T00:00:00'), [selectedDate]);
   const [viewMonth, setViewMonth] = useState(selected.getMonth());
   const [viewYear, setViewYear] = useState(selected.getFullYear());
+  // 'days' -> clicking the header drills into 'months' -> drills into 'years'
+  const [pickerMode, setPickerMode] = useState('days');
+  const [yearRangeStart, setYearRangeStart] = useState(
+    selected.getFullYear() - (selected.getFullYear() % YEAR_GRID_SIZE)
+  );
 
   const today = useMemo(() => {
     const d = new Date();
@@ -75,52 +82,121 @@ const MiniMonthCalendar = ({ selectedDate, onDateSelect }) => {
   const isSelected = (cell) =>
     !cell.isOtherMonth && cell.day === selected.getDate() && cell.month === selected.getMonth() && cell.year === selected.getFullYear();
 
+  const headerLabel = pickerMode === 'years'
+    ? `${yearRangeStart} – ${yearRangeStart + YEAR_GRID_SIZE - 1}`
+    : pickerMode === 'months'
+      ? String(viewYear)
+      : monthName;
+
+  const handleHeaderClick = () => {
+    if (pickerMode === 'days') setPickerMode('months');
+    else if (pickerMode === 'months') {
+      setYearRangeStart(viewYear - (viewYear % YEAR_GRID_SIZE));
+      setPickerMode('years');
+    }
+  };
+
+  const handlePrevHeaderNav = () => {
+    if (pickerMode === 'days') prevMonth();
+    else if (pickerMode === 'months') setViewYear(viewYear - 1);
+    else setYearRangeStart(yearRangeStart - YEAR_GRID_SIZE);
+  };
+
+  const handleNextHeaderNav = () => {
+    if (pickerMode === 'days') nextMonth();
+    else if (pickerMode === 'months') setViewYear(viewYear + 1);
+    else setYearRangeStart(yearRangeStart + YEAR_GRID_SIZE);
+  };
+
   return (
-    <div className="select-none">
-      {/* Month navigation */}
-      <div className="flex items-center justify-between mb-2">
-        <button onClick={prevMonth} className="p-1 rounded hover:bg-background spa-transition-fast">
-          <Icon name="ChevronLeft" size={14} className="text-text-secondary" />
+    <div className="select-none w-[340px]">
+      {/* Header navigation — drills days -> months -> years on label click */}
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={handlePrevHeaderNav} className="p-1.5 rounded hover:bg-background spa-transition-fast" aria-label="Previous">
+          <Icon name="ChevronLeft" size={16} className="text-text-secondary" />
         </button>
-        <span className="font-heading font-heading-semibold text-sm text-text-primary">{monthName}</span>
-        <button onClick={nextMonth} className="p-1 rounded hover:bg-background spa-transition-fast">
-          <Icon name="ChevronRight" size={14} className="text-text-secondary" />
+        <button
+          onClick={handleHeaderClick}
+          disabled={pickerMode === 'years'}
+          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-background spa-transition-fast disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          <span className="font-heading font-heading-semibold text-base text-text-primary">{headerLabel}</span>
+          {pickerMode !== 'years' && <Icon name="ChevronDown" size={14} className="text-text-secondary" />}
+        </button>
+        <button onClick={handleNextHeaderNav} className="p-1.5 rounded hover:bg-background spa-transition-fast" aria-label="Next">
+          <Icon name="ChevronRight" size={16} className="text-text-secondary" />
         </button>
       </div>
 
-      {/* Day headers */}
-      <div className="grid grid-cols-7 mb-1">
-        {DAYS.map((d, i) => (
-          <div key={i} className="text-center text-[10px] font-caption text-text-secondary font-semibold py-0.5">
-            {d}
-          </div>
-        ))}
-      </div>
-
-      {/* Weeks */}
-      {weeks.map((week, wi) => (
-        <div key={wi} className="grid grid-cols-7">
-          {week.map((cell, ci) => {
-            const todayCell = isToday(cell);
-            const selectedCell = isSelected(cell);
-            return (
-              <button
-                key={ci}
-                onClick={() => handleDateClick(cell)}
-                className={`
-                  w-7 h-7 flex items-center justify-center text-xs rounded-full spa-transition-fast
-                  ${cell.isOtherMonth ? 'text-text-secondary/40' : 'text-text-primary'}
-                  ${todayCell && !selectedCell ? 'bg-primary/10 text-primary font-semibold' : ''}
-                  ${selectedCell ? 'bg-primary text-white font-semibold' : ''}
-                  ${!todayCell && !selectedCell ? 'hover:bg-background' : ''}
-                `}
-              >
-                {cell.day}
-              </button>
-            );
-          })}
+      {pickerMode === 'years' && (
+        <div className="grid grid-cols-3 gap-1">
+          {Array.from({ length: YEAR_GRID_SIZE }, (_, i) => yearRangeStart + i).map(y => (
+            <button
+              key={y}
+              onClick={() => { setViewYear(y); setPickerMode('months'); }}
+              className={`py-3 rounded-spa text-base spa-transition-fast ${
+                y === viewYear ? 'bg-primary text-white font-semibold' : 'text-text-primary hover:bg-background'
+              }`}
+            >
+              {y}
+            </button>
+          ))}
         </div>
-      ))}
+      )}
+
+      {pickerMode === 'months' && (
+        <div className="grid grid-cols-3 gap-1">
+          {MONTHS.map((m, i) => (
+            <button
+              key={m}
+              onClick={() => { setViewMonth(i); setPickerMode('days'); }}
+              className={`py-3 rounded-spa text-base spa-transition-fast ${
+                i === viewMonth ? 'bg-primary text-white font-semibold' : 'text-text-primary hover:bg-background'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {pickerMode === 'days' && (
+        <>
+          {/* Day headers */}
+          <div className="grid grid-cols-7 mb-1">
+            {DAYS.map((d, i) => (
+              <div key={i} className="text-center text-xs font-caption text-text-secondary font-semibold py-1">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Weeks */}
+          {weeks.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7">
+              {week.map((cell, ci) => {
+                const todayCell = isToday(cell);
+                const selectedCell = isSelected(cell);
+                return (
+                  <button
+                    key={ci}
+                    onClick={() => handleDateClick(cell)}
+                    className={`
+                      w-11 h-11 flex items-center justify-center text-base rounded-full spa-transition-fast
+                      ${cell.isOtherMonth ? 'text-text-secondary/40' : 'text-text-primary'}
+                      ${todayCell && !selectedCell ? 'bg-primary/10 text-primary font-semibold' : ''}
+                      ${selectedCell ? 'bg-primary text-white font-semibold' : ''}
+                      ${!todayCell && !selectedCell ? 'hover:bg-background' : ''}
+                    `}
+                  >
+                    {cell.day}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 };

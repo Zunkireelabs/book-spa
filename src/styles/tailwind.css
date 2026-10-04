@@ -116,9 +116,15 @@
     @apply border-border;
   }
   
+  html {
+    @apply bg-background;
+    overscroll-behavior-y: none;
+  }
+
   body {
     @apply bg-background text-text-primary font-body;
     font-feature-settings: "rlig" 1, "calt" 1;
+    overscroll-behavior-y: none;
   }
 
   /* Smooth scrolling, opt-in: the customer booking flow adds `smooth-scroll` to <html>

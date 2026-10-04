@@ -1660,7 +1660,7 @@ const CalendarGrid = ({
       {/* Fixed header — outside scroll container */}
       <div
         ref={headerScrollRef}
-        className="flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
+        className="relative flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
       >
         <div className="flex" style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
           <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center sticky left-0 z-header bg-background" style={{ width: TIME_COL_WIDTH }}>
@@ -1853,7 +1853,7 @@ const CalendarGrid = ({
       {/* Fixed header — outside scroll container */}
       <div
         ref={headerScrollRef}
-        className="flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
+        className="relative flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
       >
         <div className="flex" style={{ width: '100%', minWidth: TIME_COL_WIDTH + daysMinWidth }}>
           <div className="flex-shrink-0 border-r border-border sticky left-0 bg-background" style={{ width: TIME_COL_WIDTH }} />
