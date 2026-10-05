@@ -21,6 +21,7 @@ import {
   fetchAttendance,
   LEAVE_LIKE_ATTENDANCE_STATUSES,
   rescheduleBooking,
+  rescheduleBookingAsNewBooking,
   fetchServices,
   createBooking,
   updateBookingDetails,
@@ -2171,6 +2172,30 @@ const OperationalCalendar = ({ branchId }) => {
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
 
+      if (source.isReschedule) {
+        // Single DB transaction (reschedule_booking, migration-243) — creates the
+        // new booking and cancels the original atomically, so there's no
+        // partial-failure state (double-booked slot) to recover from here, and
+        // discount/special-requests/companion/referral fields carry over from
+        // the original instead of being dropped by a fresh createBooking() call.
+        const result = await rescheduleBookingAsNewBooking({
+          bookingId: source.originalBookingId,
+          date: slotInfo.day,
+          startTime,
+          therapistId,
+          roomId,
+          reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
+        });
+        if (result.error) {
+          showToast(result.error.message || 'Failed to reschedule.', 'error');
+          setRebookSource(source);
+        } else {
+          showToast('Booking rescheduled successfully.');
+          refreshCalendar();
+        }
+        return;
+      }
+
       const result = await createBooking({
         branchId,
         serviceId: source.serviceId,
@@ -2182,25 +2207,10 @@ const OperationalCalendar = ({ branchId }) => {
         roomId,
       });
       if (result.error) {
-        showToast(result.error.message || (source.isReschedule ? 'Failed to reschedule.' : 'Failed to rebook.'), 'error');
+        showToast(result.error.message || 'Failed to rebook.', 'error');
         // Restore pick mode on failure so user can retry — the original
         // booking hasn't been touched yet either way.
         setRebookSource(source);
-      } else if (source.isReschedule) {
-        // New booking is in; now close out the original. The new booking
-        // already exists regardless of this call's outcome, so a failure
-        // here just surfaces a toast rather than rolling anything back.
-        const cancelResult = await updateBookingStatus({
-          bookingId: source.originalBookingId,
-          newStatus: toDbStatus('cancelled'),
-          reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
-        });
-        if (cancelResult.error) {
-          showToast(`Rescheduled, but couldn't close the original booking: ${cancelResult.error.message || 'unknown error'}`, 'error');
-        } else {
-          showToast('Booking rescheduled successfully.');
-        }
-        refreshCalendar();
       } else {
         showToast('Rebooked successfully — payment will be collected at the new appointment.');
         refreshCalendar();

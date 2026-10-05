@@ -7,13 +7,6 @@ import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard, { canDragBooking, BookingHoverPreview } from './CalendarBookingCard';
 import { to12h } from '../../../../services/bookingTransformers';
 
-// Self-service amenities — no therapist needed, just a room. Mirrors the
-// name-matching heuristic already used in serviceEnrichment.js's
-// WELLNESS_SUBTOPIC_IMAGES (sauna/jacuzzi/steam subset — herbal there is a
-// therapist-administered treatment, not self-service).
-const SELF_SERVICE_SERVICE_REGEXES = [/sauna/i, /jacuzzi/i, /steam/i];
-const isSelfServiceName = (name) => !!name && SELF_SERVICE_SERVICE_REGEXES.some(re => re.test(name));
-
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
   const [brackets, setBrackets] = useState([]);
@@ -903,6 +896,7 @@ const CalendarGrid = ({
         customerPhone: b.customer_phone || null,
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
+        requiresTherapist: b.service?.requires_therapist !== false,
         status: b.status,
         paymentStatus: b.payment_status,
         isLocked: b.is_locked || false,
@@ -990,7 +984,7 @@ const CalendarGrid = ({
     const online = colBookings.filter(b => b.isOnline);
     return {
       count: online.length,
-      allSelfService: online.length > 0 && online.every(b => isSelfServiceName(b.serviceName)),
+      allSelfService: online.length > 0 && online.every(b => b.requiresTherapist === false),
     };
   }, [bookingsByDayAndCol, currentDate]);
 

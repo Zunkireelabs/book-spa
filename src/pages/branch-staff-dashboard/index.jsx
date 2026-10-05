@@ -19,7 +19,7 @@ import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsi
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
-import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
+import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
@@ -284,7 +284,13 @@ const BranchStaffDashboard = () => {
     }
 
     if (filters.status !== 'all') {
-      filtered = filtered.filter(booking => booking.status === filters.status);
+      // No-Show status buttons were removed — a No-Show booking now carries
+      // status='cancelled' + cancellationReason='No Show' instead of the old
+      // real status='no show', so the "No Show" filter needs isNoShow()
+      // rather than a literal equality check to still match anything.
+      filtered = filters.status === 'no show'
+        ? filtered.filter(isNoShow)
+        : filtered.filter(booking => booking.status === filters.status);
     }
 
     filtered.sort((a, b) => a.time.localeCompare(b.time));

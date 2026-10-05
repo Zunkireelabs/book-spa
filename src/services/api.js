@@ -1,5 +1,5 @@
 import { supabase, supabaseCustomer } from '../lib/supabase';
-import { transformMembership, transformMemberships, toTitleCase } from './bookingTransformers';
+import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
@@ -3930,7 +3930,7 @@ export async function getDailyOperationalReport(branchId, date) {
       .select(`
         id, booking_number, customer_name, status, payment_status,
         base_amount, discount_amount, final_amount, discount_status,
-        discount_approved_by, therapist_id,
+        discount_approved_by, therapist_id, cancellation_reason,
         service_name_snapshot, service_duration_snapshot, service_price_snapshot,
         therapist_name_snapshot, room_name_snapshot
       `)
@@ -4033,7 +4033,7 @@ export async function getDailyOperationalReport(branchId, date) {
         totalBookings: closedReport.total_bookings,
         completedBookings: closedReport.completed_bookings,
         cancelledBookings: closedReport.cancelled_bookings,
-        noShowBookings: all.filter(b => b.status === 'No Show').length,
+        noShowBookings: all.filter(isNoShow).length,
         grossRevenue: Number(closedReport.gross_revenue),
         totalDiscount: Number(closedReport.total_discounts),
         netRevenue: Number(closedReport.net_revenue),
@@ -4047,7 +4047,7 @@ export async function getDailyOperationalReport(branchId, date) {
         totalBookings: all.length,
         completedBookings: all.filter(b => b.status === 'Completed').length,
         cancelledBookings: all.filter(b => b.status === 'Cancelled').length,
-        noShowBookings: all.filter(b => b.status === 'No Show').length,
+        noShowBookings: all.filter(isNoShow).length,
         grossRevenue: paidBookings.reduce((sum, b) => sum + Number(b.base_amount), 0),
         totalDiscount: paidBookings.reduce((sum, b) => sum + Number(b.discount_amount), 0),
         // REVENUE LAW: netRevenue = SUM(payments.amount) — includes partial collections.
@@ -5024,7 +5024,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         date, start_time, end_time, start_datetime, end_datetime, created_at, created_by,
         therapist_id, room_id,
         base_amount, discount_amount, final_amount, special_requests,
-        service:services(name, duration_minutes),
+        service:services(name, duration_minutes, requires_therapist),
         therapist:therapists(id, name),
         room:rooms(id, name),
         creator:users!created_by(full_name),
@@ -5679,6 +5679,39 @@ export async function createBooking({
     return { data: booking, error: null };
   } catch (error) {
     console.error('[API] createBooking error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Atomic create-new-and-cancel-old reschedule — NOT the same operation as
+// rescheduleBooking() above (which updates a booking's date/time in place for
+// the calendar's drag-and-drop flow). This one backs the "Reschedule" action
+// (booking-details-assignment-modal, calendar's Rebook-reuse-as-reschedule
+// branch), which intentionally creates a fresh booking row and cancels the
+// original rather than mutating it in place. One DB transaction via
+// reschedule_booking() (migration-243), replacing the old createBooking() +
+// updateBookingStatus() two-call sequence, which left a double-booked slot
+// behind if the cancel call failed after the create succeeded, and dropped
+// discount/specialRequests/companion/referral fields because createBooking()
+// always recomputes a fresh booking from scratch. The RPC copies every
+// preservable field from the original row server-side instead.
+export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime, therapistId, roomId, reason }) {
+  try {
+    const { data, error } = await supabase.rpc('reschedule_booking', {
+      p_booking_id: bookingId,
+      p_date: date,
+      p_start_time: startTime,
+      p_therapist_id: therapistId || null,
+      p_room_id: roomId || null,
+      p_reason: reason || null,
+    });
+    if (error) throw error;
+
+    capture('staff_booking_rescheduled', { booking_id: bookingId, new_booking_id: data?.id });
+
+    return { data: { id: data?.id, bookingNumber: data?.booking_number }, error: null };
+  } catch (error) {
+    console.error('[API] rescheduleBooking error:', error.message);
     return { data: null, error };
   }
 }
@@ -8179,7 +8212,7 @@ export async function getRiskIndicators({ branchId, date }) {
     // 2. Last 7 days bookings (for cancellation/no-show rates)
     let last7dQuery = supabase
       .from('bookings')
-      .select('id, status')
+      .select('id, status, cancellation_reason')
       .gte('date', sevenDaysAgo)
       .lte('date', today);
     last7dQuery = withBranch(last7dQuery, branchId);
@@ -8238,7 +8271,7 @@ export async function getRiskIndicators({ branchId, date }) {
 
     // --- Cancellation Risk ---
     const cancelled7d = last7dBookings.filter(b => b.status === 'Cancelled').length;
-    const noShow7d = last7dBookings.filter(b => b.status === 'No Show').length;
+    const noShow7d = last7dBookings.filter(isNoShow).length;
     const cancellationRate7d = total7d > 0 ? Math.round((cancelled7d / total7d) * 100) : 0;
     const noShowRate7d = total7d > 0 ? Math.round((noShow7d / total7d) * 100) : 0;
 
@@ -9112,7 +9145,7 @@ export async function getTherapistCustomerHistory({ branchId, therapistId, fromD
 
     let query = supabase
       .from('bookings')
-      .select('id, customer_id, customer_name, customer_phone, service_name_snapshot, date, start_time, service_duration_snapshot, status')
+      .select('id, customer_id, customer_name, customer_phone, service_name_snapshot, date, start_time, service_duration_snapshot, status, cancellation_reason')
       .eq('therapist_id', therapistId)
       .gte('date', startDate)
       .lte('date', endDate)
@@ -9154,7 +9187,11 @@ export async function getTherapistCustomerHistory({ branchId, therapistId, fromD
       date: r.date,
       startTime: r.start_time,
       durationMinutes: r.service_duration_snapshot,
-      status: r.status,
+      // No-Show status buttons were removed — a No-Show appointment now carries
+      // status='Cancelled' + cancellation_reason='No Show'. The `statuses` IN-list
+      // above already includes it under 'Cancelled', but it must still be labeled
+      // "No Show" here rather than losing that distinction.
+      status: isNoShow(r) ? 'No Show' : r.status,
       customerType: r.status !== 'Completed'
         ? null
         : (!r.customer_id || firstVisitByCustomer[r.customer_id] === r.date) ? 'New' : 'Repeat',
@@ -9215,7 +9252,7 @@ export async function getTherapistServiceBreakdown({ branchId, therapistId, from
 
     let query = supabase
       .from('bookings')
-      .select('service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot')
+      .select('service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot, cancellation_reason')
       .eq('therapist_id', therapistId)
       .gte('date', startDate)
       .lte('date', endDate)
@@ -9236,10 +9273,12 @@ export async function getTherapistServiceBreakdown({ branchId, therapistId, from
         s.completed += 1;
         if (b.payment_status === 'paid') s.revenue += Number(b.final_amount) || 0;
         if (b.service_duration_snapshot) s._durations.push(b.service_duration_snapshot);
+      } else if (isNoShow(b)) {
+        // Must be checked before the plain-Cancelled branch below — a No-Show
+        // booking now carries status='Cancelled' + cancellation_reason='No Show'.
+        s.missed += 1;
       } else if (b.status === 'Cancelled') {
         s.cancelled += 1;
-      } else if (b.status === 'No Show') {
-        s.missed += 1;
       }
     }
 

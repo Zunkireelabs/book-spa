@@ -10,7 +10,7 @@ import BookingTimelinePanel from './components/BookingTimelinePanel';
 import CustomerCommunicationPanel from './components/CustomerCommunicationPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookingById, fetchTherapists, fetchRooms, recordPayment, recordTip, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag, createBooking } from '../../services/api';
+import { fetchBookingById, fetchTherapists, fetchRooms, recordPayment, recordTip, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag, rescheduleBookingAsNewBooking } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
 import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
@@ -147,40 +147,30 @@ const BookingDetailsAssignmentModal = () => {
   // (same customer + service as the original) and then cancels the original —
   // it does not update the existing row in place. Mirrors the Rebook pattern
   // used on the calendar, just driven by a form instead of click-a-slot since
-  // this page has no calendar grid.
+  // this page has no calendar grid. Both steps run in one DB transaction via
+  // reschedule_booking() (migration-243), so there's no partial-failure state
+  // to handle here.
   const handleReschedule = async ({ date, startTime, therapistId, roomId }) => {
     if (!booking) return { error: { message: 'No booking loaded.' } };
     setIsLoading(true);
     setActionError(null);
 
-    const createResult = await createBooking({
-      branchId,
-      serviceId: booking.serviceId,
+    const result = await rescheduleBookingAsNewBooking({
+      bookingId: booking.bookingId,
       date,
       startTime,
-      customerName: booking.customerName,
-      customerPhone: booking.customerPhone,
       therapistId: therapistId || null,
       roomId: roomId || null,
-    });
-
-    if (createResult.error) {
-      setIsLoading(false);
-      return { error: createResult.error };
-    }
-
-    const cancelResult = await updateBookingStatus({
-      bookingId: booking.bookingId,
-      newStatus: toDbStatus('cancelled'),
       reason: `Rescheduled to ${date} ${startTime}`,
     });
-    if (cancelResult.error) {
+
+    if (result.error) {
       setIsLoading(false);
-      return { error: { message: `New booking created, but couldn't close the original: ${cancelResult.error.message || 'unknown error'}` } };
+      return { error: result.error };
     }
 
     setIsLoading(false);
-    const newBookingId = createResult.data?.id;
+    const newBookingId = result.data?.id;
     const orgSlug = urlOrgSlug || profile?.organizations?.slug;
     if (newBookingId && orgSlug) {
       navigate(`/${orgSlug}/bookings/${newBookingId}`);
