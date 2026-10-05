@@ -5,7 +5,7 @@ import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
 import CustomSelect from '../../../components/ui/CustomSelect';
 import ConfirmDialog, { CANCEL_REASON_OPTIONS } from '../../../components/ui/ConfirmDialog';
-import { to12h } from '../../../services/bookingTransformers';
+import { to12h, isNoShow } from '../../../services/bookingTransformers';
 import { useAuth } from '../../../contexts/AuthContext';
 
 const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
@@ -163,7 +163,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, onResch
           ? booking.paymentStatus === 'paid'
             ? { bg: 'bg-success/5', border: 'border-success/20', color: 'text-success', icon: 'ShieldCheck', label: 'Completed — Settled' }
             : { bg: 'bg-warning/5', border: 'border-warning/20', color: 'text-warning', icon: 'Clock', label: 'Service Completed — Payment Pending' }
-          : { bg: 'bg-gray-50', border: 'border-gray-200', color: 'text-gray-600', iconColor: 'text-gray-500', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' };
+          : { bg: 'bg-gray-50', border: 'border-gray-200', color: 'text-gray-600', iconColor: 'text-gray-500', icon: 'ShieldCheck', label: isNoShow(booking) ? 'No Show — Immutable' : 'Cancelled — Immutable' };
         const iconColor = banner.iconColor || banner.color;
         return (
           <div className={`flex items-center space-x-2 px-3 py-2 ${banner.bg} border ${banner.border} rounded-spa`}>
@@ -195,7 +195,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, onResch
         <div className="flex items-center space-x-2 px-3 py-2 bg-error/5 border border-error/20 rounded-spa">
           <Icon name="XCircle" size={16} className="text-error flex-shrink-0" />
           <span className="font-body font-body-medium text-sm text-error capitalize">
-            {booking.status === 'no show' ? 'No Show' : 'Cancelled'}
+            {isNoShow(booking) ? 'No Show' : 'Cancelled'}
           </span>
         </div>
       ) : (

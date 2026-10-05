@@ -1,11 +1,10 @@
--- Migration 244: services.requires_therapist — replace name-regex heuristic with a real flag
--- CalendarGrid.jsx classifies a booking as "self-service, no therapist needed" by matching
--- /sauna|jacuzzi|steam/i against the service NAME. Works today because the catalog only has
--- single-topic Wellness services, but a future combo service like "Sauna + Massage" would
--- match the regex and get the wrong "just allocate a room" tooltip despite needing a
--- therapist. This adds a real boolean column and backfills it with the exact same regex, so
--- behavior is unchanged at ship time — only the going-forward classification mechanism
--- changes from inferring off the name to reading a stored flag.
+-- Migration 244: services.requires_therapist — backs the unassigned-column self-service badge
+-- CalendarGrid.jsx's unassigned column needs to tell apart services that can run unattended
+-- (sauna/jacuzzi/steam) from ones that need a therapist, so it can show the right
+-- "just allocate a room" badge vs. requiring an assignment. This is net-new functionality,
+-- not a replacement for an existing name-regex check — none exists on stage today. Backfills
+-- the new boolean column using a one-time regex over current service names so existing rows
+-- classify correctly; going forward, the column is the source of truth, not the name.
 -- Applied: stage <YYYY-MM-DD> / prod HELD.
 
 BEGIN;

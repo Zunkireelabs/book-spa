@@ -49,8 +49,9 @@ export function toDbStatus(uiStatus) {
 // result (cancellationReason).
 export function isNoShow(booking) {
   if (!booking) return false;
+  const status = booking.status ? booking.status.toLowerCase() : '';
   const reason = booking.cancellationReason ?? booking.cancellation_reason;
-  return booking.status === 'No Show' || (booking.status === 'Cancelled' && reason === 'No Show');
+  return status === 'no show' || (status === 'cancelled' && reason === 'No Show');
 }
 
 /**

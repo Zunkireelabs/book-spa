@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
+import { isNoShow } from '../../../../services/bookingTransformers';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
@@ -71,7 +72,8 @@ export function canDragBooking(booking) {
 }
 
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect }) => {
-  const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
+  const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
+  const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);
@@ -322,7 +324,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
 // itself and by OverflowPopoverRow (the "+N" hidden-bookings list) so both
 // give the same detail preview instead of just a native title tooltip.
 export const BookingHoverPreview = ({ booking, position, draggable }) => {
-  const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
+  const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
+  const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
 
   const durationMins = (() => {
