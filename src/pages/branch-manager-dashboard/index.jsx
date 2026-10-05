@@ -30,6 +30,7 @@ import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
 import RevenueCards from './components/RevenueCards';
+import TipsSummaryCard from './components/TipsSummaryCard';
 import TodayInsightsPanel from './components/TodayInsightsPanel';
 import PeriodFilter from './components/PeriodFilter';
 import { getTodayISO } from '../../utils/periodPresets';
@@ -383,6 +384,9 @@ const BranchManagerDashboard = () => {
       <div className="hidden sm:block bg-white border border-gray-200 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5">
         <StatusLegend showPayment />
       </div>
+
+      {/* Tips — not revenue, kept visually separate, directly above Top Performers */}
+      <TipsSummaryCard branchId={branchId} userRole={profile?.role} />
 
       {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">

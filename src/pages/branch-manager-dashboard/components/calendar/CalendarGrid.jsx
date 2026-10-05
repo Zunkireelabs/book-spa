@@ -896,6 +896,7 @@ const CalendarGrid = ({
         customerPhone: b.customer_phone || null,
         serviceName: b.service?.name || 'Service',
         serviceDuration: b.service?.duration_minutes || null,
+        requiresTherapist: b.service?.requires_therapist !== false,
         status: b.status,
         paymentStatus: b.payment_status,
         isLocked: b.is_locked || false,
@@ -913,6 +914,9 @@ const CalendarGrid = ({
         finalAmount: b.final_amount,
         specialRequests: b.special_requests || null,
         createdByName: b.creator?.full_name || null,
+        // Only ever NULL for the public customer self-service booking flow —
+        // every staff-side creation path runs under an authenticated session.
+        isOnline: !b.created_by,
         isShared,
         sharedCount: isShared ? b.booking_therapists.length : 0,
       };
@@ -969,6 +973,20 @@ const CalendarGrid = ({
 
     return map;
   }, [bookings, columns, days, columnMode, therapists, rooms]);
+
+  // Stats for the synthetic "Unassigned"/"No Room" column's header badge +
+  // tooltip — only counts bookings that came from the public online booking
+  // flow (isOnline), not e.g. a staff-created walk-in deliberately left
+  // unassigned. Single-day view only (the only place this column's header
+  // renders) — see renderColumnHeader's callers.
+  const unassignedOnlineStats = useMemo(() => {
+    const colBookings = (bookingsByDayAndCol[currentDate] || {}).unassigned || [];
+    const online = colBookings.filter(b => b.isOnline);
+    return {
+      count: online.length,
+      allSelfService: online.length > 0 && online.every(b => b.requiresTherapist === false),
+    };
+  }, [bookingsByDayAndCol, currentDate]);
 
   // Expose selected bookings to parent for multi-drag
   const getSelectedBookings = useCallback(() => {
@@ -1182,12 +1200,49 @@ const CalendarGrid = ({
   // ── Column header tooltip (fixed-position to escape overflow-hidden) ──
   const [headerTooltip, setHeaderTooltip] = useState(null);
   const [isHeaderDragging, setIsHeaderDragging] = useState(false);
+  const headerTooltipRef = useRef(null);
   const showHeaderTooltip = useCallback((e, name) => {
     if (isHeaderDragging) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    setHeaderTooltip({ name, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
+    // Anchor to the cell's center by default (align: 'center'); measured and
+    // re-clamped against the viewport post-render below once the tooltip's
+    // real width is known — this first value is just the initial anchor.
+    // cellLeft is the hard left bound: the grid itself starts to the right of
+    // a fixed sidebar, so clamping against window x=0 still let the tooltip
+    // render underneath/behind the sidebar — clamping to the triggering
+    // cell's own left edge keeps it inside the actually-visible grid area
+    // regardless of sidebar width (collapsed or expanded).
+    setHeaderTooltip({ name, anchorX: rect.left + rect.width / 2, cellLeft: rect.left, y: rect.bottom + 4, x: rect.left + rect.width / 2, align: 'center' });
   }, [isHeaderDragging]);
   const hideHeaderTooltip = useCallback(() => setHeaderTooltip(null), []);
+
+  // Clamp the tooltip horizontally once its real (text-dependent) width is
+  // known, so a long message near the left/right viewport edge (e.g. behind
+  // the sidebar) doesn't render clipped — same box, just shifted to stay
+  // fully on-screen instead of always centering on the anchor.
+  useLayoutEffect(() => {
+    if (!headerTooltip || !headerTooltipRef.current) return;
+    const width = headerTooltipRef.current.offsetWidth;
+    const margin = 8;
+    const { anchorX, cellLeft } = headerTooltip;
+    const naturalLeft = anchorX - width / 2;
+    const naturalRight = anchorX + width / 2;
+    const lowerBound = Math.max(margin, cellLeft);
+
+    let x = anchorX;
+    let align = 'center';
+    if (naturalLeft < lowerBound) {
+      x = lowerBound;
+      align = 'left';
+    } else if (naturalRight > window.innerWidth - margin) {
+      x = Math.max(lowerBound, window.innerWidth - margin - width);
+      align = 'left';
+    }
+
+    if (align !== headerTooltip.align || Math.abs(x - headerTooltip.x) > 0.5) {
+      setHeaderTooltip(t => t && ({ ...t, x, align }));
+    }
+  }, [headerTooltip]);
 
   // ── Header drag-to-reorder (nested DndContext) ────────────
   const headerSensors = useSensors(
@@ -1210,13 +1265,22 @@ const CalendarGrid = ({
     const scheduledLabel = col.scheduledTransfer
       ? `Scheduled — transfer to ${col.scheduledTransfer.toBranch || 'another branch'} at ${to12h(col.scheduledTransfer.startTime)}`
       : null;
+    // Online-unassigned count only ever applies to the synthetic Unassigned/No
+    // Room column, and only overrides the plain name when there's actually
+    // something to flag — a column holding only staff-left-unassigned
+    // bookings keeps today's plain tooltip.
+    const onlineUnassignedTooltip = isUnassigned && col.onlineUnassignedCount > 0
+      ? (col.allSelfService
+          ? 'Please allocate the customer to a dedicated room'
+          : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a therapist and allocate the room`)
+      : null;
     const headerTooltip = transferReason
       ? `${col.name} — ${transferReason}`
       : todayBlock
         ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''} (${to12h(todayBlock.fromTime)}–${to12h(todayBlock.toTime)})`
         : scheduledLabel
           ? `${col.name} — ${scheduledLabel}`
-          : col.name;
+          : onlineUnassignedTooltip || col.name;
     return (
       <div
         key={col.id}
@@ -1236,6 +1300,14 @@ const CalendarGrid = ({
           >
             {col.name}
           </span>
+          {isUnassigned && col.onlineUnassignedCount > 0 && (
+            <span
+              className="flex-shrink-0 min-w-[16px] h-4 px-1 bg-warning text-white rounded-full text-[10px] font-bold flex items-center justify-center"
+              title={onlineUnassignedTooltip}
+            >
+              {col.onlineUnassignedCount}
+            </span>
+          )}
           {isUnassigned && onToggleFreezeUnassigned && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFreezeUnassigned(); }}
@@ -1631,7 +1703,10 @@ const CalendarGrid = ({
 
   // ── Single-day view ───────────────────────────────────────
   const columnsMinWidth = columns.length * minColWidth;
-  const unassignedCol = columns.find(c => c.type === 'unassigned');
+  const unassignedCol = useMemo(() => {
+    const base = columns.find(c => c.type === 'unassigned');
+    return base ? { ...base, onlineUnassignedCount: unassignedOnlineStats.count, allSelfService: unassignedOnlineStats.allSelfService } : base;
+  }, [columns, unassignedOnlineStats]);
   const regularColumns = columns.filter(c => c.type !== 'unassigned');
   const regularMinWidth = regularColumns.length * minColWidth;
   const canSortHeaders = (columnMode === 'therapist' && !!onTherapistReorder)
@@ -1962,8 +2037,13 @@ const CalendarGrid = ({
       {isMultiDay ? renderMultiDayView() : renderDayView()}
       {headerTooltip && (
         <div
+          ref={headerTooltipRef}
           className="fixed px-2 py-1 bg-text-primary text-white text-[10px] font-body rounded whitespace-nowrap z-dropdown pointer-events-none"
-          style={{ left: headerTooltip.x, top: headerTooltip.y, transform: 'translateX(-50%)' }}
+          style={{
+            left: headerTooltip.x,
+            top: headerTooltip.y,
+            transform: headerTooltip.align === 'center' ? 'translateX(-50%)' : 'none',
+          }}
         >
           {headerTooltip.name}
         </div>
