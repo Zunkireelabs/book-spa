@@ -17,8 +17,8 @@ const CustomerHeader = ({ wide }) => {
   useMeasuredHeightVar(headerRef, '--customer-header-h');
 
   // Falls back to defaults when rendered outside TenantProvider/CustomerAuthProvider
-  const tenantData = useContext(TenantContext) || { orgName: 'Zennly', isCleaning: false, isSalon: false };
-  const { orgName, isCleaning, isSalon } = tenantData;
+  const tenantData = useContext(TenantContext) || { orgName: 'Zennly', isCleaning: false, isSalon: false, isBeauty: false };
+  const { orgName, isCleaning, isSalon, isBeauty } = tenantData;
 
   const customerAuth = useContext(CustomerAuthContext) || { customer: null, customerProfile: null };
   const { customer, customerProfile } = customerAuth;
@@ -34,6 +34,7 @@ const CustomerHeader = ({ wide }) => {
   const getTagline = () => {
     if (isCleaning) return 'Professional Cleaning';
     if (isSalon) return 'Beauty & Style';
+    if (isBeauty) return 'Beauty & Aesthetics';
     return 'Wellness & Relaxation';
   };
 

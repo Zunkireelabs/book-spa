@@ -449,6 +449,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           overallHidden: true
         },
         {
+          id: 'booking-settings',
+          label: 'Booking Settings',
+          icon: 'Settings',
+          path: `${basePath}?view=booking-settings`,
+          roles: ['admin'],
+          overallHidden: true
+        },
+        {
           id: 'audit',
           label: 'Audit Log',
           icon: 'History',

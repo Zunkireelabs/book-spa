@@ -490,6 +490,16 @@ export async function updateOrgPaymentMethods(methods) {
   return { data, error: null };
 }
 
+// Admin-only org booking-setting toggles (settings.show_staff_selection, settings.enable_staff_ratings).
+// p_key is allow-listed server-side in update_org_booking_settings (migration-248).
+export async function updateOrgBookingSetting(key, enabled) {
+  const { data, error } = await supabase.rpc('update_org_booking_settings', { p_key: key, p_value: !!enabled });
+  if (error) {
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update booking setting.' } };
+  }
+  return { data, error: null };
+}
+
 // Record one or more payment tenders against a booking. Supports split payments
 // (e.g. part cash + part card) and leaving a remaining balance as a due, which is
 // attributed to a free-typed responsible person (dueHolderName).
@@ -5490,6 +5500,17 @@ export async function createBooking({
 
       const primary = therapistsData.find(t => t.id === primaryTherapistId);
       therapistNameSnapshot = primary?.name || null;
+
+      // Service↔staff eligibility allow-list (migration-249) — no rows for this service
+      // means unrestricted, otherwise every selected therapist must be on the list.
+      const { data: eligibleIds } = await fetchServiceTherapists(serviceId);
+      if (eligibleIds && eligibleIds.length > 0) {
+        const eligibleSet = new Set(eligibleIds);
+        const ineligible = therapistsData.find(t => !eligibleSet.has(t.id));
+        if (ineligible) {
+          return { data: null, error: { code: 'THERAPIST_NOT_ELIGIBLE', message: `${ineligible.name} is not eligible for ${service.name}.` } };
+        }
+      }
     }
 
     // 7a2. Validate + capacity-check per-therapist room overrides (couple bookings with
@@ -6043,6 +6064,62 @@ export async function deleteRoom({ roomId }) {
 // Phase 9B: Master Data Management — Therapist CRUD
 // ============================================================
 
+// Service↔staff eligibility allow-list (migration-249). Empty/no rows for a service means
+// unrestricted — every therapist stays eligible, matching today's behavior for every org that
+// never configures this.
+export async function fetchServiceTherapists(serviceId) {
+  try {
+    const { data, error } = await supabase
+      .from('service_therapists')
+      .select('therapist_id')
+      .eq('service_id', serviceId);
+
+    if (error) throw error;
+    return { data: (data || []).map(r => r.therapist_id), error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceTherapists error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function setServiceTherapists(serviceId, therapistIds) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { error: deleteError } = await supabase
+      .from('service_therapists')
+      .delete()
+      .eq('service_id', serviceId);
+    if (deleteError) throw deleteError;
+
+    const ids = (therapistIds || []).filter(Boolean);
+    if (ids.length > 0) {
+      const { error: insertError } = await supabase
+        .from('service_therapists')
+        .insert(ids.map(therapistId => ({ service_id: serviceId, therapist_id: therapistId })));
+      if (insertError) throw insertError;
+    }
+
+    return { data: ids, error: null };
+  } catch (error) {
+    console.error('[API] setServiceTherapists error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Shared "empty allow-list = unrestricted" eligibility filter, used both at booking-creation
+// time (createBooking) and in the manual reassignment UI (TherapistAssignmentPanel).
+export function filterEligibleTherapists(therapists, eligibleTherapistIds) {
+  if (!eligibleTherapistIds || eligibleTherapistIds.length === 0) return therapists;
+  const eligibleSet = new Set(eligibleTherapistIds);
+  return (therapists || []).filter(t => eligibleSet.has(t.id ?? t.therapistId));
+}
+
 export async function fetchTherapistsForManagement(branchId) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6059,7 +6136,7 @@ export async function fetchTherapistsForManagement(branchId) {
 
     let query = supabase
       .from('therapists')
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating')
       .order('display_order')
       .order('name');
     query = withBranch(query, effectiveBranchId);
@@ -6074,7 +6151,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId }) {
+export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6124,8 +6201,12 @@ export async function createTherapist({ name, gender, specialties, position, isS
         org_id: profile.org_id,
         is_active: true,
         display_order: nextOrder,
+        photo_url: photoUrl || null,
+        bio: bio || null,
+        experience_years: experienceYears ?? null,
+        rating: rating ?? null,
       })
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating')
       .single();
 
     if (error) throw error;
@@ -6136,7 +6217,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6185,12 +6266,16 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     if (specialties !== undefined) updatePayload.specialties = specialties;
     if (position !== undefined) updatePayload.position = position;
     if (isServiceStaff !== undefined) updatePayload.is_service_staff = isServiceStaff;
+    if (photoUrl !== undefined) updatePayload.photo_url = photoUrl || null;
+    if (bio !== undefined) updatePayload.bio = bio || null;
+    if (experienceYears !== undefined) updatePayload.experience_years = experienceYears === '' ? null : experienceYears;
+    if (rating !== undefined) updatePayload.rating = rating === '' ? null : rating;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating')
       .single();
 
     if (error) throw error;
@@ -7172,7 +7257,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
+export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -7187,6 +7272,7 @@ export async function updateServicePricing({ serviceId, priceNpr, durationMinute
     }
 
     const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name;
     if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
     if (durationMinutes !== undefined) updatePayload.duration_minutes = durationMinutes;
     if (description !== undefined) updatePayload.description = description;
@@ -9511,6 +9597,7 @@ export async function fetchOrganizationBySlug(slug) {
         currency,
         industry_type,
         is_active,
+        settings,
         industries (
           id,
           name,

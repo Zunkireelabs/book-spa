@@ -47,6 +47,7 @@ export const useIndustry = () => {
     isSpa: industryType === 'spa',
     isCleaning: industryType === 'cleaning',
     isSalon: industryType === 'salon',
+    isBeauty: industryType === 'beauty',
   };
 };
 
