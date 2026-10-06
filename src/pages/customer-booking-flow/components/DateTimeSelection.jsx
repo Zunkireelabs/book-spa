@@ -22,7 +22,7 @@ const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetc
 // re-rendered on every one of those frames too, which is what made scrolling feel janky/
 // stuttery rather than smooth — same fix as ServiceCard in ServiceSelection.jsx.
 const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange, therapistFilter = null }) {
-  const { enableStaffGender, enableRooms, staffLabel } = useTenant();
+  const { enableStaffGender, enableRooms, staffLabel, orgSlug } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
   const [therapistCounts, setTherapistCounts] = useState({ male: 0, female: 0 });
@@ -100,10 +100,10 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     if (!selectedBranch?.id || !therapistFilter) return;
     setTherapistWindow(null);
     setExtendedTherapistWindow(null);
-    fetchTherapistAvailabilityWindow(selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
+    fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
       .then(setTherapistWindow)
       .catch((err) => console.error('[DateTimeSelection] therapist availability fetch failed:', err.message));
-  }, [selectedBranch?.id, !!therapistFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedBranch?.id, !!therapistFilter, orgSlug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadFurtherAhead = () => {
     if (!selectedBranch?.id || loadingExtended || extendedWindow) return;
@@ -113,7 +113,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     ];
     if (therapistFilter) {
       tasks.push(
-        fetchTherapistAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate).then(setExtendedTherapistWindow)
+        fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate).then(setExtendedTherapistWindow)
       );
     }
     Promise.all(tasks)

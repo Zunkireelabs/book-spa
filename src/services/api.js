@@ -263,12 +263,15 @@ export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate
 }
 
 // Per-therapist sibling to fetchBranchAvailabilityWindow — same shape, but backed
-// by public_check_therapist_bookings_range (migration-252), which returns
+// by public_check_therapist_bookings_range (migration-253), which returns
 // therapist-keyed busy rows (including NULL-therapist "unassigned" rows) instead of
 // room/gender rows. Used by the provider-profile booking drawer's per-therapist
-// slot filtering.
-export async function fetchTherapistAvailabilityWindow(branchId, startDate, endDate) {
+// slot filtering. orgSlug is required (migration-253 added it as the RPC's tenant
+// predicate) — without it any caller holding any branch UUID could pull another
+// org's per-therapist occupancy, including attendance ('absence'/'checkout').
+export async function fetchTherapistAvailabilityWindow(orgSlug, branchId, startDate, endDate) {
   const { data, error } = await supabase.rpc('public_check_therapist_bookings_range', {
+    p_org_slug: orgSlug,
     p_branch_id: branchId,
     p_start_date: startDate,
     p_end_date: endDate,
