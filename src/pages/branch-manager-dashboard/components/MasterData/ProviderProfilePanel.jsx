@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import { useOrg } from '../../../../contexts/OrgContext';
@@ -67,11 +67,26 @@ const ProviderProfilePanel = () => {
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState(null);
 
-  const [about, setAbout] = useState(org.orgAbout ?? org.org?.settings?.about ?? '');
+  const [about, setAbout] = useState(org.org?.settings?.about ?? '');
   const [cancellationPolicy, setCancellationPolicy] = useState(org.org?.settings?.cancellation_policy ?? '');
   const [logoUrl, setLogoUrl] = useState(org.org?.logo_url ?? '');
   const [heroImageUrl, setHeroImageUrl] = useState(org.org?.hero_image_url ?? '');
   const useProviderProfileLayout = org.org?.settings?.use_provider_profile_layout === true;
+
+  // OrgContext loads org asynchronously, so useState's one-time initializer above
+  // mounts with org.org === null on a hard reload and seeds every field to '' — the
+  // first Save would then write empty strings over real content. Re-seed once org
+  // resolves. Keyed on the id (not the org object identity, which can change on
+  // every refreshOrg()) so this fires once per org, not on every re-render, and
+  // can't clobber an in-progress edit.
+  useEffect(() => {
+    if (!org.org?.id) return;
+    setAbout(org.org.settings?.about ?? '');
+    setCancellationPolicy(org.org.settings?.cancellation_policy ?? '');
+    setLogoUrl(org.org.logo_url ?? '');
+    setHeroImageUrl(org.org.hero_image_url ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.org?.id]);
 
   const settingsLists = {
     amenities: org.org?.settings?.amenities || [],
