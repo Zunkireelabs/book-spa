@@ -132,6 +132,12 @@ const ServiceManagementPanel = () => {
     setImagePreview(service.image_url || null);
     setStaffSearchQuery('');
     setFormError(null);
+    // Reset before opening (same as handleOpenCreate) — otherwise the modal
+    // briefly renders with whichever service was last edited's allow-list still
+    // in state, and a save in that window would write that service's staff onto
+    // this one.
+    setEligibleTherapistIds([]);
+    setRestrictStaff(false);
     setShowModal(true);
     const eligibleResult = await fetchServiceTherapists(service.id);
     const ids = eligibleResult.data || [];
@@ -252,7 +258,17 @@ const ServiceManagementPanel = () => {
     } else {
       const serviceId = editingService ? editingService.id : result.data?.id;
       if (serviceId) {
-        await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : []);
+        const staffResult = await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : []);
+        if (staffResult.error) {
+          // The service itself saved fine; only the eligible-staff allow-list
+          // failed. Surface it and keep the modal open — closing on success-of-
+          // the-service-only previously hid this failure entirely, since the
+          // caller never checked setServiceTherapists's return value.
+          setFormError(staffResult.error.message || 'Failed to save eligible staff.');
+          setSaving(false);
+          await loadServices();
+          return;
+        }
       }
       setShowModal(false);
       await loadServices();

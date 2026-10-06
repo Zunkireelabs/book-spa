@@ -6237,29 +6237,20 @@ export async function fetchServiceTherapists(serviceId) {
   }
 }
 
+// Delegates the replace to set_service_therapists (migration-253) instead of a
+// client-side delete-then-insert: that pair had no transaction, so an insert
+// failure after the delete committed silently flipped the service from
+// restricted to unrestricted, with no caller ever checking the result. The RPC
+// does both statements inside one function invocation, so a failure rolls
+// back the delete too.
 export async function setServiceTherapists(serviceId, therapistIds) {
   try {
-    const { profile, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-
-    if (!['manager', 'admin'].includes(profile.role)) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
-    }
-
-    const { error: deleteError } = await supabase
-      .from('service_therapists')
-      .delete()
-      .eq('service_id', serviceId);
-    if (deleteError) throw deleteError;
-
     const ids = (therapistIds || []).filter(Boolean);
-    if (ids.length > 0) {
-      const { error: insertError } = await supabase
-        .from('service_therapists')
-        .insert(ids.map(therapistId => ({ service_id: serviceId, therapist_id: therapistId })));
-      if (insertError) throw insertError;
-    }
-
+    const { data, error } = await supabase.rpc('set_service_therapists', {
+      p_service_id: serviceId,
+      p_therapist_ids: ids,
+    });
+    if (error) throw error;
     return { data: ids, error: null };
   } catch (error) {
     console.error('[API] setServiceTherapists error:', error.message);
