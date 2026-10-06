@@ -98,6 +98,14 @@ export const TenantProvider = ({ children }) => {
     // Org booking settings
     showStaffSelection: org?.settings?.show_staff_selection === true,
     enableStaffRatings: org?.settings?.enable_staff_ratings === true,
+    useProviderProfileLayout: org?.settings?.use_provider_profile_layout === true,
+    logoUrl: org?.logo_url || null,
+    heroImageUrl: org?.hero_image_url || null,
+    orgAbout: org?.settings?.about || '',
+    orgAmenities: org?.settings?.amenities || [],
+    includedWithVisit: org?.settings?.included_with_visit || [],
+    optionalExtras: org?.settings?.optional_extras || [],
+    cancellationPolicy: org?.settings?.cancellation_policy || '',
 
     // Loading state
     loading,

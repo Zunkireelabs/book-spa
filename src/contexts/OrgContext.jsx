@@ -22,7 +22,7 @@ export const OrgProvider = ({ children }) => {
     try {
       const { data, error: fetchError } = await supabase
         .from('organizations')
-        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type')
+        .select('id, name, code, slug, timezone, currency, is_active, settings, industry_type, logo_url, hero_image_url')
         .eq('id', profile.org_id)
         .single();
 

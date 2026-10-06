@@ -15,6 +15,7 @@ import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { splitE164 } from '../../utils/phone';
 import useScrollCollapse from '../../hooks/useScrollCollapse';
+import ProviderProfileFlow from '../provider-profile-flow';
 
 // Callback ref, not useRef + a useLayoutEffect keyed on [currentStep]: this page
 // returns an early "Loading..." placeholder while tenant data is still in flight, so
@@ -52,7 +53,7 @@ function useMeasuredRef(setHeight) {
 // v1 ServiceSelection / DateTimeSelection components unchanged — no parallel booking system.
 const CustomerBookingFlowV2 = () => {
   const { orgSlug } = useParams();
-  const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
+  const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError, useProviderProfileLayout } = useTenant();
   const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -412,6 +413,7 @@ const CustomerBookingFlowV2 = () => {
         return (
           <BookingSuccess
             bookingData={bookingData}
+            orgSlug={orgSlug}
           />
         );
 
@@ -453,6 +455,10 @@ const CustomerBookingFlowV2 = () => {
     );
   }
 
+  if (useProviderProfileLayout) {
+    return <ProviderProfileFlow />;
+  }
+
   // Widening the container to fit the drawer used to keep the OLD max-w-4xl
   // centered position for its left edge and only grow rightward, which kept
   // step transitions from shifting but left a lopsided gutter on the left
@@ -474,7 +480,7 @@ const CustomerBookingFlowV2 = () => {
           : 'var(--customer-header-h, 64px)',
       }}
     >
-      <CustomerHeader wide={wideOpen} />
+      <CustomerHeader wide={wideOpen} branch={selectedBranch} />
 
       {currentStep < 5 && (
         <ProgressIndicatorV2

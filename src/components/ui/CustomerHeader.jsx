@@ -5,7 +5,7 @@ import TenantContext from 'contexts/TenantContext';
 import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
-const CustomerHeader = ({ wide }) => {
+const CustomerHeader = ({ wide, branch }) => {
   const location = useLocation();
   const { orgSlug } = useParams();
   const headerRef = useRef(null);
@@ -87,21 +87,24 @@ const CustomerHeader = ({ wide }) => {
 
           {/* Contact & Support */}
           <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
-            {/* Phone Contact */}
-            <a
-              href="tel:+977-1-4441234"
-              aria-label="Call +977-1-4441234"
-              className="flex items-center justify-center sm:justify-start space-x-0 sm:space-x-2 px-0 sm:px-3 py-0 sm:py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group flex-shrink-0 spa-touch-target"
-            >
-              <Icon
-                name="Phone"
-                size={16}
-                className="text-primary group-hover:text-primary/80"
-              />
-              <span className="hidden sm:inline font-body font-body-medium text-sm text-text-primary">
-                +977-1-4441234
-              </span>
-            </a>
+            {/* Phone Contact — hidden entirely when the branch has no phone on file,
+                rather than showing a hardcoded number that may not reach anyone here. */}
+            {branch?.phone && (
+              <a
+                href={`tel:${branch.phone}`}
+                aria-label={`Call ${branch.phone}`}
+                className="flex items-center justify-center sm:justify-start space-x-0 sm:space-x-2 px-0 sm:px-3 py-0 sm:py-2 rounded-spa bg-background hover:bg-border/50 spa-transition-fast group flex-shrink-0 spa-touch-target"
+              >
+                <Icon
+                  name="Phone"
+                  size={16}
+                  className="text-primary group-hover:text-primary/80"
+                />
+                <span className="hidden sm:inline font-body font-body-medium text-sm text-text-primary">
+                  {branch.phone}
+                </span>
+              </a>
+            )}
 
             {/* Login / Account */}
             <Link
@@ -113,13 +116,6 @@ const CustomerHeader = ({ wide }) => {
                 {customer && customerProfile ? customerProfile.full_name.split(' ')[0] : 'Login'}
               </span>
             </Link>
-
-            {/* Support Button */}
-            <button className="flex items-center justify-center space-x-2 sm:w-auto sm:h-auto px-0 py-0 sm:px-4 sm:py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-spa spa-transition-fast spa-touch-target flex-shrink-0">
-              <Icon name="MessageCircle" size={14} className="sm:hidden" />
-              <Icon name="MessageCircle" size={16} className="hidden sm:block" />
-              <span className="hidden sm:inline font-body font-body-medium text-sm">Support</span>
-            </button>
           </div>
         </div>
       </div>

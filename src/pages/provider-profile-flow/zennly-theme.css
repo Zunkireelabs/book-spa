@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@500;600&family=Space+Mono:wght@400;700&display=swap');
+
+/* Scoped to .zn-scope, not :root — cannot leak into the rest of the app.
+   Visual-parity override for the sbal provider-profile booking page only;
+   mirrors zennly-marketplace's globals.css tokens exactly.
+
+   IMPORTANT: Tailwind's opacity-modifier syntax on an arbitrary value only
+   works when the referenced var holds raw RGB channels — it cannot apply an
+   alpha modifier to a var holding a hex string, and silently emits no rule
+   at all (no build error, no console warning). Every translucent tint,
+   border, and scrim below is pre-composed as its own rgb(… , alpha) token
+   instead — reference a token directly (e.g. bg-[var(--zn-overlay)]);
+   never append an opacity modifier to bg-[var(--zn-foreground)] or any
+   other hex-backed token. */
+.zn-scope {
+  --zn-background: #fefdfb;
+  --zn-foreground: #23211d;
+  --zn-muted: #ede9e0;
+  --zn-muted-foreground: #6b6255;
+  --zn-border: #e6e1d6;
+  --zn-card: #ffffff;
+  --zn-primary: #5b6e56;
+  --zn-primary-hover: #4a5a46;
+  --zn-primary-foreground: #ffffff;
+  --zn-accent: #5e86a0;
+  --zn-warning: #c08a3e;
+  --zn-radius-sm: 8px;
+  --zn-radius-md: 12px;
+  --zn-radius-lg: 18px;
+  --zn-radius-full: 999px;
+
+  --zn-overlay:             rgb(35 33 29 / .40);  /* backdrop scrim */
+  --zn-primary-tint:        rgb(91 110 86 / .06); /* selected card fill */
+  --zn-primary-tint-strong: rgb(91 110 86 / .12); /* avatar tint */
+  --zn-primary-soft:        rgb(91 110 86 / .50); /* selected card border */
+  --zn-border-soft:         rgb(107 98 85 / .30); /* inactive pill border */
+  --zn-border-hover:        rgb(35 33 29 / .40);  /* pill hover border */
+
+  font-family: 'Outfit', sans-serif;
+  background-color: var(--zn-background);
+  color: var(--zn-foreground);
+}

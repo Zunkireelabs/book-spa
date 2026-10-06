@@ -457,6 +457,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           overallHidden: true
         },
         {
+          id: 'provider-profile',
+          label: 'Provider Profile',
+          icon: 'Image',
+          path: `${basePath}?view=provider-profile`,
+          roles: ['admin'],
+          overallHidden: true
+        },
+        {
           id: 'audit',
           label: 'Audit Log',
           icon: 'History',

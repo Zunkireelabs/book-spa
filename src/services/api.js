@@ -262,6 +262,21 @@ export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate
   return { rooms: rooms || [], bookings: bookings || [] };
 }
 
+// Per-therapist sibling to fetchBranchAvailabilityWindow — same shape, but backed
+// by public_check_therapist_bookings_range (migration-252), which returns
+// therapist-keyed busy rows (including NULL-therapist "unassigned" rows) instead of
+// room/gender rows. Used by the provider-profile booking drawer's per-therapist
+// slot filtering.
+export async function fetchTherapistAvailabilityWindow(branchId, startDate, endDate) {
+  const { data, error } = await supabase.rpc('public_check_therapist_bookings_range', {
+    p_branch_id: branchId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+  });
+  if (error) throw error;
+  return { bookings: data || [] };
+}
+
 export async function fetchTherapists(branchId, { date } = {}) {
   try {
     let therapistsQuery = supabase
@@ -496,6 +511,30 @@ export async function updateOrgBookingSetting(key, enabled) {
   const { data, error } = await supabase.rpc('update_org_booking_settings', { p_key: key, p_value: !!enabled });
   if (error) {
     return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update booking setting.' } };
+  }
+  return { data, error: null };
+}
+
+// Admin-only org profile-settings (settings.about, settings.amenities,
+// settings.included_with_visit, settings.optional_extras, settings.cancellation_policy,
+// settings.use_provider_profile_layout). p_key is allow-listed server-side in
+// update_org_profile_settings (migration-251). p_value is jsonb — strings/arrays alike.
+export async function updateOrgProfileSetting(key, value) {
+  const { data, error } = await supabase.rpc('update_org_profile_settings', { p_key: key, p_value: value });
+  if (error) {
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update profile setting.' } };
+  }
+  return { data, error: null };
+}
+
+// Admin-only org branding (logo_url / hero_image_url plain columns, migration-251).
+export async function updateOrgBranding({ logoUrl, heroImageUrl }) {
+  const { data, error } = await supabase.rpc('update_org_branding', {
+    p_logo_url: logoUrl || null,
+    p_hero_image_url: heroImageUrl || null,
+  });
+  if (error) {
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update branding.' } };
   }
   return { data, error: null };
 }
@@ -5503,6 +5542,9 @@ export async function createBooking({
 
       // Service↔staff eligibility allow-list (migration-249) — no rows for this service
       // means unrestricted, otherwise every selected therapist must be on the list.
+      // This is a nicer pre-flight for staff sessions only (real enforcement — the part
+      // anon can't bypass — now lives in the enforce_booking_therapist_guards DB trigger,
+      // migration-252).
       const { data: eligibleIds } = await fetchServiceTherapists(serviceId);
       if (eligibleIds && eligibleIds.length > 0) {
         const eligibleSet = new Set(eligibleIds);
@@ -5610,6 +5652,17 @@ export async function createBooking({
       if (insertError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
         return { data: null, error: { code: 'BOOKING_CROSSES_MIDNIGHT', message: insertError.message.split('BOOKING_CROSSES_MIDNIGHT:')[1]?.trim() || 'This time would extend past midnight — please choose an earlier start time.' } };
       }
+      // enforce_booking_therapist_guards / enforce_booking_therapist_junction_guards
+      // triggers (migration-252) — the real enforcement point, since anon can't be
+      // trusted to run the JS pre-flight checks above. One ERRCODE (P0006) covers all
+      // three guards; split on the message's CODE: prefix same as the midnight rule.
+      if (insertError.code === 'P0006') {
+        for (const code of ['THERAPIST_NOT_ELIGIBLE', 'THERAPIST_ABSENT', 'THERAPIST_CHECKED_OUT']) {
+          if (insertError.message?.includes(code)) {
+            return { data: null, error: { code, message: insertError.message.split(`${code}:`)[1]?.trim() || insertError.message } };
+          }
+        }
+      }
       throw insertError;
     }
 
@@ -5682,7 +5735,13 @@ export async function createBooking({
           existingRoomId: null, // brand-new booking, nothing to preserve
         }),
       }));
-      const { error: btError } = await supabase.from('booking_therapists').insert(rows);
+      // upsert+ignoreDuplicates, not insert — sync_booking_therapists_from_booking
+      // (migration-252) already inserted the primary therapist's row off the bookings
+      // AFTER INSERT trigger, so a plain insert would hit (booking_id, therapist_id)'s
+      // unique constraint on every single-therapist booking.
+      const { error: btError } = await supabase
+        .from('booking_therapists')
+        .upsert(rows, { onConflict: 'booking_id,therapist_id', ignoreDuplicates: true });
       if (btError) {
         // Same reasoning as assignTherapist above -- the booking row itself already
         // committed, so this stays non-fatal, but must be visible to the caller now
@@ -5707,6 +5766,97 @@ export async function createBooking({
 // Atomic create-new-and-cancel-old reschedule — NOT the same operation as
 // rescheduleBooking() above (which updates a booking's date/time in place for
 // the calendar's drag-and-drop flow). This one backs the "Reschedule" action
+
+// Multi-service visit: one bookings row per selected service, scheduled back-to-back
+// from the chosen start time and linked by a shared booking_group_id (migration-030,
+// the same mechanism the calendar's group bookings already use). A single professional
+// covers the whole visit, so every row carries the same therapistId.
+//
+// Not a single SQL transaction: createBooking() holds ~500 lines of pricing, campaign,
+// customer-upsert, referral and snapshot logic that would have to be duplicated in SQL
+// and kept in sync. Instead this pre-checks every slot, creates in order, and on a
+// mid-way failure cancels whatever was already created so the customer is never left
+// silently half-booked. The residual window is small but real, and cancelled rows do
+// remain visible to staff — that trade is deliberate.
+export async function createBookingGroup({ services, date, startTime, therapistId, ...common }) {
+  if (!services || services.length === 0) {
+    return { data: null, error: { code: 'NO_SERVICES', message: 'Select at least one service.' } };
+  }
+
+  // Single service: no group, no compensation path — behave exactly like a plain booking.
+  if (services.length === 1) {
+    const { data, error } = await createBooking({
+      ...common,
+      serviceId: services[0].id,
+      date,
+      startTime,
+      therapistId,
+    });
+    return { data: data ? { bookings: [data], bookingGroupId: null } : null, error };
+  }
+
+  const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  // Lay the services out back-to-back so each row gets its own real slot.
+  let cursor = startTime;
+  const planned = services.map((service) => {
+    const slot = { service, startTime: cursor };
+    cursor = addMinutesToTime(cursor, service.duration_minutes);
+    return slot;
+  });
+
+  const created = [];
+  for (const { service, startTime: slotStart } of planned) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await createBooking({
+      ...common,
+      serviceId: service.id,
+      date,
+      startTime: slotStart,
+      therapistId,
+      bookingGroupId,
+    });
+
+    if (error) {
+      // Compensate via the narrow SECURITY DEFINER RPC, not updateBookingStatus():
+      // that one requires an authenticated staff user and bookings has no anon UPDATE
+      // policy, so the staff path would silently fail for the anonymous customers this
+      // flow actually serves. One call releases the whole group.
+      if (created.length > 0) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const { error: rollbackError } = await supabase
+            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+          if (rollbackError) throw rollbackError;
+        } catch (cancelError) {
+          // Surfaced loudly: the customer now holds bookings they weren't told about.
+          console.error('[API] createBookingGroup rollback FAILED for group', bookingGroupId, cancelError);
+          return {
+            data: null,
+            error: {
+              code: 'BOOKING_GROUP_PARTIAL',
+              message: `${service.name} could not be booked, and we could not automatically release the services booked before it. Please contact the branch to confirm what is reserved.`,
+            },
+          };
+        }
+      }
+      return {
+        data: null,
+        error: {
+          ...error,
+          message: `${service.name}: ${error.message || 'could not be booked.'}${created.length > 0 ? ' Your other services were released — please pick another time.' : ''}`,
+        },
+      };
+    }
+    created.push(data);
+  }
+
+  return { data: { bookings: created, bookingGroupId }, error: null };
+}
+
+
 // (booking-details-assignment-modal, calendar's Rebook-reuse-as-reschedule
 // branch), which intentionally creates a fresh booking row and cancels the
 // original rather than mutating it in place. One DB transaction via
@@ -9598,6 +9748,8 @@ export async function fetchOrganizationBySlug(slug) {
         industry_type,
         is_active,
         settings,
+        logo_url,
+        hero_image_url,
         industries (
           id,
           name,
@@ -9629,7 +9781,7 @@ export async function fetchBranchesByOrgId(orgId) {
   try {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, address, phone, is_active')
+      .select('id, name, address, phone, is_active, open_time, close_time')
       .eq('org_id', orgId)
       .eq('is_active', true)
       .order('name');
@@ -9700,6 +9852,8 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       description: s.description,
       image_url: s.image_url,
       category: s.category_name,
+      category_id: s.category_id,
+      category_display_order: s.category_display_order,
       effective_price_npr: s.effective_price_npr,
       is_on_offer: s.is_on_offer,
       original_price_npr: s.original_price_npr,
@@ -9721,6 +9875,46 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
     return { data: services, error: null };
   } catch (error) {
     console.error('[API] fetchBookableServicesByOrgSlug error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Fetch bookable staff for the provider-profile "Select professional" step
+ * (public_get_bookable_therapists, migration-252) — org-scoped (the raw anon RLS
+ * policy on `therapists` is not) and allow-list-aware when p_service_id is passed.
+ */
+export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
+  try {
+    // Accepts one id or an array — a multi-service visit is covered by a single
+    // professional, so the roster must be narrowed to staff eligible for every
+    // selected service (enforced server-side in public_get_bookable_therapists).
+    const ids = Array.isArray(serviceIds)
+      ? serviceIds.filter(Boolean)
+      : (serviceIds ? [serviceIds] : []);
+
+    const { data, error } = await supabase.rpc('public_get_bookable_therapists', {
+      p_org_slug: orgSlug,
+      p_branch_id: branchId,
+      p_service_ids: ids.length > 0 ? ids : null,
+    });
+
+    if (error) throw error;
+
+    return {
+      data: (data || []).map((t) => ({
+        id: t.id,
+        name: t.name,
+        position: t.position,
+        photoUrl: t.photo_url,
+        rating: t.rating,
+        experienceYears: t.experience_years,
+        bio: t.bio,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchBookableTherapists error:', error.message);
     return { data: null, error };
   }
 }
