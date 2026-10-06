@@ -78,7 +78,13 @@ const BookingView = ({
   const therapistFilter = useMemo(() => {
     if (!showStaffSelection || !selectedProfessional) return null;
     if (selectedProfessional.mode === 'specific') return { therapistId: selectedProfessional.therapist.id };
-    return { eligibleIds: therapists.map((t) => t.id) };
+    // An empty eligible list must fall back to the room/gender availability path
+    // (null), not filter every slot out — anyProfessionalFree() always returns
+    // false for an empty list, which with no staff eligible (or a failed roster
+    // fetch) would show a totally empty calendar for a customer the UI just told
+    // to continue with "Any professional".
+    const ids = therapists.map((t) => t.id);
+    return ids.length > 0 ? { eligibleIds: ids } : null;
   }, [showStaffSelection, selectedProfessional, therapists]);
 
   const handleEditBooking = () => setShowConfirmation(false);
