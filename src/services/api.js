@@ -5735,13 +5735,18 @@ export async function createBooking({
           existingRoomId: null, // brand-new booking, nothing to preserve
         }),
       }));
-      // upsert+ignoreDuplicates, not insert — sync_booking_therapists_from_booking
-      // (migration-252) already inserted the primary therapist's row off the bookings
-      // AFTER INSERT trigger, so a plain insert would hit (booking_id, therapist_id)'s
-      // unique constraint on every single-therapist booking.
+      // upsert, not insert — sync_booking_therapists_from_booking (migration-252)
+      // already inserted the primary therapist's row off the bookings AFTER INSERT
+      // trigger, so a plain insert would hit (booking_id, therapist_id)'s unique
+      // constraint on every single-therapist booking. ignoreDuplicates MUST be
+      // false (-> ON CONFLICT DO UPDATE, not DO NOTHING): the trigger's row always
+      // has room_id NULL, while this row carries resolveJunctionRoomId()'s
+      // per-therapist override (migration-171) — ignoreDuplicates:true was silently
+      // discarding that override on every booking, undercounting room capacity for
+      // multi-room tenants.
       const { error: btError } = await supabase
         .from('booking_therapists')
-        .upsert(rows, { onConflict: 'booking_id,therapist_id', ignoreDuplicates: true });
+        .upsert(rows, { onConflict: 'booking_id,therapist_id', ignoreDuplicates: false });
       if (btError) {
         // Same reasoning as assignTherapist above -- the booking row itself already
         // committed, so this stays non-fatal, but must be visible to the caller now
