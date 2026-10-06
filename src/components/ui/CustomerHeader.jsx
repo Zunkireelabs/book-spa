@@ -5,7 +5,7 @@ import TenantContext from 'contexts/TenantContext';
 import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
-const CustomerHeader = ({ wide, branch }) => {
+const CustomerHeader = ({ wide, branch, containerClassName }) => {
   const location = useLocation();
   const { orgSlug } = useParams();
   const headerRef = useRef(null);
@@ -43,8 +43,12 @@ const CustomerHeader = ({ wide, branch }) => {
       {/* px-4 and max-w-4xl (widening to max-w-[1600px] only when `wide`) match
           every caller's own <main> content container exactly, so the logo and
           right-side actions line up with the page content below instead of
-          sitting in a wider/differently-padded box of their own. */}
-      <div className={`relative mx-auto px-4 ${wide ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl'}`}>
+          sitting in a wider/differently-padded box of their own. A page wider than
+          the wizards' max-w-4xl/1600px (e.g. the provider-profile layout's max-w-7xl)
+          passes containerClassName instead of adding another width boolean here —
+          callers doing so must keep `relative` in what they pass, since the
+          right-side actions position against it. */}
+      <div className={containerClassName ?? `relative mx-auto px-4 ${wide ? 'max-w-4xl lg:max-w-[1600px]' : 'max-w-4xl'}`}>
         <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
           <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0 flex-1">

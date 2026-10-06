@@ -250,7 +250,7 @@ const ProviderProfileFlow = () => {
 
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
-      <CustomerHeader branch={selectedBranch} />
+      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] pb-24 lg:pb-10">
