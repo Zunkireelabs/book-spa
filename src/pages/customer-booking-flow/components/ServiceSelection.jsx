@@ -156,7 +156,7 @@ const ServiceCard = React.memo(({ service, isSelected, onServiceSelect, hideImag
 ServiceCard.displayName = 'ServiceCard';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, onPrevious }) => {
-  const { orgId, orgSlug, isBeauty, loading: tenantLoading } = useTenant();
+  const { orgId, orgSlug, useProviderProfileLayout, loading: tenantLoading } = useTenant();
   const [activeCampaign, setActiveCampaign] = useState(null);
   // Collapses the "Choose Service" title/subtitle and the category filter
   // pills as the customer scrolls down, so they don't stay pinned above the
@@ -777,7 +777,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
             service={service}
             isSelected={selectedService?.id === service.id}
             onServiceSelect={onServiceSelect}
-            hideImage={isBeauty}
+            hideImage={useProviderProfileLayout}
           />
         ))}
       </div>

@@ -343,6 +343,11 @@ const CustomerBookingFlowV2 = () => {
     setCurrentStep(2);
   };
 
+  const handleBookAnother = () => {
+    setBookingData(null);
+    setCurrentStep(2);
+  };
+
   const getStepTitle = () => {
     switch (currentStep) {
       case 1: return 'Select Branch';
@@ -414,6 +419,7 @@ const CustomerBookingFlowV2 = () => {
           <BookingSuccess
             bookingData={bookingData}
             orgSlug={orgSlug}
+            onBookAnother={handleBookAnother}
           />
         );
 
