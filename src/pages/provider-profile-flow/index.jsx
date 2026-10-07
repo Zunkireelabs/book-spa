@@ -11,7 +11,6 @@ import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import ProfileHero from './components/ProfileHero';
 import ServicesSection from './components/ServicesSection';
 import TeamSection from './components/TeamSection';
-import LocationSection from './components/LocationSection';
 import BranchGate from './components/BranchGate';
 import SummaryCard from './components/SummaryCard';
 import MobileBookingBar from './components/MobileBookingBar';
@@ -108,8 +107,8 @@ const ProviderProfileFlow = () => {
     setSelectedDateTime({ date: '', time: '' });
   }, []);
 
-  // Only the gate (first entry) pushes history — LocationSection's selector is for
-  // switching later, where leaving a history trail would make Back behave oddly.
+  // Pushes history so browser Back returns here instead of leaving the site — the
+  // gate (and Back) is now the only way to change branch.
   const handleBranchGateSelect = useCallback((branch) => {
     handleBranchSelect(branch);
     window.history.pushState({ providerBranch: true }, '');
@@ -333,12 +332,6 @@ const ProviderProfileFlow = () => {
               onSelect={handleProfessionalSelect}
             />
           )}
-
-          <LocationSection
-            branch={selectedBranch}
-            branches={branches}
-            onSelectBranch={handleBranchSelect}
-          />
         </div>
 
         <div className="pt-6">
@@ -346,7 +339,6 @@ const ProviderProfileFlow = () => {
             orgName={orgName}
             logoUrl={logoUrl}
             heroImageUrl={heroImageUrl}
-            branch={selectedBranch}
             selectedServices={selectedServices}
             totalMinutes={totalMinutes}
             selectedProfessional={selectedProfessional}

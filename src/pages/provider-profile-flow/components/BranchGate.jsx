@@ -31,8 +31,8 @@ const BranchPhoto = ({ branchName, photoUrl }) => {
 // First-entry branch chooser for multi-branch orgs — gates the services page so a
 // customer can't silently browse/book the wrong location (today's data[0] pick).
 // Single-branch orgs never see this; it only renders when branches.length > 1.
-// Changing branch afterwards stays with LocationSection's CustomSelect — this is
-// for first entry only, not "second thoughts".
+// Browser Back is the only way to change branch afterwards (the popstate handler
+// re-shows this gate) — there is no in-page switcher.
 const BranchGate = ({ orgName, heroImageUrl, logoUrl, branches, onSelect }) => (
   <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
     <CustomerHeader containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
