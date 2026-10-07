@@ -73,6 +73,9 @@ const SummaryCard = ({
         <VenueThumb orgName={orgName} logoUrl={logoUrl} heroImageUrl={heroImageUrl} />
         <div className="min-w-0">
           <p className="font-medium text-base text-[var(--zn-foreground)] truncate">{orgName}</p>
+          {branch?.name && (
+            <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5 truncate">{branch.name}</p>
+          )}
           {isRealAddress(branch?.address) && (
             <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5">{branch.address}</p>
           )}
