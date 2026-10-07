@@ -265,6 +265,11 @@ const ServiceManagementPanel = () => {
           // the-service-only previously hid this failure entirely, since the
           // caller never checked setServiceTherapists's return value.
           setFormError(staffResult.error.message || 'Failed to save eligible staff.');
+          // On the create path editingService is still null here — without
+          // re-targeting it at the row just created, pressing Save again would
+          // re-enter the createService branch and create a duplicate service on
+          // every retry instead of just retrying the allow-list write.
+          if (!editingService) setEditingService(result.data);
           setSaving(false);
           await loadServices();
           return;

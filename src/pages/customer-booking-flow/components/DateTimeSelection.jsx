@@ -30,12 +30,17 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   const [extendedWindow, setExtendedWindow] = useState(null); // days 14..29, fetched on demand
   const [therapistWindow, setTherapistWindow] = useState(null); // days 0..13, only when therapistFilter is set
   const [extendedTherapistWindow, setExtendedTherapistWindow] = useState(null); // days 14..29
+  const [therapistWindowError, setTherapistWindowError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingExtended, setLoadingExtended] = useState(false);
 
-  // Fetch therapist counts for the selected branch (once) — advisory gender signal only; real
-  // availability is gated by room capacity below. Skipped entirely when filtering by a specific
-  // professional — genderOk is forced true in that case, so this fetch's result would go unused.
+  // Fetch therapist counts for the selected branch — advisory gender signal only; real
+  // availability is gated by room capacity below. Skipped while filtering by a specific
+  // professional — genderOk is forced true in that case, so this fetch's result would go
+  // unused. Depends on !!therapistFilter too (not just branch id) so that when a filter
+  // clears mid-session (e.g. a roster refetch failure resets it to null), this re-fires
+  // instead of leaving stale {male:0,female:0} counts that would mark every slot
+  // unavailable under the gender-preference path.
   useEffect(() => {
     if (!selectedBranch?.id || therapistFilter) return;
     async function fetchTherapistCounts() {
@@ -51,7 +56,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       }
     }
     fetchTherapistCounts();
-  }, [selectedBranch?.id]);
+  }, [selectedBranch?.id, !!therapistFilter]);
 
   // Generate next 30 days (date-chip strip)
   const dates = useMemo(() => {
@@ -96,13 +101,26 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   // Per-therapist busy rows — only fetched when filtering by a specific professional
   // or "any professional"; every other caller (every other tenant, and this tenant's
   // own gender-preference path) never triggers this at all.
-  useEffect(() => {
+  //
+  // On failure, therapistWindowError is set rather than left to a silent console.error:
+  // therapistWindow staying null previously made computedDays' therapistOk default to
+  // true (nothing to check against), so a fetch failure read as every slot being free —
+  // honest handling requires computedDays to treat "we don't know" as unavailable.
+  const loadTherapistWindow = () => {
     if (!selectedBranch?.id || !therapistFilter) return;
     setTherapistWindow(null);
     setExtendedTherapistWindow(null);
+    setTherapistWindowError(null);
     fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
       .then(setTherapistWindow)
-      .catch((err) => console.error('[DateTimeSelection] therapist availability fetch failed:', err.message));
+      .catch((err) => {
+        console.error('[DateTimeSelection] therapist availability fetch failed:', err.message);
+        setTherapistWindowError(err.message || 'Could not load availability.');
+      });
+  };
+
+  useEffect(() => {
+    loadTherapistWindow();
   }, [selectedBranch?.id, !!therapistFilter, orgSlug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadFurtherAhead = () => {
@@ -117,7 +135,10 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       );
     }
     Promise.all(tasks)
-      .catch((err) => console.error('[DateTimeSelection] extended availability fetch failed:', err.message))
+      .catch((err) => {
+        console.error('[DateTimeSelection] extended availability fetch failed:', err.message);
+        if (therapistFilter) setTherapistWindowError(err.message || 'Could not load availability.');
+      })
       .finally(() => setLoadingExtended(false));
   };
 
@@ -173,10 +194,16 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         );
 
         let therapistOk = true;
-        if (therapistFilter && therapistOccupancy) {
-          therapistOk = therapistFilter.therapistId
-            ? isTherapistFree(therapistOccupancy, therapistFilter.therapistId, d.fullDate, start, duration)
-            : anyProfessionalFree(therapistOccupancy, therapistFilter.eligibleIds || [], d.fullDate, start, duration);
+        if (therapistFilter) {
+          if (therapistWindowError) {
+            // Fetch failed and we have no busy-row data to check against — treat as
+            // unavailable rather than free (see loadTherapistWindow's comment above).
+            therapistOk = false;
+          } else if (therapistOccupancy) {
+            therapistOk = therapistFilter.therapistId
+              ? isTherapistFree(therapistOccupancy, therapistFilter.therapistId, d.fullDate, start, duration)
+              : anyProfessionalFree(therapistOccupancy, therapistFilter.eligibleIds || [], d.fullDate, start, duration);
+          }
         }
 
         const isAvailable = !isPast && roomAvailable && genderOk && therapistOk;
@@ -193,7 +220,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
       return { date: d.fullDate, slots };
     });
-  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
+  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
 
   const timeSlots = useMemo(
     () => computedDays.find((d) => d.date === selectedDate)?.slots || [],
@@ -291,6 +318,20 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
             Showing real availability for <span className="font-body font-body-medium text-text-primary">{selectedService.name}</span>
             {' '}({selectedService.durationMinutes || 60} min){enableRooms ? ' — a slot is only shown open if a room is free for the entire duration.' : '.'}
           </span>
+        </div>
+      )}
+
+      {therapistFilter && therapistWindowError && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2 bg-error/5 border border-error/20 rounded-spa text-sm">
+          <span className="font-body font-body-normal text-text-secondary">
+            Could not load availability for this professional. No slots are shown until this is retried.
+          </span>
+          <button
+            onClick={loadTherapistWindow}
+            className="font-body font-body-medium text-primary hover:text-primary/80 spa-transition-fast shrink-0"
+          >
+            Retry
+          </button>
         </div>
       )}
 
