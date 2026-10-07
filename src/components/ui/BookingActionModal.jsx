@@ -3,29 +3,16 @@ import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import PaymentModal from './PaymentModal';
-import ConfirmDialog from './ConfirmDialog';
+import ConfirmDialog, { CANCEL_REASON_OPTIONS } from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import AdminCorrectionModal from './AdminCorrectionModal';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, getCustomerFirstBookingFlag } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
-
-function getNepalNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
-}
-
-// "No Show" only becomes selectable once the booking's scheduled start time
-// has passed — otherwise staff could mark a client a no-show before they were
-// even due.
-function hasBookingStarted(booking) {
-  if (!booking?.date || !booking?.startTime) return false;
-  const start = new Date(`${booking.date}T${booking.startTime}`);
-  return getNepalNow() >= start;
-}
 
 // Convert "HH:MM" or "HH:MM:SS" to 12h format
 function to12h(timeStr) {
@@ -87,6 +74,12 @@ const BookingActionModal = ({
   // booking's own management dialog instead of only being able to select it for
   // a bundled payment. Takes the booking id, same contract as onBookingClick.
   onViewBooking,
+  // Optional: when provided, "Reschedule" becomes available in the status row.
+  // Like onRebookStart, this closes the modal and hands the booking back to
+  // the caller to run its own pick-a-slot (or form) flow — but afterward the
+  // caller is expected to create the new booking AND cancel this one, not
+  // update it in place.
+  onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
   const { paymentMethods } = useOrg();
@@ -108,7 +101,7 @@ const BookingActionModal = ({
   const [correctingPayment, setCorrectingPayment] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
-  const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
+  const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' while confirm dialog is open
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -371,8 +364,8 @@ const BookingActionModal = ({
   // Valid next-status transitions (lowercase UI values)
   const getNextStatuses = (currentStatus) => {
     const transitions = {
-      'pending': ['confirmed', 'cancelled', 'no show'],
-      'confirmed': ['in-progress', 'cancelled', 'no show'],
+      'pending': ['confirmed', 'cancelled'],
+      'confirmed': ['in-progress', 'cancelled'],
       'in-progress': ['completed'],
     };
     return transitions[currentStatus] || [];
@@ -389,6 +382,7 @@ const BookingActionModal = ({
   const extendPanelRef = useRef(null);
   const [extendError, setExtendError] = useState(null);
   const [extendSubmitting, setExtendSubmitting] = useState(false);
+
 
   const currentServiceObj = useMemo(() => {
     if (!booking?.serviceId || !services?.length) return null;
@@ -614,7 +608,7 @@ const BookingActionModal = ({
     }
   };
 
-  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes }) => {
+  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipAmount, tipReceivedBy }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     setActionError(null);
@@ -633,13 +627,24 @@ const BookingActionModal = ({
         ]);
         if (error) return { error };
 
+        // Tip is a separate, independent write (booking_tips, migration-240) with
+        // no FK/trigger relationship to `payments` — safe to log here too, even
+        // though the payments themselves went through the atomic group RPC.
+        // Best-effort, attributed to the primary booking only (never split across
+        // the bundle) — a failure here must never undo the payment that already
+        // succeeded.
+        if (tipAmount > 0) {
+          const tipResult = await recordTip({ bookingId: booking.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+          if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
+        }
+
         setShowPaymentModal(false);
         setSelectedPreviousDueIds(new Set());
         onGroupPaymentRecorded();
         return { data: data?.[0], error: null };
       }
 
-      const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes });
+      const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes, tipAmount, tipReceivedBy });
       if (result?.error) return result;
 
       // Pay each bundled previous-due/related booking with its own allocated
@@ -962,21 +967,32 @@ const BookingActionModal = ({
                   {!isTerminal && !isLocked && nextStatuses.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => {
-                        const needsConfirm = status === 'cancelled' || status === 'no show';
-                        const noShowGated = status === 'no show' && !hasBookingStarted(booking);
+                        const needsConfirm = status === 'cancelled';
+                        const rescheduleDisabled = isServiceStarted || isLocked || booking.paymentStatus === 'paid';
                         return (
-                          <Button
-                            key={status}
-                            variant={needsConfirm ? 'outline' : 'primary'}
-                            size="sm"
-                            className="min-h-[40px] sm:min-h-0 sm:h-auto"
-                            onClick={() => needsConfirm ? setPendingStatus(status) : handleStatusUpdate(status)}
-                            loading={isLoading}
-                            disabled={noShowGated}
-                            title={noShowGated ? "Available after the booking's scheduled time" : undefined}
-                          >
-                            {status === 'in-progress' ? 'Start' : status === 'no show' ? 'No Show' : status.charAt(0).toUpperCase() + status.slice(1)}
-                          </Button>
+                          <React.Fragment key={status}>
+                            {status === 'cancelled' && onRescheduleStart && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="min-h-[40px] sm:min-h-0 sm:h-auto"
+                                onClick={() => onRescheduleStart(booking)}
+                                disabled={rescheduleDisabled}
+                                title={booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : rescheduleDisabled ? 'This service has already started.' : undefined}
+                              >
+                                Reschedule
+                              </Button>
+                            )}
+                            <Button
+                              variant={needsConfirm ? 'outline' : 'primary'}
+                              size="sm"
+                              className="min-h-[40px] sm:min-h-0 sm:h-auto"
+                              onClick={() => needsConfirm ? setPendingStatus(status) : handleStatusUpdate(status)}
+                              loading={isLoading}
+                            >
+                              {status === 'in-progress' ? 'Start' : status.charAt(0).toUpperCase() + status.slice(1)}
+                            </Button>
+                          </React.Fragment>
                         );
                       })}
                     </div>
@@ -2025,6 +2041,12 @@ const BookingActionModal = ({
                           </div>
                         </div>
                       ))}
+                      {(booking.tips || []).map((t) => (
+                        <div key={t.id || `tip-${t.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
+                          <span className="text-text-tertiary italic">Tip{t.receivedByName ? ` → ${t.receivedByName}` : ''} (not revenue)</span>
+                          <span className="font-data text-text-tertiary">NPR {t.amount.toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
                       <div className="flex items-center justify-between border-t border-border pt-2">
                         <span className="font-body font-body-medium text-xs text-text-primary">Balance Due</span>
                         <span className="font-data font-data-medium text-sm text-warning">NPR {Number(booking.amountDue || 0).toLocaleString('en-IN')}</span>
@@ -2232,6 +2254,12 @@ const BookingActionModal = ({
                             </button>
                           )}
                         </div>
+                      </div>
+                    ))}
+                    {(booking.tips || []).map((t) => (
+                      <div key={t.id || `tip-${t.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                        <span className="text-text-secondary italic">Tip{t.receivedByName ? ` → ${t.receivedByName}` : ''} (not revenue)</span>
+                        <span className="font-data text-text-secondary">NPR {t.amount.toLocaleString('en-IN')}</span>
                       </div>
                     ))}
                   </div>
@@ -2481,16 +2509,13 @@ const BookingActionModal = ({
         </div>
       </div>
 
-      {/* Cancel / No Show confirmation */}
+      {/* Cancel confirmation */}
       {pendingStatus && (
         <ConfirmDialog
-          title={pendingStatus === 'no show' ? 'Mark as No Show' : 'Cancel Booking'}
-          message={
-            pendingStatus === 'no show'
-              ? 'This will mark the booking as a no-show. This cannot be undone.'
-              : 'This will cancel the booking. This cannot be undone.'
-          }
-          confirmLabel={pendingStatus === 'no show' ? 'Mark No Show' : 'Cancel Booking'}
+          title="Cancel Booking"
+          message="This will cancel the booking. This cannot be undone."
+          confirmLabel="Cancel Booking"
+          reasonOptions={CANCEL_REASON_OPTIONS}
           isSubmitting={isLoading}
           onClose={() => setPendingStatus(null)}
           onConfirm={(reason) => handleStatusUpdate(pendingStatus, reason)}

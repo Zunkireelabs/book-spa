@@ -1,30 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
+import { useTenant } from '../../../contexts/TenantContext';
+import { formatNPR } from '../../../services/bookingTransformers';
 
-const BookingSuccess = ({ bookingData }) => {
+const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   const navigate = useNavigate();
-  const [countdown, setCountdown] = useState(10);
   const [showDetails, setShowDetails] = useState(false);
+  const { isCleaning, isSalon, isBeauty } = useTenant();
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
+  const getServiceWord = () => {
+    if (isCleaning) return 'cleaning';
+    if (isSalon) return 'salon';
+    if (isBeauty) return 'beauty';
+    return 'spa';
+  };
 
   const formatDateTime = () => {
     if (!bookingData?.selectedDateTime?.date || !bookingData?.selectedDateTime?.time) return '';
-    
+
     const date = new Date(bookingData.selectedDateTime.date);
     const dateStr = date.toLocaleDateString('en-GB', {
       weekday: 'long',
@@ -32,7 +27,7 @@ const BookingSuccess = ({ bookingData }) => {
       month: 'long',
       day: 'numeric'
     });
-    
+
     const timeObj = new Date();
     const [hours, minutes] = bookingData.selectedDateTime.time.split(':');
     timeObj.setHours(parseInt(hours), parseInt(minutes));
@@ -41,24 +36,23 @@ const BookingSuccess = ({ bookingData }) => {
       minute: '2-digit',
       hour12: true
     });
-    
+
     return `${dateStr} at ${timeStr}`;
   };
 
-  const formatPrice = (price) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'NPR',
-      minimumFractionDigits: 0
-    }).format(price);
-  };
+  // Provider-profile flow sets `selectedServices` (an array, possibly several for a
+  // group booking); every other caller sets the singular `selectedService`. Normalize
+  // to a list once so both paths render every service and the real combined total.
+  const services = bookingData?.selectedServices ?? (bookingData?.selectedService ? [bookingData.selectedService] : []);
+  const priceOf = (s) => Number(s?.effective_price_npr ?? s?.price_npr ?? s?.price ?? 0);
+  const total = services.reduce((sum, s) => sum + priceOf(s), 0);
 
   const handleNewBooking = () => {
-    navigate('/customer-booking-flow');
-  };
-
-  const handleManageBooking = () => {
-    navigate('/booking-management-portal');
+    if (onBookAnother) {
+      onBookAnother();
+      return;
+    }
+    navigate(orgSlug ? `/${orgSlug}` : '/login');
   };
 
   return (
@@ -75,14 +69,14 @@ const BookingSuccess = ({ bookingData }) => {
             <Icon name="Sparkles" size={16} className="text-accent-foreground" />
           </div>
         </div>
-        
+
         <h2 className="font-heading font-heading-semibold text-3xl text-text-primary mb-2">
-          Booking Confirmed!
+          Booking confirmed!
         </h2>
         <p className="font-body font-body-normal text-lg text-text-secondary mb-4">
-          Your spa appointment has been successfully booked
+          Your {getServiceWord()} appointment has been successfully booked
         </p>
-        
+
         <div className="inline-flex items-center space-x-2 bg-success/10 text-success px-4 py-2 rounded-spa">
           <Icon name="Calendar" size={16} />
           <span className="font-body font-body-medium text-sm">
@@ -107,10 +101,14 @@ const BookingSuccess = ({ bookingData }) => {
             <div className="flex items-center space-x-3">
               <Icon name="Sparkles" size={16} className="text-primary" />
               <div>
-                <span className="font-body font-body-medium text-sm text-text-secondary">Service</span>
-                <p className="font-body font-body-normal text-sm text-text-primary">
-                  {bookingData?.selectedService?.name}
-                </p>
+                <span className="font-body font-body-medium text-sm text-text-secondary">
+                  {services.length > 1 ? 'Services' : 'Service'}
+                </span>
+                {services.map((s, i) => (
+                  <p key={s?.id ?? i} className="font-body font-body-normal text-sm text-text-primary">
+                    {s?.name}
+                  </p>
+                ))}
               </div>
             </div>
           </div>
@@ -129,7 +127,7 @@ const BookingSuccess = ({ bookingData }) => {
               <div>
                 <span className="font-body font-body-medium text-sm text-text-secondary">Total Amount</span>
                 <p className="font-heading font-heading-semibold text-lg text-primary">
-                  {formatPrice(bookingData?.selectedService?.price || 0)}
+                  {formatNPR(total)}
                 </p>
               </div>
             </div>
@@ -141,7 +139,7 @@ const BookingSuccess = ({ bookingData }) => {
       <div className="bg-surface rounded-spa-lg border border-border p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-heading font-heading-medium text-lg text-text-primary">
-            Confirmation Details
+            Confirmation details
           </h3>
           <Button
             variant="outline"
@@ -155,27 +153,29 @@ const BookingSuccess = ({ bookingData }) => {
         </div>
 
         <div className="space-y-4">
-          <div className="flex items-center space-x-3 p-3 bg-success/10 rounded-spa">
-            <Icon name="Mail" size={16} className="text-success" />
-            <div className="flex-1">
-              <span className="font-body font-body-medium text-sm text-text-primary">
-                Email Confirmation Sent
-              </span>
-              <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                Check your inbox at {bookingData?.customerInfo?.email}
-              </p>
+          {bookingData?.customerInfo?.email && (
+            <div className="flex items-center space-x-3 p-3 bg-success/10 rounded-spa">
+              <Icon name="Mail" size={16} className="text-success" />
+              <div className="flex-1">
+                <span className="font-body font-body-medium text-sm text-text-primary">
+                  Email confirmation sent
+                </span>
+                <p className="font-caption font-caption-normal text-xs text-text-secondary">
+                  Check your inbox at {bookingData.customerInfo.email}
+                </p>
+              </div>
+              <Icon name="CheckCircle" size={16} className="text-success" />
             </div>
-            <Icon name="CheckCircle" size={16} className="text-success" />
-          </div>
+          )}
 
           <div className="flex items-center space-x-3 p-3 bg-success/10 rounded-spa">
             <Icon name="MessageSquare" size={16} className="text-success" />
             <div className="flex-1">
               <span className="font-body font-body-medium text-sm text-text-primary">
-                SMS Confirmation Sent
+                SMS confirmation sent
               </span>
               <p className="font-caption font-caption-normal text-xs text-text-secondary">
-                Message sent to +977 {bookingData?.customerInfo?.phone}
+                Message sent to {bookingData?.customerInfo?.phoneCountryCode || '+977'} {bookingData?.customerInfo?.phone}
               </p>
             </div>
             <Icon name="CheckCircle" size={16} className="text-success" />
@@ -186,7 +186,7 @@ const BookingSuccess = ({ bookingData }) => {
           <div className="mt-6 pt-6 border-t border-border space-y-4">
             <div>
               <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
-                Customer Information
+                Your details
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
@@ -207,7 +207,7 @@ const BookingSuccess = ({ bookingData }) => {
             {bookingData?.customerInfo?.specialRequests && (
               <div>
                 <h4 className="font-body font-body-medium text-sm text-text-primary mb-2">
-                  Special Requests
+                  Special requests
                 </h4>
                 <p className="font-body font-body-normal text-sm text-text-secondary bg-background p-3 rounded-spa">
                   {bookingData.customerInfo.specialRequests}
@@ -218,74 +218,18 @@ const BookingSuccess = ({ bookingData }) => {
         )}
       </div>
 
-      {/* QR Code */}
-      <div className="bg-surface rounded-spa-lg border border-border p-6 text-center">
-        <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
-          Quick Access QR Code
-        </h3>
-        <div className="w-32 h-32 bg-background rounded-spa mx-auto mb-4 flex items-center justify-center">
-          <Icon name="QrCode" size={64} className="text-text-secondary" />
-        </div>
-        <p className="font-caption font-caption-normal text-sm text-text-secondary mb-4">
-          Save this QR code to quickly access your booking details
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          iconName="Download"
-          iconSize={14}
-        >
-          Download QR Code
-        </Button>
-      </div>
-
-      {/* Important Reminders */}
-      <div className="bg-warning/10 border border-warning/20 rounded-spa p-4">
-        <div className="flex items-start space-x-3">
-          <Icon name="AlertTriangle" size={16} className="text-warning mt-0.5" />
-          <div className="flex-1">
-            <h4 className="font-body font-body-medium text-sm text-warning mb-2">
-              Important Reminders
-            </h4>
-            <ul className="space-y-1 font-caption font-caption-normal text-xs text-text-secondary">
-              <li>• Bring a valid ID for verification</li>
-              <li>• Wear comfortable, loose-fitting clothing</li>
-              <li>• Inform us of any health conditions or allergies</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
       {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <Button
-          variant="outline"
-          onClick={handleManageBooking}
-          iconName="Settings"
-          iconSize={16}
-          className="sm:w-auto"
-        >
-          Manage Bookings
-        </Button>
+      <div>
         <Button
           variant="primary"
           onClick={handleNewBooking}
           iconName="Plus"
           iconSize={16}
-          className="flex-1"
+          className="w-full"
         >
-          Book Another Service
+          Book another service
         </Button>
       </div>
-
-      {/* Auto-redirect Notice */}
-      {countdown > 0 && (
-        <div className="text-center p-4 bg-background rounded-spa">
-          <p className="font-caption font-caption-normal text-sm text-text-secondary">
-            Redirecting to booking management in {countdown} seconds...
-          </p>
-        </div>
-      )}
     </div>
   );
 };

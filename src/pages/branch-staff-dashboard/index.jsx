@@ -14,11 +14,12 @@ import OperationalCalendar from '../branch-manager-dashboard/components/calendar
 import EnrollMemberModal from '../branch-manager-dashboard/components/Memberships/EnrollMemberModal';
 import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
 import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
+import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
 import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../services/api';
-import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
+import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
@@ -283,7 +284,13 @@ const BranchStaffDashboard = () => {
     }
 
     if (filters.status !== 'all') {
-      filtered = filtered.filter(booking => booking.status === filters.status);
+      // No-Show status buttons were removed — a No-Show booking now carries
+      // status='cancelled' + cancellationReason='No Show' instead of the old
+      // real status='no show', so the "No Show" filter needs isNoShow()
+      // rather than a literal equality check to still match anything.
+      filtered = filters.status === 'no show'
+        ? filtered.filter(isNoShow)
+        : filtered.filter(booking => booking.status === filters.status);
     }
 
     filtered.sort((a, b) => a.time.localeCompare(b.time));
@@ -392,10 +399,18 @@ const BranchStaffDashboard = () => {
   // Wire to real API: recordPayment
   const handleRecordPayment = async (bookingId, opts) => {
     setActionError(null);
-    const result = await recordPayment({ bookingId, ...opts });
+    const { tipAmount, tipReceivedBy, ...paymentOpts } = opts;
+    const result = await recordPayment({ bookingId, ...paymentOpts });
 
     if (result.error) {
       return { error: result.error };
+    }
+
+    // Best-effort — tip is logged separately (migration-240) and must never
+    // undo or block a payment that already succeeded.
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
 
     showSuccess('Payment recorded successfully');
@@ -677,6 +692,9 @@ const BranchStaffDashboard = () => {
                   />
                 </div>
               </div>
+
+              {/* Tips — not revenue, kept visually separate, last section on the page */}
+              <TipsSummaryCard branchId={branchId} userRole={userRole} />
             </div>
           ) : viewMode === 'bookings' ? (
             <BookingsViewPanel branchId={branchId} />

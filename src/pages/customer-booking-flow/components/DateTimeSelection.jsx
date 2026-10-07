@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import { supabase } from '../../../lib/supabase';
-import { fetchBranchAvailabilityWindow, getRoomCapacity } from '../../../services/api';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, getRoomCapacity } from '../../../services/api';
 import { useTenant } from '../../../contexts/TenantContext';
 import {
   START_HOUR,
@@ -12,6 +12,7 @@ import {
   minutesToTime12,
   buildOccupancy,
 } from '../utils/availability';
+import { buildTherapistOccupancy, isTherapistFree, anyProfessionalFree } from '../../provider-profile-flow/utils/therapistAvailability';
 
 const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetch covers all of them
 
@@ -20,20 +21,29 @@ const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetc
 // drive the collapsing header (see useScrollCollapse). Without this, the whole calendar
 // re-rendered on every one of those frames too, which is what made scrolling feel janky/
 // stuttery rather than smooth — same fix as ServiceCard in ServiceSelection.jsx.
-const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange }) {
-  const { enableStaffGender, enableRooms, staffLabel } = useTenant();
+const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTime, onDateTimeSelect, selectedService, selectedBranch, genderPreference, onGenderPreferenceChange, therapistFilter = null }) {
+  const { enableStaffGender, enableRooms, staffLabel, orgSlug } = useTenant();
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
   const [therapistCounts, setTherapistCounts] = useState({ male: 0, female: 0 });
   const [availabilityWindow, setAvailabilityWindow] = useState(null); // days 0..13
   const [extendedWindow, setExtendedWindow] = useState(null); // days 14..29, fetched on demand
+  const [therapistWindow, setTherapistWindow] = useState(null); // days 0..13, only when therapistFilter is set
+  const [extendedTherapistWindow, setExtendedTherapistWindow] = useState(null); // days 14..29
+  const [therapistWindowError, setTherapistWindowError] = useState(null);
+  const [extendedTherapistWindowError, setExtendedTherapistWindowError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingExtended, setLoadingExtended] = useState(false);
 
-  // Fetch therapist counts for the selected branch (once) — advisory gender signal only; real
-  // availability is gated by room capacity below.
+  // Fetch therapist counts for the selected branch — advisory gender signal only; real
+  // availability is gated by room capacity below. Skipped while filtering by a specific
+  // professional — genderOk is forced true in that case, so this fetch's result would go
+  // unused. Depends on !!therapistFilter too (not just branch id) so that when a filter
+  // clears mid-session (e.g. a roster refetch failure resets it to null), this re-fires
+  // instead of leaving stale {male:0,female:0} counts that would mark every slot
+  // unavailable under the gender-preference path.
   useEffect(() => {
-    if (!selectedBranch?.id) return;
+    if (!selectedBranch?.id || therapistFilter) return;
     async function fetchTherapistCounts() {
       const { data } = await supabase
         .from('therapists')
@@ -47,7 +57,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       }
     }
     fetchTherapistCounts();
-  }, [selectedBranch?.id]);
+  }, [selectedBranch?.id, !!therapistFilter]);
 
   // Generate next 30 days (date-chip strip)
   const dates = useMemo(() => {
@@ -89,13 +99,59 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       .finally(() => setLoadingSlots(false));
   }, [selectedBranch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Per-therapist busy rows — only fetched when filtering by a specific professional
+  // or "any professional"; every other caller (every other tenant, and this tenant's
+  // own gender-preference path) never triggers this at all.
+  //
+  // On failure, therapistWindowError is set rather than left to a silent console.error:
+  // therapistWindow staying null previously made computedDays' therapistOk default to
+  // true (nothing to check against), so a fetch failure read as every slot being free —
+  // honest handling requires computedDays to treat "we don't know" as unavailable.
+  const loadTherapistWindow = () => {
+    setTherapistWindowError(null);
+    if (!selectedBranch?.id || !therapistFilter) return;
+    setTherapistWindow(null);
+    setExtendedTherapistWindow(null);
+    setExtendedTherapistWindowError(null);
+    // Reset the extended (14-29) window too — a Retry should put the component back
+    // into its day-0-13 state so loadFurtherAhead (guarded by `|| extendedWindow`)
+    // becomes callable again, instead of leaving stale days 14-29 with no occupancy
+    // rows to check against (which reads as every slot there being free, forever).
+    setExtendedWindow(null);
+    setLoadingExtended(false);
+    fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
+      .then(setTherapistWindow)
+      .catch((err) => {
+        console.error('[DateTimeSelection] therapist availability fetch failed:', err.message);
+        setTherapistWindowError(err.message || 'Could not load availability.');
+      });
+  };
+
+  useEffect(() => {
+    loadTherapistWindow();
+  }, [selectedBranch?.id, !!therapistFilter, orgSlug]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadFurtherAhead = () => {
     if (!selectedBranch?.id || loadingExtended || extendedWindow) return;
     setLoadingExtended(true);
-    fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
-      .then(setExtendedWindow)
-      .catch((err) => console.error('[DateTimeSelection] extended availability fetch failed:', err.message))
-      .finally(() => setLoadingExtended(false));
+    const tasks = [
+      fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+        .then(setExtendedWindow)
+        .catch((err) => {
+          console.error('[DateTimeSelection] extended room/gender availability fetch failed:', err.message);
+        }),
+    ];
+    if (therapistFilter) {
+      tasks.push(
+        fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+          .then(setExtendedTherapistWindow)
+          .catch((err) => {
+            console.error('[DateTimeSelection] extended therapist availability fetch failed:', err.message);
+            setExtendedTherapistWindowError(err.message || 'Could not load availability.');
+          })
+      );
+    }
+    Promise.all(tasks).finally(() => setLoadingExtended(false));
   };
 
   // Real, duration-aware, per-room-capacity availability across the whole fetched window.
@@ -105,6 +161,10 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     const rooms = availabilityWindow.rooms || [];
     const allBookings = [...(availabilityWindow.bookings || []), ...(extendedWindow?.bookings || [])];
     const { byRoom, byGender } = buildOccupancy(allBookings);
+
+    const therapistOccupancy = therapistFilter
+      ? buildTherapistOccupancy([...(therapistWindow?.bookings || []), ...(extendedTherapistWindow?.bookings || [])])
+      : null;
 
     const duration = selectedService?.durationMinutes || 60;
     const nepalToday = getNepalToday();
@@ -139,12 +199,31 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
           if (therapistCounts.female - booked.female <= 0) femaleAvailable = false;
         }
 
-        const genderOk =
+        const genderOk = therapistFilter ? true : (
           (genderPreference === 'male' && maleAvailable) ||
           (genderPreference === 'female' && femaleAvailable) ||
-          (genderPreference === 'no-preference' && (maleAvailable || femaleAvailable));
+          (genderPreference === 'no-preference' && (maleAvailable || femaleAvailable))
+        );
 
-        const isAvailable = !isPast && roomAvailable && genderOk;
+        let therapistOk = true;
+        if (therapistFilter) {
+          // Each half of the fetched window carries its own error flag — a failure on
+          // the days-0-13 fetch doesn't mean the days-14-29 extended fetch also failed
+          // (or vice versa), so only the half whose fetch actually failed is blocked.
+          const isExtendedDay = d.fullDate >= dates[WINDOW_DAYS].fullDate;
+          const windowFetchFailed = isExtendedDay ? extendedTherapistWindowError : therapistWindowError;
+          if (windowFetchFailed) {
+            // Fetch failed and we have no busy-row data to check against — treat as
+            // unavailable rather than free (see loadTherapistWindow's comment above).
+            therapistOk = false;
+          } else if (therapistOccupancy) {
+            therapistOk = therapistFilter.therapistId
+              ? isTherapistFree(therapistOccupancy, therapistFilter.therapistId, d.fullDate, start, duration)
+              : anyProfessionalFree(therapistOccupancy, therapistFilter.eligibleIds || [], d.fullDate, start, duration);
+          }
+        }
+
+        const isAvailable = !isPast && roomAvailable && genderOk && therapistOk;
 
         slots.push({
           time24: minutesToTime24(start),
@@ -158,7 +237,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
       return { date: d.fullDate, slots };
     });
-  }, [availabilityWindow, extendedWindow, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
+  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, extendedTherapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
 
   const timeSlots = useMemo(
     () => computedDays.find((d) => d.date === selectedDate)?.slots || [],
@@ -219,6 +298,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   };
 
   const getTherapistIcon = (slot) => {
+    if (therapistFilter) return null;
     if (genderPreference === 'male' && slot.maleAvailable) {
       return <Icon name="User" size={12} className="text-blue-600" />;
     } else if (genderPreference === 'female' && slot.femaleAvailable) {
@@ -253,13 +333,28 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
           <Icon name="Clock" size={14} className="text-primary" />
           <span className="font-body font-body-normal text-text-secondary">
             Showing real availability for <span className="font-body font-body-medium text-text-primary">{selectedService.name}</span>
-            {' '}({selectedService.durationMinutes || 60} min) — a slot is only shown open if a room is free for the entire duration.
+            {' '}({selectedService.durationMinutes || 60} min){enableRooms ? ' — a slot is only shown open if a room is free for the entire duration.' : '.'}
           </span>
         </div>
       )}
 
-      {/* Gender Preference - only shown for industries that use it */}
-      {enableStaffGender && (
+      {therapistFilter && therapistWindowError && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2 bg-error/5 border border-error/20 rounded-spa text-sm">
+          <span className="font-body font-body-normal text-text-secondary">
+            Could not load availability for this professional. No slots are shown until this is retried.
+          </span>
+          <button
+            onClick={loadTherapistWindow}
+            className="font-body font-body-medium text-primary hover:text-primary/80 spa-transition-fast shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Gender Preference - only shown for industries that use it, and never alongside
+          a specific-professional filter (that already determines who serves this slot) */}
+      {enableStaffGender && !therapistFilter && (
         <div className="bg-surface rounded-spa-lg border border-border p-5">
           <h3 className="font-heading font-heading-medium text-base text-text-primary mb-3">
             {staffLabel} Gender Preference
@@ -320,7 +415,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       {!loadingSlots && nearestSlots.length > 0 && (
         <div className="bg-surface rounded-spa-lg border border-border p-4">
           <h3 className="font-heading font-heading-medium text-base text-text-primary mb-3">
-            Quick Picks — Next Available
+            Quick picks — next available
           </h3>
           <div className="grid grid-cols-3 gap-2">
             {nearestSlots.map((slot, i) => {
@@ -351,7 +446,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       <div className="@container bg-surface rounded-spa-lg border border-border p-6">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
           <h3 className="font-heading font-heading-medium text-lg text-text-primary">
-            Select Date
+            Select date
           </h3>
           {(computedDays.some((d) => !d.slots.some((s) => s.isAvailable)) || datesPartiallyBooked.size > 0) && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
@@ -423,12 +518,12 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       {selectedDate && (
         <div className="@container bg-surface rounded-spa-lg border border-border p-6">
           <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
-            Available Time Slots
+            Available time slots
           </h3>
           {loadingSlots ? (
             <div className="text-center py-8">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
-              <p className="font-body font-body-normal text-text-secondary">Checking availability...</p>
+              <p className="font-body font-body-normal text-text-secondary">Checking availability…</p>
             </div>
           ) : (
             <div className="grid grid-cols-4 @sm:grid-cols-6 @2xl:grid-cols-8 gap-2">
@@ -467,7 +562,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
               <p className="font-body font-body-medium text-text-primary">
                 {datesWithNoAvailability.has(selectedDate)
                   ? 'This day is fully booked for the selected service.'
-                  : 'No available slots for selected date and preference.'}
+                  : `No available slots for the selected date${enableStaffGender ? ' and preference' : ''}.`}
               </p>
               <p className="font-caption font-caption-normal text-sm text-text-secondary mt-2">
                 Try a different date{enableStaffGender ? ' or gender preference' : ''} — or tap a Quick Pick above.
@@ -501,38 +596,40 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         </div>
       )}
 
-      {/* Legend */}
-      <div className="bg-background rounded-spa p-4">
-        <h4 className="font-body font-body-medium text-sm text-text-primary mb-3">
-          Therapist Availability Legend
-        </h4>
-        <div className="flex flex-wrap gap-4 text-xs">
-          <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 bg-blue-100 rounded-full flex items-center justify-center">
-              <Icon name="User" size={8} className="text-blue-600" />
+      {/* Legend — meaningless once a specific professional/filter already decides availability */}
+      {!therapistFilter && (
+        <div className="bg-background rounded-spa p-4">
+          <h4 className="font-body font-body-medium text-sm text-text-primary mb-3">
+            {staffLabel} availability legend
+          </h4>
+          <div className="flex flex-wrap gap-4 text-xs">
+            <div className="flex items-center space-x-2">
+              <div className="w-4 h-4 bg-blue-100 rounded-full flex items-center justify-center">
+                <Icon name="User" size={8} className="text-blue-600" />
+              </div>
+              <span className="font-caption font-caption-normal text-text-secondary">
+                Male {staffLabel.toLowerCase()} available
+              </span>
             </div>
-            <span className="font-caption font-caption-normal text-text-secondary">
-              Male Therapist Available
-            </span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 bg-pink-100 rounded-full flex items-center justify-center">
-              <Icon name="User" size={8} className="text-pink-600" />
+            <div className="flex items-center space-x-2">
+              <div className="w-4 h-4 bg-pink-100 rounded-full flex items-center justify-center">
+                <Icon name="User" size={8} className="text-pink-600" />
+              </div>
+              <span className="font-caption font-caption-normal text-text-secondary">
+                Female {staffLabel.toLowerCase()} available
+              </span>
             </div>
-            <span className="font-caption font-caption-normal text-text-secondary">
-              Female Therapist Available
-            </span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 bg-primary/10 rounded-full flex items-center justify-center">
-              <Icon name="Users" size={8} className="text-primary" />
+            <div className="flex items-center space-x-2">
+              <div className="w-4 h-4 bg-primary/10 rounded-full flex items-center justify-center">
+                <Icon name="Users" size={8} className="text-primary" />
+              </div>
+              <span className="font-caption font-caption-normal text-text-secondary">
+                Both Available
+              </span>
             </div>
-            <span className="font-caption font-caption-normal text-text-secondary">
-              Both Available
-            </span>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 });

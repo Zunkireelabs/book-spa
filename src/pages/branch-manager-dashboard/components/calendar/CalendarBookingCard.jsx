@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
+import { isNoShow } from '../../../../services/bookingTransformers';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
@@ -71,7 +72,8 @@ export function canDragBooking(booking) {
 }
 
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect }) => {
-  const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
+  const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
+  const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
   const isDraggable = canDragBooking(booking);
@@ -161,13 +163,14 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       if (cardRef.current) {
         const rect = cardRef.current.getBoundingClientRect();
         const side = rect.right > window.innerWidth * 0.6 ? 'left' : 'right';
-        // Clamp top so popover stays within viewport (estimate ~280px popover height)
-        const popoverHeight = 280;
-        const maxTop = window.innerHeight - popoverHeight - 10;
-        const clampedTop = Math.min(rect.top, maxTop);
+        // Vertical clamping against the popover's REAL (content-dependent)
+        // height happens inside BookingHoverPreview itself, post-render — its
+        // content varies a lot (notes, discount line, etc.) so a fixed-height
+        // guess here previously ran it off the bottom of the viewport for
+        // taller cards. This is just the initial anchor.
         setPopoverPos({
           side,
-          top: Math.max(10, clampedTop),
+          top: Math.max(10, rect.top),
           left: side === 'right' ? rect.right + 8 : rect.left - 288,
         });
       }
@@ -321,7 +324,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
 // itself and by OverflowPopoverRow (the "+N" hidden-bookings list) so both
 // give the same detail preview instead of just a native title tooltip.
 export const BookingHoverPreview = ({ booking, position, draggable }) => {
-  const colors = STATUS_COLORS[booking.status] || STATUS_COLORS['Pending'];
+  const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
+  const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
 
   const durationMins = (() => {
@@ -335,13 +339,33 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
     ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
     : '';
 
+  const cardRef = useRef(null);
+  const [top, setTop] = useState(position?.top ?? 0);
+
+  // Re-anchor to the new target's initial estimate whenever a different
+  // booking/position comes in (new hover), then re-clamp below once the
+  // real height is known.
+  useEffect(() => {
+    setTop(position?.top ?? 0);
+  }, [position?.top, position?.left]);
+
+  useLayoutEffect(() => {
+    if (!position || !cardRef.current) return;
+    const height = cardRef.current.offsetHeight;
+    const margin = 10;
+    const maxTop = window.innerHeight - height - margin;
+    const clamped = Math.max(margin, Math.min(position.top, maxTop));
+    if (Math.abs(clamped - top) > 0.5) setTop(clamped);
+  }, [position, top]);
+
   if (!position) return null;
 
   return createPortal(
     <div
+      ref={cardRef}
       className="fixed z-dropdown pointer-events-none"
       style={{
-        top: position.top,
+        top,
         left: position.left,
         width: 280,
       }}

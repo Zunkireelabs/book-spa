@@ -10,7 +10,7 @@ import BookingTimelinePanel from './components/BookingTimelinePanel';
 import CustomerCommunicationPanel from './components/CustomerCommunicationPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookingById, fetchTherapists, recordPayment, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag } from '../../services/api';
+import { fetchBookingById, fetchTherapists, fetchRooms, recordPayment, recordTip, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag, rescheduleBookingAsNewBooking, fetchServiceTherapists, filterEligibleTherapists } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
 import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
@@ -29,6 +29,8 @@ const BookingDetailsAssignmentModal = () => {
   const [booking, setBooking] = useState(null);
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [therapists, setTherapists] = useState([]);
+  const [eligibleTherapistIds, setEligibleTherapistIds] = useState(null);
+  const [rooms, setRooms] = useState([]);
   const [error, setError] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [dueHolderSuggestions, setDueHolderSuggestions] = useState([]);
@@ -77,6 +79,18 @@ const BookingDetailsAssignmentModal = () => {
           specialties: t.specialties || [],
         })));
       }
+
+      const roomsResult = await fetchRooms(branchId);
+      if (roomsResult.data) setRooms(roomsResult.data);
+    }
+
+    if (transformed.serviceId) {
+      // Scoped to the booking's own branch (migration-257/258 made the allow-list
+      // per-branch) — not the viewer's current branch context, which can differ.
+      const eligibleResult = await fetchServiceTherapists(transformed.serviceId, transformed.branchId);
+      setEligibleTherapistIds(eligibleResult.data || null);
+    } else {
+      setEligibleTherapistIds(null);
     }
 
     hasLoadedRef.current = true;
@@ -139,6 +153,45 @@ const BookingDetailsAssignmentModal = () => {
     setIsLoading(false);
   };
 
+  // "Reschedule" creates a new booking at the chosen date/time/therapist/room
+  // (same customer + service as the original) and then cancels the original —
+  // it does not update the existing row in place. Mirrors the Rebook pattern
+  // used on the calendar, just driven by a form instead of click-a-slot since
+  // this page has no calendar grid. Both steps run in one DB transaction via
+  // reschedule_booking() (migration-243), so there's no partial-failure state
+  // to handle here.
+  const handleReschedule = async ({ date, startTime, therapistId, roomId }) => {
+    if (!booking) return { error: { message: 'No booking loaded.' } };
+    setIsLoading(true);
+    setActionError(null);
+
+    const result = await rescheduleBookingAsNewBooking({
+      bookingId: booking.bookingId,
+      date,
+      startTime,
+      therapistId: therapistId || null,
+      roomId: roomId || null,
+      reason: `Rescheduled to ${date} ${startTime}`,
+    });
+
+    if (result.error) {
+      setIsLoading(false);
+      return { error: result.error };
+    }
+
+    setIsLoading(false);
+    const newBookingId = result.data?.id;
+    const orgSlug = urlOrgSlug || profile?.organizations?.slug;
+    if (newBookingId && orgSlug) {
+      navigate(`/${orgSlug}/bookings/${newBookingId}`);
+    } else if (newBookingId) {
+      navigate(`/booking-details/${newBookingId}`);
+    } else {
+      await loadBooking();
+    }
+    return { error: null };
+  };
+
   const handleAssignTherapist = async (therapistId, notes) => {
     if (!booking) return;
     setIsLoading(true);
@@ -162,11 +215,18 @@ const BookingDetailsAssignmentModal = () => {
     if (!booking) return { error: { message: 'No booking loaded.' } };
     setPaymentSubmitting(true);
 
-    const result = await recordPayment({ bookingId: booking.bookingId, ...opts });
+    const { tipAmount, tipReceivedBy, ...paymentOpts } = opts;
+    const result = await recordPayment({ bookingId: booking.bookingId, ...paymentOpts });
 
     if (result.error) {
       setPaymentSubmitting(false);
       return { error: result.error };
+    }
+
+    // Best-effort — must never undo or block a payment that already succeeded.
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId: booking.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
 
     setPaymentSuccess(true);
@@ -309,6 +369,9 @@ const BookingDetailsAssignmentModal = () => {
                               }}
                               onStatusUpdate={handleStatusUpdate}
                               onRecordPayment={() => setShowPaymentModal(true)}
+                              onReschedule={handleReschedule}
+                              therapists={therapists}
+                              rooms={rooms}
                               isLoading={isLoading}
                               isFirstBooking={isFirstBooking}
                             />
@@ -349,7 +412,7 @@ const BookingDetailsAssignmentModal = () => {
                       {activeTab === 'assignment' && (
                         <TherapistAssignmentPanel
                           booking={booking}
-                          availableTherapists={therapists.map(t => ({
+                          availableTherapists={filterEligibleTherapists(therapists, eligibleTherapistIds).map(t => ({
                             ...t,
                             conflictReason: null,
                             schedule: [],

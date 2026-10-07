@@ -3,8 +3,8 @@ import { useAuth } from '../../../contexts/AuthContext';
 import QuickFilters from '../../branch-staff-dashboard/components/QuickFilters';
 import BookingsList from '../../branch-staff-dashboard/components/BookingsList';
 import TherapistAvailability from '../../branch-staff-dashboard/components/TherapistAvailability';
-import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, applyDiscount } from '../../../services/api';
-import { transformBookings, toDbStatus } from '../../../services/bookingTransformers';
+import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../../services/api';
+import { transformBookings, toDbStatus, isNoShow } from '../../../services/bookingTransformers';
 import { toISO, getTodayISO } from '../../../utils/periodPresets';
 
 const BookingsViewPanel = ({ branchId }) => {
@@ -126,7 +126,9 @@ const BookingsViewPanel = ({ branchId }) => {
     }
 
     if (filters.status !== 'all') {
-      filtered = filtered.filter(b => b.status === filters.status);
+      filtered = filters.status === 'no show'
+        ? filtered.filter(isNoShow)
+        : filtered.filter(b => b.status === filters.status);
     }
 
     filtered.sort((a, b) => a.time.localeCompare(b.time));
@@ -165,8 +167,13 @@ const BookingsViewPanel = ({ branchId }) => {
   };
 
   const handleRecordPayment = async (bookingId, opts) => {
-    const result = await recordPayment({ bookingId, ...opts });
+    const { tipAmount, tipReceivedBy, ...paymentOpts } = opts;
+    const result = await recordPayment({ bookingId, ...paymentOpts });
     if (result.error) return { error: result.error };
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
+    }
     showToast('Payment recorded successfully');
     await loadData();
     return { error: null };

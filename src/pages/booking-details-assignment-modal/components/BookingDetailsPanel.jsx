@@ -3,29 +3,37 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
-import ConfirmDialog from '../../../components/ui/ConfirmDialog';
-import { to12h } from '../../../services/bookingTransformers';
+import CustomSelect from '../../../components/ui/CustomSelect';
+import ConfirmDialog, { CANCEL_REASON_OPTIONS } from '../../../components/ui/ConfirmDialog';
+import { to12h, isNoShow } from '../../../services/bookingTransformers';
 import { useAuth } from '../../../contexts/AuthContext';
 
-function getNepalNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
-}
+const inputClasses = 'w-full px-3 py-2 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast';
 
-// "No Show" only becomes selectable once the booking's scheduled start time
-// has passed — otherwise staff could mark a client a no-show before they were
-// even due.
-function hasBookingStarted(booking) {
-  const startTime = booking?.startTime || booking?.time;
-  if (!booking?.date || !startTime) return false;
-  const start = new Date(`${booking.date}T${startTime}`);
-  return getNepalNow() >= start;
+// Default 9am–9pm, 15-minute increments — no per-branch hours available on this page.
+const TIME_OPTIONS = (() => {
+  const opts = [];
+  for (let h = 9; h <= 21; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      if (h === 21 && m > 0) break;
+      opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+    }
+  }
+  return opts;
+})();
+
+function format12h(time24) {
+  const [h, m] = time24.split(':').map(Number);
+  const suffix = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
 }
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'no show'];
 
 const VALID_TRANSITIONS = {
-  'pending':      ['confirmed', 'no show'],
-  'confirmed':    ['in-progress', 'cancelled', 'no show'],
+  'pending':      ['confirmed'],
+  'confirmed':    ['in-progress', 'cancelled'],
   'in-progress':  ['completed'],
 };
 
@@ -53,11 +61,16 @@ function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
-const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoading, isFirstBooking }) => {
+const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, onReschedule, therapists = [], rooms = [], isLoading, isFirstBooking }) => {
   const navigate = useNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
-  const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' | 'no show' while confirm dialog is open
+  const [pendingStatus, setPendingStatus] = useState(null); // 'cancelled' while confirm dialog is open
+
+  const [showReschedulePanel, setShowReschedulePanel] = useState(false);
+  const [rescheduleForm, setRescheduleForm] = useState({ date: '', startTime: '', therapistId: '', roomId: '' });
+  const [rescheduleError, setRescheduleError] = useState(null);
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
 
   // Get org slug from URL or profile
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
@@ -93,6 +106,47 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
     navigate(`${basePath}?view=audit&recordId=${recordId}`);
   };
 
+  const isServiceStarted = booking.status === 'in-progress';
+  const rescheduleDisabled = isServiceStarted || isLocked || booking.paymentStatus === 'paid';
+
+  const openReschedulePanel = () => {
+    setRescheduleForm({
+      date: booking.date || '',
+      startTime: booking.startTime ? booking.startTime.slice(0, 5) : (booking.time || ''),
+      therapistId: booking.therapist?.id || '',
+      roomId: booking.roomId || '',
+    });
+    setRescheduleError(null);
+    setRescheduleSubmitting(false);
+    setShowReschedulePanel(true);
+  };
+
+  const handleReschedule = async () => {
+    if (!onReschedule) return;
+    setRescheduleError(null);
+    if (!rescheduleForm.date) {
+      setRescheduleError('Please select a date.');
+      return;
+    }
+    if (!rescheduleForm.startTime) {
+      setRescheduleError('Please select a time.');
+      return;
+    }
+    setRescheduleSubmitting(true);
+    try {
+      const result = await onReschedule(rescheduleForm);
+      if (result?.error) {
+        setRescheduleError(result.error.message || 'Failed to reschedule booking.');
+      } else {
+        setShowReschedulePanel(false);
+      }
+    } catch (error) {
+      setRescheduleError('An unexpected error occurred.');
+    } finally {
+      setRescheduleSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Lock / Immutability Banners */}
@@ -109,7 +163,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
           ? booking.paymentStatus === 'paid'
             ? { bg: 'bg-success/5', border: 'border-success/20', color: 'text-success', icon: 'ShieldCheck', label: 'Completed — Settled' }
             : { bg: 'bg-warning/5', border: 'border-warning/20', color: 'text-warning', icon: 'Clock', label: 'Service Completed — Payment Pending' }
-          : { bg: 'bg-gray-50', border: 'border-gray-200', color: 'text-gray-600', iconColor: 'text-gray-500', icon: 'ShieldCheck', label: booking.status === 'cancelled' ? 'Cancelled — Immutable' : 'No Show — Immutable' };
+          : { bg: 'bg-gray-50', border: 'border-gray-200', color: 'text-gray-600', iconColor: 'text-gray-500', icon: 'ShieldCheck', label: isNoShow(booking) ? 'No Show — Immutable' : 'Cancelled — Immutable' };
         const iconColor = banner.iconColor || banner.color;
         return (
           <div className={`flex items-center space-x-2 px-3 py-2 ${banner.bg} border ${banner.border} rounded-spa`}>
@@ -141,7 +195,7 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
         <div className="flex items-center space-x-2 px-3 py-2 bg-error/5 border border-error/20 rounded-spa">
           <Icon name="XCircle" size={16} className="text-error flex-shrink-0" />
           <span className="font-body font-body-medium text-sm text-error capitalize">
-            {booking.status === 'no show' ? 'No Show' : 'Cancelled'}
+            {isNoShow(booking) ? 'No Show' : 'Cancelled'}
           </span>
         </div>
       ) : (
@@ -180,19 +234,29 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
         <div className="grid grid-cols-2 gap-2">
           {nextStatuses.map((statusValue) => {
             const config = getStatusConfig(statusValue);
-            const needsConfirm = statusValue === 'cancelled' || statusValue === 'no show';
-            const noShowGated = statusValue === 'no show' && !hasBookingStarted(booking);
+            const needsConfirm = statusValue === 'cancelled';
             return (
-              <button
-                key={statusValue}
-                onClick={() => needsConfirm ? setPendingStatus(statusValue) : onStatusUpdate(statusValue)}
-                disabled={isLoading || noShowGated}
-                title={noShowGated ? "Available after the booking's scheduled time" : undefined}
-                className={`flex items-center justify-center space-x-2 px-3 py-2 rounded-spa border spa-transition-fast spa-touch-target border-border hover:border-primary/50 text-text-secondary hover:text-text-primary ${isLoading || noShowGated ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <Icon name={config.icon} size={16} />
-                <span className="font-body font-body-medium text-xs capitalize">{statusValue.replace('-', ' ')}</span>
-              </button>
+              <React.Fragment key={statusValue}>
+                {statusValue === 'cancelled' && onReschedule && (
+                  <button
+                    onClick={openReschedulePanel}
+                    disabled={isLoading || rescheduleDisabled}
+                    title={booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : rescheduleDisabled ? 'This service has already started.' : undefined}
+                    className={`flex items-center justify-center space-x-2 px-3 py-2 rounded-spa border spa-transition-fast spa-touch-target border-border hover:border-primary/50 text-text-secondary hover:text-text-primary ${isLoading || rescheduleDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <Icon name="CalendarClock" size={16} />
+                    <span className="font-body font-body-medium text-xs">Reschedule</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => needsConfirm ? setPendingStatus(statusValue) : onStatusUpdate(statusValue)}
+                  disabled={isLoading}
+                  className={`flex items-center justify-center space-x-2 px-3 py-2 rounded-spa border spa-transition-fast spa-touch-target border-border hover:border-primary/50 text-text-secondary hover:text-text-primary ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <Icon name={config.icon} size={16} />
+                  <span className="font-body font-body-medium text-xs capitalize">{statusValue.replace('-', ' ')}</span>
+                </button>
+              </React.Fragment>
             );
           })}
         </div>
@@ -204,6 +268,84 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
           </span>
         </div>
       ) : null}
+
+      {/* Reschedule panel */}
+      {showReschedulePanel && (
+        <div className="space-y-4 bg-background rounded-spa border border-border p-4">
+          <div className="flex items-center justify-between">
+            <h4 className="font-heading font-heading-medium text-base text-text-primary flex items-center space-x-2">
+              <Icon name="CalendarClock" size={18} className="text-primary" />
+              <span>Reschedule Booking</span>
+            </h4>
+            <button
+              onClick={() => setShowReschedulePanel(false)}
+              className="p-1.5 rounded-spa hover:bg-surface spa-transition-fast text-text-secondary hover:text-text-primary"
+            >
+              <Icon name="X" size={16} />
+            </button>
+          </div>
+
+          {rescheduleError && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-spa bg-error/10 border border-error/20">
+              <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0" />
+              <span className="font-body text-xs text-error">{rescheduleError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Date *</label>
+              <input
+                type="date"
+                value={rescheduleForm.date}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={e => setRescheduleForm(f => ({ ...f, date: e.target.value }))}
+                className={inputClasses}
+              />
+            </div>
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Time *</label>
+              <CustomSelect
+                value={rescheduleForm.startTime}
+                onChange={(val) => setRescheduleForm(f => ({ ...f, startTime: val }))}
+                options={TIME_OPTIONS.map(t => ({ value: t, label: format12h(t) }))}
+                placeholder="Select time..."
+                searchable
+                size="sm"
+              />
+            </div>
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Therapist</label>
+              <CustomSelect
+                value={rescheduleForm.therapistId}
+                onChange={(val) => setRescheduleForm(f => ({ ...f, therapistId: val }))}
+                options={[{ value: '', label: 'Keep current' }, ...therapists.map(t => ({ value: t.id, label: t.name }))]}
+                placeholder="Keep current"
+                size="sm"
+              />
+            </div>
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Room</label>
+              <CustomSelect
+                value={rescheduleForm.roomId}
+                onChange={(val) => setRescheduleForm(f => ({ ...f, roomId: val }))}
+                options={[{ value: '', label: 'Keep current' }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                placeholder="Keep current"
+                size="sm"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setShowReschedulePanel(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleReschedule} loading={rescheduleSubmitting}>
+              Confirm Reschedule
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Customer Information */}
       <div className="space-y-4">
@@ -504,16 +646,13 @@ const BookingDetailsPanel = ({ booking, onStatusUpdate, onRecordPayment, isLoadi
         </div>
       )}
 
-      {/* Cancel / No Show confirmation */}
+      {/* Cancel confirmation */}
       {pendingStatus && (
         <ConfirmDialog
-          title={pendingStatus === 'no show' ? 'Mark as No Show' : 'Cancel Booking'}
-          message={
-            pendingStatus === 'no show'
-              ? 'This will mark the booking as a no-show. This cannot be undone.'
-              : 'This will cancel the booking. This cannot be undone.'
-          }
-          confirmLabel={pendingStatus === 'no show' ? 'Mark No Show' : 'Cancel Booking'}
+          title="Cancel Booking"
+          message="This will cancel the booking. This cannot be undone."
+          confirmLabel="Cancel Booking"
+          reasonOptions={CANCEL_REASON_OPTIONS}
           isSubmitting={isLoading}
           onClose={() => setPendingStatus(null)}
           onConfirm={(reason) => {

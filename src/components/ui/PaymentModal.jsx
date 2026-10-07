@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
+import CustomSelect from './CustomSelect';
 import PaymentMethodSelector from './PaymentMethodSelector';
 import MembershipWalletCard from './MembershipWalletCard';
 import ReferralRewardCard from './ReferralRewardCard';
@@ -15,6 +16,7 @@ import {
   fetchVouchersForBooking,
   fetchBookingById,
   getActivePackagesForCustomer,
+  fetchBranchStaffUsers,
 } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
@@ -77,6 +79,20 @@ const PaymentModal = ({
   const grandTotal = round2(remaining + additionalRemaining);
 
   const [notes, setNotes] = useState('');
+  // Customer gratuity — NOT part of the amount-due math at all (deliberately kept
+  // out of tenders/entered/leftover/grandTotal), so it never interacts with the
+  // OVERPAYMENT guard below. Logged as a separate, independent write
+  // (booking_tips, migration-240) regardless of whether this payment goes through
+  // the plain recordPayment() path or the atomic bundled recordGroupPayment RPC —
+  // see BookingActionModal's handlePaymentConfirm.
+  const [tip, setTip] = useState('');
+  const [showTip, setShowTip] = useState(false);
+  // Who actually received the tip — not necessarily the assigned therapist, a
+  // guest may hand it to whichever staff member (service or support) they
+  // interacted with (migration-242). Any active branch staff user, not just
+  // therapists.
+  const [tipReceivedBy, setTipReceivedBy] = useState('');
+  const [branchStaffOptions, setBranchStaffOptions] = useState([]);
   const [error, setError] = useState(null);
 
   // Split payment — one or more tenders, always available (even when a previous
@@ -101,6 +117,19 @@ const PaymentModal = ({
     })();
     return () => { cancelled = true; };
   }, [bookingId]);
+
+  // Branch staff roster for the "who received this tip" picker (migration-242) —
+  // fetched lazily, only once the Tip field is actually opened.
+  const branchId = booking.branchId || booking.branch_id;
+  useEffect(() => {
+    if (!showTip || !branchId || branchStaffOptions.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchBranchStaffUsers(branchId);
+      if (!cancelled) setBranchStaffOptions(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [showTip, branchId, branchStaffOptions.length]);
 
   // The Membership option is added to the mode selector only when there's a
   // wallet attached to this booking's customer AND the wallet still has balance.
@@ -479,6 +508,10 @@ const PaymentModal = ({
         return;
       }
     }
+    if (showTip && Number(tip) > 0 && !tipReceivedBy) {
+      setError('Select who received the tip.');
+      return;
+    }
     setError(null);
     const cleanedTenders = tenders
       .filter(t => Number(t.amount) > 0)
@@ -498,11 +531,14 @@ const PaymentModal = ({
       setError(`Could not allocate payment to: ${skippedBookings.map(s => s.bookingNumber || s.bookingId).join(', ')}. Please re-check the entered amounts and try again.`);
       return;
     }
+    const tipAmount = Number(tip) > 0 ? round2(Number(tip)) : 0;
     const result = await onConfirm({
       tenders: primaryTenders,
       additionalAllocations,
       dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
       notes,
+      tipAmount,
+      tipReceivedBy: tipAmount > 0 ? tipReceivedBy : null,
     });
     if (result?.error) setError(result.error.message || 'Failed to record payment.');
   };
@@ -965,6 +1001,68 @@ const PaymentModal = ({
                 </div>
               )}
             </div>
+
+          {/* Tip — not part of the amount-due math, doesn't interact with the
+              OVERPAYMENT guard above. A tip is logged in a separate, independent
+              table (booking_tips, migration-240) with no FK/trigger relationship to
+              `payments`, so it's safe to record even on a bundled/previous-due
+              payment that otherwise goes through the atomic recordGroupPayment RPC —
+              the tip write itself stays a second, best-effort call either way,
+              attributed to the primary booking only (see BookingActionModal's
+              handlePaymentConfirm). */}
+          {showTip ? (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="block font-body font-body-medium text-sm text-text-primary">
+                  Tip <span className="text-text-secondary font-body-normal">(optional, goes to staff — not revenue)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => { setShowTip(false); setTip(''); }}
+                  className="p-1 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                  aria-label="Remove tip"
+                >
+                  <Icon name="Trash2" size={14} />
+                </button>
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={tip}
+                  onChange={(e) => setTip(e.target.value)}
+                  placeholder="e.g. 200"
+                  autoFocus
+                  className="w-full rounded-spa border border-border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
+                />
+              </div>
+              {Number(tip) > 0 && (
+                <div>
+                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">
+                    Received by <span className="text-error">*</span>
+                  </label>
+                  <CustomSelect
+                    value={tipReceivedBy}
+                    onChange={setTipReceivedBy}
+                    options={branchStaffOptions.map(s => ({ value: s.id, label: s.name }))}
+                    placeholder="Who got this tip?"
+                    searchable
+                    size="sm"
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowTip(true)}
+              className="flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <Icon name="Plus" size={14} /> Add Tip
+            </button>
+          )}
 
           {/* Notes */}
           <div className="space-y-1">
