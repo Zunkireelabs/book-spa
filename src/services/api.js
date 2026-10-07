@@ -5543,12 +5543,13 @@ export async function createBooking({
       const primary = therapistsData.find(t => t.id === primaryTherapistId);
       therapistNameSnapshot = primary?.name || null;
 
-      // Service↔staff eligibility allow-list (migration-249) — no rows for this service
-      // means unrestricted, otherwise every selected therapist must be on the list.
-      // This is a nicer pre-flight for staff sessions only (real enforcement — the part
-      // anon can't bypass — now lives in the enforce_booking_therapist_guards DB trigger,
-      // migration-252).
-      const { data: eligibleIds } = await fetchServiceTherapists(serviceId);
+      // Service↔staff eligibility allow-list (migration-249), per-branch since
+      // migration-257/258 — no rows for this service AT THIS BRANCH means unrestricted
+      // here, otherwise every selected therapist must be on the list. This is a nicer
+      // pre-flight for staff sessions only (real enforcement — the part anon can't
+      // bypass — now lives in the enforce_booking_therapist_guards DB trigger,
+      // migration-252/258, which applies the same branch scoping).
+      const { data: eligibleIds } = await fetchServiceTherapists(serviceId, resolvedBranchId);
       if (eligibleIds && eligibleIds.length > 0) {
         const eligibleSet = new Set(eligibleIds);
         const ineligible = therapistsData.find(t => !eligibleSet.has(t.id));
@@ -6222,15 +6223,24 @@ export async function deleteRoom({ roomId }) {
 // Phase 9B: Master Data Management — Therapist CRUD
 // ============================================================
 
-// Service↔staff eligibility allow-list (migration-249). Empty/no rows for a service means
-// unrestricted — every therapist stays eligible, matching today's behavior for every org that
-// never configures this.
-export async function fetchServiceTherapists(serviceId) {
+// Service↔staff eligibility allow-list (migration-249), per-branch since migration-257/258:
+// storage is still a flat org-wide table, but meaning is per-branch, so every reader has to
+// filter by branch itself. Pass branchId to get this branch's rows only (empty/no rows means
+// unrestricted AT THIS BRANCH); omit it only for callers that genuinely need the raw org-wide
+// set (none currently do — every caller should pass a branch).
+// therapists!inner(branch_id) keeps the embed an inner join so rows for a different branch's
+// therapist drop out entirely rather than coming back with a null-filled embed. branch_id is
+// already granted to anon by migration-256, and this runs for staff and anon alike (createBooking),
+// so the embed is safe under that column grant.
+export async function fetchServiceTherapists(serviceId, branchId) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('service_therapists')
-      .select('therapist_id')
+      .select('therapist_id, therapists!inner(branch_id)')
       .eq('service_id', serviceId);
+    if (branchId) query = query.eq('therapists.branch_id', branchId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
     return { data: (data || []).map(r => r.therapist_id), error: null };
@@ -6246,12 +6256,13 @@ export async function fetchServiceTherapists(serviceId) {
 // restricted to unrestricted, with no caller ever checking the result. The RPC
 // does both statements inside one function invocation, so a failure rolls
 // back the delete too.
-export async function setServiceTherapists(serviceId, therapistIds) {
+export async function setServiceTherapists(serviceId, therapistIds, branchId) {
   try {
     const ids = (therapistIds || []).filter(Boolean);
     const { data, error } = await supabase.rpc('set_service_therapists', {
       p_service_id: serviceId,
       p_therapist_ids: ids,
+      p_branch_id: branchId,
     });
     if (error) throw error;
     return { data: ids, error: null };

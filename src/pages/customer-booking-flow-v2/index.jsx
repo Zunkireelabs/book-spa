@@ -323,7 +323,7 @@ const CustomerBookingFlowV2 = () => {
 
     setBookingData(finalBookingData);
     setCurrentStep(5);
-    localStorage.removeItem('bookingFlowV2');
+    localStorage.removeItem(`bookingFlowV2:${orgSlug}`);
 
     capture('customer_booking_submitted', {
       org_slug: orgSlug,
@@ -340,6 +340,15 @@ const CustomerBookingFlowV2 = () => {
   const handleEditBooking = () => {
     // BookingConfirmation only ever calls onEditBooking(1) ("Edit Booking" -> back to
     // service selection); v2's equivalent is the combined service+time step.
+    setCurrentStep(2);
+  };
+
+  const handleBookAnother = () => {
+    setBookingData(null);
+    setSelectedService(null);
+    setSelectedDateTime({ date: '', time: '' });
+    // Name/email/phone carry over deliberately; consent and free-text notes do not.
+    setCustomerInfo((prev) => ({ ...prev, agreeToTerms: false, specialRequests: '' }));
     setCurrentStep(2);
   };
 
@@ -414,6 +423,7 @@ const CustomerBookingFlowV2 = () => {
           <BookingSuccess
             bookingData={bookingData}
             orgSlug={orgSlug}
+            onBookAnother={handleBookAnother}
           />
         );
 

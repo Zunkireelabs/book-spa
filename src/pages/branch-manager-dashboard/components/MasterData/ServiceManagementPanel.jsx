@@ -139,7 +139,11 @@ const ServiceManagementPanel = () => {
     setEligibleTherapistIds([]);
     setRestrictStaff(false);
     setShowModal(true);
-    const eligibleResult = await fetchServiceTherapists(service.id);
+    // branchId filters server-side (migration-257/258 made the allow-list per-branch,
+    // but storage is still org-wide) — a service restricted only at a different branch
+    // comes back empty here, so the checkboxes and "is this restricted here" reflect
+    // only what a save at this branch would actually write.
+    const eligibleResult = await fetchServiceTherapists(service.id, branchId);
     const ids = eligibleResult.data || [];
     setEligibleTherapistIds(ids);
     setRestrictStaff(ids.length > 0);
@@ -258,17 +262,30 @@ const ServiceManagementPanel = () => {
     } else {
       const serviceId = editingService ? editingService.id : result.data?.id;
       if (serviceId) {
-        const staffResult = await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : []);
+        const staffResult = await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : [], branchId);
         if (staffResult.error) {
           // The service itself saved fine; only the eligible-staff allow-list
           // failed. Surface it and keep the modal open — closing on success-of-
           // the-service-only previously hid this failure entirely, since the
           // caller never checked setServiceTherapists's return value.
           setFormError(staffResult.error.message || 'Failed to save eligible staff.');
+          // On the create path editingService is still null here — without
+          // re-targeting it at the row just created, pressing Save again would
+          // re-enter the createService branch and create a duplicate service on
+          // every retry instead of just retrying the allow-list write.
+          if (!editingService) setEditingService(result.data);
           setSaving(false);
           await loadServices();
           return;
         }
+      } else {
+        // createService reported success but returned no row/id — the eligible-
+        // staff allow-list write has nothing to attach to and was silently
+        // skipped. Surface it rather than closing the modal as if it saved clean.
+        setFormError('Service saved, but its id was not returned — eligible staff could not be saved. Reopen it from the list to configure eligible staff.');
+        setSaving(false);
+        await loadServices();
+        return;
       }
       setShowModal(false);
       await loadServices();

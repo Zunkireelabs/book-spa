@@ -5,7 +5,7 @@ import Icon from '../../../components/AppIcon';
 import { useTenant } from '../../../contexts/TenantContext';
 import { formatNPR } from '../../../services/bookingTransformers';
 
-const BookingSuccess = ({ bookingData, orgSlug }) => {
+const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   const navigate = useNavigate();
   const [showDetails, setShowDetails] = useState(false);
   const { isCleaning, isSalon, isBeauty } = useTenant();
@@ -48,6 +48,10 @@ const BookingSuccess = ({ bookingData, orgSlug }) => {
   const total = services.reduce((sum, s) => sum + priceOf(s), 0);
 
   const handleNewBooking = () => {
+    if (onBookAnother) {
+      onBookAnother();
+      return;
+    }
     navigate(orgSlug ? `/${orgSlug}` : '/login');
   };
 
@@ -212,23 +216,6 @@ const BookingSuccess = ({ bookingData, orgSlug }) => {
             )}
           </div>
         )}
-      </div>
-
-      {/* Important Reminders */}
-      <div className="bg-warning/10 border border-warning/20 rounded-spa p-4">
-        <div className="flex items-start space-x-3">
-          <Icon name="AlertTriangle" size={16} className="text-warning mt-0.5" />
-          <div className="flex-1">
-            <h4 className="font-body font-body-medium text-sm text-warning mb-2">
-              Important reminders
-            </h4>
-            <ul className="space-y-1 font-caption font-caption-normal text-xs text-text-secondary">
-              <li>• Bring a valid ID for verification</li>
-              <li>• Wear comfortable, loose-fitting clothing</li>
-              <li>• Inform us of any health conditions or allergies</li>
-            </ul>
-          </div>
-        </div>
       </div>
 
       {/* Action Buttons */}

@@ -113,6 +113,13 @@ const ProviderProfileFlow = () => {
     [selectedServices],
   );
 
+  const handleBookAnother = useCallback(() => {
+    setBookingData(null);
+    setSelectedServices([]);
+    setSelectedProfessional(null);
+    setSelectedDateTime({ date: '', time: '' });
+  }, []);
+
   const handleProfessionalSelect = useCallback((professional) => {
     setSelectedProfessional(professional);
     // Slots are person-dependent — a previously-picked date/time may not be free
@@ -219,7 +226,7 @@ const ProviderProfileFlow = () => {
   }
 
   if (bookingData) {
-    return <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} />;
+    return <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} onBookAnother={handleBookAnother} />;
   }
 
   // Full-page takeover rather than an overlay: the profile page simply isn't rendered
