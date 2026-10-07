@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Button from './Button';
 import Input from './Input';
 import Icon from '../AppIcon';
+import BrandMark from './BrandMark';
 import CustomSelect from './CustomSelect';
 import { useAuth } from 'contexts/AuthContext';
 
@@ -104,21 +105,7 @@ const AuthenticationModal = ({ isOpen = true, onClose }) => {
         <div className="p-6 border-b border-border">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-                <svg 
-                  width="24" 
-                  height="24" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  className="text-primary-foreground"
-                >
-                  <path 
-                    d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" 
-                    fill="currentColor"
-                  />
-                  <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
-                </svg>
-              </div>
+              <BrandMark className="h-10 w-auto" />
               <div>
                 <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
                   Staff Login
