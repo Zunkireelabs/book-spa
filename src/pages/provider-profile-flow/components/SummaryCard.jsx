@@ -2,14 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { formatNPR } from '../../../services/bookingTransformers';
-
-// Placeholder addresses seeded during onboarding shouldn't be shown to customers.
-// Treated as "unset" rather than printed verbatim.
-const PLACEHOLDER_ADDRESSES = new Set(['tbd', 'n/a', 'na', '-', 'tba']);
-const isRealAddress = (address) => {
-  const trimmed = (address || '').trim();
-  return trimmed.length > 0 && !PLACEHOLDER_ADDRESSES.has(trimmed.toLowerCase());
-};
+import { isRealAddress } from '../utils/address';
 
 // Falls back to the icon tile when the URL is absent *or* fails to load — these are
 // admin-pasted URLs with nothing validating them, so a dead link is a normal state, not
