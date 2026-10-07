@@ -35,7 +35,7 @@ const StaffHeader = ({ userName: propName, branchName: propBranch, viewMode = 'd
   }, [showProfileDropdown]);
 
   const userName = profile?.full_name || propName || 'Staff Member';
-  const branchName = profile?.branches?.name || propBranch || 'Main Branch';
+  const branchName = profile?.branches?.name || propBranch || '';
   const userRole = profile?.role || 'staff';
 
   const handleLogout = async () => {

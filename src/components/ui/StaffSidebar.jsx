@@ -69,7 +69,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const showWorldCupKick = new Date() < new Date('2026-07-21T00:00:00+05:45');
   const userRole = profile?.role || propRole || 'staff';
   const userName = profile?.full_name || propName || 'Staff Member';
-  const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
+  const branchName = contextBranchName || profile?.branches?.name || propBranch || '';
   const isManagerOrAdmin = ['manager', 'admin', 'admin_viewer'].includes(userRole);
 
   // Pending discount-approval count for the badge on "Dashboard".
