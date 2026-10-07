@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
+import BrandMark from '../../components/ui/BrandMark';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchOrganizationBySlug } from '../../services/api';
 import { supabase } from '../../lib/supabase';
@@ -70,20 +71,8 @@ const OrgFinder = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center animate-pulse">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-primary-foreground"
-            >
-              <path
-                d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
-                fill="currentColor"
-              />
-              <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7" />
-            </svg>
+          <div className="animate-pulse">
+            <BrandMark className="h-12 w-auto" />
           </div>
           <p className="text-sm text-text-secondary">Loading...</p>
         </div>
@@ -96,21 +85,7 @@ const OrgFinder = () => {
       {/* Minimal Header */}
       <header className="flex-shrink-0 px-6 md:px-8 py-5 flex justify-between items-center">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-primary-foreground"
-            >
-              <path
-                d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
-                fill="currentColor"
-              />
-              <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7" />
-            </svg>
-          </div>
+          <BrandMark className="h-7 w-auto" />
           <span className="text-lg font-semibold text-text-primary tracking-tight">
             Zennly
           </span>
@@ -138,21 +113,7 @@ const OrgFinder = () => {
       <main className="flex-1 flex flex-col items-center px-5 py-10 overflow-y-auto">
         <div className="w-full max-w-[380px] mx-auto flex flex-col items-center">
           {/* Large Logo Icon */}
-          <div className="w-16 h-16 bg-primary rounded-xl flex items-center justify-center mb-6">
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-primary-foreground"
-            >
-              <path
-                d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
-                fill="currentColor"
-              />
-              <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7" />
-            </svg>
-          </div>
+          <BrandMark className="h-16 w-auto mb-6" />
 
           {/* Title & Subtitle */}
           <h1 className="text-[28px] font-semibold text-text-primary mb-2 text-center tracking-tight">

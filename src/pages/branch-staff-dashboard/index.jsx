@@ -495,7 +495,7 @@ const BranchStaffDashboard = () => {
                 <div className="flex items-center space-x-2">
                   <Icon name="MapPin" size={14} className="text-primary" />
                   <span className="font-body font-body-medium text-sm text-text-primary">
-                    {branchName || 'Main Branch'}
+                    {branchName || ''}
                   </span>
                 </div>
                 <div className="hidden sm:block h-5 w-px bg-border"></div>

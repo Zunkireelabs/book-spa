@@ -97,7 +97,7 @@ const BranchManagerDashboard = () => {
   const managerData = {
     name: profile?.full_name || 'Manager',
     role: profile?.role === 'admin' ? 'Admin' : 'Branch Manager',
-    branch: branchName || profile?.branches?.name || 'Main Branch',
+    branch: branchName || profile?.branches?.name || '',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
     email: profile?.email || ''
   };
