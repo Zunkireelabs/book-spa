@@ -139,13 +139,12 @@ const ServiceManagementPanel = () => {
     setEligibleTherapistIds([]);
     setRestrictStaff(false);
     setShowModal(true);
-    const eligibleResult = await fetchServiceTherapists(service.id);
-    // The allow-list is org-wide in storage but per-branch in meaning (migration-257/258):
-    // a service can be restricted at another branch with no rows for this one. Filter to
-    // this branch's roster so the checkboxes — and "is this service restricted here" —
-    // reflect only what a save at this branch would actually write.
-    const branchTherapistIds = new Set(allTherapists.map((t) => t.id));
-    const ids = (eligibleResult.data || []).filter((id) => branchTherapistIds.has(id));
+    // branchId filters server-side (migration-257/258 made the allow-list per-branch,
+    // but storage is still org-wide) — a service restricted only at a different branch
+    // comes back empty here, so the checkboxes and "is this restricted here" reflect
+    // only what a save at this branch would actually write.
+    const eligibleResult = await fetchServiceTherapists(service.id, branchId);
+    const ids = eligibleResult.data || [];
     setEligibleTherapistIds(ids);
     setRestrictStaff(ids.length > 0);
   };

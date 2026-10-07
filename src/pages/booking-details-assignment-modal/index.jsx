@@ -85,7 +85,9 @@ const BookingDetailsAssignmentModal = () => {
     }
 
     if (transformed.serviceId) {
-      const eligibleResult = await fetchServiceTherapists(transformed.serviceId);
+      // Scoped to the booking's own branch (migration-257/258 made the allow-list
+      // per-branch) — not the viewer's current branch context, which can differ.
+      const eligibleResult = await fetchServiceTherapists(transformed.serviceId, transformed.branchId);
       setEligibleTherapistIds(eligibleResult.data || null);
     } else {
       setEligibleTherapistIds(null);
