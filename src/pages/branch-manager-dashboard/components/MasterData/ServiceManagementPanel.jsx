@@ -13,11 +13,22 @@ import {
   toggleServiceActive,
   deleteService,
   uploadServiceImage,
+  fetchTherapistsForManagement,
+  fetchServiceTherapists,
+  setServiceTherapists,
 } from '../../../../services/api';
+import { useBranch } from '../../../../contexts/BranchContext';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 const ServiceManagementPanel = () => {
+  const { branchId } = useBranch();
+  const { isBeauty } = useIndustry();
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [allTherapists, setAllTherapists] = useState([]);
+  const [eligibleTherapistIds, setEligibleTherapistIds] = useState([]);
+  const [restrictStaff, setRestrictStaff] = useState(false);
+  const [staffSearchQuery, setStaffSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -79,21 +90,31 @@ const ServiceManagementPanel = () => {
     setLoading(false);
   }, []);
 
+  const loadTherapists = useCallback(async () => {
+    if (!branchId) return;
+    const result = await fetchTherapistsForManagement(branchId);
+    if (!result.error) setAllTherapists(result.data || []);
+  }, [branchId]);
+
   useEffect(() => {
     loadCategories();
     loadServices();
-  }, [loadCategories, loadServices]);
+    loadTherapists();
+  }, [loadCategories, loadServices, loadTherapists]);
 
   const handleOpenCreate = () => {
     setEditingService(null);
     setFormData({ name: '', priceNpr: '', durationMinutes: '', description: '', imageUrl: '', category: categories[0]?.name || 'Spa', isCouple: false, offerEnabled: false, offerType: 'percent', offerValue: '' });
     setImageFile(null);
     setImagePreview(null);
+    setEligibleTherapistIds([]);
+    setRestrictStaff(false);
+    setStaffSearchQuery('');
     setFormError(null);
     setShowModal(true);
   };
 
-  const handleOpenEdit = (service) => {
+  const handleOpenEdit = async (service) => {
     setEditingService(service);
     setFormData({
       name: service.name,
@@ -109,8 +130,19 @@ const ServiceManagementPanel = () => {
     });
     setImageFile(null);
     setImagePreview(service.image_url || null);
+    setStaffSearchQuery('');
     setFormError(null);
+    // Reset before opening (same as handleOpenCreate) — otherwise the modal
+    // briefly renders with whichever service was last edited's allow-list still
+    // in state, and a save in that window would write that service's staff onto
+    // this one.
+    setEligibleTherapistIds([]);
+    setRestrictStaff(false);
     setShowModal(true);
+    const eligibleResult = await fetchServiceTherapists(service.id);
+    const ids = eligibleResult.data || [];
+    setEligibleTherapistIds(ids);
+    setRestrictStaff(ids.length > 0);
   };
 
   const handleImageChange = (e) => {
@@ -143,7 +175,7 @@ const ServiceManagementPanel = () => {
     const price = Number(formData.priceNpr);
     const duration = Number(formData.durationMinutes);
 
-    if (!editingService && !formData.name.trim()) {
+    if (!formData.name.trim()) {
       setFormError('Service name is required.');
       return;
     }
@@ -195,6 +227,7 @@ const ServiceManagementPanel = () => {
     if (editingService) {
       result = await updateServicePricing({
         serviceId: editingService.id,
+        name: formData.name.trim(),
         priceNpr: price,
         durationMinutes: duration,
         description: formData.description.trim() || null,
@@ -223,6 +256,20 @@ const ServiceManagementPanel = () => {
     if (result.error) {
       setFormError(result.error.message || 'Save failed.');
     } else {
+      const serviceId = editingService ? editingService.id : result.data?.id;
+      if (serviceId) {
+        const staffResult = await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : []);
+        if (staffResult.error) {
+          // The service itself saved fine; only the eligible-staff allow-list
+          // failed. Surface it and keep the modal open — closing on success-of-
+          // the-service-only previously hid this failure entirely, since the
+          // caller never checked setServiceTherapists's return value.
+          setFormError(staffResult.error.message || 'Failed to save eligible staff.');
+          setSaving(false);
+          await loadServices();
+          return;
+        }
+      }
       setShowModal(false);
       await loadServices();
     }
@@ -456,20 +503,13 @@ const ServiceManagementPanel = () => {
             )}
 
             <div className="space-y-3">
-              {/* Service name — editable for create, read-only for edit */}
               <div className="space-y-1">
                 <label className="block font-body font-body-medium text-sm text-text-primary">Service Name</label>
-                {editingService ? (
-                  <div className="px-3 py-2 bg-background rounded-spa border border-border font-body text-sm text-text-secondary">
-                    {editingService.name}
-                  </div>
-                ) : (
-                  <Input
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g. Deep Tissue Massage"
-                  />
-                )}
+                <Input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g. Deep Tissue Massage"
+                />
               </div>
 
               {/* Category dropdown */}
@@ -587,21 +627,25 @@ const ServiceManagementPanel = () => {
                 )}
               </div>
 
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.isCouple}
-                  onChange={(e) => setFormData({ ...formData, isCouple: e.target.checked })}
-                  className="text-primary focus:ring-primary w-4 h-4 rounded"
-                />
-                <span className="font-body font-body-medium text-sm text-text-primary">
-                  Couple service (priced for two)
-                </span>
-              </label>
-              <p className="font-caption font-caption-normal text-xs text-text-secondary -mt-2">
-                Shows the companion room/name/phone option when staff assign 2 therapists, and is
-                excluded from the calendar's Group-booking service pickers (double-charges there).
-              </p>
+              {!isBeauty && (
+                <>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.isCouple}
+                      onChange={(e) => setFormData({ ...formData, isCouple: e.target.checked })}
+                      className="text-primary focus:ring-primary w-4 h-4 rounded"
+                    />
+                    <span className="font-body font-body-medium text-sm text-text-primary">
+                      Couple service (priced for two)
+                    </span>
+                  </label>
+                  <p className="font-caption font-caption-normal text-xs text-text-secondary -mt-2">
+                    Shows the companion room/name/phone option when staff assign 2 therapists, and is
+                    excluded from the calendar's Group-booking service pickers (double-charges there).
+                  </p>
+                </>
+              )}
 
               <div className="space-y-1">
                 <label className="block font-body font-body-medium text-sm text-text-primary">Description</label>
@@ -612,6 +656,71 @@ const ServiceManagementPanel = () => {
                   rows={3}
                   className="w-full rounded-spa border border-border bg-background px-3 py-2 font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast resize-none"
                 />
+              </div>
+
+              <div className="space-y-2 p-3 bg-background rounded-spa border border-border">
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific staff?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !restrictStaff;
+                      setRestrictStaff(next);
+                      if (!next) {
+                        setEligibleTherapistIds([]);
+                        setStaffSearchQuery('');
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                      restrictStaff ? 'bg-success' : 'bg-border'
+                    }`}
+                  >
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                      restrictStaff ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
+
+                {restrictStaff && (
+                  <div className="space-y-2">
+                    <Input
+                      value={staffSearchQuery}
+                      onChange={(e) => setStaffSearchQuery(e.target.value)}
+                      placeholder="Search staff..."
+                    />
+                    <div className="border border-border rounded-spa bg-surface max-h-[140px] overflow-y-auto p-2 space-y-1">
+                      {(() => {
+                        const query = staffSearchQuery.toLowerCase();
+                        const filtered = query
+                          ? allTherapists.filter(t => t.name.toLowerCase().includes(query))
+                          : allTherapists;
+                        if (allTherapists.length === 0) {
+                          return <p className="text-xs text-text-secondary px-2 py-1">No staff found.</p>;
+                        }
+                        if (filtered.length === 0) {
+                          return <p className="text-xs text-text-secondary px-2 py-1">No staff match "{staffSearchQuery}".</p>;
+                        }
+                        return filtered.map(t => (
+                          <label key={t.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleTherapistIds.includes(t.id) ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={eligibleTherapistIds.includes(t.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEligibleTherapistIds(ids => [...ids, t.id]);
+                                } else {
+                                  setEligibleTherapistIds(ids => ids.filter(id => id !== t.id));
+                                }
+                              }}
+                              className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                            />
+                            <span className="font-body text-sm text-text-primary">{t.name}</span>
+                          </label>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Service Image for customer portal */}

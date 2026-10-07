@@ -58,11 +58,13 @@ export const TenantProvider = ({ children }) => {
   const isSpa = org?.industry_type === 'spa';
   const isCleaning = org?.industry_type === 'cleaning';
   const isSalon = org?.industry_type === 'salon';
+  const isBeauty = org?.industry_type === 'beauty';
 
   // Booking flow text based on industry
   const getBookingJourneyText = () => {
     if (isCleaning) return 'Complete your cleaning service booking';
     if (isSalon) return 'Complete your salon booking';
+    if (isBeauty) return 'Complete your beauty booking';
     return 'Complete your spa booking journey';
   };
 
@@ -88,9 +90,22 @@ export const TenantProvider = ({ children }) => {
     isSpa,
     isCleaning,
     isSalon,
+    isBeauty,
 
     // Helper text
     getBookingJourneyText,
+
+    // Org booking settings
+    showStaffSelection: org?.settings?.show_staff_selection === true,
+    enableStaffRatings: org?.settings?.enable_staff_ratings === true,
+    useProviderProfileLayout: org?.settings?.use_provider_profile_layout === true,
+    logoUrl: org?.logo_url || null,
+    heroImageUrl: org?.hero_image_url || null,
+    orgAbout: org?.settings?.about || '',
+    orgAmenities: org?.settings?.amenities || [],
+    includedWithVisit: org?.settings?.included_with_visit || [],
+    optionalExtras: org?.settings?.optional_extras || [],
+    cancellationPolicy: org?.settings?.cancellation_policy || '',
 
     // Loading state
     loading,

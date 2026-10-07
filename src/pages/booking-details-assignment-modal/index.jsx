@@ -10,7 +10,7 @@ import BookingTimelinePanel from './components/BookingTimelinePanel';
 import CustomerCommunicationPanel from './components/CustomerCommunicationPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { fetchBookingById, fetchTherapists, fetchRooms, recordPayment, recordTip, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag, rescheduleBookingAsNewBooking } from '../../services/api';
+import { fetchBookingById, fetchTherapists, fetchRooms, recordPayment, recordTip, updateBookingStatus, assignTherapist, fetchDueHolderNames, getCustomerFirstBookingFlag, rescheduleBookingAsNewBooking, fetchServiceTherapists, filterEligibleTherapists } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
 import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
@@ -29,6 +29,7 @@ const BookingDetailsAssignmentModal = () => {
   const [booking, setBooking] = useState(null);
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [therapists, setTherapists] = useState([]);
+  const [eligibleTherapistIds, setEligibleTherapistIds] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [error, setError] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -81,6 +82,13 @@ const BookingDetailsAssignmentModal = () => {
 
       const roomsResult = await fetchRooms(branchId);
       if (roomsResult.data) setRooms(roomsResult.data);
+    }
+
+    if (transformed.serviceId) {
+      const eligibleResult = await fetchServiceTherapists(transformed.serviceId);
+      setEligibleTherapistIds(eligibleResult.data || null);
+    } else {
+      setEligibleTherapistIds(null);
     }
 
     hasLoadedRef.current = true;
@@ -402,7 +410,7 @@ const BookingDetailsAssignmentModal = () => {
                       {activeTab === 'assignment' && (
                         <TherapistAssignmentPanel
                           booking={booking}
-                          availableTherapists={therapists.map(t => ({
+                          availableTherapists={filterEligibleTherapists(therapists, eligibleTherapistIds).map(t => ({
                             ...t,
                             conflictReason: null,
                             schedule: [],

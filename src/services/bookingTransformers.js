@@ -7,7 +7,7 @@ export function to12h(timeStr) {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-function formatNPR(amount) {
+export function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 

@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
-import { createBooking, fetchRooms, lookupReferrerByPhone } from '../../../services/api';
+import { createBooking, createBookingGroup, fetchRooms, lookupReferrerByPhone } from '../../../services/api';
 import { toE164 } from '../../../utils/phone';
+import { formatNPR } from '../../../services/bookingTransformers';
 
 const BookingConfirmation = ({
   orgSlug,
@@ -13,6 +14,11 @@ const BookingConfirmation = ({
   customerInfo,
   genderPreference,
   customerAccountId,
+  therapistId = null,
+  // Multi-service visits (provider-profile flow) pass the full list; every other
+  // caller omits it and takes the single-service path below, unchanged.
+  additionalServices = null,
+  therapistName = null,
   onConfirmBooking,
   onEditBooking
 }) => {
@@ -70,14 +76,6 @@ const BookingConfirmation = ({
     return null;
   };
 
-  const formatPrice = (price) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'NPR',
-      minimumFractionDigits: 0
-    }).format(price);
-  };
-
   const handleConfirmBooking = async () => {
     setIsConfirming(true);
     setBookingError(null);
@@ -105,9 +103,8 @@ const BookingConfirmation = ({
         referralSourceDetail = customerInfo.referralStaffName?.trim() || null;
       }
 
-      const { data, error } = await createBooking({
+      const commonFields = {
         branchId: selectedBranch?.id,
-        serviceId: selectedService?.id,
         date: selectedDateTime?.date,
         startTime: selectedDateTime?.time,
         customerName: (customerInfo.firstName + ' ' + customerInfo.lastName).trim(),
@@ -120,7 +117,20 @@ const BookingConfirmation = ({
         referralSource: customerInfo.referralSource || null,
         referralSourceDetail,
         customerAccountId,
-      });
+        therapistId,
+      };
+
+      // Several services become one back-to-back group booking; a single service takes
+      // the original path untouched, so every other tenant's flow is unaffected.
+      const isGroup = Array.isArray(additionalServices) && additionalServices.length > 1;
+
+      const { data, error } = isGroup
+        ? await createBookingGroup({ ...commonFields, services: additionalServices })
+            .then(({ data: groupData, error: groupError }) => ({
+              data: groupData ? groupData.bookings[0] : null,
+              error: groupError,
+            }))
+        : await createBooking({ ...commonFields, serviceId: selectedService?.id });
 
       if (error) {
         console.error('[BookingConfirmation] createBooking failed:', error.code, error.message);
@@ -136,6 +146,9 @@ const BookingConfirmation = ({
           'THERAPIST_INACTIVE',
           'THERAPIST_ABSENT',
           'THERAPIST_CHECKED_OUT',
+          'THERAPIST_NOT_ELIGIBLE',
+          'BOOKING_GROUP_PARTIAL',
+          'NO_SERVICES',
           'THERAPIST_CONFLICT',
           'BRANCH_ONLINE_CAPACITY',
           'BOOKING_CROSSES_MIDNIGHT',
@@ -157,36 +170,61 @@ const BookingConfirmation = ({
     }
   };
 
+  // additionalServices carries the full list for a group booking; every other caller
+  // omits it and this falls back to the single selectedService — same shape either way.
+  const servicesToShow = (Array.isArray(additionalServices) && additionalServices.length > 0)
+    ? additionalServices
+    : (selectedService ? [selectedService] : []);
+  const priceOf = (s) => Number(s?.price ?? s?.effective_price_npr ?? s?.price_npr ?? 0);
+  const totalPrice = servicesToShow.reduce((sum, s) => sum + priceOf(s), 0);
+  const heroService = servicesToShow[0];
+
   return (
     <div className="space-y-4">
       <div className="relative overflow-hidden rounded-spa-lg shadow-sm">
-        <Image src={selectedService?.image} alt={selectedService?.name} className="w-full h-48 object-cover" />
+        <Image src={heroService?.image ?? heroService?.image_url} alt={heroService?.name} className="w-full h-48 object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
         <div className="absolute bottom-3 left-4">
-          <h3 className="font-heading font-bold text-xl text-white">{selectedService?.name}</h3>
-          <p className="text-xs text-white/80">{selectedService?.duration} session</p>
+          <h3 className="font-heading font-bold text-xl text-white">
+            {servicesToShow.length > 1 ? `${servicesToShow.length} services` : heroService?.name}
+          </h3>
+          {servicesToShow.length === 1 && (
+            <p className="text-xs text-white/80">{heroService?.duration ?? heroService?.duration_minutes} min</p>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-surface rounded-spa-lg border border-border p-5 space-y-4">
-          <h3 className="font-heading font-semibold text-text-primary">Booking Details</h3>
+          <h3 className="font-heading font-semibold text-text-primary">Your booking</h3>
           <div className="space-y-3">
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Branch</span><span className="font-medium">{selectedBranch?.name}</span></div>
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Date & Time</span><span className="font-medium">{formatDateTime()}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-text-secondary">Price</span><span className="text-primary font-bold">{formatPrice(selectedService?.price || 0)}</span></div>
+            {therapistName && (
+              <div className="flex justify-between text-sm"><span className="text-text-secondary">With</span><span className="font-medium">{therapistName}</span></div>
+            )}
+            {servicesToShow.map((s, i) => (
+              <div key={s?.id ?? i} className="flex justify-between text-sm">
+                <span className="text-text-secondary">{s?.name}</span>
+                <span className="font-medium">{formatNPR(priceOf(s))}</span>
+              </div>
+            ))}
+            <div className="flex justify-between text-sm pt-2 border-t border-border">
+              <span className="text-text-secondary font-medium">Total</span>
+              <span className="text-primary font-bold">{formatNPR(totalPrice)}</span>
+            </div>
           </div>
         </div>
 
         <div className="bg-surface rounded-spa-lg border border-border p-5 space-y-4">
-          <h3 className="font-heading font-semibold text-text-primary">Customer Details</h3>
+          <h3 className="font-heading font-semibold text-text-primary">Your details</h3>
           <div className="space-y-3">
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Name</span><span className="font-medium">{customerInfo.firstName} {customerInfo.lastName}</span></div>
             <div className="flex justify-between text-sm"><span className="text-text-secondary">Phone</span><span className="font-medium">{customerInfo.phoneCountryCode || '+977'} {customerInfo.phone}</span></div>
             {referralSummary() && (
               <div className="flex justify-between text-sm gap-3">
                 <span className="text-text-secondary flex-shrink-0">
-                  {customerInfo.referralSource === 'client' ? 'Referred by' : 'Heard about us'}
+                  {customerInfo.referralSource === 'client' ? 'Referred by' : 'How you heard about us'}
                 </span>
                 <span className="font-medium text-right">{referralSummary()}</span>
               </div>
@@ -219,9 +257,9 @@ const BookingConfirmation = ({
       )}
 
       <div className="flex flex-col sm:flex-row gap-4">
-        <Button variant="outline" onClick={() => onEditBooking(1)} iconName="Edit" className="flex-1">Edit Booking</Button>
+        <Button variant="outline" onClick={() => onEditBooking(1)} iconName="Edit" className="flex-1">Edit booking</Button>
         <Button variant="primary" onClick={handleConfirmBooking} loading={isConfirming} iconName="Check" className="flex-1">
-          {isConfirming ? 'Confirming...' : 'Confirm Booking'}
+          {isConfirming ? 'Confirming...' : 'Confirm booking'}
         </Button>
       </div>
     </div>

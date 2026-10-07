@@ -23,7 +23,7 @@ const formatPrice = (price) => {
 // frames too, which is what made scrolling the card grid itself feel janky/
 // stuttery rather than smooth — the cards don't depend on scroll progress at
 // all, so none of that work was ever necessary.
-const ServiceCard = React.memo(({ service, isSelected, onServiceSelect }) => (
+const ServiceCard = React.memo(({ service, isSelected, onServiceSelect, hideImage }) => (
   <div
     onClick={() => onServiceSelect(service)}
     className={`scroll-reveal group bg-surface rounded-spa-lg spa-transition-fast cursor-pointer shadow-[0_1px_0_rgba(0,0,0,0.08)] hover:shadow-[0_2px_0_rgba(0,0,0,0.07)] hover:-translate-y-0.5 ${
@@ -32,45 +32,77 @@ const ServiceCard = React.memo(({ service, isSelected, onServiceSelect }) => (
         : 'border border-border hover:border-primary/50'
     }`}
   >
-    <div className="relative overflow-hidden rounded-t-spa-lg">
-      <Image
-        src={service.image}
-        alt={service.name}
-        className="w-full h-48 object-cover"
-      />
-      <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 [@media(hover:hover)]:group-hover:bg-black/30 [@media(hover:hover)]:group-hover:opacity-100 spa-transition-fast pointer-events-none">
-        <span className="px-4 py-1.5 rounded-full bg-surface text-text-primary font-body font-body-medium text-sm shadow-spa-elevated">
-          Select Service
-        </span>
+    {hideImage ? (
+      <div className="flex items-start justify-between gap-2 px-3.5 pt-3.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {service.popularity && (
+            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
+              {service.popularity}
+            </span>
+          )}
+          {service.specialty && (
+            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-primary text-primary-foreground">
+              {service.specialty}
+            </span>
+          )}
+          {service.isOnOffer && (
+            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-success text-success-foreground">
+              {service.activeCampaignName || 'Offer'}
+            </span>
+          )}
+        </div>
+        <div className="bg-background rounded-spa px-2.5 py-1 flex items-baseline gap-1.5 shrink-0">
+          {service.isOnOffer && service.originalPrice != null && (
+            <span className="font-body font-body-normal text-xs text-text-secondary line-through">
+              {formatPrice(service.originalPrice)}
+            </span>
+          )}
+          <span className="font-heading font-heading-semibold text-base text-text-primary">
+            {formatPrice(service.isOnOffer && service.effectivePrice != null ? service.effectivePrice : service.price)}
+          </span>
+        </div>
       </div>
-      <div className="absolute top-3 left-3 flex flex-col space-y-1.5">
-        {service.popularity && (
-          <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
-            {service.popularity}
+    ) : (
+      <div className="relative overflow-hidden rounded-t-spa-lg">
+        <Image
+          src={service.image}
+          alt={service.name}
+          className="w-full h-48 object-cover"
+        />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 [@media(hover:hover)]:group-hover:bg-black/30 [@media(hover:hover)]:group-hover:opacity-100 spa-transition-fast pointer-events-none">
+          <span className="px-4 py-1.5 rounded-full bg-surface text-text-primary font-body font-body-medium text-sm shadow-spa-elevated">
+            Select Service
           </span>
-        )}
-        {service.specialty && (
-          <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-primary text-primary-foreground">
-            {service.specialty}
+        </div>
+        <div className="absolute top-3 left-3 flex flex-col space-y-1.5">
+          {service.popularity && (
+            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-accent text-accent-foreground">
+              {service.popularity}
+            </span>
+          )}
+          {service.specialty && (
+            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-primary text-primary-foreground">
+              {service.specialty}
+            </span>
+          )}
+          {service.isOnOffer && (
+            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-success text-success-foreground">
+              {service.activeCampaignName || 'Offer'}
+            </span>
+          )}
+        </div>
+        <div className="absolute top-3 right-3 bg-surface/90 backdrop-blur-sm rounded-spa px-2.5 py-1 flex items-baseline gap-1.5">
+          {service.isOnOffer && service.originalPrice != null && (
+            <span className="font-body font-body-normal text-xs text-text-secondary line-through">
+              {formatPrice(service.originalPrice)}
+            </span>
+          )}
+          <span className="font-heading font-heading-semibold text-base text-text-primary">
+            {formatPrice(service.isOnOffer && service.effectivePrice != null ? service.effectivePrice : service.price)}
           </span>
-        )}
-        {service.isOnOffer && (
-          <span className="inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal bg-success text-success-foreground">
-            {service.activeCampaignName || 'Offer'}
-          </span>
-        )}
+        </div>
       </div>
-      <div className="absolute top-3 right-3 bg-surface/90 backdrop-blur-sm rounded-spa px-2.5 py-1 flex items-baseline gap-1.5">
-        {service.isOnOffer && service.originalPrice != null && (
-          <span className="font-body font-body-normal text-xs text-text-secondary line-through">
-            {formatPrice(service.originalPrice)}
-          </span>
-        )}
-        <span className="font-heading font-heading-semibold text-base text-text-primary">
-          {formatPrice(service.isOnOffer && service.effectivePrice != null ? service.effectivePrice : service.price)}
-        </span>
-      </div>
-    </div>
+    )}
 
     <div className="p-3.5">
       <div className="flex items-start justify-between mb-1.5">
@@ -124,7 +156,7 @@ const ServiceCard = React.memo(({ service, isSelected, onServiceSelect }) => (
 ServiceCard.displayName = 'ServiceCard';
 
 const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, onPrevious }) => {
-  const { orgId, orgSlug, loading: tenantLoading } = useTenant();
+  const { orgId, orgSlug, isBeauty, loading: tenantLoading } = useTenant();
   const [activeCampaign, setActiveCampaign] = useState(null);
   // Collapses the "Choose Service" title/subtitle and the category filter
   // pills as the customer scrolls down, so they don't stay pinned above the
@@ -745,6 +777,7 @@ const ServiceSelection = ({ selectedService, onServiceSelect, selectedBranch, on
             service={service}
             isSelected={selectedService?.id === service.id}
             onServiceSelect={onServiceSelect}
+            hideImage={isBeauty}
           />
         ))}
       </div>

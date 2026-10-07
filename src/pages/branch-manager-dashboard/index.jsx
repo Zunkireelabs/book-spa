@@ -26,6 +26,8 @@ import TherapistManagementPanel from './components/MasterData/TherapistManagemen
 import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
+import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
+import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -674,6 +676,8 @@ const BranchManagerDashboard = () => {
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
               {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
               {viewMode === 'payment-methods' && profile?.role === 'admin' && <PaymentMethodsPanel />}
+              {viewMode === 'booking-settings' && profile?.role === 'admin' && <BookingSettingsPanel />}
+              {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}

@@ -19,6 +19,7 @@ import Input from '../../../../components/ui/Input';
 import Select from '../../../../components/ui/Select';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { useIndustry } from '../../../../hooks/useIndustry';
+import { useOrg } from '../../../../contexts/OrgContext';
 import {
   fetchTherapistsForManagement,
   createTherapist,
@@ -146,12 +147,13 @@ const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, on
 
 const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
   const { staffLabel, staffLabelPlural } = useIndustry();
+  const { enableStaffRatings } = useOrg();
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingTherapist, setEditingTherapist] = useState(null);
-  const [formData, setFormData] = useState({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true });
+  const [formData, setFormData] = useState({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '' });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -266,7 +268,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
 
   const handleOpenCreate = () => {
     setEditingTherapist(null);
-    setFormData({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true });
+    setFormData({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '' });
     setFormError(null);
     setShowModal(true);
   };
@@ -279,6 +281,10 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       positions: t.position ? t.position.split('/').map(p => p.trim()) : [],
       specialties: (t.specialties || []).join(', '),
       isServiceStaff: t.is_service_staff !== false,
+      photoUrl: t.photo_url || '',
+      bio: t.bio || '',
+      experienceYears: t.experience_years != null ? String(t.experience_years) : '',
+      rating: t.rating != null ? String(t.rating) : '',
     });
     setFormError(null);
     setShowModal(true);
@@ -298,6 +304,11 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       .map(s => s.trim())
       .filter(Boolean);
 
+    const photoUrl = formData.photoUrl.trim();
+    const bio = formData.bio.trim();
+    const experienceYears = formData.experienceYears === '' ? null : parseInt(formData.experienceYears, 10);
+    const rating = formData.rating === '' ? null : parseFloat(formData.rating);
+
     let result;
     if (editingTherapist) {
       result = await updateTherapist({
@@ -307,6 +318,10 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
         position: formData.positions.length > 0 ? formData.positions.join('/') : null,
         specialties: specialtiesArr,
         isServiceStaff: formData.isServiceStaff,
+        photoUrl,
+        bio,
+        experienceYears,
+        rating: enableStaffRatings ? rating : undefined,
       });
     } else {
       result = await createTherapist({
@@ -316,6 +331,10 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
         specialties: specialtiesArr,
         isServiceStaff: formData.isServiceStaff,
         branchId,
+        photoUrl,
+        bio,
+        experienceYears,
+        rating: enableStaffRatings ? rating : undefined,
       });
     }
 
@@ -600,6 +619,50 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                 />
                 <p className="font-caption text-xs text-text-secondary">Separate multiple specialties with commas</p>
               </div>
+
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Photo URL</label>
+                <Input
+                  value={formData.photoUrl}
+                  onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
+                  placeholder="https://..."
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Bio</label>
+                <textarea
+                  value={formData.bio}
+                  onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                  placeholder="Short bio shown on the staff profile"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-border rounded-spa font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary spa-transition-fast resize-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Experience (years)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={formData.experienceYears}
+                  onChange={(e) => setFormData({ ...formData, experienceYears: e.target.value })}
+                />
+              </div>
+
+              {enableStaffRatings && (
+                <div className="space-y-1">
+                  <label className="block font-body font-body-medium text-sm text-text-primary">Rating</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="5"
+                    step="0.1"
+                    value={formData.rating}
+                    onChange={(e) => setFormData({ ...formData, rating: e.target.value })}
+                  />
+                </div>
+              )}
 
               <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background">
                 <div>
