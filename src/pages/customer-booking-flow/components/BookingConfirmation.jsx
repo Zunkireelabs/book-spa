@@ -189,7 +189,7 @@ const BookingConfirmation = ({
             {servicesToShow.length > 1 ? `${servicesToShow.length} services` : heroService?.name}
           </h3>
           {servicesToShow.length === 1 && (
-            <p className="text-xs text-white/80">{heroService?.duration_minutes ?? parseInt(heroService?.duration, 10)} min</p>
+            <p className="text-xs text-white/80">{heroService?.duration_minutes ?? heroService?.durationMinutes ?? parseInt(heroService?.duration, 10)} min</p>
           )}
         </div>
       </div>

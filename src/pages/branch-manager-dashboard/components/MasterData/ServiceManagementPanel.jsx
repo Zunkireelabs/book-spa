@@ -140,7 +140,12 @@ const ServiceManagementPanel = () => {
     setRestrictStaff(false);
     setShowModal(true);
     const eligibleResult = await fetchServiceTherapists(service.id);
-    const ids = eligibleResult.data || [];
+    // The allow-list is org-wide in storage but per-branch in meaning (migration-257/258):
+    // a service can be restricted at another branch with no rows for this one. Filter to
+    // this branch's roster so the checkboxes — and "is this service restricted here" —
+    // reflect only what a save at this branch would actually write.
+    const branchTherapistIds = new Set(allTherapists.map((t) => t.id));
+    const ids = (eligibleResult.data || []).filter((id) => branchTherapistIds.has(id));
     setEligibleTherapistIds(ids);
     setRestrictStaff(ids.length > 0);
   };
@@ -258,7 +263,7 @@ const ServiceManagementPanel = () => {
     } else {
       const serviceId = editingService ? editingService.id : result.data?.id;
       if (serviceId) {
-        const staffResult = await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : []);
+        const staffResult = await setServiceTherapists(serviceId, restrictStaff ? eligibleTherapistIds : [], branchId);
         if (staffResult.error) {
           // The service itself saved fine; only the eligible-staff allow-list
           // failed. Surface it and keep the modal open — closing on success-of-
@@ -274,6 +279,14 @@ const ServiceManagementPanel = () => {
           await loadServices();
           return;
         }
+      } else {
+        // createService reported success but returned no row/id — the eligible-
+        // staff allow-list write has nothing to attach to and was silently
+        // skipped. Surface it rather than closing the modal as if it saved clean.
+        setFormError('Service saved, but its id was not returned — eligible staff could not be saved. Reopen it from the list to configure eligible staff.');
+        setSaving(false);
+        await loadServices();
+        return;
       }
       setShowModal(false);
       await loadServices();

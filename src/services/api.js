@@ -6246,12 +6246,13 @@ export async function fetchServiceTherapists(serviceId) {
 // restricted to unrestricted, with no caller ever checking the result. The RPC
 // does both statements inside one function invocation, so a failure rolls
 // back the delete too.
-export async function setServiceTherapists(serviceId, therapistIds) {
+export async function setServiceTherapists(serviceId, therapistIds, branchId) {
   try {
     const ids = (therapistIds || []).filter(Boolean);
     const { data, error } = await supabase.rpc('set_service_therapists', {
       p_service_id: serviceId,
       p_therapist_ids: ids,
+      p_branch_id: branchId,
     });
     if (error) throw error;
     return { data: ids, error: null };

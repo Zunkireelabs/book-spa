@@ -31,6 +31,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   const [therapistWindow, setTherapistWindow] = useState(null); // days 0..13, only when therapistFilter is set
   const [extendedTherapistWindow, setExtendedTherapistWindow] = useState(null); // days 14..29
   const [therapistWindowError, setTherapistWindowError] = useState(null);
+  const [extendedTherapistWindowError, setExtendedTherapistWindowError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingExtended, setLoadingExtended] = useState(false);
 
@@ -107,10 +108,17 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   // true (nothing to check against), so a fetch failure read as every slot being free —
   // honest handling requires computedDays to treat "we don't know" as unavailable.
   const loadTherapistWindow = () => {
+    setTherapistWindowError(null);
     if (!selectedBranch?.id || !therapistFilter) return;
     setTherapistWindow(null);
     setExtendedTherapistWindow(null);
-    setTherapistWindowError(null);
+    setExtendedTherapistWindowError(null);
+    // Reset the extended (14-29) window too — a Retry should put the component back
+    // into its day-0-13 state so loadFurtherAhead (guarded by `|| extendedWindow`)
+    // becomes callable again, instead of leaving stale days 14-29 with no occupancy
+    // rows to check against (which reads as every slot there being free, forever).
+    setExtendedWindow(null);
+    setLoadingExtended(false);
     fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
       .then(setTherapistWindow)
       .catch((err) => {
@@ -127,19 +135,23 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     if (!selectedBranch?.id || loadingExtended || extendedWindow) return;
     setLoadingExtended(true);
     const tasks = [
-      fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate).then(setExtendedWindow),
+      fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+        .then(setExtendedWindow)
+        .catch((err) => {
+          console.error('[DateTimeSelection] extended room/gender availability fetch failed:', err.message);
+        }),
     ];
     if (therapistFilter) {
       tasks.push(
-        fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate).then(setExtendedTherapistWindow)
+        fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+          .then(setExtendedTherapistWindow)
+          .catch((err) => {
+            console.error('[DateTimeSelection] extended therapist availability fetch failed:', err.message);
+            setExtendedTherapistWindowError(err.message || 'Could not load availability.');
+          })
       );
     }
-    Promise.all(tasks)
-      .catch((err) => {
-        console.error('[DateTimeSelection] extended availability fetch failed:', err.message);
-        if (therapistFilter) setTherapistWindowError(err.message || 'Could not load availability.');
-      })
-      .finally(() => setLoadingExtended(false));
+    Promise.all(tasks).finally(() => setLoadingExtended(false));
   };
 
   // Real, duration-aware, per-room-capacity availability across the whole fetched window.
@@ -195,7 +207,12 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
         let therapistOk = true;
         if (therapistFilter) {
-          if (therapistWindowError) {
+          // Each half of the fetched window carries its own error flag — a failure on
+          // the days-0-13 fetch doesn't mean the days-14-29 extended fetch also failed
+          // (or vice versa), so only the half whose fetch actually failed is blocked.
+          const isExtendedDay = d.fullDate >= dates[WINDOW_DAYS].fullDate;
+          const windowFetchFailed = isExtendedDay ? extendedTherapistWindowError : therapistWindowError;
+          if (windowFetchFailed) {
             // Fetch failed and we have no busy-row data to check against — treat as
             // unavailable rather than free (see loadTherapistWindow's comment above).
             therapistOk = false;
@@ -220,7 +237,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
       return { date: d.fullDate, slots };
     });
-  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
+  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, extendedTherapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
 
   const timeSlots = useMemo(
     () => computedDays.find((d) => d.date === selectedDate)?.slots || [],
