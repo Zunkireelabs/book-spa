@@ -7,7 +7,7 @@ export function to12h(timeStr) {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-function formatNPR(amount) {
+export function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
@@ -38,6 +38,20 @@ const STATUS_TO_DB = {
 
 export function toDbStatus(uiStatus) {
   return STATUS_TO_DB[uiStatus] || uiStatus;
+}
+
+// No-Show status buttons were removed — cancelling a booking with reason "No
+// Show" now sets status='Cancelled' + cancellation_reason='No Show' instead
+// of the old real status='No Show'. Every site that used to test
+// `status === 'No Show'` needs this predicate instead, so both old rows (real
+// 'No Show' status, pre-dating that change) and new rows (reason-only) count.
+// Accepts either a raw DB row (cancellation_reason) or a transformBooking()
+// result (cancellationReason).
+export function isNoShow(booking) {
+  if (!booking) return false;
+  const status = booking.status ? booking.status.toLowerCase() : '';
+  const reason = booking.cancellationReason ?? booking.cancellation_reason;
+  return status === 'no show' || (status === 'cancelled' && reason === 'No Show');
 }
 
 /**
@@ -100,6 +114,10 @@ export function transformBooking(dbBooking) {
   }
   const amountDue = Math.max(finalAmount - amountPaid, 0);
 
+  // Customer gratuity (migration-240) — NOT revenue, NOT part of amountPaid/amountDue.
+  const tipRows = Array.isArray(dbBooking.booking_tips) ? dbBooking.booking_tips : [];
+  const tipTotal = tipRows.reduce((s, t) => s + Number(t.amount || 0), 0);
+
   return {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
@@ -116,6 +134,7 @@ export function transformBooking(dbBooking) {
     time: dbBooking.start_time ? dbBooking.start_time.slice(0, 5) : '',
     date: dbBooking.date,
     status: dbBooking.status ? dbBooking.status.toLowerCase() : 'pending',
+    cancellationReason: dbBooking.cancellation_reason || null,
     paymentStatus,
     baseAmount: Number(dbBooking.base_amount || 0),
     discountAmount: Number(dbBooking.discount_amount || 0),
@@ -141,6 +160,8 @@ export function transformBooking(dbBooking) {
     payments: paymentRows
       ? paymentRows.map(p => ({ id: p.id || null, amount: Number(p.amount || 0), paymentMode: p.payment_mode, createdAt: p.created_at }))
       : [],
+    tips: tipRows.map(t => ({ id: t.id || null, amount: Number(t.amount || 0), createdAt: t.created_at, receivedByName: t.receiver?.full_name || null })),
+    tipTotal,
   };
 }
 

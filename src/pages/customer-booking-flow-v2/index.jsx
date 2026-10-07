@@ -15,6 +15,7 @@ import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { splitE164 } from '../../utils/phone';
 import useScrollCollapse from '../../hooks/useScrollCollapse';
+import ProviderProfileFlow from '../provider-profile-flow';
 
 // Callback ref, not useRef + a useLayoutEffect keyed on [currentStep]: this page
 // returns an early "Loading..." placeholder while tenant data is still in flight, so
@@ -52,7 +53,7 @@ function useMeasuredRef(setHeight) {
 // v1 ServiceSelection / DateTimeSelection components unchanged — no parallel booking system.
 const CustomerBookingFlowV2 = () => {
   const { orgSlug } = useParams();
-  const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError } = useTenant();
+  const { orgName, getBookingJourneyText, loading: tenantLoading, error: tenantError, useProviderProfileLayout } = useTenant();
   const { customerProfile } = useCustomerAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -322,7 +323,7 @@ const CustomerBookingFlowV2 = () => {
 
     setBookingData(finalBookingData);
     setCurrentStep(5);
-    localStorage.removeItem('bookingFlowV2');
+    localStorage.removeItem(`bookingFlowV2:${orgSlug}`);
 
     capture('customer_booking_submitted', {
       org_slug: orgSlug,
@@ -339,6 +340,15 @@ const CustomerBookingFlowV2 = () => {
   const handleEditBooking = () => {
     // BookingConfirmation only ever calls onEditBooking(1) ("Edit Booking" -> back to
     // service selection); v2's equivalent is the combined service+time step.
+    setCurrentStep(2);
+  };
+
+  const handleBookAnother = () => {
+    setBookingData(null);
+    setSelectedService(null);
+    setSelectedDateTime({ date: '', time: '' });
+    // Name/email/phone carry over deliberately; consent and free-text notes do not.
+    setCustomerInfo((prev) => ({ ...prev, agreeToTerms: false, specialRequests: '' }));
     setCurrentStep(2);
   };
 
@@ -412,6 +422,8 @@ const CustomerBookingFlowV2 = () => {
         return (
           <BookingSuccess
             bookingData={bookingData}
+            orgSlug={orgSlug}
+            onBookAnother={handleBookAnother}
           />
         );
 
@@ -453,6 +465,10 @@ const CustomerBookingFlowV2 = () => {
     );
   }
 
+  if (useProviderProfileLayout) {
+    return <ProviderProfileFlow />;
+  }
+
   // Widening the container to fit the drawer used to keep the OLD max-w-4xl
   // centered position for its left edge and only grow rightward, which kept
   // step transitions from shifting but left a lopsided gutter on the left
@@ -474,7 +490,7 @@ const CustomerBookingFlowV2 = () => {
           : 'var(--customer-header-h, 64px)',
       }}
     >
-      <CustomerHeader wide={wideOpen} />
+      <CustomerHeader wide={wideOpen} branch={selectedBranch} />
 
       {currentStep < 5 && (
         <ProgressIndicatorV2

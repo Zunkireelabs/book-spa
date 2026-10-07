@@ -266,6 +266,18 @@ const DailyOperationalReportPanel = ({ branchId }) => {
             </div>
           </div>
 
+          {/* Tips — NOT revenue, deliberately kept outside the Revenue Summary Cards
+              and Payment Breakdown above (migration-240-add-booking-tips.sql). */}
+          {report.tipsTotal > 0 && (
+            <div className="bg-surface rounded-spa p-3 border border-border border-dashed flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Icon name="Banknote" size={14} className="text-text-secondary" />
+                <span className="text-xs text-text-secondary">Tips Collected (not revenue — passed to staff)</span>
+              </div>
+              <span className="text-sm font-semibold text-text-secondary">{formatNPR(report.tipsTotal)}</span>
+            </div>
+          )}
+
           {/* Booking Breakdown + Payment Mode */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Booking Breakdown */}

@@ -4,7 +4,7 @@ import FilterBar from '../../../../components/ui/FilterBar';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import PaymentModal from '../../../../components/ui/PaymentModal';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
-import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, getCustomerOutstandingBalance } from '../../../../services/api';
+import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
 import SettledDueHistoryPanel from './SettledDueHistoryPanel';
 
 function formatNPR(amount) {
@@ -201,7 +201,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     setOtherDueBookings(data?.bookings || []);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes }) => {
+  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipAmount, tipReceivedBy }) => {
     if (!payingRow) return { error: { message: 'No booking selected.' } };
     setPaymentSubmitting(true);
     // Pay the clicked row with its allocated tenders, then pay each bundled
@@ -211,6 +211,12 @@ const OutstandingReportPanel = ({ branchId }) => {
     if (result.error) {
       setPaymentSubmitting(false);
       return { error: result.error };
+    }
+    // Tip is attributed to the clicked row only, never split across bundled
+    // other-outstanding bookings. Best-effort — must never undo a successful payment.
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId: payingRow.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
     for (const alloc of (additionalAllocations || [])) {
       await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });

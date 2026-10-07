@@ -26,10 +26,13 @@ import TherapistManagementPanel from './components/MasterData/TherapistManagemen
 import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
+import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
+import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
 import RevenueCards from './components/RevenueCards';
+import TipsSummaryCard from './components/TipsSummaryCard';
 import TodayInsightsPanel from './components/TodayInsightsPanel';
 import PeriodFilter from './components/PeriodFilter';
 import { getTodayISO } from '../../utils/periodPresets';
@@ -384,6 +387,9 @@ const BranchManagerDashboard = () => {
         <StatusLegend showPayment />
       </div>
 
+      {/* Tips — not revenue, kept visually separate, directly above Top Performers */}
+      <TipsSummaryCard branchId={branchId} userRole={profile?.role} />
+
       {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
         <TherapistUtilizationChart branchId={branchId} period={period} />
@@ -670,6 +676,8 @@ const BranchManagerDashboard = () => {
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
               {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
               {viewMode === 'payment-methods' && profile?.role === 'admin' && <PaymentMethodsPanel />}
+              {viewMode === 'booking-settings' && profile?.role === 'admin' && <BookingSettingsPanel />}
+              {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}

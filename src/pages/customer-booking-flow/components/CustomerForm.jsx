@@ -4,8 +4,12 @@ import Input from '../../../components/ui/Input';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import Icon from '../../../components/AppIcon';
 import { checkExistingCustomerByPhone, findCustomerMatch } from '../../../services/api';
+import { formatNPR } from '../../../services/bookingTransformers';
 
-const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, selectedService, selectedDateTime, genderPreference, orgSlug }) => {
+// showSummary defaults to true so the v2 wizard (which has no summary elsewhere) is
+// unaffected; the provider-profile flow already shows a live, multi-service summary
+// in its own SummaryCard and sets this false to avoid a second, contradicting one.
+const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, selectedService, selectedDateTime, genderPreference, orgSlug, showSummary = true }) => {
   const [errors, setErrors] = useState({});
   const [isValidating, setIsValidating] = useState(false);
   // Purely informational — createBooking()'s isNewCustomer check (unchanged) is what
@@ -240,21 +244,14 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
     return `${dateStr} at ${timeStr}`;
   };
 
-  const formatPrice = (price) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'NPR',
-      minimumFractionDigits: 0
-    }).format(price);
-  };
-
   return (
     <div className="space-y-4">
       {/* Booking Summary */}
+      {showSummary && (
       <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-4 sm:p-6">
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4 flex items-center">
           <Icon name="Calendar" size={20} className="mr-2" />
-          Booking Summary
+          Booking summary
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-3">
@@ -281,17 +278,18 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
             <div>
               <span className="font-body font-body-medium text-sm text-text-secondary">Price:</span>
               <p className="font-heading font-heading-semibold text-lg text-primary">
-                {formatPrice(selectedService?.price || 0)}
+                {formatNPR(selectedService?.price || 0)}
               </p>
             </div>
           </div>
         </div>
       </div>
+      )}
 
       {/* Customer Form */}
       <div className="bg-surface rounded-spa-lg border border-border p-4 sm:p-6">
         <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-6">
-          Personal Information
+          Your details
         </h3>
 
         {matchedCustomer && (
@@ -328,7 +326,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* First Name */}
           <div className="space-y-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              First Name *
+              First name
             </label>
             <Input
               type="text"
@@ -350,7 +348,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Last Name */}
           <div className="space-y-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Last Name *
+              Last name
             </label>
             <Input
               type="text"
@@ -372,7 +370,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Email */}
           <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Email Address
+              Email address (Optional)
             </label>
             <Input
               type="email"
@@ -395,7 +393,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Phone */}
           <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Phone Number
+              Phone number (Optional)
             </label>
             <div className="flex">
               <CountryCodeSelect
@@ -431,7 +429,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Gender */}
           <div className="space-y-2 col-span-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Gender *
+              Gender
             </label>
             <div className="grid grid-cols-3 gap-2 sm:gap-4">
               {[
@@ -477,13 +475,13 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {customerCheckStatus === 'new' && (
           <div className="space-y-2 col-span-2">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              How did they hear about us? (Optional)
+              How did you hear about us? (Optional)
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[
-                { value: 'client', label: 'Client', icon: 'Users' },
+                { value: 'client', label: 'A friend or client', icon: 'Users' },
                 { value: 'social_media', label: 'Social Media', icon: 'Share2' },
-                { value: 'staff', label: 'Staff', icon: 'UserCheck' }
+                { value: 'staff', label: 'A team member', icon: 'UserCheck' }
               ].map((option) => (
                 <label
                   key={option.value}
@@ -566,7 +564,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
                   name="referralStaffName"
                   value={customerInfo.referralStaffName || ''}
                   onChange={handleInputChange}
-                  placeholder="Staff member's name"
+                  placeholder="Who was it?"
                 />
               </div>
             )}

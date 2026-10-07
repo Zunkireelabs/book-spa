@@ -3,7 +3,7 @@ import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 import PaymentModal from '../../../components/ui/PaymentModal';
-import { getCustomerOutstandingBalance, recordPayment, fetchDueHolderNames } from '../../../services/api';
+import { getCustomerOutstandingBalance, recordPayment, recordTip, fetchDueHolderNames } from '../../../services/api';
 import { useBranch } from '../../../contexts/BranchContext';
 
 function formatNPR(amount) {
@@ -86,7 +86,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     setPayingBookings(selected);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes }) => {
+  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipAmount, tipReceivedBy }) => {
     if (!payingBookings || payingBookings.length === 0) {
       return { error: { message: 'No booking selected.' } };
     }
@@ -96,6 +96,12 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     if (result.error) {
       setPaymentSubmitting(false);
       return { error: result.error };
+    }
+    // Tip is attributed to the primary booking only, never split across bundled
+    // allocations. Best-effort — must never undo a payment that already succeeded.
+    if (tipAmount > 0) {
+      const tipResult = await recordTip({ bookingId: primary.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+      if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
     for (const alloc of (additionalAllocations || [])) {
       await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
