@@ -9791,7 +9791,7 @@ export async function fetchBranchesByOrgId(orgId) {
   try {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, address, phone, is_active, open_time, close_time')
+      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url')
       .eq('org_id', orgId)
       .eq('is_active', true)
       .order('name');

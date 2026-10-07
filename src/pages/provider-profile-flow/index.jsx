@@ -11,6 +11,7 @@ import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import ProfileHero from './components/ProfileHero';
 import ServicesSection from './components/ServicesSection';
 import TeamSection from './components/TeamSection';
+import LocationSection from './components/LocationSection';
 import SummaryCard from './components/SummaryCard';
 import MobileBookingBar from './components/MobileBookingBar';
 import BookingView from './components/BookingView';
@@ -36,6 +37,7 @@ const ProviderProfileFlow = () => {
   const { customerProfile } = useCustomerAuth();
 
   const [selectedBranch, setSelectedBranch] = useState(null);
+  const [branches, setBranches] = useState([]);
   const [services, setServices] = useState([]);
   // Array: a visit can bundle several services, created as one back-to-back group
   // booking (shared booking_group_id). Order is selection order, which is also the
@@ -84,9 +86,21 @@ const ProviderProfileFlow = () => {
   useEffect(() => {
     if (!orgId) return;
     fetchBranchesByOrgId(orgId).then(({ data }) => {
-      if (data && data.length > 0) setSelectedBranch(data[0]);
+      setBranches(data || []);
+      if (data?.length > 0) setSelectedBranch(data[0]);
     });
   }, [orgId]);
+
+  const handleBranchSelect = useCallback((branch) => {
+    if (!branch) return;
+    setSelectedBranch(branch);
+    // Branch-scoped selections don't carry over — services/therapists/slots are a
+    // different set at a different branch. The services and therapist fetches
+    // already key on selectedBranch?.id, so both refetch on their own.
+    setSelectedServices([]);
+    setSelectedProfessional(null);
+    setSelectedDateTime({ date: '', time: '' });
+  }, []);
 
   useEffect(() => {
     if (!orgSlug || !selectedBranch) return;
@@ -277,6 +291,12 @@ const ProviderProfileFlow = () => {
               onSelect={handleProfessionalSelect}
             />
           )}
+
+          <LocationSection
+            branch={selectedBranch}
+            branches={branches}
+            onSelectBranch={handleBranchSelect}
+          />
         </div>
 
         <div className="pt-6">
