@@ -3,14 +3,6 @@ import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { formatNPR } from '../../../services/bookingTransformers';
 
-// Placeholder addresses seeded during onboarding shouldn't be shown to customers.
-// Treated as "unset" rather than printed verbatim.
-const PLACEHOLDER_ADDRESSES = new Set(['tbd', 'n/a', 'na', '-', 'tba']);
-const isRealAddress = (address) => {
-  const trimmed = (address || '').trim();
-  return trimmed.length > 0 && !PLACEHOLDER_ADDRESSES.has(trimmed.toLowerCase());
-};
-
 // Falls back to the icon tile when the URL is absent *or* fails to load — these are
 // admin-pasted URLs with nothing validating them, so a dead link is a normal state, not
 // an edge case, and a broken-image icon in the summary looks like a broken app.
@@ -45,7 +37,6 @@ const SummaryCard = ({
   orgName,
   logoUrl,
   heroImageUrl,
-  branch,
   selectedServices = [],
   totalMinutes = 0,
   selectedProfessional,
@@ -73,12 +64,6 @@ const SummaryCard = ({
         <VenueThumb orgName={orgName} logoUrl={logoUrl} heroImageUrl={heroImageUrl} />
         <div className="min-w-0">
           <p className="font-medium text-base text-[var(--zn-foreground)] truncate">{orgName}</p>
-          {branch?.name && (
-            <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5 truncate">{branch.name}</p>
-          )}
-          {isRealAddress(branch?.address) && (
-            <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5">{branch.address}</p>
-          )}
         </div>
       </div>
 

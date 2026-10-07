@@ -228,7 +228,6 @@ const BookingView = ({
             orgName={orgName}
             logoUrl={logoUrl}
             heroImageUrl={heroImageUrl}
-            branch={selectedBranch}
             selectedServices={selectedServices}
             totalMinutes={totalMinutes}
             selectedProfessional={selectedProfessional}

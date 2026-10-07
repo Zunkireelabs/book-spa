@@ -11,7 +11,7 @@ import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
 import ProfileHero from './components/ProfileHero';
 import ServicesSection from './components/ServicesSection';
 import TeamSection from './components/TeamSection';
-import LocationSection from './components/LocationSection';
+import BranchGate from './components/BranchGate';
 import SummaryCard from './components/SummaryCard';
 import MobileBookingBar from './components/MobileBookingBar';
 import BookingView from './components/BookingView';
@@ -38,6 +38,7 @@ const ProviderProfileFlow = () => {
 
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [branches, setBranches] = useState([]);
+  const [branchesLoaded, setBranchesLoaded] = useState(false);
   const [services, setServices] = useState([]);
   // Array: a visit can bundle several services, created as one back-to-back group
   // booking (shared booking_group_id). Order is selection order, which is also the
@@ -87,7 +88,11 @@ const ProviderProfileFlow = () => {
     if (!orgId) return;
     fetchBranchesByOrgId(orgId).then(({ data }) => {
       setBranches(data || []);
-      if (data?.length > 0) setSelectedBranch(data[0]);
+      // Auto-select only when unambiguous. Two or more branches show BranchGate
+      // first instead — silently picking data[0] let a customer book the wrong
+      // location on a multi-branch org with no way to tell.
+      if (data?.length === 1) setSelectedBranch(data[0]);
+      setBranchesLoaded(true);
     });
   }, [orgId]);
 
@@ -101,6 +106,13 @@ const ProviderProfileFlow = () => {
     setSelectedProfessional(null);
     setSelectedDateTime({ date: '', time: '' });
   }, []);
+
+  // Pushes history so browser Back returns here instead of leaving the site — the
+  // gate (and Back) is now the only way to change branch.
+  const handleBranchGateSelect = useCallback((branch) => {
+    handleBranchSelect(branch);
+    window.history.pushState({ providerBranch: true }, '');
+  }, [handleBranchSelect]);
 
   useEffect(() => {
     if (!orgSlug || !selectedBranch) return;
@@ -199,13 +211,19 @@ const ProviderProfileFlow = () => {
   };
 
   useEffect(() => {
-    const onPopState = () => {
+    const onPopState = (e) => {
       setBookingOpen(false);
+      // Popping back past the gate's pushed entry (state.providerBranch) lands on
+      // the pre-selection entry (state null) — re-show the gate instead of leaving
+      // the customer on services with no way back to it.
+      if (branches.length > 1 && !e.state?.providerBranch) {
+        setSelectedBranch(null);
+      }
       scrollToTopInstant();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [branches]);
 
   const handleConfirmBooking = (confirmationData) => {
     setBookingData({
@@ -269,6 +287,29 @@ const ProviderProfileFlow = () => {
     );
   }
 
+  if (branchesLoaded && branches.length === 0) {
+    return (
+      <div className="zn-scope min-h-screen bg-[var(--zn-background)] flex items-center justify-center">
+        <div className="text-center p-8">
+          <Icon name="AlertCircle" size={48} className="text-error mx-auto mb-4" />
+          <h1 className="font-normal text-2xl text-[var(--zn-foreground)]">No locations available right now</h1>
+        </div>
+      </div>
+    );
+  }
+
+  if (branches.length > 1 && !selectedBranch) {
+    return (
+      <BranchGate
+        orgName={orgName}
+        heroImageUrl={heroImageUrl}
+        logoUrl={logoUrl}
+        branches={branches}
+        onSelect={handleBranchGateSelect}
+      />
+    );
+  }
+
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
@@ -291,12 +332,6 @@ const ProviderProfileFlow = () => {
               onSelect={handleProfessionalSelect}
             />
           )}
-
-          <LocationSection
-            branch={selectedBranch}
-            branches={branches}
-            onSelectBranch={handleBranchSelect}
-          />
         </div>
 
         <div className="pt-6">
@@ -304,7 +339,6 @@ const ProviderProfileFlow = () => {
             orgName={orgName}
             logoUrl={logoUrl}
             heroImageUrl={heroImageUrl}
-            branch={selectedBranch}
             selectedServices={selectedServices}
             totalMinutes={totalMinutes}
             selectedProfessional={selectedProfessional}
