@@ -5,6 +5,7 @@ import SummaryCard from '../SummaryCard';
 import ProfessionalStep from './ProfessionalStep';
 import DateTimeStep from './DateTimeStep';
 import ConfirmStep from './ConfirmStep';
+import DiscardDialog from './DiscardDialog';
 import { useTenant } from '../../../../contexts/TenantContext';
 import { scrollToTopInstant } from '../../../../utils/scroll';
 
@@ -60,6 +61,7 @@ const BookingView = ({
     return i > 0 ? i : 0;
   });
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
 
   // A late-arriving flag (TenantContext resolves async) can't strand stepIndex past
   // the end of a shorter steps array.
@@ -133,13 +135,17 @@ const BookingView = ({
         </button>
 
         <button
-          onClick={onClose}
+          onClick={() => setConfirmingClose(true)}
           aria-label="Close booking"
           className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
         >
           <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
         </button>
       </div>
+
+      {confirmingClose && (
+        <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-28 lg:pb-16">
         <nav aria-label="Booking steps" className="flex items-center gap-2 flex-wrap mt-4">
