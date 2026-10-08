@@ -546,7 +546,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
                 {editingTherapist ? `Edit ${staffLabel}` : `Add ${staffLabel}`}
