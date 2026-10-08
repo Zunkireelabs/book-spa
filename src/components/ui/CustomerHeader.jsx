@@ -2,7 +2,6 @@ import React, { useContext, useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
 import BrandMark from './BrandMark';
-import TenantContext from 'contexts/TenantContext';
 import CustomerAuthContext from 'contexts/CustomerAuthContext';
 import useMeasuredHeightVar from 'hooks/useMeasuredHeightVar';
 
@@ -17,10 +16,6 @@ const CustomerHeader = ({ wide, branch, containerClassName }) => {
   // hardcode a stale 64px and end up overlapping it.
   useMeasuredHeightVar(headerRef, '--customer-header-h');
 
-  // Falls back to defaults when rendered outside TenantProvider/CustomerAuthProvider
-  const tenantData = useContext(TenantContext) || { orgName: 'Zennly', isCleaning: false, isSalon: false, isBeauty: false };
-  const { orgName, isCleaning, isSalon, isBeauty } = tenantData;
-
   const customerAuth = useContext(CustomerAuthContext) || { customer: null, customerProfile: null };
   const { customer, customerProfile } = customerAuth;
   const loginPath = orgSlug ? `/${orgSlug}/customer-login` : '/login';
@@ -30,14 +25,6 @@ const CustomerHeader = ({ wide, branch, containerClassName }) => {
   const bookingPath = orgSlug ? `/${orgSlug}` : '/';
 
   const isBookingFlow = location.pathname === bookingPath || location.pathname === `/${orgSlug}`;
-
-  // Industry-specific tagline
-  const getTagline = () => {
-    if (isCleaning) return 'Professional Cleaning';
-    if (isSalon) return 'Beauty & Style';
-    if (isBeauty) return 'Beauty & Aesthetics';
-    return 'Wellness & Relaxation';
-  };
 
   return (
     <header ref={headerRef} className="fixed top-0 left-0 right-0 z-customer-header bg-surface border-b border-border">
@@ -53,15 +40,7 @@ const CustomerHeader = ({ wide, branch, containerClassName }) => {
         <div className="flex items-center justify-between gap-3 h-auto min-h-16 py-3 sm:h-16 sm:py-0">
           {/* Logo */}
           <Link to={bookingPath} className="flex items-center space-x-2 group min-w-0 flex-1">
-            <BrandMark className="h-8 sm:h-10 w-auto flex-shrink-0 spa-transition-fast" />
-            <div className="flex flex-col min-w-0">
-              <span className="font-heading font-heading-semibold text-base sm:text-lg text-text-primary truncate">
-                {orgName || 'Zennly'}
-              </span>
-              <span className="block font-caption font-caption-normal text-[10px] sm:text-xs text-text-secondary -mt-0.5 sm:-mt-1 truncate">
-                {getTagline()}
-              </span>
-            </div>
+            <BrandMark className="h-7 w-auto flex-shrink-0 spa-transition-fast" />
           </Link>
 
           {/* Navigation Links */}
