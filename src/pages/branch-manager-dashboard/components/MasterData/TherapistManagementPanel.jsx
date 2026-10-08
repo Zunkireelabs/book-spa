@@ -29,6 +29,7 @@ import {
   updateTherapistOrder,
   fetchAllBranches,
   fetchStaffTransfers,
+  uploadStaffPhoto,
 } from '../../../../services/api';
 
 const GENDER_OPTIONS = [
@@ -156,6 +157,9 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
   const [formData, setFormData] = useState({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '' });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -270,6 +274,8 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
     setEditingTherapist(null);
     setFormData({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '' });
     setFormError(null);
+    setPhotoFile(null);
+    setPhotoPreview(null);
     setShowModal(true);
   };
 
@@ -287,7 +293,33 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       rating: t.rating != null ? String(t.rating) : '',
     });
     setFormError(null);
+    setPhotoFile(null);
+    setPhotoPreview(t.photo_url || null);
     setShowModal(true);
+  };
+
+  const handlePhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      setFormError('Only JPEG, PNG, WebP, and GIF images are allowed.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError('Image must be less than 5MB.');
+      return;
+    }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setFormError(null);
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setFormData(f => ({ ...f, photoUrl: '' }));
   };
 
   const handleSave = async () => {
@@ -304,7 +336,19 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       .map(s => s.trim())
       .filter(Boolean);
 
-    const photoUrl = formData.photoUrl.trim();
+    let photoUrl = formData.photoUrl.trim();
+    if (photoFile) {
+      setUploadingPhoto(true);
+      const uploadResult = await uploadStaffPhoto(photoFile);
+      setUploadingPhoto(false);
+
+      if (uploadResult.error) {
+        setFormError(uploadResult.error.message || 'Failed to upload photo.');
+        setSaving(false);
+        return;
+      }
+      photoUrl = uploadResult.url;
+    }
     const bio = formData.bio.trim();
     const experienceYears = formData.experienceYears === '' ? null : parseInt(formData.experienceYears, 10);
     const rating = formData.rating === '' ? null : parseFloat(formData.rating);
@@ -548,8 +592,8 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="shrink-0 bg-surface flex items-center justify-between px-6 pt-6 pb-4 border-b border-border rounded-t-spa-lg">
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
                 {editingTherapist ? `Edit ${staffLabel}` : `Add ${staffLabel}`}
               </h3>
@@ -557,8 +601,6 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                 <Icon name="X" size={20} className="text-text-secondary" />
               </button>
             </div>
-
-            <div className="overflow-y-auto p-6 pt-4 space-y-4">
 
             {formError && (
               <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
@@ -624,13 +666,55 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                 <p className="font-caption text-xs text-text-secondary">Separate multiple specialties with commas</p>
               </div>
 
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Photo URL</label>
-                <Input
-                  value={formData.photoUrl}
-                  onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
-                  placeholder="https://..."
-                />
+              <div className="space-y-2">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Photo</label>
+
+                {photoPreview ? (
+                  <div className="flex items-start gap-3">
+                    <div className="relative w-20 h-20 rounded-full overflow-hidden border border-border flex-shrink-0">
+                      <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-background hover:bg-background/80 spa-transition-fast text-sm text-text-secondary">
+                        <Icon name="RefreshCw" size={14} />
+                        Replace
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          onChange={handlePhotoChange}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-error/30 bg-error/5 hover:bg-error/10 spa-transition-fast text-sm text-error"
+                      >
+                        <Icon name="Trash2" size={14} />
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-border rounded-spa hover:border-primary/50 hover:bg-primary/5 spa-transition-fast">
+                    <Icon name="Upload" size={24} className="text-text-tertiary mb-2" />
+                    <span className="font-body text-sm text-text-secondary">Click to upload photo</span>
+                    <span className="font-caption text-xs text-text-tertiary mt-1">JPEG, PNG, WebP, GIF (max 5MB)</span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={handlePhotoChange}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+
+                {uploadingPhoto && (
+                  <div className="flex items-center gap-2 text-sm text-text-secondary">
+                    <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                    Uploading photo...
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -692,7 +776,6 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
               <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
                 {editingTherapist ? 'Save Changes' : `Add ${staffLabel}`}
               </Button>
-            </div>
             </div>
           </div>
         </div>
