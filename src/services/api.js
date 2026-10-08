@@ -8018,17 +8018,28 @@ export async function fetchCustomersLightweight(branchId) {
       .single();
     if (branchErr) throw branchErr;
 
-    const [{ data, error }, statusRes] = await Promise.all([
-      supabase
-        .from('customers')
-        .select('id, full_name, phone, email, gender')
-        .eq('org_id', branch.org_id)
-        .eq('is_active', true)
-        .order('full_name'),
+    const pageAllCustomers = async () => {
+      const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
+      const customers = [];
+      for (let offset = 0; ; offset += PAGE_SIZE) {
+        const { data: page, error: pageErr } = await supabase
+          .from('customers')
+          .select('id, full_name, phone, email, gender')
+          .eq('org_id', branch.org_id)
+          .eq('is_active', true)
+          .order('full_name')
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (pageErr) throw pageErr;
+        customers.push(...(page || []));
+        if (!page || page.length < PAGE_SIZE) break;
+      }
+      return customers;
+    };
+
+    const [data, statusRes] = await Promise.all([
+      pageAllCustomers(),
       MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
     ]);
-
-    if (error) throw error;
 
     // Attach a `primaryMembership` to each customer via the staff-safe status
     // RPC (migration-087) — status/tier only, no balance, and readable
