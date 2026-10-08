@@ -7364,6 +7364,52 @@ export async function uploadServiceImage(file) {
   }
 }
 
+/**
+ * Upload a staff photo to Supabase Storage.
+ * Returns the public URL of the uploaded image.
+ */
+export async function uploadStaffPhoto(file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (!['admin', 'manager'].includes(profile.role)) {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins and managers can upload staff photos.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `staff/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadStaffPhoto error:', error.message);
+    return { url: null, error };
+  }
+}
+
 export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
