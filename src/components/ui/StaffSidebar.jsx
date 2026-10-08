@@ -150,14 +150,6 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['staff']
         },
         {
-          id: 'new-booking',
-          label: 'New Booking',
-          icon: 'CalendarPlus',
-          path: `${basePath}?view=new-booking`,
-          roles: ['staff', 'manager', 'admin', 'admin_viewer'],
-          overallHidden: true
-        },
-        {
           id: 'check-booking',
           label: 'Check Booking',
           icon: 'Search',

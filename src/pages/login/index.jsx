@@ -49,9 +49,6 @@ const StaffLoginAuthentication = () => {
       <header className="flex-shrink-0 px-6 md:px-8 py-5 flex justify-between items-center">
         <div className="flex items-center gap-2.5">
           <BrandMark className="h-7 w-auto" />
-          <span className="text-lg font-semibold text-text-primary tracking-tight">
-            {orgName}
-          </span>
         </div>
 
         <div className="flex items-center gap-2 text-sm text-text-secondary">
@@ -75,9 +72,6 @@ const StaffLoginAuthentication = () => {
       {/* Main Content - Centered */}
       <main className="flex-1 flex flex-col items-center px-5 py-10 overflow-y-auto">
         <div className="w-full max-w-[380px] mx-auto flex flex-col items-center">
-          {/* Large Logo Icon */}
-          <BrandMark className="h-16 w-auto mb-6" />
-
           {/* Title & Subtitle */}
           <h1 className="text-[28px] font-semibold text-text-primary mb-2 text-center tracking-tight">
             Sign in to {orgName}
