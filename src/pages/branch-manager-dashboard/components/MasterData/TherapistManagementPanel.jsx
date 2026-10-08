@@ -546,8 +546,8 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
+          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 z-10 bg-surface flex items-center justify-between px-6 pt-6 pb-4 border-b border-border">
               <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
                 {editingTherapist ? `Edit ${staffLabel}` : `Add ${staffLabel}`}
               </h3>
@@ -555,6 +555,8 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
                 <Icon name="X" size={20} className="text-text-secondary" />
               </button>
             </div>
+
+            <div className="p-6 pt-4 space-y-4">
 
             {formError && (
               <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
@@ -688,6 +690,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
               <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
                 {editingTherapist ? 'Save Changes' : `Add ${staffLabel}`}
               </Button>
+            </div>
             </div>
           </div>
         </div>
