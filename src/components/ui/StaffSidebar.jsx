@@ -155,7 +155,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           icon: 'CalendarPlus',
           path: `${basePath}?view=new-booking`,
           roles: ['staff', 'manager', 'admin', 'admin_viewer'],
-          overallHidden: true
+          overallHidden: true,
+          desktopHidden: true
         },
         {
           id: 'check-booking',
@@ -772,7 +773,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
 
                   {/* Children (expanded state) */}
                   {isExpanded && !isCollapsed && (() => {
-                    const activeIndex = getActiveChildIndex(item.children);
+                    const visibleChildren = item.children.filter(c => !c.desktopHidden);
+                    const activeIndex = getActiveChildIndex(visibleChildren);
 
                     return (
                       <div className="relative mt-1">
@@ -789,7 +791,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                           />
                         )}
 
-                        {item.children.map((child, index) => {
+                        {visibleChildren.map((child, index) => {
                           const isChildActive = index === activeIndex;
 
                           return (
@@ -898,10 +900,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       {collapsedFlyout && (() => {
         const FLYOUT_WIDTH = 200;
         const rowHeight = 32;
+        const visibleChildren = collapsedFlyout.item.children.filter(c => !c.desktopHidden);
         const clampedX = Math.min(collapsedFlyout.x, window.innerWidth - FLYOUT_WIDTH - 8);
         const clampedY = Math.min(
           collapsedFlyout.y,
-          window.innerHeight - (collapsedFlyout.item.children.length * rowHeight + 40) - 8
+          window.innerHeight - (visibleChildren.length * rowHeight + 40) - 8
         );
         return (
           <div
@@ -910,7 +913,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
             style={{ left: clampedX, top: Math.max(clampedY, 8), width: FLYOUT_WIDTH }}
           >
             <div className="px-3 py-1.5 text-xs font-medium text-gray-400">{collapsedFlyout.item.label}</div>
-            {collapsedFlyout.item.children.map((child) => (
+            {visibleChildren.map((child) => (
               <Link
                 key={child.id}
                 to={child.path}
