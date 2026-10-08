@@ -435,6 +435,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
     : `${therapists.length} ${therapists.length !== 1 ? staffLabelPlural.toLowerCase() : staffLabel.toLowerCase()} configured`;
 
   return (
+    <>
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -542,6 +543,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
           </table>
         </DndContext>
       </div>
+    </div>
 
       {/* Create/Edit Modal */}
       {showModal && (
@@ -927,7 +929,7 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
