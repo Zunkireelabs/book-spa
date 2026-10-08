@@ -67,6 +67,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     if (!isCollapsed) setCollapsedFlyout(null);
   }, [isCollapsed]);
 
+  const showWorldCupKick = new Date() < new Date('2026-07-21T00:00:00+05:45');
+
   const userRole = profile?.role || propRole || 'staff';
   const userName = profile?.full_name || propName || 'Staff Member';
   const branchName = contextBranchName || profile?.branches?.name || propBranch || '';
