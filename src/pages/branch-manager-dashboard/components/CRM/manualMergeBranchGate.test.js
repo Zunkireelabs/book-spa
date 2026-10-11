@@ -10,10 +10,13 @@ describe('canSearchForMerge', () => {
     expect(canSearchForMerge({ isOverall: true, branchId: 'b0000000-0000-0000-0000-000000000001' })).toBe(true);
   });
 
-  it('blocks search when in Overall view and no real branch id is available', () => {
+  it('blocks search when in Overall view and no branch id/sentinel is available at all', () => {
     expect(canSearchForMerge({ isOverall: true, branchId: null })).toBe(false);
     expect(canSearchForMerge({ isOverall: true, branchId: undefined })).toBe(false);
-    expect(canSearchForMerge({ isOverall: true, branchId: '__overall__' })).toBe(false);
+  });
+
+  it('allows search when the Overall sentinel itself is passed — fetchCustomersLightweight resolves org from the logged-in user instead of a branch', () => {
+    expect(canSearchForMerge({ isOverall: true, branchId: '__overall__' })).toBe(true);
   });
 
   it('blocks search when branchId is missing even outside Overall view (defensive)', () => {

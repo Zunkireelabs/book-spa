@@ -8067,16 +8067,27 @@ export async function fetchCustomersLightweight(branchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
     // Resolve the branch's org so autocomplete suggests the whole org's customers
     // (a returning cross-branch customer appears instead of being invisible).
-    const { data: branch, error: branchErr } = await supabase
-      .from('branches')
-      .select('org_id')
-      .eq('id', resolvedBranchId)
-      .single();
-    if (branchErr) throw branchErr;
+    // The '__overall__' sentinel has no row in `branches` — resolve org from the
+    // logged-in user's own profile instead of routing it through resolveBranchId,
+    // which would silently coerce it to a hardcoded default branch (see
+    // getCustomerIntelligence's identical guard).
+    let orgId;
+    if (isOverallBranch(branchId)) {
+      const { profile, error: authError } = await getAuthenticatedUser();
+      if (authError) return { data: null, error: authError };
+      orgId = profile.org_id;
+    } else {
+      const resolvedBranchId = resolveBranchId(branchId);
+      const { data: branch, error: branchErr } = await supabase
+        .from('branches')
+        .select('org_id')
+        .eq('id', resolvedBranchId)
+        .single();
+      if (branchErr) throw branchErr;
+      orgId = branch.org_id;
+    }
 
     const pageAllCustomers = async () => {
       const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
@@ -8085,7 +8096,7 @@ export async function fetchCustomersLightweight(branchId) {
         const { data: page, error: pageErr } = await supabase
           .from('customers')
           .select('id, full_name, phone, email, gender')
-          .eq('org_id', branch.org_id)
+          .eq('org_id', orgId)
           .eq('is_active', true)
           .order('full_name')
           .range(offset, offset + PAGE_SIZE - 1);
@@ -8327,17 +8338,56 @@ export async function getCustomerIntelligence({ branchId }) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    // 1. Parallel fetch: customers + bookings
-    let custQuery = supabase
+    // This is a search/browse-for-an-existing-customer tool (matches full_name),
+    // not a branch performance metric — org-wide, same as fetchCustomersLightweight,
+    // so a customer who first visited a different branch isn't invisible here and
+    // doesn't get duplicated. branchId is still required (resolves the org + keeps
+    // the UI's branch-selector gate meaningful) but no longer restricts the result
+    // set to that one branch.
+    //
+    // The "Overall" branch picker value (isOverallBranch) is a UI sentinel, not a
+    // real branch — resolveBranchId has no knowledge of it and silently coerces it
+    // to a hardcoded default branch (withBranch's own comment warns about exactly
+    // this: "never route the sentinel through resolveBranchId — it would coerce to
+    // a default branch"). That default happens to belong to Nuad Thai Spa, so any
+    // other org selecting Overall here would have resolved to Nuad Thai Spa's
+    // org_id and leaked its customers/bookings. Resolve the org from the logged-in
+    // user's own profile instead whenever the sentinel is passed.
+    let orgId;
+    if (isOverallBranch(branchId)) {
+      const { profile, error: authError } = await getAuthenticatedUser();
+      if (authError) return { data: null, error: authError };
+      orgId = profile.org_id;
+    } else {
+      const resolvedBranchId = resolveBranchId(branchId);
+      const { data: branch, error: branchErr } = await supabase
+        .from('branches')
+        .select('org_id')
+        .eq('id', resolvedBranchId)
+        .single();
+      if (branchErr) throw branchErr;
+      orgId = branch.org_id;
+    }
+
+    const { data: orgBranches, error: orgBranchesErr } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('org_id', orgId);
+    if (orgBranchesErr) throw orgBranchesErr;
+    const orgBranchIds = (orgBranches || []).map((b) => b.id);
+
+    // 1. Parallel fetch: customers + bookings, both org-wide
+    const custQuery = supabase
       .from('customers')
       .select('id, full_name, phone, email, is_active, created_at')
+      .eq('org_id', orgId)
       .order('full_name');
-    custQuery = withBranch(custQuery, branchId);
-    let bookQuery = supabase
+    // bookings has no org_id column — scope via the org's branch_id list instead.
+    const bookQuery = supabase
       .from('bookings')
       .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
-      .not('customer_id', 'is', null);
-    bookQuery = withBranch(bookQuery, branchId);
+      .not('customer_id', 'is', null)
+      .in('branch_id', orgBranchIds);
     const [custResult, bookResult, statusResult] = await Promise.all([
       custQuery,
       bookQuery,
