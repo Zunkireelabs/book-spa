@@ -69,7 +69,9 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
         const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
         const digits = value.replace(/\D/g, '');
         const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-        if (value.trim() && !phoneValid) {
+        if (!value.trim()) {
+          newErrors.phone = 'Phone number is required';
+        } else if (!phoneValid) {
           newErrors.phone = isNepal ? 'Please enter a valid Nepali phone number' : 'Please enter a valid phone number';
         } else {
           delete newErrors.phone;
@@ -393,7 +395,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Phone */}
           <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Phone number (Optional)
+              Phone number <span className="text-error">*</span>
             </label>
             <div className="flex">
               <CountryCodeSelect

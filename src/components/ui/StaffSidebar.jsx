@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import Icon from '../AppIcon';
+import BrandMark from './BrandMark';
+import zennlyIcon from 'assets/brand/zennly-icon.png';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
@@ -65,11 +67,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     if (!isCollapsed) setCollapsedFlyout(null);
   }, [isCollapsed]);
 
-  // World Cup 2026 — show the logo-kicks-football animation through July 20, 2026 (Nepal time).
   const showWorldCupKick = new Date() < new Date('2026-07-21T00:00:00+05:45');
+
   const userRole = profile?.role || propRole || 'staff';
   const userName = profile?.full_name || propName || 'Staff Member';
-  const branchName = contextBranchName || profile?.branches?.name || propBranch || 'Main Branch';
+  const branchName = contextBranchName || profile?.branches?.name || propBranch || '';
   const isManagerOrAdmin = ['manager', 'admin', 'admin_viewer'].includes(userRole);
 
   // Pending discount-approval count for the badge on "Dashboard".
@@ -153,7 +155,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           icon: 'CalendarPlus',
           path: `${basePath}?view=new-booking`,
           roles: ['staff', 'manager', 'admin', 'admin_viewer'],
-          overallHidden: true
+          overallHidden: true,
+          desktopHidden: true
         },
         {
           id: 'check-booking',
@@ -549,25 +552,18 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         isCollapsed ? 'w-16' : 'w-60'
       } hidden lg:flex`}>
         {/* Header */}
-        <div className="px-5 py-3 h-[52px] flex items-center justify-between">
-          {!isCollapsed && (
-            <Link to={basePath} className="flex items-center gap-3">
+        <div className={`py-3 h-[52px] flex items-center justify-between ${isCollapsed ? 'px-2' : 'px-5'}`}>
+          <Link to={basePath} className="flex items-center gap-3 shrink-0">
               <div className="relative">
-                <div className={`w-8 h-8 bg-primary rounded-full flex items-center justify-center ${showWorldCupKick ? 'zenly-wc-bubble' : ''}`}>
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    className={`text-white ${showWorldCupKick ? 'zenly-wc-star' : ''}`}
-                  >
-                    <path
-                      d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
-                      fill="currentColor"
-                    />
-                    <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
-                  </svg>
-                </div>
+                {isCollapsed ? (
+                  <img
+                    src={zennlyIcon}
+                    alt="Zennly"
+                    className={`w-auto shrink-0 h-10 rounded-md ${showWorldCupKick ? 'zenly-wc-bubble' : ''}`}
+                  />
+                ) : (
+                  <BrandMark className={`h-6 w-auto ml-2 shrink-0 ${showWorldCupKick ? 'zenly-wc-bubble' : ''}`} />
+                )}
                 {showWorldCupKick && (
                   <>
                     {/* Athletic stick figure — head, torso, and 4 limbs each
@@ -656,23 +652,18 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                   </>
                 )}
               </div>
-              <div>
-                <h1 className="text-sm font-semibold text-gray-900">Zennly</h1>
-                <p className="text-xs text-gray-500">Staff Portal</p>
-              </div>
-            </Link>
-          )}
+          </Link>
           <button
             onClick={() => {
               const next = !isCollapsed;
               setIsCollapsed(next);
               onCollapseChange?.(next);
             }}
-            className="p-2 rounded-md hover:bg-background transition-colors"
+            className={`rounded-md hover:bg-background transition-colors shrink-0 ${isCollapsed ? 'p-1' : 'p-2'}`}
           >
             <Icon
               name={isCollapsed ? "ChevronRight" : "ChevronLeft"}
-              size={16}
+              size={isCollapsed ? 14 : 16}
               className="text-gray-500"
             />
           </button>
@@ -782,7 +773,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
 
                   {/* Children (expanded state) */}
                   {isExpanded && !isCollapsed && (() => {
-                    const activeIndex = getActiveChildIndex(item.children);
+                    const visibleChildren = item.children.filter(c => !c.desktopHidden);
+                    const activeIndex = getActiveChildIndex(visibleChildren);
 
                     return (
                       <div className="relative mt-1">
@@ -799,7 +791,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                           />
                         )}
 
-                        {item.children.map((child, index) => {
+                        {visibleChildren.map((child, index) => {
                           const isChildActive = index === activeIndex;
 
                           return (
@@ -908,10 +900,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       {collapsedFlyout && (() => {
         const FLYOUT_WIDTH = 200;
         const rowHeight = 32;
+        const visibleChildren = collapsedFlyout.item.children.filter(c => !c.desktopHidden);
         const clampedX = Math.min(collapsedFlyout.x, window.innerWidth - FLYOUT_WIDTH - 8);
         const clampedY = Math.min(
           collapsedFlyout.y,
-          window.innerHeight - (collapsedFlyout.item.children.length * rowHeight + 40) - 8
+          window.innerHeight - (visibleChildren.length * rowHeight + 40) - 8
         );
         return (
           <div
@@ -920,7 +913,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
             style={{ left: clampedX, top: Math.max(clampedY, 8), width: FLYOUT_WIDTH }}
           >
             <div className="px-3 py-1.5 text-xs font-medium text-gray-400">{collapsedFlyout.item.label}</div>
-            {collapsedFlyout.item.children.map((child) => (
+            {visibleChildren.map((child) => (
               <Link
                 key={child.id}
                 to={child.path}

@@ -84,12 +84,19 @@ export const BranchProvider = ({ children }) => {
     const storageKey = getStorageKey(profile.org_id);
     const savedId = localStorage.getItem(storageKey);
 
-    // Restore a saved "Overall" selection (admin-only aggregate view)
+    // Restore a saved "Overall" selection (admin-only aggregate view) — only
+    // meaningful when there's more than one branch to aggregate across. A
+    // single-branch org has no switcher to pick it from again, so a stale
+    // save (e.g. from before this org dropped to one branch) must not pin
+    // the admin in a degraded read-only mode with no way out.
     if (savedId === OVERALL_BRANCH_ID) {
-      setBranchId(OVERALL_BRANCH_ID);
-      setBranchName('Overall');
-      setLoading(false);
-      return;
+      if (allBranches.length > 1) {
+        setBranchId(OVERALL_BRANCH_ID);
+        setBranchName('Overall');
+        setLoading(false);
+        return;
+      }
+      localStorage.removeItem(storageKey);
     }
 
     // Validate saved branch exists in current org's branches

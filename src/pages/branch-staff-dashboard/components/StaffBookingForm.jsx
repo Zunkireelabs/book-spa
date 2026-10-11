@@ -111,7 +111,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   }, [])();
 
   const handleSubmit = async () => {
-    if (!selectedService || !selectedDate || !selectedTime || !customerName.trim()) return;
+    if (!selectedService || !selectedDate || !selectedTime || !customerName.trim() || !customerPhone.trim()) return;
 
     setSubmitting(true);
     setError(null);
@@ -247,7 +247,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
     switch (step) {
       case 1: return !!selectedService;
       case 2: return !!selectedDate && !!selectedTime;
-      case 3: return !!customerName.trim();
+      case 3: return !!customerName.trim() && !!customerPhone.trim();
       case 4: return true;
       default: return false;
     }
@@ -442,7 +442,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone
+                  Phone <span className="text-red-500">*</span>
                 </label>
                 <div className="flex">
                   <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
@@ -454,6 +454,7 @@ const StaffBookingForm = ({ onBookingCreated }) => {
                     branchId={branchId}
                     searchBy="phone"
                     placeholder="9800000000"
+                    required
                     inputClassName="flex-1 h-10 px-3 rounded-r-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                   />
                 </div>

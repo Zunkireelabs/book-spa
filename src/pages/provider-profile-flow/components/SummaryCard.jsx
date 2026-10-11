@@ -9,6 +9,10 @@ import { formatNPR } from '../../../services/bookingTransformers';
 const VenueThumb = ({ orgName, logoUrl, heroImageUrl }) => {
   const [failed, setFailed] = useState(false);
   const src = logoUrl || heroImageUrl;
+  // A logo is typically a wide wordmark/non-square mark — object-cover crops those
+  // into near-illegibility in a square tile, so contain-fit logos but cover-fit the
+  // hero-photo fallback (a photo is meant to fill the tile).
+  const fitClass = logoUrl ? 'object-contain p-1' : 'object-cover';
 
   if (src && !failed) {
     return (
@@ -16,7 +20,7 @@ const VenueThumb = ({ orgName, logoUrl, heroImageUrl }) => {
         src={src}
         alt={orgName}
         onError={() => setFailed(true)}
-        className="w-16 h-16 rounded-[var(--zn-radius-md)] object-cover shrink-0"
+        className={`w-16 h-16 rounded-[var(--zn-radius-md)] shrink-0 ${fitClass}`}
       />
     );
   }
@@ -62,9 +66,11 @@ const SummaryCard = ({
     >
       <div className="flex items-start gap-3">
         <VenueThumb orgName={orgName} logoUrl={logoUrl} heroImageUrl={heroImageUrl} />
-        <div className="min-w-0">
-          <p className="font-medium text-base text-[var(--zn-foreground)] truncate">{orgName}</p>
-        </div>
+        {!logoUrl && (
+          <div className="min-w-0">
+            <p className="font-medium text-base text-[var(--zn-foreground)] truncate">{orgName}</p>
+          </div>
+        )}
       </div>
 
       <div className="mt-5 pt-5 border-t border-[var(--zn-border)]">
