@@ -8067,16 +8067,27 @@ export async function fetchCustomersLightweight(branchId) {
       return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
     }
 
-    const resolvedBranchId = resolveBranchId(branchId);
-
     // Resolve the branch's org so autocomplete suggests the whole org's customers
     // (a returning cross-branch customer appears instead of being invisible).
-    const { data: branch, error: branchErr } = await supabase
-      .from('branches')
-      .select('org_id')
-      .eq('id', resolvedBranchId)
-      .single();
-    if (branchErr) throw branchErr;
+    // The '__overall__' sentinel has no row in `branches` — resolve org from the
+    // logged-in user's own profile instead of routing it through resolveBranchId,
+    // which would silently coerce it to a hardcoded default branch (see
+    // getCustomerIntelligence's identical guard).
+    let orgId;
+    if (isOverallBranch(branchId)) {
+      const { profile, error: authError } = await getAuthenticatedUser();
+      if (authError) return { data: null, error: authError };
+      orgId = profile.org_id;
+    } else {
+      const resolvedBranchId = resolveBranchId(branchId);
+      const { data: branch, error: branchErr } = await supabase
+        .from('branches')
+        .select('org_id')
+        .eq('id', resolvedBranchId)
+        .single();
+      if (branchErr) throw branchErr;
+      orgId = branch.org_id;
+    }
 
     const pageAllCustomers = async () => {
       const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
@@ -8085,7 +8096,7 @@ export async function fetchCustomersLightweight(branchId) {
         const { data: page, error: pageErr } = await supabase
           .from('customers')
           .select('id, full_name, phone, email, gender')
-          .eq('org_id', branch.org_id)
+          .eq('org_id', orgId)
           .eq('is_active', true)
           .order('full_name')
           .range(offset, offset + PAGE_SIZE - 1);

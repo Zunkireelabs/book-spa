@@ -30,7 +30,7 @@ const CandidateSide = ({ label, name, phone, email, branchId, createdAt, isCanon
   </button>
 );
 
-const DuplicateCustomersPanel = ({ orgId, role, branchId }) => {
+const DuplicateCustomersPanel = ({ orgId }) => {
   const [candidates, setCandidates] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -53,13 +53,10 @@ const DuplicateCustomersPanel = ({ orgId, role, branchId }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  // Manager sees only pairs touching their own branch; admin sees every pair in the org.
-  // Merge itself is re-checked server-side inside merge_customers regardless of this filter.
-  const visible = useMemo(() => {
-    if (!candidates) return [];
-    if (role === 'admin') return candidates;
-    return candidates.filter(c => c.branch_id_a === branchId || c.branch_id_b === branchId);
-  }, [candidates, role, branchId]);
+  // customer_duplicate_candidates (migration-133) is already org-scoped
+  // (WHERE c.org_id = p_org_id, no branch filter) — every manager/admin in the
+  // org sees every pair, same as the Customers tab (getCustomerIntelligence).
+  const visible = useMemo(() => candidates || [], [candidates]);
 
   const pairKey = (c) => `${c.customer_id_a}:${c.customer_id_b}`;
 
