@@ -23,8 +23,8 @@ const BranchSwitcher = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  // Admin: show dropdown to switch branches
-  if (isAdmin && branches.length > 0) {
+  // Admin: show dropdown to switch branches (only when there's an actual choice to make)
+  if (isAdmin && branches.length > 1) {
     return (
       <div className="flex items-center gap-2">
         <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-pink-100 text-pink-700 whitespace-nowrap">

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from
 import { useParams } from 'react-router-dom';
 import { capture } from '../../lib/analytics';
 import CustomerHeader from '../../components/ui/CustomerHeader';
+import BrandMark from '../../components/ui/BrandMark';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
 import ProgressIndicatorV2 from './components/ProgressIndicatorV2';
@@ -255,12 +256,11 @@ const CustomerBookingFlowV2 = () => {
   const isCustomerInfoValid = () => {
     if (!customerInfo.firstName.trim()) return false;
     if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
-    if (customerInfo.phone.trim()) {
-      const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
-      const digits = customerInfo.phone.replace(/\D/g, '');
-      const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-      if (!phoneValid) return false;
-    }
+    if (!customerInfo.phone.trim()) return false;
+    const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
+    const digits = customerInfo.phone.replace(/\D/g, '');
+    const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+    if (!phoneValid) return false;
     return true;
   };
 
@@ -615,21 +615,7 @@ const CustomerBookingFlowV2 = () => {
         <div className="max-w-4xl mx-auto px-4 py-8">
           <div className="text-center">
             <div className="flex items-center justify-center space-x-2 mb-4">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="text-primary-foreground"
-                >
-                  <path
-                    d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"
-                    fill="currentColor"
-                  />
-                  <circle cx="12" cy="19" r="2" fill="currentColor" opacity="0.7"/>
-                </svg>
-              </div>
+              <BrandMark className="h-8 w-auto" />
               <span className="font-heading font-heading-semibold text-lg text-text-primary">
                 Zennly
               </span>

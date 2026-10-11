@@ -23,4 +23,4 @@ SET address   = 'Lazimpat Rd, Kathmandu, Bagmati Province 44600',
 FROM public.organizations o
 WHERE o.id = b.org_id
   AND o.slug = 'sbal'
-  AND b.name = 'Main Branch';
+  AND b.name IN ('Main Branch', 'Lazimpat');

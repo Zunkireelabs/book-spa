@@ -23,14 +23,16 @@ const ProfileHero = ({ orgName, heroImageUrl, logoUrl }) => {
     <div className="absolute bottom-0 left-0 px-4 sm:px-6 pb-5 sm:pb-6 flex items-center gap-4 max-w-7xl mx-auto right-0">
       <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-white bg-[var(--zn-card)] overflow-hidden flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(35,33,29,0.15)]">
         {logoUrl && !logoFailed ? (
-          <img src={logoUrl} alt={orgName} onError={() => setLogoFailed(true)} className="w-full h-full object-cover" />
+          <img src={logoUrl} alt={orgName} onError={() => setLogoFailed(true)} className="w-full h-full object-contain p-1.5" />
         ) : (
           <Icon name="Sparkles" size={28} className="text-[var(--zn-primary)]" />
         )}
       </div>
-      <h1 className="font-normal text-2xl sm:text-4xl text-white drop-shadow-md tracking-tight">
-        {orgName}
-      </h1>
+      {(!logoUrl || logoFailed) && (
+        <h1 className="font-normal text-2xl sm:text-4xl text-white drop-shadow-md tracking-tight">
+          {orgName}
+        </h1>
+      )}
     </div>
   </div>
   );

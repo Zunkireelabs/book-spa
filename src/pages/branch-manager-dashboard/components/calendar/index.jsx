@@ -245,8 +245,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Reset form when slot changes + pre-select therapist/room from column
   useEffect(() => {
-    setServiceId('');
-    setCustomerName('');
+    setServiceId(slotInfo?.defaultServiceId || '');
+    setCustomerName(slotInfo?.defaultCustomerName || '');
     setCustomerPhone('');
     setCustomerCountryCode('+977');
     setCustomerEmail('');
@@ -461,21 +461,21 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? !!groupServiceId
     : (people.length > 0 && people.every((p) => !!p.serviceId));
   const groupValid = bookingMode !== 'group'
-    || (people[0]?.name?.trim() && people[0]?.phone?.replace(/\D/g, '') && groupServiceValid);
+    || (people.length > 0
+      && people.every((p) => p.name?.trim() && p.phone?.replace(/\D/g, ''))
+      && groupServiceValid);
 
   const buildGroupPeople = () => {
-    // Blank "other" persons inherit the booking contact's credentials.
+    // Blank "other" persons inherit the booking contact's name/email — phone is
+    // required per-person now (see groupValid), so no phone fallback here.
     const lead = people[0] || {};
     const leadName = lead.name?.trim();
-    const leadPhone = lead.phone?.replace(/\D/g, '')
-      ? (lead.countryCode || '+977') + lead.phone.replace(/\D/g, '')
-      : null;
     const leadEmail = lead.email?.trim();
     return people.map((p, idx) => ({
       customerName: p.name?.trim() || (idx === 0 ? null : leadName) || null,
       customerPhone: p.phone?.replace(/\D/g, '')
         ? (p.countryCode || '+977') + p.phone.replace(/\D/g, '')
-        : (idx === 0 ? null : leadPhone) || null,
+        : null,
       customerEmail: p.email?.trim() || (idx === 0 ? null : leadEmail) || null,
       customerGender: p.gender || (idx === 0 ? null : lead.gender) || null,
       serviceId: serviceMode === 'same' ? groupServiceId : p.serviceId,
@@ -486,7 +486,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim())) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, ''))) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
     // create duplicate bookings. The ref blocks the second call immediately.
@@ -869,7 +869,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {/* Phone */}
             <div>
               <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
-                Phone
+                Phone <span className="text-error">*</span>
               </label>
               <div className="flex">
                 <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
@@ -880,6 +880,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
                   branchId={branchId}
                   searchBy="phone"
+                  required
                   inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
               </div>
@@ -1113,7 +1114,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       type="tel"
                       value={p.phone}
                       onChange={(e) => setPerson(idx, { phone: e.target.value })}
-                      placeholder={idx === 0 ? 'Phone (required)' : 'Phone (optional)'}
+                      placeholder="Phone (required)"
                       className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     />
                   </div>
@@ -2139,6 +2140,17 @@ const OperationalCalendar = ({ branchId }) => {
 
   // ── Quick-create handlers ──────────────────────────────────
 
+  // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
+  const openQuickCreateForSlot = useCallback(async (slotInfo) => {
+    setQuickCreateSlot(slotInfo);
+    if (!servicesCache && !servicesLoading) {
+      setServicesLoading(true);
+      const result = await fetchServices(branchId);
+      if (result.data) setServicesCache(result.data);
+      setServicesLoading(false);
+    }
+  }, [servicesCache, servicesLoading, branchId]);
+
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
     // Block new bookings/blocks on any slot covered by a manual block (migration-212).
     const manualBlock = findManualBlockForSlot(calendarData?.blockOccurrences, slotInfo.colType, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute);
@@ -2196,6 +2208,20 @@ const OperationalCalendar = ({ branchId }) => {
         return;
       }
 
+      // The source booking may be one of the historical bookings created before
+      // phone became required — silently resubmitting it would now fail the
+      // DB's INSERT trigger. Route through the normal editable form instead,
+      // pre-filled with what's known, so staff supply a phone here rather than
+      // hitting an opaque DB error.
+      if (!source.customerPhone || !source.customerPhone.trim()) {
+        openQuickCreateForSlot({
+          ...slotInfo,
+          defaultCustomerName: source.customerName,
+          defaultServiceId: source.serviceId,
+        });
+        return;
+      }
+
       const result = await createBooking({
         branchId,
         serviceId: source.serviceId,
@@ -2220,7 +2246,7 @@ const OperationalCalendar = ({ branchId }) => {
 
     // Normal flow — offer a choice instead of jumping straight to the booking form
     setChoiceMenuSlot(slotInfo);
-  }, [rebookSource, branchId, refreshCalendar, calendarData]);
+  }, [rebookSource, branchId, refreshCalendar, calendarData, openQuickCreateForSlot]);
 
   // Manual-block management from the calendar overlay itself (delete the mistaken block,
   // or drag its bottom edge to resize) — always scoped to just this occurrence ('this'),
@@ -2283,17 +2309,6 @@ const OperationalCalendar = ({ branchId }) => {
     }
     refreshCalendar();
   }, [refreshCalendar]);
-
-  // "Add booking" choice — exactly the prior direct-to-QuickCreatePanel behavior.
-  const openQuickCreateForSlot = useCallback(async (slotInfo) => {
-    setQuickCreateSlot(slotInfo);
-    if (!servicesCache && !servicesLoading) {
-      setServicesLoading(true);
-      const result = await fetchServices(branchId);
-      if (result.data) setServicesCache(result.data);
-      setServicesLoading(false);
-    }
-  }, [servicesCache, servicesLoading, branchId]);
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
