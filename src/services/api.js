@@ -2309,11 +2309,17 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
 // so bundling is exact rather than fuzzy-matched by name/date. Still scoped
 // to payment_status='unpaid' — this is "what to bundle into a payment", not
 // "everything in this group" (see fetchGroupBookings below for the latter).
-export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId, bookingGroupId }) {
+// customerId (when known) additionally restricts results to the requesting
+// booking's own customer — a booking_group_id link only means "created
+// together" (e.g. a walk-in group under one shared name), not "same
+// customer", so without this a sibling belonging to a genuinely different
+// customer row could get bundled into a membership/wallet payment that's
+// scoped to one customer (see the BK-20261011-0033/-0034 incident).
+export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBookingId, bookingGroupId, customerId }) {
   try {
     let query = supabase
       .from('bookings')
-      .select('id, booking_number, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
+      .select('id, booking_number, customer_id, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
       .eq('payment_status', 'unpaid')
       .not('status', 'in', '("Cancelled","No Show")')
       .neq('id', excludeBookingId);
@@ -2321,6 +2327,10 @@ export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBo
     query = bookingGroupId
       ? query.eq('booking_group_id', bookingGroupId)
       : query.eq('customer_name', customerName).eq('date', date);
+
+    if (customerId) {
+      query = query.eq('customer_id', customerId);
+    }
 
     const { data, error } = await query.order('start_time');
 
@@ -5234,6 +5244,10 @@ export async function createBooking({
   customerAccountId,
 }) {
   try {
+    if (!customerPhone || !customerPhone.trim()) {
+      return { data: null, error: { message: 'Phone number is required' } };
+    }
+
     customerName = toTitleCase(customerName);
     const resolvedBranchId = resolveBranchId(branchId);
 

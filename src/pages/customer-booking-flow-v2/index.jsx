@@ -256,12 +256,11 @@ const CustomerBookingFlowV2 = () => {
   const isCustomerInfoValid = () => {
     if (!customerInfo.firstName.trim()) return false;
     if (customerInfo.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerInfo.email)) return false;
-    if (customerInfo.phone.trim()) {
-      const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
-      const digits = customerInfo.phone.replace(/\D/g, '');
-      const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
-      if (!phoneValid) return false;
-    }
+    if (!customerInfo.phone.trim()) return false;
+    const isNepal = (customerInfo.phoneCountryCode || '+977') === '+977';
+    const digits = customerInfo.phone.replace(/\D/g, '');
+    const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+    if (!phoneValid) return false;
     return true;
   };
 

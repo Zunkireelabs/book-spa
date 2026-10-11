@@ -224,6 +224,7 @@ const BookingActionModal = ({
         date: booking.date,
         excludeBookingId: booking.bookingId,
         bookingGroupId: booking.bookingGroupId,
+        customerId: booking.customerId,
       });
       if (activeTab === 'payment') {
         fetchGroupBookings({
