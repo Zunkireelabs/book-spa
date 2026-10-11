@@ -5244,6 +5244,10 @@ export async function createBooking({
   customerAccountId,
 }) {
   try {
+    if (!customerPhone || !customerPhone.trim()) {
+      return { data: null, error: { message: 'Phone number is required' } };
+    }
+
     customerName = toTitleCase(customerName);
     const resolvedBranchId = resolveBranchId(branchId);
 
