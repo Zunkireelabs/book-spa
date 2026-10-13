@@ -39,6 +39,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   }, []);
   const [expandedItems, setExpandedItems] = useState(['operations']); // Default expanded
   const [collapsedFlyout, setCollapsedFlyout] = useState(null); // { item, x, y } | null
+  const [hoveredTip, setHoveredTip] = useState(null); // { label, x, y } | null
   const flyoutRef = useRef(null);
 
   // Close the collapsed-sidebar flyout on outside click / Escape, mirroring
@@ -694,7 +695,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                           const rect = e.currentTarget.getBoundingClientRect();
                           setCollapsedFlyout({ item, x: rect.right + 8, y: rect.top });
                         }}
-                        title={item.label}
+                        onMouseEnter={(e) => {
+                          if (!isCollapsed) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setHoveredTip({ label: item.label, x: rect.right + 8, y: rect.top + rect.height / 2 });
+                        }}
+                        onMouseLeave={() => setHoveredTip(null)}
+                        aria-label={item.label}
                         aria-haspopup="true"
                         aria-expanded={collapsedFlyout?.item.id === item.id}
                         className={`w-full flex items-center justify-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -748,7 +755,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                           toggleExpand(item.id);
                         }
                       }}
-                      title={isCollapsed ? item.label : undefined}
+                      onMouseEnter={(e) => {
+                        if (!isCollapsed) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setHoveredTip({ label: item.label, x: rect.right + 8, y: rect.top + rect.height / 2 });
+                      }}
+                      onMouseLeave={() => setHoveredTip(null)}
+                      aria-label={item.label}
                       aria-haspopup={isCollapsed ? 'true' : undefined}
                       aria-expanded={isCollapsed ? collapsedFlyout?.item.id === item.id : undefined}
                       className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -855,7 +868,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
               <Link
                 key={item.id}
                 to={item.path}
-                title={isCollapsed ? item.label : undefined}
+                onMouseEnter={(e) => {
+                  if (!isCollapsed) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setHoveredTip({ label: item.label, x: rect.right + 8, y: rect.top + rect.height / 2 });
+                }}
+                onMouseLeave={() => setHoveredTip(null)}
+                aria-label={isCollapsed ? item.label : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   isActive(item.path)
                     ? 'bg-background text-gray-900'
@@ -930,6 +949,15 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           </div>
         );
       })()}
+
+      {isCollapsed && hoveredTip && !collapsedFlyout && (
+        <div
+          className="fixed z-dropdown px-2 py-1 rounded-spa bg-gray-900 text-white text-xs font-medium shadow-spa-elevated pointer-events-none whitespace-nowrap transition-opacity duration-100"
+          style={{ left: hoveredTip.x, top: hoveredTip.y, transform: 'translateY(-50%)' }}
+        >
+          {hoveredTip.label}
+        </div>
+      )}
 
       {/* Mobile Floating Pill Navigation — icon + label inside the pill; subtle shrink while scrolling */}
       <nav
