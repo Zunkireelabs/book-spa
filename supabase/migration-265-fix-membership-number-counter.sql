@@ -27,9 +27,15 @@ ALTER TABLE public.membership_number_counters ENABLE ROW LEVEL SECURITY;
 -- Ground-truth seed: next_number = 1 + the highest sequence number already
 -- used in memberships.membership_number per (org, tier) -- never trust a
 -- COUNT here, since undercounting (from past deletions) is exactly the bug.
+--
+-- Digit group bounded to 1-6 chars (card numbers are 4-digit padded; 6 is
+-- generous headroom) so a malformed membership_number -- e.g. a phone number
+-- that ended up in this column on prod -- doesn't match at all (NULL, so
+-- COALESCE skips it) instead of overflowing int4 on cast (saw this on prod:
+-- "value \"9801020407\" is out of range for type integer").
 INSERT INTO public.membership_number_counters (org_id, tier_id, next_number)
 SELECT m.org_id, m.tier_id,
-       COALESCE(MAX((regexp_match(m.membership_number, '-(\d+)$'))[1]::int), 0) + 1
+       COALESCE(MAX((regexp_match(m.membership_number, '-([0-9]{1,6})$'))[1]::int), 0) + 1
 FROM public.memberships m
 WHERE m.membership_number IS NOT NULL
 GROUP BY m.org_id, m.tier_id
