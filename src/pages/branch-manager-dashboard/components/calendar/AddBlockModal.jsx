@@ -1,23 +1,15 @@
-import React, { useState } from 'react';
-import Icon from '../../../../components/AppIcon';
-import Select from '../../../../components/ui/Select';
-import Input from '../../../../components/ui/Input';
-import Button from '../../../../components/ui/Button';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { createBlock } from '../../../../services/api';
-import { to12h } from '../../../../services/bookingTransformers';
-
-// 'HH:MM' + minutes -> 'HH:MM', for the "ends at" preview next to the duration field.
-function addMinutesToTime(timeStr, minutes) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const total = h * 60 + m + minutes;
-  const wrapped = ((total % 1440) + 1440) % 1440;
-  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
-}
+import { countBookingsInRange, bookingsInRangeMessage } from '../../../../utils/bookingsInRange';
+import {
+  PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
+  InlineError, InlineWarning, format12h, addMinutes, formatShortDate,
+} from '../../../../components/ui/PanelFormKit';
 
 const TABS = [
-  { id: 'details', label: 'Details' },
-  { id: 'recurrence', label: 'Recurrence' },
+  { id: 'details', label: 'Details', icon: 'FileText' },
+  { id: 'recurrence', label: 'Recurrence', icon: 'Repeat' },
 ];
 
 const REPEAT_OPTIONS = [
@@ -33,10 +25,15 @@ const END_CONDITION_OPTIONS = [
   { value: 'count', label: 'After N occurrences' },
 ];
 
-// Two-tab modal for blocking time off on the Calendar — Details (who/when/why) and
-// Recurrence (Repeat + end condition), matching the Fresha-style reference the request was
-// scoped against. Tab-switcher visual pattern copied from ProductDetailDrawer.jsx.
-const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSuccess }) => {
+const slotTime = (slot) => (slot?.hour != null ? `${String(slot.hour).padStart(2, '0')}:${String(slot.minute ?? 0).padStart(2, '0')}` : '');
+
+// "Add block" form — a docked SidePanel on the calendar (variant="panel"), or the classic centered modal.
+// Two tabs: Details (who/when/why) and Recurrence. While open it reports a live draft (`onDraftChange`) so the grid can
+// show the block in its final hatched style, and it accepts `retarget` (click an empty slot to move the start / column).
+const AddBlockModal = ({
+  variant = 'modal', branchId, slotInfo, therapists, rooms, bookings = [], branchHours, retarget, guardRef,
+  onClose, onSuccess, onRoomOnlyChange, onDraftChange,
+}) => {
   const { orgId } = useOrg();
   const [activeTab, setActiveTab] = useState('details');
 
@@ -44,9 +41,7 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
   const [therapistId, setTherapistId] = useState(slotInfo?.colType === 'therapist' ? slotInfo.colId : '');
   const [roomId, setRoomId] = useState(slotInfo?.colType === 'room' ? slotInfo.colId : '');
   const [date, setDate] = useState(slotInfo?.day || '');
-  const [startTime, setStartTime] = useState(
-    slotInfo?.hour != null ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute ?? 0).padStart(2, '0')}` : ''
-  );
+  const [startTime, setStartTime] = useState(slotTime(slotInfo));
   const [durationMinutes, setDurationMinutes] = useState('30');
   const [description, setDescription] = useState('');
   const [preventOnlineBooking, setPreventOnlineBooking] = useState(true);
@@ -59,9 +54,53 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
 
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [moveConfirm, setMoveConfirm] = useState(null);
 
-  const isFormComplete = !!date && !!startTime && Number(durationMinutes) > 0
-    && (assigneeType !== 'therapist' || !!therapistId);
+  // Baseline for "did the user change something beyond the slot?" — the slot (date/time/column) is moved silently by retargeting.
+  const baselineRef = useRef({ therapist: slotInfo?.colType === 'therapist' ? slotInfo.colId : '', room: slotInfo?.colType === 'room' ? slotInfo.colId : '' });
+  const dirty = !!description.trim() || durationMinutes !== '30' || !preventOnlineBooking || !!repeat
+    || (assigneeType === 'therapist' ? therapistId : '') !== baselineRef.current.therapist || roomId !== baselineRef.current.room;
+
+  const isFormComplete = !!date && !!startTime && Number(durationMinutes) > 0 && (assigneeType !== 'therapist' || !!therapistId);
+
+  const dur = Number(durationMinutes) > 0 ? Number(durationMinutes) : 0;
+  const effTherapist = assigneeType === 'therapist' ? therapistId : '';
+  const bookingCount = useMemo(
+    () => countBookingsInRange(bookings, { date, startTime, durationMinutes: dur, therapistId: effTherapist, roomId }),
+    [bookings, date, startTime, dur, effTherapist, roomId]
+  );
+  const bookingWarning = bookingsInRangeMessage(bookingCount);
+
+  // Live preview on the grid.
+  useEffect(() => {
+    onDraftChange?.({
+      kind: 'block', date, startTime, durationMinutes: dur || 30,
+      therapistId: effTherapist || null, roomId: roomId || null, wholeBranch: !effTherapist && !roomId,
+      overlap: bookingCount > 0, label: description.trim(),
+    });
+  }, [date, startTime, dur, effTherapist, roomId, bookingCount, description]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onDraftChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Retarget: an empty-slot click on the grid moves the block's start / column.
+  const lastRetargetRef = useRef(retarget?.nonce ?? null); // ignore a retarget request left over from an earlier panel
+  const applyRetarget = (s) => {
+    setDate(s.day);
+    setStartTime(slotTime(s));
+    if (s.colType === 'therapist' && s.colId) { setAssigneeType('therapist'); setTherapistId(s.colId); }
+    if (s.colType === 'room' && s.colId) setRoomId(s.colId);
+    baselineRef.current = {
+      therapist: s.colType === 'therapist' && s.colId ? s.colId : baselineRef.current.therapist,
+      room: s.colType === 'room' && s.colId ? s.colId : baselineRef.current.room,
+    };
+  };
+  useEffect(() => {
+    if (!retarget || retarget.nonce === lastRetargetRef.current) return;
+    lastRetargetRef.current = retarget.nonce;
+    const s = retarget.slot;
+    const curCol = s.colType === 'room' ? roomId : s.colType === 'therapist' ? (assigneeType === 'therapist' ? therapistId : '') : '';
+    const changes = s.day !== date || ((s.colType === 'room' || s.colType === 'therapist') && (s.colId || '') !== curCol);
+    if (dirty && changes) setMoveConfirm(s); else applyRetarget(s);
+  }, [retarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async () => {
     if (!date || !startTime) { setError('Select a date and start time.'); return; }
@@ -94,184 +133,137 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
     }
 
     setSubmitting(false);
+    onRoomOnlyChange?.(assigneeType !== 'therapist' && !!roomId);
     onSuccess?.();
   };
 
+  const reason = !date ? 'Pick a date' : !startTime ? 'Pick a start time'
+    : !(Number(durationMinutes) > 0) ? 'Enter a duration'
+    : assigneeType === 'therapist' && !therapistId ? 'Select a therapist' : '';
+
+  const moveOverride = moveConfirm ? (
+    <div role="alertdialog" aria-label="Move block" className="flex items-center gap-3">
+      <p className="flex-1 min-w-0 text-[13px] text-text-primary">
+        Move this block to {[formatShortDate(moveConfirm.day), format12h(slotTime(moveConfirm))].filter(Boolean).join(' · ')}?
+      </p>
+      <button type="button" onClick={() => setMoveConfirm(null)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background whitespace-nowrap">Keep here</button>
+      <button type="button" onClick={() => { applyRetarget(moveConfirm); setMoveConfirm(null); }} className="h-9 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 whitespace-nowrap">Move</button>
+    </div>
+  ) : null;
+
   return (
-    <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !submitting && onClose()}>
-      <div className="bg-surface rounded-spa-lg shadow-spa-modal max-w-md w-full p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-heading font-heading-medium text-lg text-text-primary">Add Block</h3>
-          <button onClick={() => !submitting && onClose()} className="p-1 rounded hover:bg-background">
-            <Icon name="X" size={18} className="text-text-secondary" />
-          </button>
-        </div>
-
-        <div className="flex gap-1 border-b border-border">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-2 text-sm font-body font-body-medium spa-transition-fast border-b-2 -mb-[1px] ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-            <Icon name="AlertCircle" size={16} />
-            <span>{error}</span>
-          </div>
-        )}
+    <PanelShell
+      variant={variant}
+      title="Add block"
+      onClose={onClose}
+      dirty={dirty}
+      guardRef={guardRef}
+      busy={submitting}
+      reason={reason}
+      footerOverride={moveOverride}
+      primary={{ label: submitting ? 'Adding…' : 'Add block', onClick: handleSubmit, disabled: !isFormComplete, loading: submitting }}
+    >
+      <TabBar tabs={TABS} value={activeTab} onChange={setActiveTab} />
+      <FormBody>
+        <InlineError message={error} />
+        <InlineWarning message={bookingWarning} icon="CalendarClock" />
 
         {activeTab === 'details' && (
-          <div className="space-y-3">
-            <div className="flex rounded-spa border border-border p-0.5 bg-background w-fit">
-              <button
-                type="button"
-                onClick={() => setAssigneeType('therapist')}
-                className={`px-3 py-1.5 rounded text-sm font-body font-body-medium transition-colors ${
-                  assigneeType === 'therapist' ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                Staff member
-              </button>
-              <button
-                type="button"
-                onClick={() => setAssigneeType('location')}
-                className={`px-3 py-1.5 rounded text-sm font-body font-body-medium transition-colors ${
-                  assigneeType === 'location' ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                Whole location
-              </button>
-            </div>
-
-            {assigneeType === 'therapist' && (
-              <Select
-                label="Staff member"
-                placeholder="Select staff..."
-                options={(therapists || []).map(t => ({ value: t.id, label: t.name }))}
-                value={therapistId}
-                onChange={setTherapistId}
-              />
-            )}
-
-            <Select
-              label="Room (optional)"
-              placeholder="No specific room..."
-              options={(rooms || []).map(r => ({ value: r.id, label: r.name }))}
-              value={roomId}
-              onChange={setRoomId}
+          <>
+            <Segmented
+              options={[['therapist', 'Therapist'], ['location', 'Whole location']]}
+              value={assigneeType}
+              onChange={setAssigneeType}
             />
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Date</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+            {assigneeType === 'therapist' && (
+              <Field label="Therapist" required>
+                <SelectField
+                  placeholder="Select therapist..."
+                  options={(therapists || []).map((t) => ({ value: t.id, label: t.name }))}
+                  value={therapistId}
+                  onChange={setTherapistId}
                 />
-              </div>
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-            </div>
+              </Field>
+            )}
 
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Duration (minutes)</label>
-              <Input
-                type="number"
-                min="5"
-                step="5"
-                value={durationMinutes}
-                onChange={(e) => setDurationMinutes(e.target.value)}
+            <Field
+              label="Room (optional)"
+              hint={assigneeType === 'location' && roomId ? 'Blocks this room for any therapist (shown in Room view).' : undefined}
+            >
+              <SelectField
+                placeholder="No specific room..."
+                options={[{ value: '', label: 'No specific room' }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
+                value={roomId}
+                onChange={setRoomId}
               />
-              {startTime && Number(durationMinutes) > 0 && (
-                <p className="text-xs text-text-secondary">
-                  Opens back up at <span className="font-data font-data-medium text-text-primary">{to12h(addMinutesToTime(startTime, Number(durationMinutes)))}</span>
-                </p>
-              )}
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <DateField label="Date" required value={date} onChange={setDate} />
+              <TimeField
+                label="Start time"
+                required
+                value={startTime}
+                onChange={setStartTime}
+                fromTime={(branchHours?.openTime || '06:00').slice(0, 5)}
+                toTime="23:50"
+              />
             </div>
 
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Description (optional)</label>
-              <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Lunch break, room maintenance..." />
-            </div>
+            <Field
+              label="Duration (minutes)"
+              required
+              hint={startTime && dur ? `Opens back up at ${format12h(addMinutes(startTime, dur))}` : undefined}
+            >
+              <NumberInput min="5" step="5" value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
+            </Field>
 
-            <label className="flex items-center gap-2 text-sm font-body text-text-primary cursor-pointer">
+            <Field label="Description (optional)">
+              <TextInput value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Lunch break, room sterilisation..." />
+            </Field>
+
+            <label className="flex items-center gap-2 text-[13px] font-body text-text-primary cursor-pointer">
               <input
                 type="checkbox"
                 checked={preventOnlineBooking}
                 onChange={(e) => setPreventOnlineBooking(e.target.checked)}
-                className="rounded border-border"
+                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30"
               />
-              Prevent online bookings during this time?
+              Prevent online bookings during this time
             </label>
-          </div>
+          </>
         )}
 
         {activeTab === 'recurrence' && (
-          <div className="space-y-3">
-            <Select label="Repeat" options={REPEAT_OPTIONS} value={repeat} onChange={setRepeat} />
+          <>
+            <Field label="Repeat">
+              <SelectField options={REPEAT_OPTIONS} value={repeat} onChange={setRepeat} />
+            </Field>
 
             {repeat && (
               <>
-                <div className="space-y-1">
-                  <label className="block font-body font-body-medium text-sm text-text-primary">
-                    Every {recurrenceIntervalInput || 1} {repeat === 'daily' ? 'day(s)' : repeat === 'weekly' ? 'week(s)' : 'month(s)'}
-                  </label>
-                  <Input type="number" min="1" value={recurrenceIntervalInput} onChange={(e) => setRecurrenceIntervalInput(e.target.value)} />
-                </div>
+                <Field label={`Every ${recurrenceIntervalInput || 1} ${repeat === 'daily' ? 'day(s)' : repeat === 'weekly' ? 'week(s)' : 'month(s)'}`}>
+                  <NumberInput min="1" value={recurrenceIntervalInput} onChange={(e) => setRecurrenceIntervalInput(e.target.value)} />
+                </Field>
 
-                <Select label="Ends" options={END_CONDITION_OPTIONS} value={endCondition} onChange={setEndCondition} />
+                <Field label="Ends">
+                  <SelectField options={END_CONDITION_OPTIONS} value={endCondition} onChange={setEndCondition} />
+                </Field>
 
-                {endCondition === 'date' && (
-                  <div className="space-y-1">
-                    <label className="block font-body font-body-medium text-sm text-text-primary">End date</label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                  </div>
-                )}
+                {endCondition === 'date' && <DateField label="End date" value={endDate} onChange={setEndDate} min={date} />}
 
                 {endCondition === 'count' && (
-                  <div className="space-y-1">
-                    <label className="block font-body font-body-medium text-sm text-text-primary">Number of occurrences</label>
-                    <Input type="number" min="1" value={endCount} onChange={(e) => setEndCount(e.target.value)} />
-                  </div>
+                  <Field label="Number of occurrences">
+                    <NumberInput min="1" value={endCount} onChange={(e) => setEndCount(e.target.value)} />
+                  </Field>
                 )}
               </>
             )}
-          </div>
+          </>
         )}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={submitting}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={handleSubmit} loading={submitting} disabled={!isFormComplete}>
-            Add Block
-          </Button>
-        </div>
-      </div>
-    </div>
+      </FormBody>
+    </PanelShell>
   );
 };
 

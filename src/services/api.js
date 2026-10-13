@@ -4870,6 +4870,12 @@ export function isTransferFeatureMissing(error) {
   return ['PGRST205', 'PGRST202', '42P01', '42883'].includes(error?.code);
 }
 
+// 'YYYY-MM-DD' +/- N days, calendar math only (no timezone drift).
+function shiftDateStr(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().split('T')[0];
+}
+
 const kathmanduInstant = (date, time) => (date && time ? `${date}T${String(time).slice(0, 8)}+05:45` : null);
 
 // Per-day "unavailable" occurrences for transfer windows touching this branch in [startDate, endDate],
