@@ -462,26 +462,31 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     : (people.length > 0 && people.every((p) => !!p.serviceId));
   const groupValid = bookingMode !== 'group'
     || (people.length > 0
-      && people.every((p) => p.name?.trim() && p.phone?.replace(/\D/g, ''))
+      && !!people[0]?.name?.trim()
+      && !!people[0]?.phone?.replace(/\D/g, '')
       && groupServiceValid);
 
   const buildGroupPeople = () => {
-    // Blank "other" persons inherit the booking contact's name/email — phone is
-    // required per-person now (see groupValid), so no phone fallback here.
+    // Blank "other" persons inherit the booking contact's name/phone/email.
     const lead = people[0] || {};
     const leadName = lead.name?.trim();
+    const leadPhoneDigits = lead.phone?.replace(/\D/g, '');
+    const leadCountryCode = lead.countryCode || '+977';
     const leadEmail = lead.email?.trim();
-    return people.map((p, idx) => ({
-      customerName: p.name?.trim() || (idx === 0 ? null : leadName) || null,
-      customerPhone: p.phone?.replace(/\D/g, '')
-        ? (p.countryCode || '+977') + p.phone.replace(/\D/g, '')
-        : null,
-      customerEmail: p.email?.trim() || (idx === 0 ? null : leadEmail) || null,
-      customerGender: p.gender || (idx === 0 ? null : lead.gender) || null,
-      serviceId: serviceMode === 'same' ? groupServiceId : p.serviceId,
-      therapistIds: p.therapistId ? [p.therapistId] : null,
-      roomId: groupType === 'couple' ? (groupRoomId || null) : (p.roomId || null),
-    }));
+    return people.map((p, idx) => {
+      const ownPhoneDigits = p.phone?.replace(/\D/g, '');
+      return {
+        customerName: p.name?.trim() || (idx === 0 ? null : leadName) || null,
+        customerPhone: ownPhoneDigits
+          ? (p.countryCode || '+977') + ownPhoneDigits
+          : (idx !== 0 && leadPhoneDigits ? leadCountryCode + leadPhoneDigits : null),
+        customerEmail: p.email?.trim() || (idx === 0 ? null : leadEmail) || null,
+        customerGender: p.gender || (idx === 0 ? null : lead.gender) || null,
+        serviceId: serviceMode === 'same' ? groupServiceId : p.serviceId,
+        therapistIds: p.therapistId ? [p.therapistId] : null,
+        roomId: groupType === 'couple' ? (groupRoomId || null) : (p.roomId || null),
+      };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -1114,7 +1119,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       type="tel"
                       value={p.phone}
                       onChange={(e) => setPerson(idx, { phone: e.target.value })}
-                      placeholder="Phone (required)"
+                      placeholder={idx === 0 ? 'Phone (required)' : 'Phone (optional — uses booking contact if blank)'}
                       className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     />
                   </div>
