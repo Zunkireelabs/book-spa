@@ -8,17 +8,13 @@ import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
+import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
+import { inChunks, failOpenAfter, IN_CHUNK } from './queryHelpers';
 
-// getCalendarBookings' "New" tag lookup: PostgREST puts .in() lists in the URL, so customer ids go
-// out in chunks; the whole lookup is capped so a slow/failed history query can never hold the calendar up.
-const HISTORY_IN_CHUNK = 100;
-const HISTORY_PAGE_SIZE = 1000; // PostgREST's default max rows per response
-const HISTORY_TIMEOUT_MS = 4000;
-const withTimeout = (promise, ms, label) => {
-  let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-};
+// Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
+// lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
+const PG_PAGE_SIZE = 1000;
+const CALENDAR_LOOKUP_TIMEOUT_MS = 4000;
 
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
@@ -4864,6 +4860,190 @@ export async function fetchBookingById(bookingId) {
 // Phase 8.1: Calendar Read-Only Query
 // ============================================================
 
+// ============================================================
+// Staff (therapist) transfers (supabase/migration-038/041)
+// ============================================================
+
+// True when an error means "the transfer tables / RPCs don't exist on this database" (e.g. the
+// cloud DB before promotion). Callers fail open: no transfer data, nothing breaks.
+export function isTransferFeatureMissing(error) {
+  return ['PGRST205', 'PGRST202', '42P01', '42883'].includes(error?.code);
+}
+
+const kathmanduInstant = (date, time) => (date && time ? `${date}T${String(time).slice(0, 8)}+05:45` : null);
+
+// Per-day "unavailable" occurrences for transfer windows touching this branch in [startDate, endDate],
+// shaped like block occurrences so findBlockOverlap treats them the same (see utils/transferOccurrences.js).
+// Fail open: any error (including missing tables) -> { data: [], error }.
+export async function fetchTransferOccurrences(branchId, startDate, endDate) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+    const { data, error } = await supabase
+      .from('staff_transfers')
+      .select('therapist_id, from_branch_id, to_branch_id, effective_date, start_time, revert_at, reverted, reverted_at, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
+      .or(`from_branch_id.eq.${resolvedBranchId},to_branch_id.eq.${resolvedBranchId}`)
+      .eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+      .not('revert_at', 'is', null)
+      .lte('effective_date', endDate);
+    if (error) throw error;
+
+    const rows = (data || []).map(t => {
+      const out = t.from_branch_id === resolvedBranchId;
+      return {
+        therapistId: t.therapist_id,
+        kind: out ? 'out' : 'in',
+        startDate: t.effective_date,
+        startTime: t.start_time,
+        endAt: t.reverted && t.reverted_at ? t.reverted_at : t.revert_at,
+        otherBranch: out ? t.toBranch?.name : t.fromBranch?.name,
+      };
+    });
+
+    const occurrences = [];
+    for (let d = startDate; d <= endDate; d = shiftDateStr(d, 1)) {
+      rows.forEach(r => occurrences.push(...transferWindowOccurrencesForDate(r, d)));
+    }
+    return { data: occurrences, error: null };
+  } catch (error) {
+    if (!isTransferFeatureMissing(error)) console.warn('[API] fetchTransferOccurrences:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Applies transfer data to a branch's calendar therapists for [startDate, endDate]:
+//  - tags therapists currently visiting this branch (transferredIn + window),
+//  - tags therapists with a scheduled (not yet applied) transfer out (scheduledTransfer),
+//  - adds grey "transferred out" columns for therapists who are away (or were, within the range),
+//  - adds a "visiting" column for a visitor who already returned home in the range.
+// Fails open: on any error (including missing tables) returns the therapists unchanged.
+async function applyCalendarTransfers(branchId, startDate, endDate, therapists) {
+  try {
+    const cols = 'id, therapist_id, revert_at, effective_date, start_time, from_display_order, reverted, reverted_at';
+    const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)';
+    // Temporary, applied, non-return-leg windows; still-active ones plus ones that ended within the range.
+    const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
+    const [outRes, inRes, schedRes] = await Promise.all([
+      supabase.from('staff_transfers')
+        .select(`${cols}, ${therapistCols}`)
+        .eq('from_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+        .not('revert_at', 'is', null).or(windowFilter)
+        .order('effective_date').order('start_time'),
+      supabase.from('staff_transfers')
+        .select(`${cols}, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
+        .eq('to_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
+        .not('revert_at', 'is', null).or(windowFilter)
+        .order('effective_date').order('start_time'),
+      supabase.from('staff_transfers')
+        .select('id, therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
+        .eq('from_branch_id', branchId).eq('applied', false)
+        .gte('effective_date', startDate).lte('effective_date', endDate)
+        .order('effective_date').order('start_time'),
+    ]);
+    const err = outRes.error || inRes.error || schedRes.error;
+    if (err) {
+      if (!isTransferFeatureMissing(err)) console.warn('[API] applyCalendarTransfers:', err.message);
+      return therapists;
+    }
+
+    const activeIds = new Set(therapists.map(d => d.id));
+    // A transfer ended early ends at reverted_at, not the originally scheduled revert_at.
+    const windowOf = (t) => ({ returnsAt: t.reverted && t.reverted_at ? t.reverted_at : t.revert_at, transferStartAt: kathmanduInstant(t.effective_date, t.start_time) });
+
+    const scheduledByTherapist = {};
+    (schedRes.data || []).forEach(r => {
+      scheduledByTherapist[r.therapist_id] ??= { id: r.id, effectiveDate: r.effective_date, startTime: r.start_time, toBranch: r.toBranch?.name || null };
+    });
+
+    const outRows = dedupeTransfersByKey(sortTransfersByTime(outRes.data || []), t => t.therapist?.id);
+    const inRows = dedupeTransfersByKey(sortTransfersByTime(inRes.data || []), t => t.therapist_id);
+    const inById = {};
+    inRows.forEach(t => { inById[t.therapist_id] = { fromBranch: t.fromBranch?.name || null, ...windowOf(t) }; });
+
+    const tagged = therapists.map(d => {
+      const withIn = inById[d.id] ? { ...d, transferredIn: true, ...inById[d.id] } : d;
+      return scheduledByTherapist[d.id] ? { ...withIn, scheduledTransfer: scheduledByTherapist[d.id] } : withIn;
+    });
+
+    // Away therapists: their therapists.branch_id is elsewhere, so they're not in `therapists`.
+    const awayColumns = outRows
+      .filter(t => t.therapist && !activeIds.has(t.therapist.id))
+      .map(t => ({
+        ...t.therapist,
+        display_order: t.from_display_order ?? t.therapist.display_order,
+        transferredOut: true,
+        transferId: t.id,
+        ...windowOf(t),
+      }));
+    // A visitor who already returned home within the range: keep a column recording the visit.
+    const awayIds = new Set(awayColumns.map(c => c.id));
+    const visitedColumns = inRows
+      .filter(t => t.therapist && !activeIds.has(t.therapist.id) && !awayIds.has(t.therapist.id))
+      .map(t => ({ ...t.therapist, transferredIn: true, fromBranch: t.fromBranch?.name || null, ...windowOf(t) }));
+
+    return [...tagged, ...awayColumns, ...visitedColumns]
+      .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
+  } catch (error) {
+    console.warn('[API] applyCalendarTransfers failed open:', error.message);
+    return therapists;
+  }
+}
+
+
+
+// ── Date-picker booking counts ───────────────────────────────────────────────────────────────────────────────────────
+// One number per day for the calendar's date picker. Read-only, `bookings.date` is the branch-local date (no UTC maths).
+// Counts = Pending/Confirmed/In-Progress/Completed; Cancelled + No Show are reported separately; a shared (multi-therapist)
+// booking is one row. Paged with .range() so PostgREST's 1,000-row cap can't undercount a busy branch.
+const DAY_COUNT_PAGE = PG_PAGE_SIZE;
+const DAY_COUNT_TTL_MS = 60000;
+const dayCountCache = new Map(); // `${branch}|${start}|${end}` -> { at, promise }
+
+export function invalidateBookingDayCounts() {
+  dayCountCache.clear();
+}
+
+export function getBookingDayCounts(branchId, startDate, endDate) {
+  const resolvedBranchId = resolveBranchId(branchId);
+  const key = `${resolvedBranchId}|${startDate}|${endDate}`;
+  const hit = dayCountCache.get(key);
+  if (hit && Date.now() - hit.at < DAY_COUNT_TTL_MS) return hit.promise;
+
+  const promise = (async () => {
+    try {
+      const counts = {};
+      for (let from = 0; ; from += DAY_COUNT_PAGE) {
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('date, status')
+          .eq('branch_id', resolvedBranchId)
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + DAY_COUNT_PAGE - 1);
+        if (error) throw error;
+        for (const row of data || []) {
+          const c = (counts[row.date] ||= { total: 0, pending: 0, cancelled: 0 });
+          if (row.status === 'Cancelled' || row.status === 'No Show') c.cancelled += 1;
+          else {
+            c.total += 1;
+            if (row.status === 'Pending') c.pending += 1;
+          }
+        }
+        if (!data || data.length < DAY_COUNT_PAGE) break;
+      }
+      return counts;
+    } catch (e) {
+      console.warn('[API] getBookingDayCounts failed:', e.message);
+      dayCountCache.delete(key); // don't cache a failure
+      return null;
+    }
+  })();
+  dayCountCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
+
 export async function getCalendarBookings(branchId, startDate, endDate) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
@@ -4877,12 +5057,10 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
     if (branchError) throw branchError;
 
-    // 2. Fetch therapists, rooms, and any staffers currently transferred OUT of this
-    //    branch (they still show as a column here — booking creation is already
-    //    blocked for them since their branch_id now points elsewhere — see migration-145).
+    // 2. Fetch therapists and rooms for this branch; transfer windows (staff away / visiting / scheduled)
+    //    are layered on by applyCalendarTransfers below.
     const [
-      therapistsResult, roomsResult, transferredOutResult, transferredInResult,
-      revertedOutResult, revertedInResult, checkedOutResult, scheduledTransferResult,
+      therapistsResult, roomsResult, checkedOutResult,
     ] = await Promise.all([
       supabase
         .from('therapists')
@@ -4898,70 +5076,6 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .eq('is_active', true)
         .order('display_order')
         .order('name'),
-      // is_permanent = false: a Permanent transfer (migration-150) is a plain reassignment
-      // with no revert — the staffer should just appear as a normal column at their new
-      // branch, not as a "transferred out/visiting" overlay. revert_at IS NOT NULL additionally
-      // excludes historical pre-migration-141 rows: `reverted`/`is_permanent` are both
-      // NOT NULL DEFAULT false columns added later, so every legacy row backfills to
-      // reverted=false/is_permanent=false and would otherwise match this filter forever,
-      // showing a permanent phantom "transferred out"/"visiting" column for any staffer who
-      // was ever moved under the old model — revert_at is the one column that's genuinely
-      // NULL on those old rows (they never had a duration), so it's the reliable "this is a
-      // real, still-active temporary window" signal.
-      supabase
-        .from('staff_transfers')
-        .select('id, revert_at, effective_date, start_time, from_display_order, therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
-        .eq('from_branch_id', resolvedBranchId)
-        .eq('applied', true)
-        .eq('reverted', false)
-        .eq('is_permanent', false)
-        .not('revert_at', 'is', null)
-        .order('effective_date', { ascending: true })
-        .order('start_time', { ascending: true }),
-      // Staffers currently visiting THIS branch on a temporary transfer — they already
-      // appear normally in therapistsResult above (branch_id points here); this tags them
-      // with where they're from + their actual visiting window, so the calendar can block
-      // everything OUTSIDE that window (they're only really here for that slice of time).
-      supabase
-        .from('staff_transfers')
-        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
-        .eq('to_branch_id', resolvedBranchId)
-        .eq('applied', true)
-        .eq('reverted', false)
-        .eq('is_permanent', false)
-        .not('revert_at', 'is', null)
-        .order('effective_date', { ascending: true })
-        .order('start_time', { ascending: true }),
-      // Same two queries again, but for transfers that have ALREADY reverted within the
-      // viewed date range — without this, a transfer's shaded [start, revert_at] window
-      // vanishes from the calendar the instant it reverts, even on the same day it
-      // happened (getTransferBlockRange below is already date/time-range-aware and would
-      // render this correctly — it just never receives the flag once `reverted` flips).
-      // Bounded to [startDate, endDate] so this can't resurrect arbitrarily old transfers.
-      supabase
-        .from('staff_transfers')
-        .select('id, revert_at, effective_date, start_time, from_display_order, therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
-        .eq('from_branch_id', resolvedBranchId)
-        .eq('applied', true)
-        .eq('reverted', true)
-        .eq('is_permanent', false)
-        .not('revert_at', 'is', null)
-        .gte('effective_date', startDate)
-        .lte('effective_date', endDate)
-        .order('effective_date', { ascending: true })
-        .order('start_time', { ascending: true }),
-      supabase
-        .from('staff_transfers')
-        .select('therapist_id, revert_at, effective_date, start_time, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)')
-        .eq('to_branch_id', resolvedBranchId)
-        .eq('applied', true)
-        .eq('reverted', true)
-        .eq('is_permanent', false)
-        .not('revert_at', 'is', null)
-        .gte('effective_date', startDate)
-        .lte('effective_date', endDate)
-        .order('effective_date', { ascending: true })
-        .order('start_time', { ascending: true }),
       // Therapists who've already checked out (for real, not just marked absent/leave) on
       // some date in this range — the calendar blocks the rest of that day's column for
       // them, same as a transfer-out window, so a booking can't be dropped onto someone
@@ -4973,45 +5087,11 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         .gte('date', startDate)
         .lte('date', endDate)
         .not('check_out_time', 'is', null),
-      // Transfers scheduled for later within the viewed range but not yet due (cron hasn't
-      // flipped applied=true) — these move nothing yet, so they must NOT block the column
-      // like transferredOut/transferredIn above, but the calendar showing literally nothing
-      // for a transfer staff just created (until its start time arrives) reads as "did this
-      // even save?" — surface it as a non-blocking "Scheduled" badge instead. Only the
-      // FROM side needs this (a pending incoming transfer doesn't affect this branch's
-      // columns at all until it applies and the therapist's own row starts appearing here).
-      supabase
-        .from('staff_transfers')
-        .select('id, therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
-        .eq('from_branch_id', resolvedBranchId)
-        .eq('applied', false)
-        .gte('effective_date', startDate)
-        .lte('effective_date', endDate)
-        .order('effective_date', { ascending: true })
-        .order('start_time', { ascending: true }),
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
     if (roomsResult.error) throw roomsResult.error;
-    if (transferredOutResult.error) throw transferredOutResult.error;
-    if (transferredInResult.error) throw transferredInResult.error;
-    if (revertedOutResult.error) throw revertedOutResult.error;
-    if (revertedInResult.error) throw revertedInResult.error;
     if (checkedOutResult.error) throw checkedOutResult.error;
-    if (scheduledTransferResult.error) throw scheduledTransferResult.error;
-
-    // Keyed by therapist id -> the SOONEST still-pending transfer touching this branch's
-    // view range (a therapist could theoretically have more than one scheduled; the list is
-    // already ordered by effective_date/start_time ascending, so `??=` keeps the first).
-    const scheduledTransferByTherapist = {};
-    (scheduledTransferResult.data || []).forEach(row => {
-      scheduledTransferByTherapist[row.therapist_id] ??= {
-        id: row.id,
-        effectiveDate: row.effective_date,
-        startTime: row.start_time,
-        toBranch: row.toBranch?.name || null,
-      };
-    });
 
     // Keyed "<therapistId>_<date>" -> raw check_out_time (timestamptz), so the calendar
     // can block each affected day's column independently.
@@ -5020,74 +5100,11 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       checkedOutByTherapistAndDate[`${row.therapist_id}_${row.date}`] = row.check_out_time;
     });
 
-    const activeTherapistIds = new Set((therapistsResult.data || []).map(t => t.id));
-    // Each query is individually ordered ascending, but concatenating two separately-ordered
-    // result sets is NOT itself globally sorted (a still-live transfer can be chronologically
-    // AFTER an already-reverted-today one for the same therapist) — sort the combined array
-    // before deduping so "last row per therapist id" reliably means their most recent transfer,
-    // collapsing a round-tripped-more-than-once therapist down to a single calendar column.
-    const dedupedOutRows = dedupeTransfersByKey(
-      sortTransfersByTime([...(transferredOutResult.data || []), ...(revertedOutResult.data || [])]),
-      t => t.therapist?.id
+    const mergedTherapists = await applyCalendarTransfers(
+      resolvedBranchId, startDate, endDate,
+      (therapistsResult.data || [])
+        .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name))
     );
-    const transferredOutTherapists = dedupedOutRows
-      .filter(t => t.therapist && !activeTherapistIds.has(t.therapist.id))
-      .map(t => ({
-        ...t.therapist,
-        // therapist.display_order now reflects their DESTINATION branch's ordering
-        // (overwritten the moment the transfer applied) — from_display_order is the
-        // position they held HERE, captured before that overwrite (migration-149).
-        // Falling back to the live value only if that capture is missing (legacy rows).
-        display_order: t.from_display_order ?? t.therapist.display_order,
-        transferredOut: true,
-        transferId: t.id,
-        returnsAt: t.revert_at,
-        // Kathmandu wall-clock instant the transfer actually took effect — lets the
-        // calendar shade only the real [start, revert_at] window, not the whole day.
-        transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
-      }));
-
-    // Same dedup + global sort as the out-side.
-    const inRows = dedupeTransfersByKey(
-      sortTransfersByTime([...(transferredInResult.data || []), ...(revertedInResult.data || [])]),
-      t => t.therapist_id
-    );
-
-    const transferredInById = {};
-    inRows.forEach(t => {
-      transferredInById[t.therapist_id] = {
-        fromBranch: t.fromBranch?.name || null,
-        returnsAt: t.revert_at,
-        transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
-      };
-    });
-
-    const normalTherapists = (therapistsResult.data || []).map(t => {
-      const withIncoming = transferredInById[t.id] ? { ...t, transferredIn: true, ...transferredInById[t.id] } : t;
-      const scheduled = scheduledTransferByTherapist[t.id];
-      return scheduled ? { ...withIncoming, scheduledTransfer: scheduled } : withIncoming;
-    });
-
-    // A visitor who has ALREADY reverted home is no longer in therapistsResult (their
-    // branch_id points home again), so transferredInById above can't tag an existing row —
-    // build a real column for them instead, the same way transferredOutTherapists already
-    // does for therapists who are away. Without this, a branch's calendar has no record at
-    // all that the visit happened once it's over, even on the same day.
-    const transferredInTherapists = inRows
-      .filter(t => t.therapist && !activeTherapistIds.has(t.therapist.id))
-      .map(t => ({
-        ...t.therapist,
-        transferredIn: true,
-        fromBranch: t.fromBranch?.name || null,
-        returnsAt: t.revert_at,
-        transferStartAt: t.effective_date && t.start_time ? `${t.effective_date}T${t.start_time}+05:45` : null,
-      }));
-
-    // Slot the transferred-out column back into its ORIGINAL position among the branch's
-    // normal columns (by the preserved origin display_order, then name) instead of always
-    // appending it at the end.
-    const mergedTherapists = [...normalTherapists, ...transferredOutTherapists, ...transferredInTherapists]
-      .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
 
     // 3. Fetch bookings in date range, excluding Cancelled and No Show
     const { data: bookings, error: bookingsError } = await supabase
@@ -5096,7 +5113,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         id, booking_number, customer_id, customer_name, customer_phone, status, payment_status,
         date, start_time, end_time, start_datetime, end_datetime, created_at, created_by,
         therapist_id, room_id,
-        base_amount, discount_amount, final_amount, special_requests,
+        base_amount, discount_amount, final_amount, special_requests, referred_by,
         service:services(name, duration_minutes, requires_therapist),
         therapist:therapists(id, name),
         room:rooms(id, name),
@@ -5117,50 +5134,120 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // instead of one query per booking. No customer_id (walk-in/guest) → always New.
     const bookingCustomerIds = [...new Set((bookings || []).map(b => b.customer_id).filter(Boolean))];
     const firstBookingIdByCustomer = {};
-    // Cosmetic tag only: on error or timeout the calendar still renders and no customer-linked
+
+    // Hover-card extras — read-only, batched (no N+1) and FAIL-OPEN: any error leaves the field undefined and the
+    // calendar still loads. Started now so they run concurrently with the New-tag query below.
+    //  * customer notes: customers.notes for every customer in range (one query)
+    //  * previous due: the payment modal's "Previous due" figure, for every visible booking (two queries total)
+    const customerNotesPromise = failOpenAfter((async () => {
+      if (bookingCustomerIds.length === 0) return {};
+      try {
+        const rows = await inChunks(bookingCustomerIds, (ids) => supabase.from('customers').select('id, notes').in('id', ids));
+        const out = {};
+        for (const c of rows) { const t = (c.notes || '').trim(); if (t) out[c.id] = t; }
+        return out;
+      } catch (e) {
+        console.warn('[API] getCalendarBookings: customer notes lookup failed:', e.message);
+        return undefined;
+      }
+    })().catch(() => undefined), CALENDAR_LOOKUP_TIMEOUT_MS, undefined);
+    // Same definition as getCustomerOutstandingBalance (what the payment modal bundles as "Previous due"): the same phone's
+    // other unpaid/partial, non-cancelled bookings in this branch (any date), amount = final_amount − payments, excluding
+    // the booking itself and — as BookingActionModal does — its same-name/same-date unpaid "related services".
+    const previousDuePromise = failOpenAfter((async () => {
+      const phoneOf = (b) => { const p = toE164(b.customer_phone); return p && p.length >= 11 ? p : null; };
+      const visiblePhones = new Set((bookings || []).map(phoneOf).filter(Boolean));
+      if (visiblePhones.size === 0) return {};
+      try {
+        const { data: openAll, error } = await supabase
+          .from('bookings')
+          .select('id, customer_name, customer_phone, date, final_amount, payment_status')
+          .eq('branch_id', resolvedBranchId)
+          .in('payment_status', ['unpaid', 'partial'])
+          .not('status', 'in', '("Cancelled","No Show")');
+        if (error) throw error;
+        // Only rows for a phone that is actually on screen can matter; don't fetch payments for the rest of the branch.
+        const open = (openAll || []).filter(o => visiblePhones.has(phoneOf(o)));
+        const ids = open.map(o => o.id);
+        const paid = {};
+        if (ids.length > 0) {
+          const pays = await inChunks(ids, (chunk) => supabase.from('payments').select('booking_id, amount').in('booking_id', chunk));
+          for (const p of pays) paid[p.booking_id] = (paid[p.booking_id] || 0) + Number(p.amount);
+        }
+        const byPhone = {};
+        for (const o of open) {
+          const ph = phoneOf(o);
+          if (!ph) continue;
+          const due = Math.round((Number(o.final_amount) - (paid[o.id] || 0)) * 100) / 100;
+          if (due <= 0) continue;
+          (byPhone[ph] ||= []).push({ id: o.id, name: o.customer_name, date: o.date, unpaid: o.payment_status === 'unpaid', due });
+        }
+        const out = {};
+        for (const b of (bookings || [])) {
+          const ph = phoneOf(b);
+          if (!ph || !byPhone[ph]) continue;
+          const list = byPhone[ph].filter(o => o.id !== b.id && !(o.unpaid && o.name === b.customer_name && o.date === b.date));
+          if (list.length === 0) continue;
+          out[b.id] = { count: list.length, amount: Math.round(list.reduce((sum, o) => sum + o.due, 0) * 100) / 100 };
+        }
+        return out;
+      } catch (e) {
+        console.warn('[API] getCalendarBookings: previous-due lookup failed:', e.message);
+        return undefined;
+      }
+    })().catch(() => undefined), CALENDAR_LOOKUP_TIMEOUT_MS, undefined);
+
+    // "New" tag lookup. Cosmetic only: on error or timeout the calendar still renders and no customer-linked
     // booking is tagged New (safer than mislabelling a returning customer as new).
     let historyFailed = false;
     if (bookingCustomerIds.length > 0) {
-      try {
-        const chunks = [];
-        for (let i = 0; i < bookingCustomerIds.length; i += HISTORY_IN_CHUNK) {
-          chunks.push(bookingCustomerIds.slice(i, i + HISTORY_IN_CHUNK));
+      // Rows after endDate can't change whether a booking in this range is a customer's first. Paged because
+      // PostgREST caps a response at 1000 rows; id breaks date/time ties so pages are stable. Chunks hold disjoint
+      // customers and each is already in (date, start_time, id) order.
+      const fetchChunk = async (ids) => {
+        const rows = [];
+        for (let from = 0; ; from += PG_PAGE_SIZE) {
+          const { data, error } = await supabase
+            .from('bookings')
+            .select('id, customer_id, date, start_time')
+            .in('customer_id', ids)
+            .neq('status', 'Cancelled')
+            .lte('date', endDate)
+            .order('date', { ascending: true })
+            .order('start_time', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, from + PG_PAGE_SIZE - 1);
+          if (error) throw error;
+          rows.push(...(data || []));
+          if (!data || data.length < PG_PAGE_SIZE) return rows;
         }
-        // Rows after endDate can't change whether a booking in this range is a customer's first.
-        // Paged because PostgREST caps a response at 1000 rows; id breaks date/time ties so pages are stable.
-        const fetchChunk = async (ids) => {
-          const rows = [];
-          for (let from = 0; ; from += HISTORY_PAGE_SIZE) {
-            const { data, error } = await supabase
-              .from('bookings')
-              .select('id, customer_id, date, start_time')
-              .in('customer_id', ids)
-              .neq('status', 'Cancelled')
-              .lte('date', endDate)
-              .order('date', { ascending: true })
-              .order('start_time', { ascending: true })
-              .order('id', { ascending: true })
-              .range(from, from + HISTORY_PAGE_SIZE - 1);
-            if (error) throw error;
-            rows.push(...(data || []));
-            if (!data || data.length < HISTORY_PAGE_SIZE) return rows;
-          }
-        };
-        const historyRows = (await withTimeout(Promise.all(chunks.map(fetchChunk)), HISTORY_TIMEOUT_MS, 'New-customer history lookup')).flat();
-        // Chunks hold disjoint customers, and each chunk is already in (date, start_time, id) order.
+      };
+      const chunks = [];
+      for (let i = 0; i < bookingCustomerIds.length; i += IN_CHUNK) chunks.push(bookingCustomerIds.slice(i, i + IN_CHUNK));
+      // null = the lookup failed or timed out.
+      const historyRows = await failOpenAfter(
+        Promise.all(chunks.map(fetchChunk)).then(r => r.flat()).catch((e) => {
+          console.warn('[API] getCalendarBookings: New-customer lookup failed, skipping New tags:', e.message);
+          return null;
+        }),
+        CALENDAR_LOOKUP_TIMEOUT_MS,
+        null
+      );
+      if (historyRows) {
         for (const h of historyRows) {
-          if (!(h.customer_id in firstBookingIdByCustomer)) {
-            firstBookingIdByCustomer[h.customer_id] = h.id;
-          }
+          if (!(h.customer_id in firstBookingIdByCustomer)) firstBookingIdByCustomer[h.customer_id] = h.id;
         }
-      } catch (histErr) {
-        console.warn('[API] getCalendarBookings: New-customer lookup failed, skipping New tags:', histErr.message);
+      } else {
         historyFailed = true;
       }
     }
+    const [customerNotesByCustomer, previousDueByBooking] = await Promise.all([customerNotesPromise, previousDuePromise]);
     const bookingsWithNewFlag = (bookings || []).map(b => ({
       ...b,
       isNewCustomer: !b.customer_id || (!historyFailed && firstBookingIdByCustomer[b.customer_id] === b.id),
+      // undefined (not null/0) when the lookup failed, so the UI shows nothing rather than a false "no alerts / no due".
+      customerNotes: customerNotesByCustomer ? (customerNotesByCustomer[b.customer_id] || null) : undefined,
+      previousDue: previousDueByBooking ? (previousDueByBooking[b.id] || null) : undefined,
     }));
 
     // A PERMANENTLY transferred-out therapist gets no proactive column above (by design —

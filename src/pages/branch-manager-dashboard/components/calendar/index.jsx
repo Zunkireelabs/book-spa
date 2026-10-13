@@ -2871,6 +2871,7 @@ const OperationalCalendar = ({ branchId }) => {
                   <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 bg-surface border border-border rounded-spa shadow-lg z-dropdown p-3">
                     <MiniMonthCalendar
                       selectedDate={currentDate}
+                      branchId={branchId}
                       onDateSelect={(d) => { setCurrentDate(d); setDateDropdownOpen(false); }}
                     />
                   </div>
