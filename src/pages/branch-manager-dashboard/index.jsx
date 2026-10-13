@@ -87,7 +87,7 @@ const BranchManagerDashboard = () => {
   const [notifications, setNotifications] = useState([]);
   const [discountNotifs, setDiscountNotifs] = useState([]);
   const [readDiscountIds, setReadDiscountIds] = useState(() => new Set());
-  const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
+  const [realtimeStatus, setRealtimeStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected' | 'idle' (no subscription, e.g. Overall)
 
   const managerData = {
     name: profile?.full_name || 'Manager',
@@ -142,8 +142,13 @@ const BranchManagerDashboard = () => {
 
   // Real-time subscription for booking changes
   useEffect(() => {
-    // Overall is a read-only org-wide aggregate — no single branch to subscribe to.
-    if (!branchId || isOverall) return;
+    // Overall is a read-only org-wide aggregate — no single branch to subscribe to. Nothing is
+    // subscribed there, so report 'idle' (the header shows no status) rather than a stale 'disconnected'
+    // left by the previous branch's channel closing.
+    if (isOverall) { setRealtimeStatus('idle'); return; }
+    if (!branchId) return;
+    let active = true;
+    setRealtimeStatus('connecting');
 
     const handleRealtimeUpdate = (payload) => {
       // Small delay to ensure DB triggers (booking_number generation, end_time calculation) complete
@@ -203,6 +208,8 @@ const BranchManagerDashboard = () => {
         filter: `branch_id=eq.${branchId}`
       }, handleRealtimeUpdate)
       .subscribe((status) => {
+        // Ignore callbacks from a channel this effect has already torn down (its CLOSED must not read as offline).
+        if (!active) return;
         if (status === 'SUBSCRIBED') {
           setRealtimeStatus('connected');
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -210,7 +217,7 @@ const BranchManagerDashboard = () => {
         }
       });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { active = false; supabase.removeChannel(channel); };
   }, [branchId, isOverall, loadData]);
 
   // Overall is read-only: redirect away from booking-creation / per-branch write views.
