@@ -2784,14 +2784,14 @@ const OperationalCalendar = ({ branchId }) => {
         <div className="bg-surface overflow-hidden flex flex-col h-full pb-2">
           {/* Top toolbar — stacks into 3 rows on mobile (left controls / centered date / Day+Filter),
               single row on sm+ */}
-          <div className="flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-stretch sm:items-center gap-2 px-3 sm:px-4 py-2.5 border-b border-border bg-background/50 flex-shrink-0">
+          <div className="flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-stretch sm:items-center gap-2 px-3 sm:px-4 py-1.5 border-b border-border bg-background/50 flex-shrink-0">
             {/* Left: View By toggle */}
             <div className="flex items-center gap-2 flex-wrap justify-self-start">
               {enableRooms ? (
-                <div className="flex items-center border border-border rounded-spa overflow-hidden">
+                <div className="flex items-center h-[var(--control-h)] border border-border rounded-spa overflow-hidden">
                   <button
                     onClick={() => setColumnMode('therapist')}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 text-sm font-body font-body-medium spa-transition-fast ${
+                    className={`flex items-center justify-center gap-1 h-full px-2.5 text-sm font-body font-body-medium spa-transition-fast ${
                       columnMode === 'therapist'
                         ? 'bg-primary text-white'
                         : 'text-text-primary hover:bg-background'
@@ -2802,7 +2802,7 @@ const OperationalCalendar = ({ branchId }) => {
                   </button>
                   <button
                     onClick={() => setColumnMode('room')}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 text-sm font-body font-body-medium spa-transition-fast border-l border-border ${
+                    className={`flex items-center justify-center gap-1 h-full px-2.5 text-sm font-body font-body-medium spa-transition-fast border-l border-border ${
                       columnMode === 'room'
                         ? 'bg-primary text-white'
                         : 'text-text-primary hover:bg-background'
@@ -2825,7 +2825,7 @@ const OperationalCalendar = ({ branchId }) => {
               <div className="relative" ref={prevJumpRef}>
                 <button
                   onClick={() => setJumpMenuOpen(prev => (prev === 'prev' ? null : 'prev'))}
-                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
                   aria-label="Jump back"
                 >
                   <Icon name="ChevronsLeft" size={16} className="text-text-secondary" />
@@ -2846,21 +2846,21 @@ const OperationalCalendar = ({ branchId }) => {
               </div>
               <button
                 onClick={goPrev}
-                className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
                 aria-label="Previous day"
               >
                 <Icon name="ChevronLeft" size={16} className="text-text-secondary" />
               </button>
               <button
                 onClick={goToday}
-                className="inline-flex px-3 py-1.5 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
+                className="inline-flex items-center h-[var(--control-h)] px-3 text-sm font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast"
               >
                 Today
               </button>
               <div className="relative" ref={dateDropdownRef}>
                 <button
                   onClick={() => setDateDropdownOpen(prev => !prev)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-body font-body-medium text-text-primary border rounded-spa hover:bg-background spa-transition-fast min-w-[110px] sm:min-w-[140px] justify-between ${
+                  className={`flex items-center gap-1.5 h-[var(--control-h)] px-3 text-sm font-body font-body-medium text-text-primary border rounded-spa hover:bg-background spa-transition-fast min-w-[110px] sm:min-w-[140px] justify-between ${
                     dateDropdownOpen ? 'border-primary ring-1 ring-primary' : 'border-border'
                   }`}
                 >
@@ -2878,7 +2878,7 @@ const OperationalCalendar = ({ branchId }) => {
               </div>
               <button
                 onClick={goNext}
-                className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
                 aria-label="Next day"
               >
                 <Icon name="ChevronRight" size={16} className="text-text-secondary" />
@@ -2886,7 +2886,7 @@ const OperationalCalendar = ({ branchId }) => {
               <div className="relative" ref={nextJumpRef}>
                 <button
                   onClick={() => setJumpMenuOpen(prev => (prev === 'next' ? null : 'next'))}
-                  className="p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
                   aria-label="Jump forward"
                 >
                   <Icon name="ChevronsRight" size={16} className="text-text-secondary" />
@@ -2913,7 +2913,7 @@ const OperationalCalendar = ({ branchId }) => {
                 <button
                   type="button"
                   onClick={() => setTipOpen(prev => !prev)}
-                  className="group relative p-1.5 border border-border rounded-spa hover:bg-background spa-transition-fast"
+                  className="group relative h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
                   aria-label="Drag and drop tip"
                 >
                   <Icon name="Info" size={16} className="text-text-secondary" />
@@ -2933,7 +2933,7 @@ const OperationalCalendar = ({ branchId }) => {
                 <div className="relative" ref={positionDropdownRef}>
                   <button
                     onClick={() => setPositionDropdownOpen(prev => !prev)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-spa spa-transition-fast ${
+                    className={`flex items-center gap-1.5 h-[var(--control-h)] px-3 text-sm border rounded-spa spa-transition-fast ${
                       selectedPositions.length > 0 ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-surface text-text-primary'
                     }`}
                   >
@@ -2974,7 +2974,7 @@ const OperationalCalendar = ({ branchId }) => {
                   )}
                 </div>
               )}
-              <div className="flex items-center border border-border rounded-spa overflow-hidden">
+              <div className="flex items-center h-[var(--control-h)] border border-border rounded-spa overflow-hidden">
                 {[
                   { key: 'day', label: 'Day' },
                   { key: '4day', label: '4 Day' },
@@ -2982,7 +2982,7 @@ const OperationalCalendar = ({ branchId }) => {
                   <button
                     key={v.key}
                     onClick={() => setViewMode(v.key)}
-                    className={`px-3 py-1.5 text-sm font-body font-body-medium spa-transition-fast ${
+                    className={`h-full px-3 text-sm font-body font-body-medium spa-transition-fast ${
                       viewMode === v.key
                         ? 'bg-primary text-white'
                         : 'text-text-primary hover:bg-background'

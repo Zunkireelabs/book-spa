@@ -553,7 +553,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         isCollapsed ? 'w-16' : 'w-60'
       } hidden lg:flex`}>
         {/* Header */}
-        <div className={`py-3 h-[52px] flex items-center justify-between ${isCollapsed ? 'px-2' : 'px-5'}`}>
+        <div className={`py-3 h-12 flex items-center justify-between ${isCollapsed ? 'px-2' : 'px-5'}`}>
           <Link to={basePath} className="flex items-center gap-3 shrink-0">
               <div className="relative">
                 {isCollapsed ? (

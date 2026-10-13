@@ -1290,7 +1290,7 @@ const CalendarGrid = ({
     return (
       <div
         key={col.id}
-        className={`relative flex-1 border-r border-border last:border-r-0 px-1 py-2 text-center ${col.transferredOut ? 'bg-background/70' : ''}`}
+        className={`relative flex-1 border-r border-border last:border-r-0 px-1 h-10 flex flex-col justify-center text-center ${col.transferredOut ? 'bg-background/70' : ''}`}
         style={{ minWidth: minColWidth }}
         onMouseEnter={(e) => showHeaderTooltip(e, headerTooltip)}
         onMouseLeave={hideHeaderTooltip}
@@ -1744,7 +1744,7 @@ const CalendarGrid = ({
         className="relative flex-shrink-0 z-header bg-background border-b-2 border-border overflow-hidden"
       >
         <div className="flex" style={{ width: '100%', minWidth: TIME_COL_WIDTH + columnsMinWidth }}>
-          <div className="flex-shrink-0 border-r border-border px-2 py-3 flex items-center sticky left-0 z-header bg-background" style={{ width: TIME_COL_WIDTH }}>
+          <div className="flex-shrink-0 border-r border-border px-2 h-10 flex items-center sticky left-0 z-header bg-background" style={{ width: TIME_COL_WIDTH }}>
             <Icon name="Clock" size={14} className="text-text-secondary" />
           </div>
           {unassignedCol && (
