@@ -671,7 +671,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         </div>
 
         {/* Navigation — collapsible groups (Agentic Commerce style) */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        <nav className="sidebar-scroll flex-1 overflow-y-auto p-3 space-y-1">
           {filteredNavItems.map((item) => {
             const hasChildren = item.children && item.children.length > 0;
             const isExpanded = expandedItems.includes(item.id);

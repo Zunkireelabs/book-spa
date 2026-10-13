@@ -423,28 +423,46 @@
   display: none;
 }
 
-/* ── Sidebar thin scrollbar ──────────────────────────────────── */
-.sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
-}
-
+/* ── Sidebar scrollbar: thin rounded thumb, no track, shown only while the pointer is over the nav ──
+   Chrome/Safari use the ::-webkit-scrollbar rules (they ignore them once the standard scrollbar-* properties
+   are set, so those are only applied where ::-webkit-scrollbar is unsupported, i.e. Firefox). The 8px gutter
+   is always reserved so items don't shift when the thumb appears; the thumb is 4px, inset by a transparent border. */
 .sidebar-scroll::-webkit-scrollbar {
-  width: 4px;
-  height: 6px;
-}
-
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 2px;
-}
-
-.sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+  width: 8px;
+  height: 8px;
 }
 
 .sidebar-scroll::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+
+/* Chromium doesn't repaint the thumb on the scroller's own :hover, so key the reveal off an ancestor :has(). */
+aside:has(.sidebar-scroll:hover) .sidebar-scroll::-webkit-scrollbar-thumb,
+aside:has(.sidebar-scroll:focus-within) .sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(14, 13, 12, 0.18);
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(14, 13, 12, 0.32);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .sidebar-scroll:hover,
+  .sidebar-scroll:focus-within {
+    scrollbar-color: rgba(14, 13, 12, 0.18) transparent;
+  }
 }
 
 /* ── Calendar grid scroller — thicker horizontal bar, always visible ── */
