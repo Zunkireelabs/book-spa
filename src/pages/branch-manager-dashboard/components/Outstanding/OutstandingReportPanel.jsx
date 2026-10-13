@@ -516,6 +516,7 @@ const OutstandingReportPanel = ({ branchId }) => {
           booking={{
             bookingId: payingRow.bookingId,
             booking_number: payingRow.bookingNumber,
+            branchId,
             finalAmount: payingRow.finalAmount,
             amountPaid: payingRow.amountPaid,
             service: payingRow.serviceName,
