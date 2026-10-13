@@ -489,7 +489,7 @@ const BranchStaffDashboard = () => {
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : ''}`}>
         {/* Top Bar - Consistent with Admin */}
         <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
-          <div className="px-4 sm:px-6 lg:px-8 py-3">
+          <div className="px-4 sm:px-6 lg:px-8 py-1.5">
             <div className="flex items-center justify-between">
               {/* Left: Branch + date/time */}
               <div className="flex items-center space-x-3 min-w-0">

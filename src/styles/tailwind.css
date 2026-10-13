@@ -28,36 +28,6 @@
   src: url('/fonts/Inter-Bold.ttf') format('truetype');
 }
 
-/* Playfair Display — serif display typeface */
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 400;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-Regular.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 500;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-Medium.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 600;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-SemiBold.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 700;
-  font-display: fallback;
-  src: url('/fonts/PlayfairDisplay-Bold.ttf') format('truetype');
-}
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -77,12 +47,13 @@
     --color-accent-foreground: #1A1A1A; /* near-black */
     
     /* Background Colors */
-    --color-background: #FAFAF9; /* soft off-white */
+    --color-background: #FAFAFB; /* brand grey */
     --color-surface: #FFFFFF; /* pure white */
     
     /* Text Colors */
-    --color-text-primary: #1A1A1A; /* near-black */
-    --color-text-secondary: #6B7280; /* medium gray */
+    --color-text-primary: #0E0D0C; /* brand ink */
+    --color-text-secondary: #515152; /* brand muted */
+    --color-text-tertiary: #8A8A90; /* brand soft */
     
     /* Status Colors */
     --color-success: #10B981; /* emerald green (distinct from primary) */
@@ -95,14 +66,14 @@
     --color-error-foreground: #FFFFFF; /* white */
     
     /* Border Colors */
-    --color-border: #E1E3E5; /* soft gray (Shopify-style) */
-    --color-border-muted: rgba(225, 227, 229, 0.5); /* soft gray with opacity */
+    --color-border: #E9E9EC; /* brand hairline */
+    --color-border-muted: rgba(233, 233, 236, 0.5); /* soft gray with opacity */
     
     /* Shadow Colors */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
-    --shadow-xl: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
+    --shadow-sm: 0 1px 2px rgba(14, 13, 12, 0.04);
+    --shadow-md: 0 1px 2px rgba(14, 13, 12, 0.04);
+    --shadow-lg: 0 12px 32px rgba(14, 13, 12, 0.08), 0 0 0 1px #E9E9EC;
+    --shadow-xl: 0 20px 40px rgba(14, 13, 12, 0.12), 0 0 0 1px #E9E9EC;
     
     /* Animation Timing */
     --timing-fast: 150ms;
@@ -161,11 +132,11 @@
   }
 
   .font-accent {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Inter', sans-serif;
   }
 
   .font-data {
-    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: 'Inter', sans-serif;
   }
 }
 
@@ -342,7 +313,7 @@
 
 /* Slot labels */
 .bookspa-calendar .fc .fc-timeline-slot-label-cushion {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 0.8125rem;
   color: var(--color-text-secondary);
 }
@@ -387,7 +358,7 @@
 
 /* DayGrid month view */
 .bookspa-calendar .fc .fc-daygrid-day-number {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 0.8125rem;
   color: var(--color-text-secondary);
   padding: 0.25rem 0.5rem;
