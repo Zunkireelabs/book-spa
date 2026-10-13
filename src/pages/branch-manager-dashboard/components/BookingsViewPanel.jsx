@@ -167,11 +167,11 @@ const BookingsViewPanel = ({ branchId }) => {
   };
 
   const handleRecordPayment = async (bookingId, opts) => {
-    const { tipAmount, tipReceivedBy, ...paymentOpts } = opts;
+    const { tipSplits, ...paymentOpts } = opts;
     const result = await recordPayment({ bookingId, ...paymentOpts });
     if (result.error) return { error: result.error };
-    if (tipAmount > 0) {
-      const tipResult = await recordTip({ bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+    for (const split of (tipSplits || [])) {
+      const tipResult = await recordTip({ bookingId, amount: split.amount, receivedBy: split.receivedBy });
       if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
     showToast('Payment recorded successfully');

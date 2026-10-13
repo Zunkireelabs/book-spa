@@ -201,7 +201,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     setOtherDueBookings(data?.bookings || []);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipAmount, tipReceivedBy }) => {
+  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingRow) return { error: { message: 'No booking selected.' } };
     setPaymentSubmitting(true);
     // Pay the clicked row with its allocated tenders, then pay each bundled
@@ -214,8 +214,8 @@ const OutstandingReportPanel = ({ branchId }) => {
     }
     // Tip is attributed to the clicked row only, never split across bundled
     // other-outstanding bookings. Best-effort — must never undo a successful payment.
-    if (tipAmount > 0) {
-      const tipResult = await recordTip({ bookingId: payingRow.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+    for (const split of (tipSplits || [])) {
+      const tipResult = await recordTip({ bookingId: payingRow.bookingId, amount: split.amount, receivedBy: split.receivedBy });
       if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
     for (const alloc of (additionalAllocations || [])) {
