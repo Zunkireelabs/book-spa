@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useBranch } from 'contexts/BranchContext';
 import Icon from 'components/AppIcon';
 import CustomSelect from 'components/ui/CustomSelect';
+import AppShell from 'components/ui/AppShell';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from 'utils/periodPresets';
 import { fetchAttendanceReport } from 'services/api';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
@@ -494,7 +495,8 @@ const AttendanceCalendarPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <AppShell variant="flush" sidebar={{}} header={{ realtimeStatus: 'connected' }}>
+      <div className="bg-background min-h-full">
 
       {/* ── Top bar ── */}
       <header className="sticky top-0 z-header bg-surface border-b border-border px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
@@ -906,7 +908,8 @@ const AttendanceCalendarPage = () => {
           </>
         )}
       </main>
-    </div>
+      </div>
+    </AppShell>
   );
 };
 

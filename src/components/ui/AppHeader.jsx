@@ -42,14 +42,16 @@ const AppHeader = ({
             <span className="hidden sm:inline text-sm font-body font-body-medium">Assistant</span>
           </button>
         )}
-        <div className="[&>button]:h-[var(--control-h)] [&>button]:w-[var(--control-h)] [&>button]:p-0 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-spa-lg [&>button]:text-text-secondary [&>button:hover]:bg-black/[0.04]">
-          <NotificationBell
-            notifications={notifications}
-            unreadCount={unreadCount}
-            onMarkAllRead={onMarkAllRead}
-            onItemClick={onItemClick}
-          />
-        </div>
+        {notifications && (
+          <div className="[&>button]:h-[var(--control-h)] [&>button]:w-[var(--control-h)] [&>button]:p-0 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-spa-lg [&>button]:text-text-secondary [&>button:hover]:bg-black/[0.04]">
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onMarkAllRead={onMarkAllRead}
+              onItemClick={onItemClick}
+            />
+          </div>
+        )}
         <ProfileMenu />
       </div>
     </div>
