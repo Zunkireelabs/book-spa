@@ -470,6 +470,7 @@ const BookingDetailsAssignmentModal = () => {
           booking={{
             id: booking.id,
             booking_number: booking.id,
+            branchId: booking.branchId,
             base_amount: booking.baseAmount,
             discount_amount: booking.discountAmount,
             final_amount: booking.finalAmount,
