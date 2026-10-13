@@ -149,7 +149,10 @@ const PaymentModal = ({
   const addTipRecipient = () =>
     setTipRecipients(prev => [...prev, { key: nextTipRecipientKey(), receivedBy: '', amount: '' }]);
   const removeTipRecipient = (key) =>
-    setTipRecipients(prev => prev.filter(r => r.key !== key));
+    setTipRecipients(prev => {
+      const next = prev.filter(r => r.key !== key);
+      return next.length === 1 ? [{ ...next[0], amount: tip }] : next;
+    });
 
   const tipRecipientsTotal = useMemo(
     () => round2(tipRecipients.reduce((s, r) => s + (Number(r.amount) > 0 ? Number(r.amount) : 0), 0)),
