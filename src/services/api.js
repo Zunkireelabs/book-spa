@@ -9,6 +9,17 @@ import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrph
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 
+// getCalendarBookings' "New" tag lookup: PostgREST puts .in() lists in the URL, so customer ids go
+// out in chunks; the whole lookup is capped so a slow/failed history query can never hold the calendar up.
+const HISTORY_IN_CHUNK = 100;
+const HISTORY_PAGE_SIZE = 1000; // PostgREST's default max rows per response
+const HISTORY_TIMEOUT_MS = 4000;
+const withTimeout = (promise, ms, label) => {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
 // Sentinel "branch" meaning "all branches in the admin's org" (the Overall view).
 // Admin RLS is already org-scoped, so dropping the per-branch filter for this value
 // returns exactly the org's rows across every branch (never other orgs).
@@ -5106,24 +5117,50 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     // instead of one query per booking. No customer_id (walk-in/guest) → always New.
     const bookingCustomerIds = [...new Set((bookings || []).map(b => b.customer_id).filter(Boolean))];
     const firstBookingIdByCustomer = {};
+    // Cosmetic tag only: on error or timeout the calendar still renders and no customer-linked
+    // booking is tagged New (safer than mislabelling a returning customer as new).
+    let historyFailed = false;
     if (bookingCustomerIds.length > 0) {
-      const { data: historyRows, error: histErr } = await supabase
-        .from('bookings')
-        .select('id, customer_id, date, start_time')
-        .in('customer_id', bookingCustomerIds)
-        .neq('status', 'Cancelled')
-        .order('date', { ascending: true })
-        .order('start_time', { ascending: true });
-      if (histErr) throw histErr;
-      for (const h of (historyRows || [])) {
-        if (!(h.customer_id in firstBookingIdByCustomer)) {
-          firstBookingIdByCustomer[h.customer_id] = h.id;
+      try {
+        const chunks = [];
+        for (let i = 0; i < bookingCustomerIds.length; i += HISTORY_IN_CHUNK) {
+          chunks.push(bookingCustomerIds.slice(i, i + HISTORY_IN_CHUNK));
         }
+        // Rows after endDate can't change whether a booking in this range is a customer's first.
+        // Paged because PostgREST caps a response at 1000 rows; id breaks date/time ties so pages are stable.
+        const fetchChunk = async (ids) => {
+          const rows = [];
+          for (let from = 0; ; from += HISTORY_PAGE_SIZE) {
+            const { data, error } = await supabase
+              .from('bookings')
+              .select('id, customer_id, date, start_time')
+              .in('customer_id', ids)
+              .neq('status', 'Cancelled')
+              .lte('date', endDate)
+              .order('date', { ascending: true })
+              .order('start_time', { ascending: true })
+              .order('id', { ascending: true })
+              .range(from, from + HISTORY_PAGE_SIZE - 1);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < HISTORY_PAGE_SIZE) return rows;
+          }
+        };
+        const historyRows = (await withTimeout(Promise.all(chunks.map(fetchChunk)), HISTORY_TIMEOUT_MS, 'New-customer history lookup')).flat();
+        // Chunks hold disjoint customers, and each chunk is already in (date, start_time, id) order.
+        for (const h of historyRows) {
+          if (!(h.customer_id in firstBookingIdByCustomer)) {
+            firstBookingIdByCustomer[h.customer_id] = h.id;
+          }
+        }
+      } catch (histErr) {
+        console.warn('[API] getCalendarBookings: New-customer lookup failed, skipping New tags:', histErr.message);
+        historyFailed = true;
       }
     }
     const bookingsWithNewFlag = (bookings || []).map(b => ({
       ...b,
-      isNewCustomer: !b.customer_id || firstBookingIdByCustomer[b.customer_id] === b.id,
+      isNewCustomer: !b.customer_id || (!historyFailed && firstBookingIdByCustomer[b.customer_id] === b.id),
     }));
 
     // A PERMANENTLY transferred-out therapist gets no proactive column above (by design —
