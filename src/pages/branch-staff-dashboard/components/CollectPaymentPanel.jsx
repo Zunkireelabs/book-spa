@@ -86,7 +86,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     setPayingBookings(selected);
   };
 
-  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipAmount, tipReceivedBy }) => {
+  const handleRecordPayment = async ({ tenders, additionalAllocations, dueHolderName, notes, tipSplits }) => {
     if (!payingBookings || payingBookings.length === 0) {
       return { error: { message: 'No booking selected.' } };
     }
@@ -99,8 +99,8 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     }
     // Tip is attributed to the primary booking only, never split across bundled
     // allocations. Best-effort — must never undo a payment that already succeeded.
-    if (tipAmount > 0) {
-      const tipResult = await recordTip({ bookingId: primary.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+    for (const split of (tipSplits || [])) {
+      const tipResult = await recordTip({ bookingId: primary.bookingId, amount: split.amount, receivedBy: split.receivedBy });
       if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
     for (const alloc of (additionalAllocations || [])) {
