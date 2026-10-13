@@ -116,10 +116,16 @@ const MAX_ZOOM = 320 / HOUR_HEIGHT;
 const clampZoom = (v) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
 const touchDistance = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
 
+// Local-date key. Not toISOString(): that serialises in UTC, so east of UTC (Nepal, +5:45)
+// local midnight lands on the previous day.
+function toLocalDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function addDaysToStr(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return toLocalDateStr(d);
 }
 
 function formatShortDate(dateStr) {
@@ -1161,7 +1167,7 @@ const CalendarGrid = ({
 
   // Current time
   const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  const todayStr = toLocalDateStr(now);
   const nowTop = timeToTop(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`);
 
   // Scroll the grid to the current time once, when the calendar opens on today.
