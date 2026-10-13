@@ -6286,6 +6286,93 @@ export async function setServiceTherapists(serviceId, therapistIds, branchId) {
   }
 }
 
+// Reverse of fetchServiceTherapists: for a given therapist, which of the branch's
+// active services are restricted (have any eligibility rows at all) and, for
+// restricted ones, whether this therapist is in the allow-list. Unrestricted
+// services (no rows) are returned with isRestricted:false and isEligible:true,
+// since "no rows = everyone eligible" per migration-249 — the caller should
+// treat those as informational-only, not togglable here (toggling one person
+// into an unrestricted service's list would silently restrict it to just that
+// person, which is a surprising side effect this picker deliberately avoids).
+export async function fetchServicesForTherapist(therapistId, branchId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+
+    const [servicesResult, eligibilityResult] = await Promise.all([
+      supabase
+        .from('services')
+        .select('id, name, is_active')
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('service_therapists')
+        .select('service_id, therapist_id, therapists!inner(branch_id)')
+        .eq('therapists.branch_id', branchId),
+    ]);
+
+    if (servicesResult.error) throw servicesResult.error;
+    if (eligibilityResult.error) throw eligibilityResult.error;
+
+    const restrictedServiceIds = new Set();
+    const eligibleServiceIdsForTherapist = new Set();
+    (eligibilityResult.data || []).forEach(row => {
+      restrictedServiceIds.add(row.service_id);
+      if (row.therapist_id === therapistId) eligibleServiceIdsForTherapist.add(row.service_id);
+    });
+
+    const data = (servicesResult.data || []).map(s => {
+      const isRestricted = restrictedServiceIds.has(s.id);
+      return {
+        id: s.id,
+        name: s.name,
+        isRestricted,
+        isEligible: isRestricted ? eligibleServiceIdsForTherapist.has(s.id) : true,
+      };
+    });
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicesForTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Toggles a single therapist in/out of an already-restricted service's
+// eligibility list. Only meaningful for services that already have at least
+// one eligibility row (see fetchServicesForTherapist) — does not create a
+// restriction on a currently-unrestricted service.
+export async function toggleTherapistServiceEligibility(serviceId, therapistId, eligible) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    if (eligible) {
+      const { error } = await supabase
+        .from('service_therapists')
+        .upsert({ service_id: serviceId, therapist_id: therapistId }, { onConflict: 'service_id,therapist_id' });
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('service_therapists')
+        .delete()
+        .eq('service_id', serviceId)
+        .eq('therapist_id', therapistId);
+      if (error) throw error;
+    }
+
+    return { data: { serviceId, therapistId, eligible }, error: null };
+  } catch (error) {
+    console.error('[API] toggleTherapistServiceEligibility error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Shared "empty allow-list = unrestricted" eligibility filter, used both at booking-creation
 // time (createBooking) and in the manual reassignment UI (TherapistAssignmentPanel).
 export function filterEligibleTherapists(therapists, eligibleTherapistIds) {

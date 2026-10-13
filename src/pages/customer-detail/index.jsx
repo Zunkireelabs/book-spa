@@ -62,7 +62,7 @@ const CustomerDetailPage = () => {
           <Button variant="outline" size="sm" onClick={goBack}>Back</Button>
         </div>
 
-        <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
+        <div className="max-w-5xl mx-auto px-6 py-6 space-y-4">
           {loading && (
             <div className="text-center py-20">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />

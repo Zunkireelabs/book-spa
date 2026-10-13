@@ -5,6 +5,7 @@ import Button from '../../components/ui/Button';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import StaffTypeToggle from './components/StaffTypeToggle';
 import StaffProfileSection from './components/StaffProfileSection';
+import StaffServicesSection from './components/StaffServicesSection';
 import WorkingHoursSection from './components/WorkingHoursSection';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
@@ -212,7 +213,7 @@ const StaffDetailPage = () => {
           </div>
         </div>
 
-        <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
+        <div className="max-w-5xl mx-auto px-6 py-6 space-y-4">
           {pageLoading ? (
             <div className="text-center py-20">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
@@ -240,6 +241,9 @@ const StaffDetailPage = () => {
                 onPhotoChange={handlePhotoChange}
                 onRemovePhoto={handleRemovePhoto}
               />
+              {isEdit && formData.isServiceStaff && (
+                <StaffServicesSection therapistId={staffId} branchId={effectiveBranchId} />
+              )}
               <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
             </>
           )}
