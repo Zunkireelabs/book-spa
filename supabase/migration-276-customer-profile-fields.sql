@@ -23,7 +23,7 @@ ALTER TABLE public.customers
   ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('270', 'customer-profile-fields')
+VALUES ('276', 'customer-profile-fields')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

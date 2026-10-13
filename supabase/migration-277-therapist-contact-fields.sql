@@ -14,7 +14,7 @@ ALTER TABLE public.therapists
   ADD COLUMN IF NOT EXISTS city text;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('271', 'therapist-contact-fields')
+VALUES ('277', 'therapist-contact-fields')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

@@ -318,7 +318,7 @@ CREATE POLICY "Manager can update therapist attendance"
   );
 
 -- ============================================================
--- THERAPIST_WORKING_HOURS: added in migration-269. Per-therapist recurring
+-- THERAPIST_WORKING_HOURS: added in migration-275. Per-therapist recurring
 -- weekly schedule, display/edit only -- not wired into booking availability.
 -- ============================================================
 

@@ -6531,7 +6531,7 @@ export async function fetchTherapistWorkingHours(therapistId) {
 
 // rows: [{ dayOfWeek, startTime, endTime, isDayOff }, ...] — one per weekday.
 // Deliberate scope boundary: storage/display only, not read by any booking
-// availability/conflict check (see migration-269's header comment).
+// availability/conflict check (see migration-275's header comment).
 export async function upsertTherapistWorkingHours(therapistId, rows) {
   try {
     if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };

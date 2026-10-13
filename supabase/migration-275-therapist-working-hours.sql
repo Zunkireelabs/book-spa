@@ -86,7 +86,7 @@ CREATE POLICY "Manager can delete therapist working hours"
   );
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('269', 'therapist-working-hours')
+VALUES ('275', 'therapist-working-hours')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
