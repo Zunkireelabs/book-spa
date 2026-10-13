@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
-import NotificationBell from '../../components/ui/NotificationBell';
+import AppHeader from '../../components/ui/AppHeader';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingsViewPanel from '../branch-manager-dashboard/components/BookingsViewPanel';
@@ -27,7 +27,7 @@ import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib
 import { getTodayISO, toISO } from '../../utils/periodPresets';
 
 const BranchStaffDashboard = () => {
-  const { profile, signOut, user } = useAuth();
+  const { profile, user } = useAuth();
   const { branchId, branchName } = useBranch();
   const [searchParams, setSearchParams] = useSearchParams();
   const { items: notifications, markRead: markNotifRead, markAllRead: markAllNotifsRead } = usePersistentNotifications(user?.id);
@@ -50,9 +50,6 @@ const BranchStaffDashboard = () => {
     () => ({ key: 'daily', from: todayDateStr, to: todayDateStr }),
     [todayDateStr]
   );
-
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  const profileDropdownRef = useRef(null);
 
   const [filters, setFilters] = useState({
     dateRange: 'today',
@@ -442,22 +439,6 @@ const BranchStaffDashboard = () => {
     return { data: result.data };
   };
 
-  // Close profile dropdown on outside click
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
-        setShowProfileDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleLogout = async () => {
-    setShowProfileDropdown(false);
-    await signOut();
-  };
-
   // Clock update
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -487,95 +468,13 @@ const BranchStaffDashboard = () => {
       />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:pb-0 pb-16 transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : ''}`}>
-        {/* Top Bar - Consistent with Admin */}
-        <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
-          <div className="px-4 sm:px-6 lg:px-8 py-1.5">
-            <div className="flex items-center justify-between">
-              {/* Left: Branch + date/time */}
-              <div className="flex items-center space-x-3 min-w-0">
-                <div className="flex items-center space-x-2">
-                  <Icon name="MapPin" size={14} className="text-primary" />
-                  <span className="font-body font-body-medium text-sm text-text-primary">
-                    {branchName || ''}
-                  </span>
-                </div>
-                <div className="hidden sm:block h-5 w-px bg-border"></div>
-                <p className="hidden sm:block font-caption font-caption-normal text-xs text-text-secondary">
-                  {currentTime.toLocaleDateString('en-GB', {
-                    weekday: 'short',
-                    day: 'numeric',
-                    month: 'short'
-                  })} {'\u00B7'} {currentTime.toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </p>
-              </div>
-
-              {/* Right: Real-time status + Role badge + Profile */}
-              <div className="flex items-center space-x-3 flex-shrink-0">
-                {/* Real-time Status Indicator */}
-                <div
-                  className="hidden sm:flex items-center space-x-1.5 px-2 py-1 rounded-full bg-background border border-border"
-                  title={`Real-time: ${realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}`}
-                >
-                  <span className="relative flex h-2 w-2">
-                    {realtimeStatus === 'connected' && (
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-                    )}
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                      realtimeStatus === 'connected' ? 'bg-success' :
-                      realtimeStatus === 'connecting' ? 'bg-warning' : 'bg-error'
-                    }`}></span>
-                  </span>
-                  <span className="text-xs font-caption font-caption-medium text-text-secondary">
-                    {realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Connecting' : 'Offline'}
-                  </span>
-                </div>
-                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal capitalize bg-accent/10 text-accent">
-                  {userRole}
-                </span>
-                <NotificationBell
-                  notifications={notifications}
-                  unreadCount={unreadNotifCount}
-                  onMarkAllRead={markAllNotifsRead}
-                  onItemClick={handleNotificationClick}
-                />
-                <div className="relative" ref={profileDropdownRef}>
-                  <button
-                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                    className="flex items-center space-x-2 px-2 py-1 rounded-spa hover:bg-black/5 transition-colors"
-                  >
-                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
-                      <Icon name="User" size={16} className="text-primary" />
-                    </div>
-                    <div className="hidden md:flex flex-col text-left">
-                      <span className="font-body font-body-medium text-sm text-text-primary leading-tight">
-                        {userName}
-                      </span>
-                      <span className="font-caption font-caption-normal text-xs text-text-secondary capitalize leading-tight">
-                        {userRole}
-                      </span>
-                    </div>
-                    <Icon name="ChevronDown" size={14} className={`hidden md:block text-text-secondary transition-transform ${showProfileDropdown ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {showProfileDropdown && (
-                    <div className="absolute right-0 mt-2 w-56 bg-background rounded-spa spa-shadow-elevated z-dropdown border border-border overflow-hidden">
-                      <button
-                        onClick={handleLogout}
-                        className="w-full flex items-center space-x-2 px-4 py-2.5 text-sm text-error hover:bg-error/5 transition-colors"
-                      >
-                        <Icon name="LogOut" size={16} />
-                        <span className="font-body font-body-medium">Logout</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </header>
+        <AppHeader
+          realtimeStatus={realtimeStatus}
+          notifications={notifications}
+          unreadCount={unreadNotifCount}
+          onMarkAllRead={markAllNotifsRead}
+          onItemClick={handleNotificationClick}
+        />
 
         {/* Toast notifications - Responsive positioning */}
         {actionError && (

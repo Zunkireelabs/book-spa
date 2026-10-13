@@ -32,6 +32,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Compact control height shared by header controls (ClinicMD compact chrome). */
+:root { --control-h: 32px; }
+@media (pointer: coarse) { :root { --control-h: 36px; } }
+
 @layer base {
   :root {
     /* Primary Colors */

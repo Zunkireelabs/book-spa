@@ -1,135 +1,108 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import Icon from '../AppIcon';
 import { useBranch, OVERALL_BRANCH_ID } from 'contexts/BranchContext';
+import { useMenuNav } from './useMenuNav';
 
+const TRIGGER_BASE = 'h-[var(--control-h)] flex items-center gap-2 px-2 -ml-2 rounded-spa-lg min-w-0';
+
+// Workspace-style branch switcher. Admins get "Overall" + every branch, multi-branch managers
+// get their accessible branches, single-branch managers and staff see the name as plain text.
 const BranchSwitcher = () => {
   const { branchId, branchName, branches, isAdmin, isManager, isOverall, switchBranch } = useBranch();
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const close = useCallback(() => setIsOpen(false), []);
+  useMenuNav({ open: isOpen, onClose: close, menuRef, triggerRef });
 
-  const selectedBranch = branches.find(b => b.id === branchId);
-  const selectedName = isOverall ? 'Overall' : (selectedBranch?.name || 'Select Branch');
+  const withOverall = isAdmin && branches.length > 0;
+  const switchable = withOverall || (isManager && branches.length > 1);
+  const selectedName = isOverall ? 'Overall' : (branches.find((b) => b.id === branchId)?.name || branchName || 'Select branch');
 
-  // Close dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  // Admin: show dropdown to switch branches (only when there's an actual choice to make)
-  if (isAdmin && branches.length > 1) {
+  if (!switchable) {
+    if (!branchName) return null;
     return (
-      <div className="flex items-center gap-2">
-        <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-xs font-caption font-caption-normal bg-pink-100 text-pink-700 whitespace-nowrap">
-          Platform Admin
-        </span>
-        <Icon name="Building2" size={16} className="hidden sm:inline text-text-secondary" />
-        <div className="relative" ref={dropdownRef}>
-          <button
-            type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-spa hover:border-gray-300 transition-colors cursor-pointer"
-          >
-            <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
-              {selectedName}
-            </span>
-            <Icon name="ChevronDown" size={14} className={`text-text-secondary flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {isOpen && (
-            <div className="absolute left-0 top-full mt-1 min-w-full bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
-              {/* Overall — org-wide aggregate (read-only, no booking creation) */}
+      <div className={`${TRIGGER_BASE} cursor-default`}>
+        <Icon name="Building2" size={16} className="hidden sm:block text-text-tertiary flex-shrink-0" />
+        <span className="font-body font-body-medium text-sm text-text-primary truncate">{branchName}</span>
+      </div>
+    );
+  }
+
+  const choose = (id) => {
+    switchBranch(id);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const rowBase = 'w-full h-9 flex items-center gap-2 px-2.5 rounded-spa text-left text-sm font-body text-text-primary hover:bg-black/[0.04] focus:bg-black/[0.04] focus:outline-none';
+
+  return (
+    <div className="relative min-w-0 flex">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setIsOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        className={`${TRIGGER_BASE} hover:bg-black/[0.04] ${isOpen ? 'bg-black/[0.04]' : ''} spa-transition-fast cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+      >
+        <Icon name={isOverall ? 'Globe' : 'Building2'} size={16} className="hidden sm:block text-text-tertiary flex-shrink-0" />
+        <span className="font-body font-body-medium text-sm text-text-primary truncate">{selectedName}</span>
+        <Icon name="ChevronDown" size={14} className="text-text-tertiary flex-shrink-0" />
+      </button>
+      {isOpen && (
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Switch branch"
+          className="absolute left-0 top-[calc(50%+32px)] min-w-[240px] bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-1.5"
+        >
+          {withOverall && (
+            <>
               <button
                 type="button"
-                onClick={() => {
-                  switchBranch(OVERALL_BRANCH_ID);
-                  setIsOpen(false);
-                }}
-                className={`w-full flex items-center gap-2 text-left px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap ${
-                  isOverall ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
-                }`}
+                role="menuitem"
+                aria-checked={isOverall}
+                onClick={() => choose(OVERALL_BRANCH_ID)}
+                className={`${rowBase} !h-auto py-2`}
               >
-                <Icon name="Globe" size={14} className="flex-shrink-0" />
-                Overall
+                <Icon name="Globe" size={16} className="text-text-tertiary flex-shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm leading-tight">Overall</span>
+                  <span className="block text-xs text-text-tertiary leading-tight mt-0.5">All branches · read-only</span>
+                </span>
+                {isOverall && <Icon name="Check" size={16} className="text-text-primary flex-shrink-0" />}
               </button>
-              <div className="my-1 h-px bg-gray-100" />
-              {branches.map((b) => (
+              <div className="my-1.5 h-px bg-border" />
+            </>
+          )}
+          <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-body font-body-medium uppercase tracking-wider text-text-tertiary">Branches</p>
+          <div className="max-h-72 overflow-y-auto">
+            {branches.map((b) => {
+              const selected = !isOverall && branchId === b.id;
+              return (
                 <button
                   key={b.id}
                   type="button"
-                  onClick={() => {
-                    switchBranch(b.id);
-                    setIsOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap ${
-                    !isOverall && branchId === b.id ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
-                  }`}
+                  role="menuitem"
+                  aria-checked={selected}
+                  onClick={() => choose(b.id)}
+                  className={`${rowBase} ${b.is_active ? '' : 'text-text-tertiary'}`}
                 >
-                  {b.name}{!b.is_active ? ' (Inactive)' : ''}
+                  <span className="flex-1 min-w-0 truncate">{b.name}</span>
+                  {!b.is_active && (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-black/[0.05] text-text-tertiary flex-shrink-0">Inactive</span>
+                  )}
+                  {selected && <Icon name="Check" size={16} className="text-text-primary flex-shrink-0" />}
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Manager with 2+ accessible branches: plain switcher, no "Overall" sentinel
-  if (isManager && branches.length > 1) {
-    return (
-      <div className="relative" ref={dropdownRef}>
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-spa hover:border-gray-300 transition-colors cursor-pointer"
-        >
-          <Icon name="Building2" size={16} className="text-text-secondary" />
-          <span className="font-body font-body-medium text-sm text-text-primary whitespace-nowrap">
-            {selectedName}
-          </span>
-          <Icon name="ChevronDown" size={14} className={`text-text-secondary flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-        </button>
-        {isOpen && (
-          <div className="absolute left-0 top-full mt-1 min-w-full bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
-            {branches.map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => {
-                  switchBranch(b.id);
-                  setIsOpen(false);
-                }}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap ${
-                  branchId === b.id ? 'text-primary font-medium bg-gray-50' : 'text-gray-700'
-                }`}
-              >
-                {b.name}{!b.is_active ? ' (Inactive)' : ''}
-              </button>
-            ))}
+              );
+            })}
           </div>
-        )}
-      </div>
-    );
-  }
-
-  // Manager (single branch)/Staff: show static branch label (non-clickable)
-  if (branchName) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-background rounded-spa border border-border">
-        <Icon name="Building2" size={16} className="text-text-secondary" />
-        <span className="font-body font-body-medium text-sm text-text-primary">{branchName}</span>
-      </div>
-    );
-  }
-
-  return null;
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default BranchSwitcher;
