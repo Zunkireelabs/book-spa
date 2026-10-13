@@ -42,7 +42,7 @@ const MONTH_OPTIONS = buildMonthOptions();
 
 // ── Compensation sub-panel ────────────────────────────────────────────────────
 
-const CompensationPanel = ({ branchId }) => {
+const CompensationPanel = ({ branchId, readOnly = false }) => {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -195,13 +195,15 @@ const CompensationPanel = ({ branchId }) => {
                           {s.commissionRate}%
                         </td>
                         <td className="px-3 py-3 text-right">
-                          <button
-                            onClick={() => startEdit(s)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
-                          >
-                            <Icon name="Pencil" size={13} />
-                            Edit
-                          </button>
+                          {!readOnly && (
+                            <button
+                              onClick={() => startEdit(s)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
+                            >
+                              <Icon name="Pencil" size={13} />
+                              Edit
+                            </button>
+                          )}
                         </td>
                       </>
                     )}
@@ -218,7 +220,7 @@ const CompensationPanel = ({ branchId }) => {
 
 // ── Run Payroll sub-panel ─────────────────────────────────────────────────────
 
-const RunPayrollPanel = ({ branchId }) => {
+const RunPayrollPanel = ({ branchId, readOnly = false }) => {
   const [selectedMonth, setSelectedMonth] = useState(MONTH_OPTIONS[1]?.value || MONTH_OPTIONS[0]?.value);
   const [runData, setRunData] = useState(null); // { run, items }
   const [loading, setLoading] = useState(false);
@@ -321,7 +323,7 @@ const RunPayrollPanel = ({ branchId }) => {
           />
         </div>
 
-        {!isFinalized && (
+        {!readOnly && !isFinalized && (
           <button
             onClick={handleGenerate}
             disabled={generating || loading}
@@ -332,7 +334,7 @@ const RunPayrollPanel = ({ branchId }) => {
           </button>
         )}
 
-        {hasDraftRun && !isFinalized && (
+        {!readOnly && hasDraftRun && !isFinalized && (
           <button
             onClick={() => setShowFinalizeConfirm(true)}
             disabled={finalizing}
@@ -408,7 +410,7 @@ const RunPayrollPanel = ({ branchId }) => {
           <div className="py-12 text-center">
             <Icon name="FileText" size={32} className="text-text-tertiary mx-auto mb-3" />
             <p className="font-body text-sm text-text-secondary">No payroll run for this month yet.</p>
-            <p className="font-body text-xs text-text-tertiary mt-1">Select a month and click Generate.</p>
+            {!readOnly && <p className="font-body text-xs text-text-tertiary mt-1">Select a month and click Generate.</p>}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -505,7 +507,8 @@ const TABS = [
   { id: 'run', label: 'Run Payroll', icon: 'Banknote' },
 ];
 
-const PayrollPanel = ({ branchId, isOverall }) => {
+// readOnly: view-only (admin_viewer) — hides compensation edit and Generate/Finalize; Export CSV stays.
+const PayrollPanel = ({ branchId, isOverall, readOnly = false }) => {
   const [activeTab, setActiveTab] = useState('compensation');
 
   if (isOverall) {
@@ -530,7 +533,7 @@ const PayrollPanel = ({ branchId, isOverall }) => {
             Payroll
           </h3>
           <p className="font-body text-sm text-text-secondary mt-0.5">
-            Manage staff compensation and run monthly payroll.
+            {readOnly ? 'View staff compensation and monthly payroll runs.' : 'Manage staff compensation and run monthly payroll.'}
           </p>
         </div>
       </div>
@@ -554,8 +557,8 @@ const PayrollPanel = ({ branchId, isOverall }) => {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'compensation' && <CompensationPanel branchId={branchId} />}
-      {activeTab === 'run' && <RunPayrollPanel branchId={branchId} />}
+      {activeTab === 'compensation' && <CompensationPanel branchId={branchId} readOnly={readOnly} />}
+      {activeTab === 'run' && <RunPayrollPanel branchId={branchId} readOnly={readOnly} />}
     </div>
   );
 };
