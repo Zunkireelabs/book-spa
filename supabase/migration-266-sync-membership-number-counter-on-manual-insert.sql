@@ -26,7 +26,10 @@ BEGIN
     -- Caller supplied one (backfill / migration) -- trust it, but keep the
     -- counter in sync so auto-generation never falls behind and later
     -- collides with this manually-inserted number.
-    v_manual_seq := (regexp_match(NEW.membership_number, '-(\d+)$'))[1]::int;
+    -- Bounded to 1-6 digits, same reasoning as migration-265's seed query --
+    -- avoids int4 overflow if membership_number ever holds malformed data
+    -- (e.g. a phone number) instead of a real generated sequence.
+    v_manual_seq := (regexp_match(NEW.membership_number, '-([0-9]{1,6})$'))[1]::int;
     IF v_manual_seq IS NOT NULL THEN
       INSERT INTO public.membership_number_counters (org_id, tier_id, next_number)
       VALUES (NEW.org_id, NEW.tier_id, v_manual_seq + 1)
