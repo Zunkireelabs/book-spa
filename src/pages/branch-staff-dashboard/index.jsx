@@ -16,13 +16,14 @@ import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/New
 import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
 import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
 import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
+import ProductsPanel from '../branch-manager-dashboard/components/Products/ProductsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
 import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
-import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { getTodayISO, toISO } from '../../utils/periodPresets';
 
 const BranchStaffDashboard = () => {
@@ -706,6 +707,8 @@ const BranchStaffDashboard = () => {
             <StaffBookingForm onBookingCreated={loadData} />
           ) : viewMode === 'check-booking' ? (
             <CheckBookingPanel branchId={branchId} />
+          ) : viewMode === 'products' && PRODUCTS_ENABLED ? (
+            <ProductsPanel />
           ) : viewMode === 'new-membership' && MEMBERSHIP_ENABLED ? (
             <EnrollMemberModal
               onClose={() => setSearchParams({ view: 'dashboard' })}
