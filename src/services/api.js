@@ -6325,7 +6325,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating }) {
+export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating, phone, address, city }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6379,8 +6379,11 @@ export async function createTherapist({ name, gender, specialties, position, isS
         bio: bio || null,
         experience_years: experienceYears ?? null,
         rating: rating ?? null,
+        phone: phone || null,
+        address: address || null,
+        city: city || null,
       })
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating, phone, address, city')
       .single();
 
     if (error) throw error;
@@ -6391,7 +6394,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating, phone, address, city }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6444,18 +6447,143 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     if (bio !== undefined) updatePayload.bio = bio || null;
     if (experienceYears !== undefined) updatePayload.experience_years = experienceYears === '' ? null : experienceYears;
     if (rating !== undefined) updatePayload.rating = rating === '' ? null : rating;
+    if (phone !== undefined) updatePayload.phone = phone || null;
+    if (address !== undefined) updatePayload.address = address || null;
+    if (city !== undefined) updatePayload.city = city || null;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating, phone, address, city')
       .single();
 
     if (error) throw error;
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchTherapistById(therapistId) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin', 'admin_viewer'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating, phone, address, city')
+      .eq('id', therapistId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw error;
+    }
+
+    if (profile.role === 'manager' && data.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot view therapists outside your branch.' } };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistById error:', error.message);
+    return { data: null, error };
+  }
+}
+
+const WORKING_HOURS_DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+export async function fetchTherapistWorkingHours(therapistId) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .select('id, therapist_id, day_of_week, start_time, end_time, is_day_off')
+      .eq('therapist_id', therapistId);
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    const normalized = WORKING_HOURS_DAY_LABELS.map((label, dayOfWeek) => {
+      const row = byDay.get(dayOfWeek);
+      return row
+        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off }
+        : { dayOfWeek, dayLabel: label, startTime: null, endTime: null, isDayOff: true };
+    });
+
+    return { data: normalized, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistWorkingHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// rows: [{ dayOfWeek, startTime, endTime, isDayOff }, ...] — one per weekday.
+// Deliberate scope boundary: storage/display only, not read by any booking
+// availability/conflict check (see migration-269's header comment).
+export async function upsertTherapistWorkingHours(therapistId, rows) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data: therapist, error: fetchError } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .eq('id', therapistId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw fetchError;
+    }
+
+    if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+    }
+
+    for (const row of rows) {
+      if (!row.isDayOff && (!row.startTime || !row.endTime || row.startTime >= row.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${WORKING_HOURS_DAY_LABELS[row.dayOfWeek]}: start time must be before end time.` } };
+      }
+    }
+
+    const payload = rows.map(row => ({
+      therapist_id: therapistId,
+      branch_id: therapist.branch_id,
+      day_of_week: row.dayOfWeek,
+      start_time: row.isDayOff ? null : row.startTime,
+      end_time: row.isDayOff ? null : row.endTime,
+      is_day_off: !!row.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .upsert(payload, { onConflict: 'therapist_id,day_of_week' })
+      .select('id, therapist_id, day_of_week, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertTherapistWorkingHours error:', error.message);
     return { data: null, error };
   }
 }
@@ -8151,7 +8279,7 @@ export async function fetchCustomerProfile(customerId) {
     // 1. Fetch customer record
     const { data: customer, error: custError } = await supabase
       .from('customers')
-      .select('id, branch_id, full_name, phone, email, notes, is_active, created_at')
+      .select('id, branch_id, full_name, phone, email, notes, is_active, created_at, client_source, referred_by, preferred_language, country, occupation, additional_email, additional_phone, gender, pronouns, date_of_birth, tags')
       .eq('id', customerId)
       .single();
 
@@ -8280,6 +8408,17 @@ export async function fetchCustomerProfile(customerId) {
           notes: customer.notes,
           isActive: customer.is_active,
           createdAt: customer.created_at,
+          clientSource: customer.client_source,
+          referredBy: customer.referred_by,
+          preferredLanguage: customer.preferred_language,
+          country: customer.country,
+          occupation: customer.occupation,
+          additionalEmail: customer.additional_email,
+          additionalPhone: customer.additional_phone,
+          gender: customer.gender,
+          pronouns: customer.pronouns,
+          dateOfBirth: customer.date_of_birth,
+          tags: customer.tags || [],
         },
         stats: {
           totalVisits,
@@ -8328,6 +8467,46 @@ export async function updateCustomerContact(customerId, { email = null, phone = 
     if (error.code === '23505') {
       return { data: null, error: { code: 'DUPLICATE_PHONE', message: 'This phone number is already in use by another customer.' } };
     }
+    return { data: null, error };
+  }
+}
+
+// Staff-side: edit the Fresha-style extra profile fields (source, referral,
+// language, country, occupation, additional contact, gender, pronouns, DOB,
+// free-text tags). Plain table update under the existing row-level RLS —
+// unlike updateCustomerContact, these fields have no customer_accounts
+// email-linking behavior, so no RPC is needed.
+export async function updateCustomerProfileDetails(customerId, {
+  clientSource, referredBy, preferredLanguage, country, occupation,
+  additionalEmail, additionalPhone, gender, pronouns, dateOfBirth, tags,
+} = {}) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const updatePayload = {};
+    if (clientSource !== undefined) updatePayload.client_source = clientSource || null;
+    if (referredBy !== undefined) updatePayload.referred_by = referredBy || null;
+    if (preferredLanguage !== undefined) updatePayload.preferred_language = preferredLanguage || null;
+    if (country !== undefined) updatePayload.country = country || null;
+    if (occupation !== undefined) updatePayload.occupation = occupation || null;
+    if (additionalEmail !== undefined) updatePayload.additional_email = additionalEmail || null;
+    if (additionalPhone !== undefined) updatePayload.additional_phone = additionalPhone || null;
+    if (gender !== undefined) updatePayload.gender = gender || null;
+    if (pronouns !== undefined) updatePayload.pronouns = pronouns || null;
+    if (dateOfBirth !== undefined) updatePayload.date_of_birth = dateOfBirth || null;
+    if (tags !== undefined) updatePayload.tags = tags || [];
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update(updatePayload)
+      .eq('id', customerId)
+      .select('id, client_source, referred_by, preferred_language, country, occupation, additional_email, additional_phone, gender, pronouns, date_of_birth, tags')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCustomerProfileDetails error:', error.message);
     return { data: null, error };
   }
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   DndContext,
   closestCenter,
@@ -16,26 +17,17 @@ import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
-import Select from '../../../../components/ui/Select';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { useIndustry } from '../../../../hooks/useIndustry';
-import { useOrg } from '../../../../contexts/OrgContext';
 import {
   fetchTherapistsForManagement,
-  createTherapist,
   updateTherapist,
   toggleTherapistActive,
   deleteTherapist,
   updateTherapistOrder,
   fetchAllBranches,
   fetchStaffTransfers,
-  uploadStaffPhoto,
 } from '../../../../services/api';
-
-const GENDER_OPTIONS = [
-  { value: 'Male', label: 'Male' },
-  { value: 'Female', label: 'Female' },
-];
 
 const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, onEdit, onDelete, onToggle }) => {
   const {
@@ -147,19 +139,12 @@ const SortableRow = ({ therapist, disabled, readOnly, showBranch, branchName, on
 };
 
 const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
+  const navigate = useNavigate();
+  const { orgSlug } = useParams();
   const { staffLabel, staffLabelPlural } = useIndustry();
-  const { enableStaffRatings } = useOrg();
   const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [editingTherapist, setEditingTherapist] = useState(null);
-  const [formData, setFormData] = useState({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '' });
-  const [formError, setFormError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -270,126 +255,8 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
     }
   };
 
-  const handleOpenCreate = () => {
-    setEditingTherapist(null);
-    setFormData({ name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '' });
-    setFormError(null);
-    setPhotoFile(null);
-    setPhotoPreview(null);
-    setShowModal(true);
-  };
-
-  const handleOpenEdit = (t) => {
-    setEditingTherapist(t);
-    setFormData({
-      name: t.name,
-      gender: t.gender || 'Male',
-      positions: t.position ? t.position.split('/').map(p => p.trim()) : [],
-      specialties: (t.specialties || []).join(', '),
-      isServiceStaff: t.is_service_staff !== false,
-      photoUrl: t.photo_url || '',
-      bio: t.bio || '',
-      experienceYears: t.experience_years != null ? String(t.experience_years) : '',
-      rating: t.rating != null ? String(t.rating) : '',
-    });
-    setFormError(null);
-    setPhotoFile(null);
-    setPhotoPreview(t.photo_url || null);
-    setShowModal(true);
-  };
-
-  const handlePhotoChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (!allowedTypes.includes(file.type)) {
-      setFormError('Only JPEG, PNG, WebP, and GIF images are allowed.');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setFormError('Image must be less than 5MB.');
-      return;
-    }
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
-    setFormError(null);
-  };
-
-  const handleRemovePhoto = () => {
-    setPhotoFile(null);
-    setPhotoPreview(null);
-    setFormData(f => ({ ...f, photoUrl: '' }));
-  };
-
-  const handleSave = async () => {
-    if (!formData.name.trim()) {
-      setFormError('Therapist name is required.');
-      return;
-    }
-
-    setSaving(true);
-    setFormError(null);
-
-    const specialtiesArr = formData.specialties
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    let photoUrl = formData.photoUrl.trim();
-    if (photoFile) {
-      setUploadingPhoto(true);
-      const uploadResult = await uploadStaffPhoto(photoFile);
-      setUploadingPhoto(false);
-
-      if (uploadResult.error) {
-        setFormError(uploadResult.error.message || 'Failed to upload photo.');
-        setSaving(false);
-        return;
-      }
-      photoUrl = uploadResult.url;
-    }
-    const bio = formData.bio.trim();
-    const experienceYears = formData.experienceYears === '' ? null : parseInt(formData.experienceYears, 10);
-    const rating = formData.rating === '' ? null : parseFloat(formData.rating);
-
-    let result;
-    if (editingTherapist) {
-      result = await updateTherapist({
-        therapistId: editingTherapist.id,
-        name: formData.name.trim(),
-        gender: formData.gender,
-        position: formData.positions.length > 0 ? formData.positions.join('/') : null,
-        specialties: specialtiesArr,
-        isServiceStaff: formData.isServiceStaff,
-        photoUrl,
-        bio,
-        experienceYears,
-        rating: enableStaffRatings ? rating : undefined,
-      });
-    } else {
-      result = await createTherapist({
-        name: formData.name.trim(),
-        gender: formData.gender,
-        position: formData.positions.length > 0 ? formData.positions.join('/') : null,
-        specialties: specialtiesArr,
-        isServiceStaff: formData.isServiceStaff,
-        branchId,
-        photoUrl,
-        bio,
-        experienceYears,
-        rating: enableStaffRatings ? rating : undefined,
-      });
-    }
-
-    if (result.error) {
-      setFormError(result.error.message || 'Operation failed.');
-    } else {
-      setShowModal(false);
-      await loadTherapists();
-    }
-    setSaving(false);
-  };
+  const handleOpenCreate = () => navigate(`/${orgSlug}/staff/new`);
+  const handleOpenEdit = (t) => navigate(`/${orgSlug}/staff/${t.id}`);
 
   const handleToggle = async (therapist) => {
     if (therapist.is_active) {
@@ -588,200 +455,6 @@ const TherapistManagementPanel = ({ branchId, readOnly = false }) => {
         </DndContext>
       </div>
     </div>
-
-      {/* Create/Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-start justify-center p-4 pt-20" onClick={() => setShowModal(false)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md max-h-[calc(100vh-8rem)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="overflow-y-auto max-h-[calc(100vh-8rem)] p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                {editingTherapist ? `Edit ${staffLabel}` : `Add ${staffLabel}`}
-              </h3>
-              <button onClick={() => setShowModal(false)} className="p-1 rounded hover:bg-background">
-                <Icon name="X" size={20} className="text-text-secondary" />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
-                <Icon name="AlertCircle" size={16} />
-                <span>{formError}</span>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Name</label>
-                <Input
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. Anjali Thapa"
-                  autoFocus
-                />
-              </div>
-
-              <Select
-                label="Gender"
-                options={GENDER_OPTIONS}
-                value={formData.gender}
-                onChange={(val) => setFormData({ ...formData, gender: val })}
-              />
-
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">
-                  Position{formData.positions.length > 0 && <span className="ml-1 text-xs text-text-secondary font-normal">({formData.positions.join(', ')})</span>}
-                </label>
-                <div className="border border-border rounded-spa bg-background max-h-[120px] overflow-y-auto p-2 space-y-1">
-                  {allPositionNames.length === 0 ? (
-                    <p className="text-xs text-text-secondary px-2 py-1">No positions yet. Use "Add Position" to create one.</p>
-                  ) : (
-                    allPositionNames.map(pos => (
-                      <label key={pos} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${formData.positions.includes(pos) ? 'bg-primary/5' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={formData.positions.includes(pos)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFormData(f => ({ ...f, positions: [...f.positions, pos] }));
-                            } else {
-                              setFormData(f => ({ ...f, positions: f.positions.filter(p => p !== pos) }));
-                            }
-                          }}
-                          className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
-                        />
-                        <span className="font-body text-sm text-text-primary">{pos}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Specialties</label>
-                <Input
-                  value={formData.specialties}
-                  onChange={(e) => setFormData({ ...formData, specialties: e.target.value })}
-                  placeholder="e.g. Deep Tissue, Swedish (comma-separated)"
-                />
-                <p className="font-caption text-xs text-text-secondary">Separate multiple specialties with commas</p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Photo</label>
-
-                {photoPreview ? (
-                  <div className="flex items-start gap-3">
-                    <div className="relative w-20 h-20 rounded-full overflow-hidden border border-border flex-shrink-0">
-                      <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-border bg-background hover:bg-background/80 spa-transition-fast text-sm text-text-secondary">
-                        <Icon name="RefreshCw" size={14} />
-                        Replace
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,image/gif"
-                          onChange={handlePhotoChange}
-                          className="hidden"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleRemovePhoto}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-spa border border-error/30 bg-error/5 hover:bg-error/10 spa-transition-fast text-sm text-error"
-                      >
-                        <Icon name="Trash2" size={14} />
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <label className="cursor-pointer flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-border rounded-spa hover:border-primary/50 hover:bg-primary/5 spa-transition-fast">
-                    <Icon name="Upload" size={24} className="text-text-tertiary mb-2" />
-                    <span className="font-body text-sm text-text-secondary">Click to upload photo</span>
-                    <span className="font-caption text-xs text-text-tertiary mt-1">JPEG, PNG, WebP, GIF (max 5MB)</span>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      onChange={handlePhotoChange}
-                      className="hidden"
-                    />
-                  </label>
-                )}
-
-                {uploadingPhoto && (
-                  <div className="flex items-center gap-2 text-sm text-text-secondary">
-                    <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
-                    Uploading photo...
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Bio</label>
-                <textarea
-                  value={formData.bio}
-                  onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                  placeholder="Short bio shown on the staff profile"
-                  rows={3}
-                  className="w-full px-3 py-2 border border-border rounded-spa font-body text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary spa-transition-fast resize-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Experience (years)</label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={formData.experienceYears}
-                  onChange={(e) => setFormData({ ...formData, experienceYears: e.target.value })}
-                />
-              </div>
-
-              {enableStaffRatings && (
-                <div className="space-y-1">
-                  <label className="block font-body font-body-medium text-sm text-text-primary">Rating</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="5"
-                    step="0.1"
-                    value={formData.rating}
-                    onChange={(e) => setFormData({ ...formData, rating: e.target.value })}
-                  />
-                </div>
-              )}
-
-              <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background">
-                <div>
-                  <span className="font-body font-body-medium text-sm text-text-primary">Service Staff</span>
-                  <p className="font-caption text-xs text-text-secondary">Can be assigned to bookings</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setFormData(f => ({ ...f, isServiceStaff: !f.isServiceStaff }))}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
-                    formData.isServiceStaff ? 'bg-success' : 'bg-border'
-                  }`}
-                >
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-                    formData.isServiceStaff ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>
-              <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
-                {editingTherapist ? 'Save Changes' : `Add ${staffLabel}`}
-              </Button>
-            </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Deactivation Confirmation Dialog */}
       {confirmToggle && (

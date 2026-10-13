@@ -318,6 +318,49 @@ CREATE POLICY "Manager can update therapist attendance"
   );
 
 -- ============================================================
+-- THERAPIST_WORKING_HOURS: added in migration-269. Per-therapist recurring
+-- weekly schedule, display/edit only -- not wired into booking availability.
+-- ============================================================
+
+ALTER TABLE therapist_working_hours ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Staff can read branch therapist working hours"
+  ON therapist_working_hours FOR SELECT
+  TO authenticated
+  USING (
+    branch_id = (SELECT get_user_branch_id())
+    OR (SELECT get_user_role()) = 'admin'
+  );
+
+CREATE POLICY "Manager can insert therapist working hours"
+  ON therapist_working_hours FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    (SELECT get_user_role()) IN ('manager', 'admin')
+    AND (branch_id = (SELECT get_user_branch_id()) OR (SELECT get_user_role()) = 'admin')
+  );
+
+CREATE POLICY "Manager can update therapist working hours"
+  ON therapist_working_hours FOR UPDATE
+  TO authenticated
+  USING (
+    (SELECT get_user_role()) IN ('manager', 'admin')
+    AND (branch_id = (SELECT get_user_branch_id()) OR (SELECT get_user_role()) = 'admin')
+  )
+  WITH CHECK (
+    (SELECT get_user_role()) IN ('manager', 'admin')
+    AND (branch_id = (SELECT get_user_branch_id()) OR (SELECT get_user_role()) = 'admin')
+  );
+
+CREATE POLICY "Manager can delete therapist working hours"
+  ON therapist_working_hours FOR DELETE
+  TO authenticated
+  USING (
+    (SELECT get_user_role()) IN ('manager', 'admin')
+    AND (branch_id = (SELECT get_user_branch_id()) OR (SELECT get_user_role()) = 'admin')
+  );
+
+-- ============================================================
 -- AUDIT_LOGS: Manager/Admin read only (writes via SECURITY DEFINER triggers)
 -- ============================================================
 
