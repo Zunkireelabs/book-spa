@@ -609,7 +609,7 @@ const BookingActionModal = ({
     }
   };
 
-  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipAmount, tipReceivedBy }) => {
+  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipSplits }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     setActionError(null);
@@ -634,8 +634,8 @@ const BookingActionModal = ({
         // Best-effort, attributed to the primary booking only (never split across
         // the bundle) — a failure here must never undo the payment that already
         // succeeded.
-        if (tipAmount > 0) {
-          const tipResult = await recordTip({ bookingId: booking.bookingId, amount: tipAmount, receivedBy: tipReceivedBy });
+        for (const split of (tipSplits || [])) {
+          const tipResult = await recordTip({ bookingId: booking.bookingId, amount: split.amount, receivedBy: split.receivedBy });
           if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
         }
 
@@ -645,7 +645,7 @@ const BookingActionModal = ({
         return { data: data?.[0], error: null };
       }
 
-      const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes, tipAmount, tipReceivedBy });
+      const result = await onRecordPayment(booking.bookingId, { tenders, dueHolderName, notes: paymentNotes, tipSplits });
       if (result?.error) return result;
 
       // Pay each bundled previous-due/related booking with its own allocated

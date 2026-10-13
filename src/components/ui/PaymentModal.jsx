@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -90,8 +90,11 @@ const PaymentModal = ({
   // Who actually received the tip — not necessarily the assigned therapist, a
   // guest may hand it to whichever staff member (service or support) they
   // interacted with (migration-242). Any active branch staff user, not just
-  // therapists.
-  const [tipReceivedBy, setTipReceivedBy] = useState('');
+  // therapists. Multiple staff can split one tip, each with their own
+  // manually-entered amount — tipRecipients holds one row per recipient.
+  const tipRecipientKeyRef = useRef(0);
+  const nextTipRecipientKey = () => (tipRecipientKeyRef.current += 1);
+  const [tipRecipients, setTipRecipients] = useState([{ key: 0, receivedBy: '', amount: '' }]);
   const [branchStaffOptions, setBranchStaffOptions] = useState([]);
   const [error, setError] = useState(null);
 
@@ -130,6 +133,28 @@ const PaymentModal = ({
     })();
     return () => { cancelled = true; };
   }, [showTip, branchId, branchStaffOptions.length]);
+
+  // Single-recipient case (the common path) keeps its one row's amount in sync
+  // with the entered tip total automatically, so staff never has to re-type it
+  // — matches pre-multi-recipient behavior exactly. Once a second row exists,
+  // staff is entering manual per-recipient amounts, so auto-sync stops.
+  useEffect(() => {
+    if (tipRecipients.length !== 1) return;
+    setTipRecipients(([row]) => [{ ...row, amount: tip }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tip]);
+
+  const updateTipRecipient = (key, patch) =>
+    setTipRecipients(prev => prev.map(r => (r.key === key ? { ...r, ...patch } : r)));
+  const addTipRecipient = () =>
+    setTipRecipients(prev => [...prev, { key: nextTipRecipientKey(), receivedBy: '', amount: '' }]);
+  const removeTipRecipient = (key) =>
+    setTipRecipients(prev => prev.filter(r => r.key !== key));
+
+  const tipRecipientsTotal = useMemo(
+    () => round2(tipRecipients.reduce((s, r) => s + (Number(r.amount) > 0 ? Number(r.amount) : 0), 0)),
+    [tipRecipients]
+  );
 
   // The Membership option is added to the mode selector only when there's a
   // wallet attached to this booking's customer AND the wallet still has balance.
@@ -508,9 +533,15 @@ const PaymentModal = ({
         return;
       }
     }
-    if (showTip && Number(tip) > 0 && !tipReceivedBy) {
-      setError('Select who received the tip.');
-      return;
+    if (showTip && Number(tip) > 0) {
+      if (tipRecipients.some(r => !r.receivedBy || !(Number(r.amount) > 0))) {
+        setError('Select who received the tip and enter an amount for every recipient.');
+        return;
+      }
+      if (Math.abs(tipRecipientsTotal - round2(Number(tip))) > 0.001) {
+        setError(`Tip recipient amounts (${formatNPR(tipRecipientsTotal)}) must add up to the tip total (${formatNPR(tip)}).`);
+        return;
+      }
     }
     setError(null);
     const cleanedTenders = tenders
@@ -532,13 +563,16 @@ const PaymentModal = ({
       return;
     }
     const tipAmount = Number(tip) > 0 ? round2(Number(tip)) : 0;
+    const tipSplits = tipAmount > 0
+      ? tipRecipients.map(r => ({ receivedBy: r.receivedBy, amount: round2(Number(r.amount)) }))
+      : [];
     const result = await onConfirm({
       tenders: primaryTenders,
       additionalAllocations,
       dueHolderName: leftover > 0 ? dueHolderName.trim() : '',
       notes,
       tipAmount,
-      tipReceivedBy: tipAmount > 0 ? tipReceivedBy : null,
+      tipSplits,
     });
     if (result?.error) setError(result.error.message || 'Failed to record payment.');
   };
@@ -1018,7 +1052,7 @@ const PaymentModal = ({
                 </label>
                 <button
                   type="button"
-                  onClick={() => { setShowTip(false); setTip(''); }}
+                  onClick={() => { setShowTip(false); setTip(''); setTipRecipients([{ key: nextTipRecipientKey(), receivedBy: '', amount: '' }]); }}
                   className="p-1 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
                   aria-label="Remove tip"
                 >
@@ -1039,18 +1073,62 @@ const PaymentModal = ({
                 />
               </div>
               {Number(tip) > 0 && (
-                <div>
-                  <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">
-                    Received by <span className="text-error">*</span>
-                  </label>
-                  <CustomSelect
-                    value={tipReceivedBy}
-                    onChange={setTipReceivedBy}
-                    options={branchStaffOptions.map(s => ({ value: s.id, label: s.name }))}
-                    placeholder="Who got this tip?"
-                    searchable
-                    size="sm"
-                  />
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-body font-body-medium text-xs text-text-secondary">
+                      Received by <span className="text-error">*</span>
+                    </label>
+                    {tipRecipients.length > 1 && (
+                      <span className="font-caption text-[11px] text-text-tertiary">
+                        {formatNPR(tipRecipientsTotal)} / {formatNPR(round2(Number(tip)))}
+                      </span>
+                    )}
+                  </div>
+                  {tipRecipients.map((r) => (
+                    <div key={r.key} className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <CustomSelect
+                          value={r.receivedBy}
+                          onChange={(v) => updateTipRecipient(r.key, { receivedBy: v })}
+                          options={branchStaffOptions.map(s => ({ value: s.id, label: s.name }))}
+                          placeholder="Who got this tip?"
+                          searchable
+                          size="sm"
+                        />
+                      </div>
+                      {tipRecipients.length > 1 && (
+                        <div className="relative w-28 flex-shrink-0">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-text-secondary">NPR</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={r.amount}
+                            onChange={(e) => updateTipRecipient(r.key, { amount: e.target.value })}
+                            placeholder="0"
+                            className="w-full rounded-spa border border-border bg-surface pl-9 pr-2 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
+                          />
+                        </div>
+                      )}
+                      {tipRecipients.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTipRecipient(r.key)}
+                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
+                          aria-label="Remove recipient"
+                        >
+                          <Icon name="Trash2" size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addTipRecipient}
+                    className="flex items-center gap-1 text-xs text-primary hover:underline"
+                  >
+                    <Icon name="Plus" size={12} /> Add recipient
+                  </button>
                 </div>
               )}
             </div>
