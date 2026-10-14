@@ -53,7 +53,8 @@ export const NAV_SECTIONS = [
       { id: 'campaigns', label: 'Campaigns', icon: 'Megaphone', view: 'campaigns', keywords: 'promotions messages', roles: MGR_ADMIN },
     ]),
     ...flagged(OUTREACH_ENABLED, [
-      { id: 'outreach', label: 'Outreach', icon: 'Send', view: 'outreach', keywords: 'campaign messages', roles: ['admin'] },
+      { id: 'outreach', label: 'Outreach', icon: 'Send', view: 'outreach-rules', keywords: 'campaign messages', roles: ['admin'],
+        activeViews: ['outreach', 'outreach-rules', 'outreach-templates', 'outreach-review', 'outreach-log', 'outreach-settings'] },
     ]),
   ] },
 ];

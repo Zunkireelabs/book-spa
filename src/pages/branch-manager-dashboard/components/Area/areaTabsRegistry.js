@@ -1,4 +1,4 @@
-import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from 'lib/featureFlags';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from 'lib/featureFlags';
 
 // Small areas (2–4 pages) get tabs at the top of the page; each tab is an existing `?view=` URL, so every view URL keeps working.
 // Roles, flags and `overallHidden` mirror the sidebar entries these tabs replace.
@@ -65,6 +65,18 @@ export const AREAS = [
     tabs: [
       { view: 'voucher-overview', label: 'All vouchers', roles: ['manager', 'admin'] },
       { view: 'vouchers', label: 'Issued', roles: ['manager', 'admin'] },
+    ],
+  }] : []),
+  ...(OUTREACH_ENABLED ? [{
+    id: 'outreach',
+    title: 'Outreach',
+    description: () => 'Automated messages to your customers.',
+    tabs: [
+      { view: 'outreach-rules', label: 'Rules', roles: ['admin'] },
+      { view: 'outreach-templates', label: 'Templates', roles: ['admin'] },
+      { view: 'outreach-review', label: 'Review queue', roles: ['admin'] },
+      { view: 'outreach-log', label: 'Message log', roles: ['admin'] },
+      { view: 'outreach-settings', label: 'Settings', roles: ['admin'] },
     ],
   }] : []),
 ];

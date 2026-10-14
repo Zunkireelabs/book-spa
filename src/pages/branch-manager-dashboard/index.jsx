@@ -70,7 +70,11 @@ import VoucherListPanel from './components/Vouchers/VoucherListPanel';
 import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
 import PackageListPanel from './components/Packages/PackageListPanel';
 import PackageOverviewPanel from './components/Packages/PackageOverviewPanel';
-import OutreachPanel from './components/Outreach/OutreachPanel';
+import RulesEditorPanel from './components/Outreach/RulesEditorPanel';
+import TemplateEditorPanel from './components/Outreach/TemplateEditorPanel';
+import ReviewQueuePanel from './components/Outreach/ReviewQueuePanel';
+import MessageLogPanel from './components/Outreach/MessageLogPanel';
+import ProviderSettingsPanel from './components/Outreach/ProviderSettingsPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
@@ -227,6 +231,11 @@ const BranchManagerDashboard = () => {
 
     return () => { active = false; supabase.removeChannel(channel); };
   }, [branchId, isOverall, loadData]);
+
+  // The old single Outreach page: its tabs are now URL tabs, so old links land on Rules.
+  useEffect(() => {
+    if (viewMode === 'outreach') navigate('?view=outreach-rules', { replace: true });
+  }, [viewMode, navigate]);
 
   // Overall is read-only: redirect away from booking-creation / per-branch write views.
   useEffect(() => {
@@ -434,6 +443,7 @@ const BranchManagerDashboard = () => {
   const renderAreaView = (view) => {
     if (branchLoading) return <BranchPending />; // panels need the resolved branch
     const managerOrAdmin = ['manager', 'admin'].includes(profile?.role);
+    const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
     switch (view) {
       case 'bookings': return <BookingsViewPanel branchId={branchId} />;
       case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
@@ -446,6 +456,11 @@ const BranchManagerDashboard = () => {
       case 'memberships': return MEMBERSHIP_ENABLED && managerOrAdmin ? <MembershipsPanel branchId={branchId} /> : null;
       case 'membership-collection': return MEMBERSHIP_ENABLED && managerOrAdmin ? <MembershipCollectionPanel /> : null;
       case 'wallet-usage': return MEMBERSHIP_ENABLED && managerOrAdmin ? <WalletUsagePanel /> : null;
+      case 'outreach-rules': return outreachAdmin ? <RulesEditorPanel /> : null;
+      case 'outreach-templates': return outreachAdmin ? <TemplateEditorPanel /> : null;
+      case 'outreach-review': return outreachAdmin ? <ReviewQueuePanel /> : null;
+      case 'outreach-log': return outreachAdmin ? <MessageLogPanel /> : null;
+      case 'outreach-settings': return outreachAdmin ? <ProviderSettingsPanel /> : null;
       case 'voucher-overview': return VOUCHER_ENABLED && managerOrAdmin ? <VoucherOverviewPanel /> : null;
       case 'vouchers': return VOUCHER_ENABLED && managerOrAdmin ? <VoucherListPanel /> : null;
       default: return null;
@@ -545,7 +560,6 @@ const BranchManagerDashboard = () => {
           {areaForView && <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>}
           {viewMode === 'customers' && (branchLoading ? <BranchPending /> : <CustomersPanel branchId={branchId} readOnly={isOverall} />)}
           {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
-          {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
           {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
       </AppShell>
     </>
