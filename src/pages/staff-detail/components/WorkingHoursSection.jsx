@@ -1,5 +1,6 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
+import TimeBoxInput from '../../../components/ui/TimeBoxInput';
 
 // Storage/display only — see migration-275's header comment: deliberately
 // not wired into booking-slot availability/conflict checks.
@@ -12,22 +13,44 @@ const WorkingHoursSection = ({ rows, onChange }) => {
     const nowWorking = row.isDayOff;
     updateRow(row.dayOfWeek, {
       isDayOff: !nowWorking,
-      ...(nowWorking ? { startTime: row.startTime || '09:00', endTime: row.endTime || '17:00' } : {}),
+      ...(nowWorking
+        ? { startTime: row.startTime || '09:00', endTime: row.endTime || '17:00' }
+        : { breaks: [] }),
+    });
+  };
+
+  const addBreak = (row) => {
+    const start = row.startTime || '09:00';
+    const end = row.endTime || '17:00';
+    const existing = row.breaks || [];
+    const lastEnd = existing.length > 0 ? existing[existing.length - 1].endTime : null;
+
+    let breakStart = lastEnd || '13:00';
+    let breakEnd = addOneHour(breakStart);
+    if (breakStart < start || breakEnd > end) {
+      breakStart = start;
+      breakEnd = end;
+    }
+
+    updateRow(row.dayOfWeek, { breaks: [...existing, { name: '', startTime: breakStart, endTime: breakEnd }] });
+  };
+
+  const removeBreak = (row, index) => {
+    updateRow(row.dayOfWeek, { breaks: row.breaks.filter((_, i) => i !== index) });
+  };
+
+  const updateBreak = (row, index, patch) => {
+    updateRow(row.dayOfWeek, {
+      breaks: row.breaks.map((b, i) => (i === index ? { ...b, ...patch } : b)),
     });
   };
 
   return (
-    <div className="bg-surface border border-border rounded-spa-lg p-5 space-y-4">
-      <div>
-        <h3 className="font-heading font-heading-semibold text-base text-text-primary">Normal Working Hours</h3>
-        <p className="font-caption text-xs text-text-secondary mt-0.5">
-          For reference only — not used to restrict bookings.
-        </p>
-      </div>
-
+    <div>
       <div className="divide-y divide-border">
         {rows.map(row => {
           const working = !row.isDayOff;
+          const breaks = row.breaks || [];
           return (
             <div key={row.dayOfWeek} className="py-3 first:pt-0 last:pb-0">
               <div className="flex items-center gap-3">
@@ -43,33 +66,61 @@ const WorkingHoursSection = ({ rows, onChange }) => {
                 </button>
                 <span className="w-24 flex-shrink-0 font-body font-body-medium text-sm text-text-primary">{row.dayLabel}</span>
 
-                <div
-                  className={`grid transition-all duration-200 ease-out ${
-                    working ? 'grid-cols-[1fr] opacity-100' : 'grid-cols-[0fr] opacity-0'
-                  }`}
-                  style={{ gridTemplateColumns: working ? '1fr' : '0fr' }}
-                >
-                  <div className="overflow-hidden">
+                {working ? (
+                  <div key={`${row.dayOfWeek}-on`} className="space-y-2 animate-settle-in origin-left">
                     <div className="flex items-center gap-2">
-                      <input
-                        type="time"
-                        value={row.startTime || ''}
-                        onChange={(e) => updateRow(row.dayOfWeek, { startTime: e.target.value })}
-                        className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      <TimeBoxInput
+                        value={row.startTime}
+                        onChange={(v) => updateRow(row.dayOfWeek, { startTime: v })}
                       />
                       <span className="font-caption text-xs text-text-tertiary">to</span>
-                      <input
-                        type="time"
-                        value={row.endTime || ''}
-                        onChange={(e) => updateRow(row.dayOfWeek, { endTime: e.target.value })}
-                        className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      <TimeBoxInput
+                        value={row.endTime}
+                        onChange={(v) => updateRow(row.dayOfWeek, { endTime: v })}
                       />
-                    </div>
-                  </div>
-                </div>
 
-                {!working && (
-                  <span className="font-caption text-sm text-text-tertiary">Not working on this day</span>
+                      <button
+                        type="button"
+                        onClick={() => addBreak(row)}
+                        className="font-caption text-xs text-primary hover:underline underline-offset-2 spa-transition-fast"
+                      >
+                        + break
+                      </button>
+                    </div>
+
+                    {breaks.map((brk, index) => (
+                      <div key={index} className="flex items-center gap-2 animate-settle-in origin-left">
+                        <input
+                          type="text"
+                          placeholder="Break name"
+                          value={brk.name}
+                          onChange={(e) => updateBreak(row, index, { name: e.target.value })}
+                          className="w-32 px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                        <TimeBoxInput
+                          value={brk.startTime}
+                          onChange={(v) => updateBreak(row, index, { startTime: v })}
+                        />
+                        <span className="font-caption text-xs text-text-tertiary">to</span>
+                        <TimeBoxInput
+                          value={brk.endTime}
+                          onChange={(v) => updateBreak(row, index, { endTime: v })}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeBreak(row, index)}
+                          title="Remove break"
+                          className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-error/70 hover:text-error hover:bg-error/10 spa-transition-fast"
+                        >
+                          <Icon name="Trash2" size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span key={`${row.dayOfWeek}-off`} className="font-caption text-sm text-text-tertiary animate-fade-in">
+                    Not working on this day
+                  </span>
                 )}
               </div>
             </div>
@@ -79,5 +130,11 @@ const WorkingHoursSection = ({ rows, onChange }) => {
     </div>
   );
 };
+
+function addOneHour(time) {
+  const [h, m] = time.split(':').map(Number);
+  const next = (h + 1) % 24;
+  return `${String(next).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
 export default WorkingHoursSection;

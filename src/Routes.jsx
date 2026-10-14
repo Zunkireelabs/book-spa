@@ -12,6 +12,7 @@ import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
 import StaffDetailPage from "pages/staff-detail";
 import CustomerDetailPage from "pages/customer-detail";
+import CustomerSentMessagesPage from "pages/customer-sent-messages";
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import AttendanceCalendarPage from "pages/attendance-calendar";
 import OrgFinder from "pages/org-finder";
@@ -167,6 +168,14 @@ const AppRoutes = () => {
           <TenantWrapper>
             <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
               <CustomerDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        <Route path="/:orgSlug/customers/:customerId/messages" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
+              <CustomerSentMessagesPage />
             </ProtectedRoute>
           </TenantWrapper>
         } />

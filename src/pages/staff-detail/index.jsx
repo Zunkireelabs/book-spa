@@ -3,8 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import StaffSidebar from '../../components/ui/StaffSidebar';
+import SettingsRow from './components/SettingsRow';
 import StaffTypeToggle from './components/StaffTypeToggle';
-import StaffProfileSection from './components/StaffProfileSection';
+import StaffDetailsFields from './components/StaffDetailsFields';
+import PositionSpecialtiesFields from './components/PositionSpecialtiesFields';
+import PersonalInfoFields from './components/PersonalInfoFields';
 import StaffServicesSection from './components/StaffServicesSection';
 import WorkingHoursSection from './components/WorkingHoursSection';
 import { useAuth } from '../../contexts/AuthContext';
@@ -21,7 +24,7 @@ import {
   uploadStaffPhoto,
 } from '../../services/api';
 
-const EMPTY_FORM = { name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '', phone: '', address: '', city: '' };
+const EMPTY_FORM = { name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '', phone: '', address: '', city: '', email: '', pronouns: '' };
 
 const DEFAULT_WORKING_HOURS = Array.from({ length: 7 }, (_, dayOfWeek) => ({
   dayOfWeek,
@@ -29,6 +32,7 @@ const DEFAULT_WORKING_HOURS = Array.from({ length: 7 }, (_, dayOfWeek) => ({
   startTime: null,
   endTime: null,
   isDayOff: true,
+  breaks: [],
 }));
 
 const StaffDetailPage = () => {
@@ -95,6 +99,8 @@ const StaffDetailPage = () => {
       phone: t.phone || '',
       address: t.address || '',
       city: t.city || '',
+      email: t.email || '',
+      pronouns: t.pronouns || '',
     });
     setPhotoPreview(t.photo_url || null);
 
@@ -114,8 +120,8 @@ const StaffDetailPage = () => {
       setFormError('Only JPEG, PNG, WebP, and GIF images are allowed.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setFormError('Image must be less than 5MB.');
+    if (file.size > 2 * 1024 * 1024) {
+      setFormError('Image must be less than 2.0MB.');
       return;
     }
     setPhotoFile(file);
@@ -171,6 +177,8 @@ const StaffDetailPage = () => {
       phone: formData.phone.trim(),
       address: formData.address.trim(),
       city: formData.city.trim(),
+      email: formData.email.trim(),
+      pronouns: formData.pronouns,
     };
 
     const result = isEdit
@@ -199,13 +207,13 @@ const StaffDetailPage = () => {
     <div className="min-h-screen bg-background">
       <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
 
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} lg:mb-0 mb-16 spa-transition-slow`}>
+      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
         {/* Breadcrumb header */}
         <div className="sticky top-0 z-header bg-surface border-b border-border px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 font-heading text-lg">
-            <button onClick={goBack} className="text-primary hover:underline font-heading-semibold">{staffLabel}</button>
-            <Icon name="ChevronRight" size={18} className="text-text-tertiary" />
-            <span className="font-heading-semibold text-text-primary">{isEdit ? `Edit ${staffLabel}` : `Add ${staffLabel}`}</span>
+          <div className="flex items-center gap-3 font-accent text-2xl">
+            <button onClick={goBack} className="text-primary hover:underline">{staffLabel}</button>
+            <Icon name="ChevronRight" size={20} className="text-text-tertiary" />
+            <span className="text-text-primary">{isEdit ? `Edit ${staffLabel}` : `Add ${staffLabel}`}</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={goBack} disabled={saving}>Cancel</Button>
@@ -226,25 +234,53 @@ const StaffDetailPage = () => {
             </div>
           ) : (
             <>
-              <StaffTypeToggle
-                isServiceStaff={formData.isServiceStaff}
-                onChange={(val) => setFormData(f => ({ ...f, isServiceStaff: val }))}
-              />
-              <StaffProfileSection
-                formData={formData}
-                setFormData={setFormData}
-                formError={formError}
-                allPositionNames={allPositionNames}
-                enableStaffRatings={enableStaffRatings}
-                photoPreview={photoPreview}
-                uploadingPhoto={uploadingPhoto}
-                onPhotoChange={handlePhotoChange}
-                onRemovePhoto={handleRemovePhoto}
-              />
-              {isEdit && formData.isServiceStaff && (
-                <StaffServicesSection therapistId={staffId} branchId={effectiveBranchId} />
+              {formError && (
+                <div className="flex items-center gap-2 p-4 bg-error/10 border border-error/20 rounded-spa text-error text-sm">
+                  <Icon name="AlertCircle" size={16} />
+                  <span>{formError}</span>
+                </div>
               )}
-              <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
+
+              <div className="bg-surface border border-border rounded-spa-lg px-6 py-4">
+                <SettingsRow title="Staff Type" description="Service staff deliver bookable services; support staff are not assigned to bookings.">
+                  <StaffTypeToggle
+                    isServiceStaff={formData.isServiceStaff}
+                    onChange={(val) => setFormData(f => ({ ...f, isServiceStaff: val }))}
+                  />
+                </SettingsRow>
+
+                <SettingsRow title="Staff Details" description="Contact information for this staff member.">
+                  <StaffDetailsFields formData={formData} setFormData={setFormData} />
+                </SettingsRow>
+
+                {formData.isServiceStaff && (
+                  <SettingsRow title="Position & Specialties" description="Shown to customers when booking and used to filter staff by role.">
+                    <PositionSpecialtiesFields formData={formData} setFormData={setFormData} allPositionNames={allPositionNames} />
+                  </SettingsRow>
+                )}
+
+                {isEdit && formData.isServiceStaff && (
+                  <SettingsRow title="Services" description="Which services this staff member can be assigned to. Services with no restriction are open to all staff — manage those from the Services page.">
+                    <StaffServicesSection therapistId={staffId} branchId={effectiveBranchId} />
+                  </SettingsRow>
+                )}
+
+                <SettingsRow title="Normal Working Hours" description="For reference only — not used to restrict bookings.">
+                  <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
+                </SettingsRow>
+
+                <SettingsRow title="Personal Info" description="Photo, bio, and experience shown on the staff profile.">
+                  <PersonalInfoFields
+                    formData={formData}
+                    setFormData={setFormData}
+                    enableStaffRatings={enableStaffRatings}
+                    photoPreview={photoPreview}
+                    uploadingPhoto={uploadingPhoto}
+                    onPhotoChange={handlePhotoChange}
+                    onRemovePhoto={handleRemovePhoto}
+                  />
+                </SettingsRow>
+              </div>
             </>
           )}
         </div>

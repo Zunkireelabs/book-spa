@@ -2048,6 +2048,12 @@ const BookingActionModal = ({
                           <span className="font-data text-text-tertiary">NPR {t.amount.toLocaleString('en-IN')}</span>
                         </div>
                       ))}
+                      {(booking.refunds || []).map((r) => (
+                        <div key={r.id || `refund-${r.amount}`} className="flex items-center justify-between pl-2 text-[11px]" title={r.reason || ''}>
+                          <span className="text-error">Refunded</span>
+                          <span className="font-data text-error">- NPR {r.amount.toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
                       <div className="flex items-center justify-between border-t border-border pt-2">
                         <span className="font-body font-body-medium text-xs text-text-primary">Balance Due</span>
                         <span className="font-data font-data-medium text-sm text-warning">NPR {Number(booking.amountDue || 0).toLocaleString('en-IN')}</span>
@@ -2263,6 +2269,20 @@ const BookingActionModal = ({
                         <span className="font-data text-text-secondary">NPR {t.amount.toLocaleString('en-IN')}</span>
                       </div>
                     ))}
+                    {(booking.refunds || []).map((r) => (
+                      <div key={r.id || `refund-${r.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs" title={r.reason || ''}>
+                        <span className="text-error">Refunded</span>
+                        <span className="font-data text-error">- NPR {r.amount.toLocaleString('en-IN')}</span>
+                      </div>
+                    ))}
+                    {booking.refundTotal > 0 && (
+                      <div className="flex items-center justify-between px-3 py-1.5 text-xs border-t border-border pt-2">
+                        <span className="font-body font-body-medium text-text-primary">Net Received</span>
+                        <span className="font-data font-data-medium text-text-primary">
+                          NPR {Math.max(0, (booking.amountPaid || 0) - booking.refundTotal).toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
