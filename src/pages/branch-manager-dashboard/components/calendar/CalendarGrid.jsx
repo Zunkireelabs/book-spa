@@ -466,6 +466,9 @@ const CalendarGrid = ({
         previousDue: b.previousDue,     // { count, amount } | null | undefined
         isNewCustomer: !!b.isNewCustomer,
         createdByName: b.creator?.full_name || null,
+        // Booked through the public online flow (no staff creator), and whether the service needs a therapist at all.
+        isOnline: !b.created_by,
+        requiresTherapist: b.service?.requires_therapist !== false,
         isShared,
         sharedCount: isShared ? b.booking_therapists.length : 0,
       };
@@ -1001,13 +1004,19 @@ const CalendarGrid = ({
       ? getManualBlockRanges(col, todayStr, blockOccurrences)
           .find(r => nowTime >= r.fromTime.slice(0, 5) && nowTime < r.toTime.slice(0, 5))
       : null;
+    // Online-unassigned copy only applies to the synthetic Unassigned/No Room column and only when there is something to flag.
+    const onlineUnassignedTooltip = isUnassigned && col.onlineUnassignedCount > 0
+      ? (col.allSelfService
+          ? 'Please allocate the customer to a dedicated room'
+          : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a therapist and allocate the room`)
+      : null;
     const initials = col.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
     return (
       <div
         key={col.id}
         className="relative flex-1 border-r border-border last:border-r-0 px-2 h-10 flex items-center justify-center"
         style={{ minWidth: minColWidth }}
-        onMouseEnter={(e) => showHeaderTooltip(e, col.name)}
+        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || col.name)}
         onMouseLeave={hideHeaderTooltip}
       >
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1044,6 +1053,15 @@ const CalendarGrid = ({
               </span>
             )}
           </span>
+          {isUnassigned && col.onlineUnassignedCount > 0 && (
+            <span
+              className="flex-shrink-0 min-w-[16px] h-4 px-1 bg-warning text-white rounded-full text-[10px] font-medium flex items-center justify-center"
+              title={onlineUnassignedTooltip}
+              aria-label={onlineUnassignedTooltip}
+            >
+              {col.onlineUnassignedCount}
+            </span>
+          )}
           {col.type === 'therapist' && (
             <span
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${col.attendance ? 'bg-gray-300' : 'bg-success'}`}
@@ -1473,9 +1491,21 @@ const CalendarGrid = ({
   );
 
 
+  // Stats for the synthetic "Unassigned"/"No Room" column's header badge + tooltip: only bookings that came from the public online
+  // flow (isOnline), not e.g. a staff-created walk-in deliberately left unassigned. Single-day view only (the only place this
+  // column's header renders). allSelfService: every counted booking is for a service that needs no therapist, so the copy asks
+  // for a room only.
+  const unassignedOnlineStats = useMemo(() => {
+    const online = ((bookingsByDayAndCol[currentDate] || {}).unassigned || []).filter(b => b.isOnline);
+    return { count: online.length, allSelfService: online.length > 0 && online.every(b => b.requiresTherapist === false) };
+  }, [bookingsByDayAndCol, currentDate]);
+
   // ── Single-day view ───────────────────────────────────────
   const columnsMinWidth = columns.length * minColWidth;
-  const unassignedCol = columns.find(c => c.type === 'unassigned');
+  const unassignedCol = useMemo(() => {
+    const base = columns.find(c => c.type === 'unassigned');
+    return base ? { ...base, onlineUnassignedCount: unassignedOnlineStats.count, allSelfService: unassignedOnlineStats.allSelfService } : base;
+  }, [columns, unassignedOnlineStats]);
   const regularColumns = columns.filter(c => c.type !== 'unassigned');
   const regularMinWidth = regularColumns.length * minColWidth;
   const canSortHeaders = (columnMode === 'therapist' && !!onTherapistReorder)
