@@ -23,3 +23,13 @@ export const failOpenAfter = (promise, ms, fallback) => {
   const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 };
+
+// Free text going into a PostgREST `.or()` ilike filter: commas, dots, parens, quotes and backslashes would break (or inject into)
+// the filter string, and %, _ and * would act as wildcards, so they are all dropped. Returns '' when nothing searchable is left.
+export const sanitizeSearchTerm = (query) => String(query ?? '').trim().replace(/[,.()"\\%_*]/g, '').trim();
+
+// The `.or()` filter for a customer lookup by name or phone, or null when the term is empty after sanitising.
+export const customerSearchFilter = (query) => {
+  const term = sanitizeSearchTerm(query);
+  return term ? `full_name.ilike.%${term}%,phone.ilike.%${term}%` : null;
+};

@@ -4,10 +4,25 @@ import BranchSwitcher from './BranchSwitcher';
 import NotificationBell from './NotificationBell';
 import ProfileMenu from './ProfileMenu';
 import RealtimeStatus from './RealtimeStatus';
+import { useCommandPalette } from '../CommandPalette/useCommandPalette';
 
 // Shared top bar for the manager and staff dashboards. Per-dashboard bits come in as props:
 // `leftExtra` (e.g. the period filter), `onToggleAssistant` (omit to hide the Assistant button)
 // and the notification props passed straight to NotificationBell.
+const MobileSearchButton = () => {
+  const { openPalette } = useCommandPalette();
+  return (
+    <button
+      type="button"
+      onClick={openPalette}
+      aria-label="Search"
+      className="lg:hidden h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center rounded-spa-lg text-text-secondary hover:bg-black/[0.04]"
+    >
+      <Icon name="Search" size={18} />
+    </button>
+  );
+};
+
 const AppHeader = ({
   realtimeStatus,
   leftExtra = null,
@@ -26,6 +41,7 @@ const AppHeader = ({
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <RealtimeStatus status={realtimeStatus} />
+        <MobileSearchButton />
         {onToggleAssistant && (
           <button
             type="button"

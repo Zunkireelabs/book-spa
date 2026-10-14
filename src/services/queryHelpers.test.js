@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { IN_CHUNK, inChunks, failOpenAfter } from './queryHelpers';
+import { IN_CHUNK, inChunks, failOpenAfter, sanitizeSearchTerm, customerSearchFilter } from './queryHelpers';
 
 describe('inChunks', () => {
   it('splits ids into chunks of IN_CHUNK and concatenates the rows', async () => {
@@ -43,5 +43,25 @@ describe('failOpenAfter', () => {
     vi.useFakeTimers();
     await failOpenAfter(Promise.resolve(1), 5000, null);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('sanitizeSearchTerm / customerSearchFilter', () => {
+  it('drops characters that break or inject into a PostgREST or() filter, and wildcard characters', () => {
+    expect(sanitizeSearchTerm('  a,b.c(d)"e\\f  ')).toBe('abcdef');
+    expect(sanitizeSearchTerm('50%_off*')).toBe('50off');
+  });
+
+  it('treats null / undefined / punctuation-only input as empty', () => {
+    expect(sanitizeSearchTerm(null)).toBe('');
+    expect(sanitizeSearchTerm(undefined)).toBe('');
+    expect(sanitizeSearchTerm(' ,.% ')).toBe('');
+  });
+
+  it('builds a name-or-phone ilike filter, or null when nothing is searchable', () => {
+    expect(customerSearchFilter(' Asha ')).toBe('full_name.ilike.%Asha%,phone.ilike.%Asha%');
+    expect(customerSearchFilter('9800')).toBe('full_name.ilike.%9800%,phone.ilike.%9800%');
+    expect(customerSearchFilter('')).toBeNull();
+    expect(customerSearchFilter('%_')).toBeNull();
   });
 });

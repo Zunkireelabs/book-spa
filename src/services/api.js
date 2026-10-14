@@ -9,7 +9,7 @@ import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrph
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
-import { inChunks, failOpenAfter, IN_CHUNK } from './queryHelpers';
+import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -4797,6 +4797,37 @@ export async function searchBookings(branchId, query) {
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] searchBookings error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Bounded customer lookup for the ⌘K palette: at most `limit` active customers of the branch's org whose name or phone contains the
+// term. Read-only; same table, org scoping and RLS as fetchCustomersLightweight / the Customers panel. Empty term -> [].
+export async function searchCustomers(branchId, query, limit = 5) {
+  try {
+    const filter = customerSearchFilter(query);
+    if (!filter) return { data: [], error: null };
+    if (!branchId || isOverallBranch(branchId)) return { data: [], error: null };
+
+    const { data: branch, error: branchErr } = await supabase
+      .from('branches')
+      .select('org_id')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (branchErr) throw branchErr;
+
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, full_name, phone')
+      .eq('org_id', branch.org_id)
+      .eq('is_active', true)
+      .or(filter)
+      .order('full_name')
+      .limit(Math.max(1, Math.min(limit, 20)));
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] searchCustomers error:', error.message);
     return { data: null, error };
   }
 }
