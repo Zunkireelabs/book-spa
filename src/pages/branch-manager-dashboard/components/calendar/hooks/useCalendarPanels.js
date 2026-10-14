@@ -289,6 +289,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       openQuickCreateForSlot(slotInfo);
       return;
     }
+    // Overall is view-only for anything that creates data (booking, block, transfer): nothing to offer, so no menu.
+    if (isOverallBranch(branchId)) return;
     setChoiceMenuSlot(slotInfo);
   }, [rebookSource, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist]);
 

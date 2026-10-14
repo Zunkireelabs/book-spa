@@ -337,9 +337,10 @@ const OperationalCalendar = ({ branchId }) => {
         onRecordPayment={handleRecordPayment}
         onApplyDiscount={handleApplyDiscount}
         onEditBooking={handleEditBooking}
-        onCreateBooking={handleQuickCreateSubmit}
-        onRebookStart={handleRebookStart}
-        onRescheduleStart={handleRescheduleStart}
+        // Overall is view-only for creating data: with no create/rebook/reschedule handlers the panel hides Rebook, + Service and Reschedule.
+        onCreateBooking={isOverallBranch(branchId) ? undefined : handleQuickCreateSubmit}
+        onRebookStart={isOverallBranch(branchId) ? undefined : handleRebookStart}
+        onRescheduleStart={isOverallBranch(branchId) ? undefined : handleRescheduleStart}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
@@ -366,9 +367,9 @@ const OperationalCalendar = ({ branchId }) => {
           onClose={() => setChoiceMenuSlot(null)}
           options={[
             ...(isOverallBranch(branchId) ? [] : [{ key: 'booking', label: 'Add booking', icon: 'CalendarPlus', onSelect: () => openQuickCreateForSlot(choiceMenuSlot) }]),
-            { key: 'block', label: 'Add block', icon: 'Ban', onSelect: () => openOnlyPanel(() => setAddBlockSlot(choiceMenuSlot)) },
+            ...(isOverallBranch(branchId) ? [] : [{ key: 'block', label: 'Add block', icon: 'Ban', onSelect: () => openOnlyPanel(() => setAddBlockSlot(choiceMenuSlot)) }]),
             // Transfer is a therapist-column action for managers/admins only (the RPC enforces it too).
-            ...(transfersAvailable && choiceMenuSlot.colType === 'therapist' && ['manager', 'admin'].includes(profile?.role) ? [{
+            ...(!isOverallBranch(branchId) && transfersAvailable && choiceMenuSlot.colType === 'therapist' && ['manager', 'admin'].includes(profile?.role) ? [{
               key: 'transfer',
               label: 'Transfer therapist',
               icon: 'ArrowRightLeft',
