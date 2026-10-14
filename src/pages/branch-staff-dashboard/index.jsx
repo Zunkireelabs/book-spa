@@ -37,7 +37,7 @@ const BranchStaffDashboard = () => {
     setSearchParams({ view: 'bookings' });
   };
 
-  const viewMode = searchParams.get('view') || 'dashboard';
+  const viewMode = searchParams.get('view') || 'calendar'; // staff land on the calendar; the sidebar's Dashboard link is ?view=dashboard
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Recomputes only when the calendar date actually rolls over (via the

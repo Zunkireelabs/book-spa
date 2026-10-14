@@ -120,7 +120,15 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       id: 'dashboard',
       label: 'Dashboard',
       icon: 'LayoutDashboard',
-      path: basePath,
+      // Staff land on the calendar at the bare URL, so their Dashboard link names the overview explicitly.
+      path: userRole === 'staff' ? `${basePath}?view=dashboard` : basePath,
+      roles: ['staff', 'manager', 'admin', 'admin_viewer']
+    },
+    {
+      id: 'calendar',
+      label: 'Calendar',
+      icon: 'Calendar',
+      path: `${basePath}?view=calendar`,
       roles: ['staff', 'manager', 'admin', 'admin_viewer']
     },
     {
@@ -134,13 +142,6 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           label: 'Bookings',
           icon: 'BookOpen',
           path: `${basePath}?view=bookings`,
-          roles: ['staff', 'manager', 'admin', 'admin_viewer']
-        },
-        {
-          id: 'calendar',
-          label: 'Calendar',
-          icon: 'Calendar',
-          path: `${basePath}?view=calendar`,
           roles: ['staff', 'manager', 'admin', 'admin_viewer']
         },
         {
@@ -527,9 +528,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const mobilePrimaryItems = mainNavItems.slice(0, 4);
   const mobileOverflowItems = mainNavItems.slice(4);
 
+  // The bare dashboard URL is the landing view: the calendar for staff, the dashboard for everyone else.
+  const currentUrl = location.pathname === basePath && !location.search && userRole === 'staff'
+    ? `${basePath}?view=calendar`
+    : `${location.pathname}${location.search}`;
+
   const isActive = (path) => {
     if (path.includes('?')) {
-      return `${location.pathname}${location.search}` === path;
+      return currentUrl === path;
     }
     return location.pathname === path && !location.search;
   };
