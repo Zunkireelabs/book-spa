@@ -11,6 +11,7 @@ import {
   updateBlock,
 } from '../../../../../services/api';
 import { transformBooking } from '../../../../../services/bookingTransformers';
+import { isOverallBranch } from '../../../../../services/api';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blockOverlap';
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
@@ -120,6 +121,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   // "Add booking" choice — opens the quick-create panel at the slot (the previous direct behaviour).
   const openQuickCreateForSlot = useCallback(async (slotInfo) => {
+    // Overall (all branches) is read-only for bookings: there is no single branch to create in. Every create path ends here.
+    if (isOverallBranch(branchId)) return;
     closeBlockPanels();
     setQuickCreateSlot(slotInfo);
     if (!servicesCache && !servicesLoading) {
@@ -427,6 +430,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   // ── Rebook "pick and place" handlers ───────────────────────
 
   const handleRebookStart = useCallback((booking) => {
+    if (isOverallBranch(branchId)) return;
     setRebookSource({
       booking,
       customerName: booking.customerName,
@@ -437,10 +441,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     });
     setModalOpen(false);
     setSelectedBooking(null);
-  }, []);
+  }, [branchId]);
 
   // "Reschedule": same pick-and-place as Rebook, but placing it runs the reschedule RPC (new booking + cancel the original).
   const handleRescheduleStart = useCallback((booking) => {
+    if (isOverallBranch(branchId)) return;
     setRebookSource({
       booking,
       customerName: booking.customerName,
@@ -453,7 +458,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     });
     setModalOpen(false);
     setSelectedBooking(null);
-  }, []);
+  }, [branchId]);
 
   const handleRebookCancel = useCallback(() => setRebookSource(null), []);
 

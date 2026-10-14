@@ -375,6 +375,7 @@ const CalendarToolbar = ({
             </button>
           ))}
         </div>
+        {onNewBooking && (
         <button
           type="button"
           onClick={onNewBooking}
@@ -385,6 +386,7 @@ const CalendarToolbar = ({
           <Icon name="Plus" size={14} />
           New booking
         </button>
+        )}
       </div>
     </div>
   );

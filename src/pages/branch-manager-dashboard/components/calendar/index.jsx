@@ -19,6 +19,7 @@ import { useCalendarPanels } from './hooks/useCalendarPanels';
 import { useCalendarShortcuts } from './hooks/useCalendarShortcuts';
 import { useGoTodaySignal } from './calendarSignals';
 import { useBookingActions } from './hooks/useBookingActions';
+import { isOverallBranch } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { todayStr, addDays, getStepDays } from './calendarDates';
@@ -215,7 +216,7 @@ const OperationalCalendar = ({ branchId }) => {
             selectedPositions={selectedPositions}
             setSelectedPositions={setSelectedPositions}
             calendarPositionOptions={calendarPositionOptions}
-            onNewBooking={handleNewBooking}
+            onNewBooking={isOverallBranch(branchId) ? undefined : handleNewBooking}
             branchId={branchId}
           />
 
@@ -364,7 +365,7 @@ const OperationalCalendar = ({ branchId }) => {
           y={choiceMenuSlot.clientY}
           onClose={() => setChoiceMenuSlot(null)}
           options={[
-            { key: 'booking', label: 'Add booking', icon: 'CalendarPlus', onSelect: () => openQuickCreateForSlot(choiceMenuSlot) },
+            ...(isOverallBranch(branchId) ? [] : [{ key: 'booking', label: 'Add booking', icon: 'CalendarPlus', onSelect: () => openQuickCreateForSlot(choiceMenuSlot) }]),
             { key: 'block', label: 'Add block', icon: 'Ban', onSelect: () => openOnlyPanel(() => setAddBlockSlot(choiceMenuSlot)) },
             // Transfer is a therapist-column action for managers/admins only (the RPC enforces it too).
             ...(transfersAvailable && choiceMenuSlot.colType === 'therapist' && ['manager', 'admin'].includes(profile?.role) ? [{
