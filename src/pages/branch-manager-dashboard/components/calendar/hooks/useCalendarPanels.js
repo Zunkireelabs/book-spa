@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   fetchServices,
   createBooking,
+  rescheduleBookingAsNewBooking,
   fetchBookingById,
   cancelScheduledTransfer,
   revertStaffTransferNow,
@@ -94,6 +95,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && rebookSource && !e.defaultPrevented) {
+        if (rebookSource.isReschedule) {
+          // No inline fallback form for Reschedule: just drop out of pick mode.
+          setRebookSource(null);
+          return;
+        }
         // Reopen modal with rebook inline form
         setSelectedBooking(rebookSource.booking);
         setModalOpen(true);
@@ -192,6 +198,28 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
+
+      if (source.isReschedule) {
+        // Single DB transaction (reschedule_booking RPC): creates the new booking and cancels the original atomically, and
+        // carries discount / special requests / companion / referral fields over, so there is no partial-failure state.
+        const result = await rescheduleBookingAsNewBooking({
+          bookingId: source.originalBookingId,
+          date: slotInfo.day,
+          startTime,
+          therapistId,
+          roomId,
+          reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
+        });
+        if (result.error) {
+          showToast(result.error.message || 'Failed to reschedule.', 'error');
+          setRebookSource(source);
+        } else {
+          showToast('Booking rescheduled successfully.');
+          refreshCalendar();
+        }
+        return;
+      }
+
       const result = await createBooking({
         branchId,
         serviceId: source.serviceId,
@@ -207,7 +235,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         // Restore rebook mode on failure so user can retry
         setRebookSource(source);
       } else {
-        showToast('Rebooked successfully — payment will be collected at the new appointment.');
+        if (result.data?._therapistAssignmentWarning) {
+          showToast(`Rebooked, but: ${result.data._therapistAssignmentWarning}`, 'error');
+        } else {
+          showToast('Rebooked successfully — payment will be collected at the new appointment.');
+        }
         refreshCalendar();
       }
       return;
@@ -370,7 +402,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
     }
-    showToast('Booking created successfully');
+    if (result.data?._therapistAssignmentWarning) {
+      showToast(`Booking created, but: ${result.data._therapistAssignmentWarning}`, 'error');
+    } else {
+      showToast('Booking created successfully');
+    }
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
@@ -386,6 +422,22 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       serviceId: booking.serviceId,
       serviceName: booking.service,
       duration: booking.duration,
+    });
+    setModalOpen(false);
+    setSelectedBooking(null);
+  }, []);
+
+  // "Reschedule": same pick-and-place as Rebook, but placing it runs the reschedule RPC (new booking + cancel the original).
+  const handleRescheduleStart = useCallback((booking) => {
+    setRebookSource({
+      booking,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      serviceId: booking.serviceId,
+      serviceName: booking.service,
+      duration: booking.duration,
+      isReschedule: true,
+      originalBookingId: booking.bookingId,
     });
     setModalOpen(false);
     setSelectedBooking(null);
@@ -479,7 +531,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     transferCancelRequest, setTransferCancelRequest, blockPanelOpen, blockRetarget,
     servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick, handleConfirmTransferCancel,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   };
 }

@@ -111,12 +111,12 @@ const OperationalCalendar = ({ branchId }) => {
     transferCancelRequest, setTransferCancelRequest, blockPanelOpen, blockRetarget,
     servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick, handleConfirmTransferCancel,
-    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart,
+    handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef });
 
   const {
-    handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment,
+    handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment, handleGroupPaymentRecorded,
   } = useBookingActions({ showToast, refreshCalendar, selectedBooking, setSelectedBooking, getSelectedBookingsRef, staffLabel });
 
   // Auto-refresh every 60s. Paused while any modal/panel/drag/confirm is active
@@ -296,7 +296,7 @@ const OperationalCalendar = ({ branchId }) => {
           ref={rebookCardRef}
           role="status"
           aria-live="polite"
-          aria-label={`Rebook mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
+          aria-label={`${rebookSource.isReschedule ? 'Reschedule' : 'Rebook'} mode active for ${rebookSource.customerName}. Click an empty calendar slot to place, or press Escape to cancel.`}
           className="fixed pointer-events-none z-notification"
           style={{ left: -9999, top: -9999, opacity: 0 }}
         >
@@ -312,7 +312,7 @@ const OperationalCalendar = ({ branchId }) => {
                 {rebookSource.duration}
               </span>
               <span className="font-caption text-[10px] text-primary font-medium">
-                Click to place
+                {rebookSource.isReschedule ? 'Click to move' : 'Click to place'}
               </span>
             </div>
           </div>
@@ -338,7 +338,8 @@ const OperationalCalendar = ({ branchId }) => {
         onEditBooking={handleEditBooking}
         onCreateBooking={handleQuickCreateSubmit}
         onRebookStart={handleRebookStart}
-        // TODO(step 7): onRescheduleStart (reschedule-as-new) and onGroupPaymentRecorded (atomic bundled payment) were Zennly props here; the modal falls back to the sequential payment loop and hides Reschedule until then.
+        onRescheduleStart={handleRescheduleStart}
+        onGroupPaymentRecorded={handleGroupPaymentRecorded}
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}

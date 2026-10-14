@@ -155,5 +155,17 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     return { error: null };
   };
 
-  return { handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment };
+  // Tail-only counterpart to handleRecordPayment for the atomic recordGroupPayment path (BookingActionModal): the write already
+  // happened in one transaction covering every booking in the bundle, so just toast and refresh once.
+  const handleGroupPaymentRecorded = () => {
+    showToast('Payment recorded successfully');
+    refreshCalendar();
+    if (selectedBooking) {
+      fetchBookingById(selectedBooking.bookingId).then((refreshed) => {
+        if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+      });
+    }
+  };
+
+  return { handleStatusUpdate, handleAssignTherapist, handleBookingResize, handleEditBooking, handleApplyDiscount, handleRecordPayment, handleGroupPaymentRecorded };
 }

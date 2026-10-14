@@ -428,6 +428,8 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const result = await assignTherapist({ bookingId, therapistIds: newIds });
           if (result.error) {
             showToast(result.error.message || 'Failed to consolidate assignment.', 'error');
+          } else if (result.data?.warning) {
+            showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
           } else {
             showToast(`Consolidated to ${targetColName}`, 'success');
           }
@@ -437,6 +439,8 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           const result = await assignTherapist({ bookingId, therapistIds: newIds });
           if (result.error) {
             showToast(result.error.message || 'Failed to reassign therapist.', 'error');
+          } else if (result.data?.warning) {
+            showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
           } else {
             showToast(`Reassigned from ${colNameMap[sourceColId] || 'therapist'} to ${targetColName}`, 'success');
           }
