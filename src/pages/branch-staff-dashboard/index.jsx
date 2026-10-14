@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
+import AreaTabs from '../branch-manager-dashboard/components/Area/AreaTabs';
+import { getAreaForView } from '../branch-manager-dashboard/components/Area/areaTabsRegistry';
 import AppShell from '../../components/ui/AppShell';
 import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
@@ -459,9 +461,43 @@ const BranchStaffDashboard = () => {
   const userName = profile?.full_name || 'Staff Member';
   const userRole = profile?.role || 'staff';
 
+  // Staff get one tabbed area, Bookings (All bookings, New booking, Check booking, Collect payment, ...).
+  const bookingsArea = getAreaForView('bookings');
+  const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : null;
+  const renderAreaView = (view) => {
+    switch (view) {
+      case 'bookings': return <BookingsViewPanel branchId={branchId} />;
+      case 'collect-payment': return <CollectPaymentPanel onSuccess={showSuccess} />;
+      case 'new-booking': return <StaffBookingForm onBookingCreated={loadData} />;
+      case 'check-booking': return <CheckBookingPanel branchId={branchId} />;
+      case 'new-membership':
+        return MEMBERSHIP_ENABLED ? (
+          <EnrollMemberModal
+            onClose={() => setSearchParams({ view: 'dashboard' })}
+            onEnrolled={() => {
+              setSearchParams({ view: 'dashboard' });
+              showSuccess('Membership created.');
+            }}
+          />
+        ) : null;
+      case 'new-voucher':
+        return VOUCHER_ENABLED ? (
+          <NewVoucherModal
+            userRole={userRole}
+            onClose={() => setSearchParams({ view: 'dashboard' })}
+            onIssued={() => {
+              setSearchParams({ view: 'dashboard' });
+              showSuccess('Voucher issued.');
+            }}
+          />
+        ) : null;
+      default: return null;
+    }
+  };
+
   return (
     <AppShell
-      variant={viewMode === 'calendar' ? 'fill' : 'page'}
+      variant={viewMode === 'calendar' || areaForView ? 'fill' : 'page'}
       header={{
         realtimeStatus,
         notifications,
@@ -591,35 +627,12 @@ const BranchStaffDashboard = () => {
           {/* Tips — not revenue, kept visually separate, last section on the page */}
           <TipsSummaryCard branchId={branchId} userRole={userRole} />
         </div>
-      ) : viewMode === 'bookings' ? (
-        <BookingsViewPanel branchId={branchId} />
       ) : viewMode === 'calendar' ? (
         <OperationalCalendar branchId={branchId} />
-      ) : viewMode === 'collect-payment' ? (
-        <CollectPaymentPanel onSuccess={showSuccess} />
-      ) : viewMode === 'new-booking' ? (
-        <StaffBookingForm onBookingCreated={loadData} />
-      ) : viewMode === 'check-booking' ? (
-        <CheckBookingPanel branchId={branchId} />
       ) : viewMode === 'products' && PRODUCTS_ENABLED ? (
         <ProductsPanel />
-      ) : viewMode === 'new-membership' && MEMBERSHIP_ENABLED ? (
-        <EnrollMemberModal
-          onClose={() => setSearchParams({ view: 'dashboard' })}
-          onEnrolled={() => {
-            setSearchParams({ view: 'dashboard' });
-            showSuccess('Membership created.');
-          }}
-        />
-      ) : viewMode === 'new-voucher' && VOUCHER_ENABLED ? (
-        <NewVoucherModal
-          userRole={userRole}
-          onClose={() => setSearchParams({ view: 'dashboard' })}
-          onIssued={() => {
-            setSearchParams({ view: 'dashboard' });
-            showSuccess('Voucher issued.');
-          }}
-        />
+      ) : areaForView ? (
+        <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>
       ) : (
         <StaffBookingForm onBookingCreated={loadData} />
       )}

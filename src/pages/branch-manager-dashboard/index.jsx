@@ -43,6 +43,8 @@ import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 import DiscountsPanel from './components/DiscountsPanel';
 import AttendanceReportPanel from './components/AttendanceReportPanel';
+import AreaTabs from './components/Area/AreaTabs';
+import { getAreaForView } from './components/Area/areaTabsRegistry';
 import SettingsLayout from './components/Settings/SettingsLayout';
 import { isSettingsView } from './components/Settings/settingsRegistry';
 import ReportsLayout from './components/Reports/ReportsLayout';
@@ -424,6 +426,29 @@ const BranchManagerDashboard = () => {
     }
   };
 
+  // Tabbed areas (Bookings, Packages, plus flagged Memberships / Vouchers) and single pages (Therapists, Attendance, Payroll): each tab
+  // is an existing view; the panels keep their own role / Overall guards.
+  const areaForView = getAreaForView(viewMode);
+  const renderAreaView = (view) => {
+    const managerOrAdmin = ['manager', 'admin'].includes(profile?.role);
+    switch (view) {
+      case 'bookings': return <BookingsViewPanel branchId={branchId} />;
+      case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
+      case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
+      case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />;
+      case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
+      case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
+      case 'package-overview': return managerOrAdmin ? <PackageOverviewPanel /> : null;
+      case 'packages': return managerOrAdmin ? <PackageListPanel /> : null;
+      case 'memberships': return MEMBERSHIP_ENABLED && managerOrAdmin ? <MembershipsPanel branchId={branchId} /> : null;
+      case 'membership-collection': return MEMBERSHIP_ENABLED && managerOrAdmin ? <MembershipCollectionPanel /> : null;
+      case 'wallet-usage': return MEMBERSHIP_ENABLED && managerOrAdmin ? <WalletUsagePanel /> : null;
+      case 'voucher-overview': return VOUCHER_ENABLED && managerOrAdmin ? <VoucherOverviewPanel /> : null;
+      case 'vouchers': return VOUCHER_ENABLED && managerOrAdmin ? <VoucherListPanel /> : null;
+      default: return null;
+    }
+  };
+
   // The Settings area: same idea as Reports; the layout enforces role / Overall visibility.
   const isSettingsViewActive = isSettingsView(viewMode);
   const renderSettingView = (view) => {
@@ -448,7 +473,7 @@ const BranchManagerDashboard = () => {
       </Helmet>
 
       <AppShell
-        variant={viewMode === 'calendar' || isReportsView || isSettingsViewActive ? 'fill' : 'page'}
+        variant={viewMode === 'calendar' || isReportsView || isSettingsViewActive || areaForView ? 'fill' : 'page'}
         sidebar={{ userRole: 'manager', userName: managerData.name, branchName: managerData.branch }}
         header={{
           realtimeStatus,
@@ -510,26 +535,14 @@ const BranchManagerDashboard = () => {
         asideOpen={isAssistantOpen}
       >
           {viewMode === 'dashboard' && renderDashboardView()}
-          {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
           {viewMode === 'calendar' && renderCalendarView()}
           {isReportsView && <ReportsLayout view={viewMode} renderReport={renderReportView} />}
           {isSettingsViewActive && <SettingsLayout view={viewMode} renderSetting={renderSettingView} />}
+          {areaForView && <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>}
           {viewMode === 'customers' && <CustomersPanel branchId={branchId} readOnly={isOverall} />}
-          {viewMode === 'attendance' && !isOverall && <AttendancePanel branchId={branchId} />}
-          {viewMode === 'payroll' && ['admin', 'admin_viewer'].includes(profile?.role) && <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} />}
           {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
-          {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
-          {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
-          {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
-          {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}
-          {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin'].includes(profile?.role) && <VoucherListPanel />}
-          {viewMode === 'package-overview' && ['manager','admin'].includes(profile?.role) && <PackageOverviewPanel />}
-          {viewMode === 'packages' && ['manager','admin'].includes(profile?.role) && <PackageListPanel />}
           {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
           {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
-          {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
-          {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
-          {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}
       </AppShell>
     </>
   );
