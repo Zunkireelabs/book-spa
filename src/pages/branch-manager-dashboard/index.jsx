@@ -43,6 +43,7 @@ import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 import DiscountsPanel from './components/DiscountsPanel';
 import AttendanceReportPanel from './components/AttendanceReportPanel';
+import BranchPending from './components/Area/BranchPending';
 import AreaTabs from './components/Area/AreaTabs';
 import { getAreaForView } from './components/Area/areaTabsRegistry';
 import SettingsLayout from './components/Settings/SettingsLayout';
@@ -77,7 +78,7 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
   const { profile, user } = useAuth();
-  const { branchId, branchName, isOverall } = useBranch();
+  const { branchId, branchName, isOverall, loading: branchLoading } = useBranch();
   const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
@@ -409,6 +410,7 @@ const BranchManagerDashboard = () => {
   // The Reports area: the layout frames each report; the panels themselves are unchanged and keep their own guards.
   const isReportsView = isReportView(viewMode);
   const renderReportView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
     switch (view) {
       case 'reports': return renderReportsView();
       case 'service-revenue': return <ServiceRevenueReportPanel branchId={branchId} />;
@@ -430,6 +432,7 @@ const BranchManagerDashboard = () => {
   // is an existing view; the panels keep their own role / Overall guards.
   const areaForView = getAreaForView(viewMode);
   const renderAreaView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
     const managerOrAdmin = ['manager', 'admin'].includes(profile?.role);
     switch (view) {
       case 'bookings': return <BookingsViewPanel branchId={branchId} />;
@@ -452,6 +455,7 @@ const BranchManagerDashboard = () => {
   // The Settings area: same idea as Reports; the layout enforces role / Overall visibility.
   const isSettingsViewActive = isSettingsView(viewMode);
   const renderSettingView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
     switch (view) {
       case 'rooms': return <RoomManagementPanel branchId={branchId} />;
       case 'services': return <ServiceManagementPanel />;
@@ -539,7 +543,7 @@ const BranchManagerDashboard = () => {
           {isReportsView && <ReportsLayout view={viewMode} renderReport={renderReportView} />}
           {isSettingsViewActive && <SettingsLayout view={viewMode} renderSetting={renderSettingView} />}
           {areaForView && <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>}
-          {viewMode === 'customers' && <CustomersPanel branchId={branchId} readOnly={isOverall} />}
+          {viewMode === 'customers' && (branchLoading ? <BranchPending /> : <CustomersPanel branchId={branchId} readOnly={isOverall} />)}
           {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
           {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
           {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}

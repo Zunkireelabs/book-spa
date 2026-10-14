@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
+import BranchPending from '../branch-manager-dashboard/components/Area/BranchPending';
 import AreaTabs from '../branch-manager-dashboard/components/Area/AreaTabs';
 import { getAreaForView } from '../branch-manager-dashboard/components/Area/areaTabsRegistry';
 import AppShell from '../../components/ui/AppShell';
@@ -29,7 +30,7 @@ import { getTodayISO, toISO } from '../../utils/periodPresets';
 
 const BranchStaffDashboard = () => {
   const { profile, user } = useAuth();
-  const { branchId, branchName } = useBranch();
+  const { branchId, branchName, loading: branchLoading } = useBranch();
   const [searchParams, setSearchParams] = useSearchParams();
   const { items: notifications, markRead: markNotifRead, markAllRead: markAllNotifsRead } = usePersistentNotifications(user?.id);
   const unreadNotifCount = notifications.filter((n) => !n.read).length;
@@ -465,6 +466,7 @@ const BranchStaffDashboard = () => {
   const bookingsArea = getAreaForView('bookings');
   const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : null;
   const renderAreaView = (view) => {
+    if (branchLoading) return <BranchPending />; // panels need the resolved branch
     switch (view) {
       case 'bookings': return <BookingsViewPanel branchId={branchId} />;
       case 'collect-payment': return <CollectPaymentPanel onSuccess={showSuccess} />;
@@ -473,9 +475,9 @@ const BranchStaffDashboard = () => {
       case 'new-membership':
         return MEMBERSHIP_ENABLED ? (
           <EnrollMemberModal
-            onClose={() => setSearchParams({ view: 'dashboard' })}
+            onClose={() => setSearchParams({ view: 'bookings' })}
             onEnrolled={() => {
-              setSearchParams({ view: 'dashboard' });
+              setSearchParams({ view: 'bookings' });
               showSuccess('Membership created.');
             }}
           />
@@ -484,9 +486,9 @@ const BranchStaffDashboard = () => {
         return VOUCHER_ENABLED ? (
           <NewVoucherModal
             userRole={userRole}
-            onClose={() => setSearchParams({ view: 'dashboard' })}
+            onClose={() => setSearchParams({ view: 'bookings' })}
             onIssued={() => {
-              setSearchParams({ view: 'dashboard' });
+              setSearchParams({ view: 'bookings' });
               showSuccess('Voucher issued.');
             }}
           />
