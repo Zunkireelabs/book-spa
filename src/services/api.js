@@ -2555,7 +2555,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     if (serviceId && serviceId !== booking.service_id) {
       const { data: newService, error: svcError } = await supabase
         .from('services')
-        .select('id, name, duration_minutes, price_npr')
+        .select('id, name, duration_minutes, price_npr, effective_price_npr')
         .eq('id', serviceId)
         .single();
 
@@ -2563,13 +2563,14 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
         return { data: null, error: { code: 'SERVICE_NOT_FOUND', message: 'Selected service not found.' } };
       }
 
+      const newServicePrice = Number(newService.effective_price_npr ?? newService.price_npr);
       newServiceDurationMinutes = newService.duration_minutes;
       updatePayload.service_id = serviceId;
       updatePayload.service_name_snapshot = newService.name;
-      updatePayload.base_amount = newService.price_npr;
+      updatePayload.base_amount = newServicePrice;
       // Preserve existing discount amount
       const discountAmt = Number(booking.discount_amount || 0);
-      updatePayload.final_amount = Math.max(0, newService.price_npr - discountAmt);
+      updatePayload.final_amount = Math.max(0, newServicePrice - discountAmt);
 
       // Recalculate end_time based on new duration
       const effectiveStartTime = startTime || booking.start_time;
@@ -4830,6 +4831,7 @@ export async function fetchBookingById(bookingId) {
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
         payments(id, amount, payment_mode, created_at),
+        payment_refunds(id, amount, reason, created_at),
         booking_tips(id, amount, created_at, receiver:users!received_by(full_name)),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
@@ -6286,6 +6288,145 @@ export async function setServiceTherapists(serviceId, therapistIds, branchId) {
   }
 }
 
+// Reverse of fetchServiceTherapists: for a given therapist, which of the branch's
+// active services are restricted (have any eligibility rows at all) and, for
+// restricted ones, whether this therapist is in the allow-list. Unrestricted
+// services (no rows) are returned with isRestricted:false and isEligible:true,
+// since "no rows = everyone eligible" per migration-249. Unchecking one of
+// these here calls excludeTherapistFromService, not toggleTherapistServiceEligibility
+// — it must materialize the full allow-list (everyone but this therapist),
+// not just add this therapist, or it would silently restrict the service to
+// them alone.
+export async function fetchServicesForTherapist(therapistId, branchId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+
+    const [servicesResult, eligibilityResult] = await Promise.all([
+      supabase
+        .from('services')
+        .select('id, name, is_active')
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('service_therapists')
+        .select('service_id, therapist_id, therapists!inner(branch_id)')
+        .eq('therapists.branch_id', branchId),
+    ]);
+
+    if (servicesResult.error) throw servicesResult.error;
+    if (eligibilityResult.error) throw eligibilityResult.error;
+
+    const restrictedServiceIds = new Set();
+    const eligibleServiceIdsForTherapist = new Set();
+    (eligibilityResult.data || []).forEach(row => {
+      restrictedServiceIds.add(row.service_id);
+      if (row.therapist_id === therapistId) eligibleServiceIdsForTherapist.add(row.service_id);
+    });
+
+    const data = (servicesResult.data || []).map(s => {
+      const isRestricted = restrictedServiceIds.has(s.id);
+      return {
+        id: s.id,
+        name: s.name,
+        isRestricted,
+        isEligible: isRestricted ? eligibleServiceIdsForTherapist.has(s.id) : true,
+      };
+    });
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicesForTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Toggles a single therapist in/out of an already-restricted service's
+// eligibility list. Only meaningful for services that already have at least
+// one eligibility row (see fetchServicesForTherapist) — does not create a
+// restriction on a currently-unrestricted service.
+export async function toggleTherapistServiceEligibility(serviceId, therapistId, eligible) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    if (eligible) {
+      const { error } = await supabase
+        .from('service_therapists')
+        .upsert({ service_id: serviceId, therapist_id: therapistId }, { onConflict: 'service_id,therapist_id' });
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('service_therapists')
+        .delete()
+        .eq('service_id', serviceId)
+        .eq('therapist_id', therapistId);
+      if (error) throw error;
+    }
+
+    return { data: { serviceId, therapistId, eligible }, error: null };
+  } catch (error) {
+    console.error('[API] toggleTherapistServiceEligibility error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Excludes one therapist from one or more currently-unrestricted services
+// while keeping each open to every other active therapist in the branch —
+// materializes the "empty allow-list = everyone eligible" state into an
+// explicit allow-list covering everyone but therapistId, rather than only
+// adding therapistId (which would silently narrow the service down to just
+// them). Used when a staff member's service checkbox is unchecked for a
+// service that doesn't yet have an eligibility list. Fetches the branch's
+// other active therapists once regardless of serviceIds.length, so bulk
+// callers (e.g. "Select all") issue one query + one upsert instead of one
+// of each per service.
+export async function excludeTherapistFromServices(serviceIds, branchId, therapistId) {
+  try {
+    const ids = Array.isArray(serviceIds) ? serviceIds : [serviceIds];
+    if (ids.length === 0) return { data: [], error: null };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data: therapists, error: therapistsError } = await supabase
+      .from('therapists')
+      .select('id')
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .neq('id', therapistId);
+    if (therapistsError) throw therapistsError;
+
+    const otherTherapistIds = (therapists || []).map(t => t.id);
+    const rows = ids.flatMap(serviceId => otherTherapistIds.map(tid => ({ service_id: serviceId, therapist_id: tid })));
+    if (rows.length > 0) {
+      const { error } = await supabase
+        .from('service_therapists')
+        .upsert(rows, { onConflict: 'service_id,therapist_id' });
+      if (error) throw error;
+    }
+
+    return { data: ids.map(serviceId => ({ serviceId, excludedTherapistId: therapistId })), error: null };
+  } catch (error) {
+    console.error('[API] excludeTherapistFromServices error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function excludeTherapistFromService(serviceId, branchId, therapistId) {
+  const result = await excludeTherapistFromServices([serviceId], branchId, therapistId);
+  if (result.error) return { data: null, error: result.error };
+  return { data: result.data[0], error: null };
+}
+
 // Shared "empty allow-list = unrestricted" eligibility filter, used both at booking-creation
 // time (createBooking) and in the manual reassignment UI (TherapistAssignmentPanel).
 export function filterEligibleTherapists(therapists, eligibleTherapistIds) {
@@ -6325,7 +6466,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating }) {
+export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating, phone, address, city, email, pronouns }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6379,8 +6520,13 @@ export async function createTherapist({ name, gender, specialties, position, isS
         bio: bio || null,
         experience_years: experienceYears ?? null,
         rating: rating ?? null,
+        phone: phone || null,
+        address: address || null,
+        city: city || null,
+        email: email || null,
+        pronouns: pronouns || null,
       })
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating, phone, address, city, email, pronouns')
       .single();
 
     if (error) throw error;
@@ -6391,7 +6537,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating, phone, address, city, email, pronouns }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6444,18 +6590,199 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     if (bio !== undefined) updatePayload.bio = bio || null;
     if (experienceYears !== undefined) updatePayload.experience_years = experienceYears === '' ? null : experienceYears;
     if (rating !== undefined) updatePayload.rating = rating === '' ? null : rating;
+    if (phone !== undefined) updatePayload.phone = phone || null;
+    if (address !== undefined) updatePayload.address = address || null;
+    if (city !== undefined) updatePayload.city = city || null;
+    if (email !== undefined) updatePayload.email = email || null;
+    if (pronouns !== undefined) updatePayload.pronouns = pronouns || null;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating, phone, address, city, email, pronouns')
       .single();
 
     if (error) throw error;
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchTherapistById(therapistId) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin', 'admin_viewer'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating, phone, address, city, email, pronouns')
+      .eq('id', therapistId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw error;
+    }
+
+    if (profile.role === 'manager' && data.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot view therapists outside your branch.' } };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistById error:', error.message);
+    return { data: null, error };
+  }
+}
+
+const WORKING_HOURS_DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+export async function fetchTherapistWorkingHours(therapistId) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .select('id, therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(id, name, start_time, end_time, sort_order)')
+      .eq('therapist_id', therapistId);
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    const normalizeBreaks = (breaks) => (breaks || [])
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(b => ({ id: b.id, name: b.name || '', startTime: b.start_time, endTime: b.end_time }));
+    const normalized = WORKING_HOURS_DAY_LABELS.map((label, dayOfWeek) => {
+      const row = byDay.get(dayOfWeek);
+      return row
+        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off, breaks: normalizeBreaks(row.therapist_working_hours_breaks) }
+        : { dayOfWeek, dayLabel: label, startTime: null, endTime: null, isDayOff: true, breaks: [] };
+    });
+
+    return { data: normalized, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistWorkingHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// rows: [{ dayOfWeek, startTime, endTime, isDayOff, breaks: [{ name, startTime, endTime }] }, ...]
+// — one per weekday. Deliberate scope boundary: storage/display only, not
+// read by any booking availability/conflict check (see migration-275's
+// header comment).
+export async function upsertTherapistWorkingHours(therapistId, rows) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data: therapist, error: fetchError } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .eq('id', therapistId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw fetchError;
+    }
+
+    if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+    }
+
+    for (const row of rows) {
+      const breaks = row.breaks || [];
+      const label = WORKING_HOURS_DAY_LABELS[row.dayOfWeek];
+
+      if (!row.isDayOff && (!row.startTime || !row.endTime || row.startTime >= row.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: start time must be before end time.` } };
+      }
+      if (row.isDayOff && breaks.length > 0) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: a day off cannot have breaks.` } };
+      }
+
+      const sortedBreaks = breaks.slice().sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+      for (let i = 0; i < sortedBreaks.length; i++) {
+        const brk = sortedBreaks[i];
+        if (!brk.startTime || !brk.endTime || brk.startTime >= brk.endTime) {
+          return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: break start must be before break end.` } };
+        }
+        if (brk.startTime < row.startTime || brk.endTime > row.endTime) {
+          return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: break must fall within the shift's hours.` } };
+        }
+        const next = sortedBreaks[i + 1];
+        if (next && brk.endTime > next.startTime) {
+          return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: breaks cannot overlap.` } };
+        }
+      }
+    }
+
+    const payload = rows.map(row => ({
+      therapist_id: therapistId,
+      branch_id: therapist.branch_id,
+      day_of_week: row.dayOfWeek,
+      start_time: row.isDayOff ? null : row.startTime,
+      end_time: row.isDayOff ? null : row.endTime,
+      is_day_off: !!row.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .upsert(payload, { onConflict: 'therapist_id,day_of_week' })
+      .select('id, therapist_id, day_of_week, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    for (const row of rows) {
+      const whRow = byDay.get(row.dayOfWeek);
+      if (!whRow) continue;
+
+      const { error: deleteError } = await supabase
+        .from('therapist_working_hours_breaks')
+        .delete()
+        .eq('working_hours_id', whRow.id);
+      if (deleteError) throw deleteError;
+
+      const breaks = row.breaks || [];
+      if (breaks.length > 0) {
+        const breakPayload = breaks.map((brk, index) => ({
+          working_hours_id: whRow.id,
+          name: brk.name || '',
+          start_time: brk.startTime,
+          end_time: brk.endTime,
+          sort_order: index,
+        }));
+        const { error: insertError } = await supabase
+          .from('therapist_working_hours_breaks')
+          .insert(breakPayload);
+        if (insertError) throw insertError;
+      }
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertTherapistWorkingHours error:', error.message);
     return { data: null, error };
   }
 }
@@ -7424,6 +7751,164 @@ export async function uploadStaffPhoto(file) {
   }
 }
 
+// Customer photo gallery (migration-280) — manager/admin upload/delete,
+// staff can read within their branch (or admin). Same storage bucket and
+// validation as uploadStaffPhoto, path-prefixed per customer instead of a
+// single replaced avatar, since a customer can have multiple photos.
+export async function uploadCustomerPhoto(customerId, branchId, file) {
+  try {
+    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can upload customer photos.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { data: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      return { data: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 2.0MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `customers/${customerId}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('service-images').getPublicUrl(filePath);
+
+    const { data, error } = await supabase
+      .from('customer_photos')
+      .insert({ customer_id: customerId, branch_id: branchId, photo_url: publicUrl, uploaded_by: profile.id })
+      .select('id, customer_id, photo_url, uploaded_by, created_at')
+      .single();
+    if (error) throw error;
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] uploadCustomerPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchCustomerPhotos(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('customer_photos')
+      .select('id, customer_id, photo_url, uploaded_by, created_at')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerPhotos error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCustomerPhoto(photoId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customer photos.' } };
+    }
+
+    const { error } = await supabase.from('customer_photos').delete().eq('id', photoId);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCustomerPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Customer document attachments (migration-280) — same shape as customer
+// photos, broader file-type allow-list.
+export async function uploadCustomerDocument(customerId, branchId, file) {
+  try {
+    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can upload customer documents.' } };
+    }
+
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      return { data: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only PDF, Word documents, JPEG, PNG, and WebP files are allowed.' } };
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return { data: null, error: { code: 'FILE_TOO_LARGE', message: 'File must be less than 10MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const storedName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `customers/${customerId}/documents/${storedName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('service-images').getPublicUrl(filePath);
+
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .insert({ customer_id: customerId, branch_id: branchId, file_url: publicUrl, file_name: file.name, uploaded_by: profile.id })
+      .select('id, customer_id, file_url, file_name, uploaded_by, created_at')
+      .single();
+    if (error) throw error;
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] uploadCustomerDocument error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchCustomerDocuments(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .select('id, customer_id, file_url, file_name, uploaded_by, created_at')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerDocuments error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCustomerDocument(documentId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customer documents.' } };
+    }
+
+    const { error } = await supabase.from('customer_documents').delete().eq('id', documentId);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCustomerDocument error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -8151,7 +8636,7 @@ export async function fetchCustomerProfile(customerId) {
     // 1. Fetch customer record
     const { data: customer, error: custError } = await supabase
       .from('customers')
-      .select('id, branch_id, full_name, phone, email, notes, is_active, created_at')
+      .select('id, branch_id, full_name, phone, email, notes, is_active, created_at, client_source, referred_by, preferred_language, country, occupation, additional_email, additional_phone, gender, pronouns, date_of_birth, tags')
       .eq('id', customerId)
       .single();
 
@@ -8167,7 +8652,7 @@ export async function fetchCustomerProfile(customerId) {
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
-        booking_number, date, status, payment_status,
+        id, booking_number, date, start_time, status, payment_status,
         final_amount, discount_amount,
         service_name_snapshot, therapist_name_snapshot,
         is_locked
@@ -8257,10 +8742,34 @@ export async function fetchCustomerProfile(customerId) {
       }
     }
 
-    // 5. Build history list
-    const history = all.map(b => ({
+    // 4b. Amount owing (unpaid bookings) + last/next appointment, for the
+    // Timely-style Summary tab — no extra query, `all` is already sorted by
+    // date descending.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let amountOwing = 0;
+    for (const b of all) {
+      if (b.payment_status !== 'paid') amountOwing += Number(b.final_amount);
+    }
+    const toAppointmentSummary = (b) => b ? {
+      bookingId: b.id,
       bookingNumber: b.booking_number,
       date: b.date,
+      startTime: b.start_time,
+      serviceName: b.service_name_snapshot || '—',
+      therapistName: b.therapist_name_snapshot || 'Unassigned',
+      status: b.status,
+    } : null;
+    const pastBookings = all.filter(b => b.date <= todayStr);
+    const futureBookings = all.filter(b => b.date > todayStr && !['Cancelled', 'No Show'].includes(b.status));
+    const lastAppointment = toAppointmentSummary(pastBookings[0]);
+    const nextAppointment = toAppointmentSummary(futureBookings[futureBookings.length - 1]);
+
+    // 5. Build history list
+    const history = all.map(b => ({
+      bookingId: b.id,
+      bookingNumber: b.booking_number,
+      date: b.date,
+      startTime: b.start_time,
       serviceName: b.service_name_snapshot || '—',
       therapistName: b.therapist_name_snapshot || 'Unassigned',
       finalAmount: Number(b.final_amount),
@@ -8274,12 +8783,24 @@ export async function fetchCustomerProfile(customerId) {
       data: {
         customer: {
           id: customer.id,
+          branchId: customer.branch_id,
           fullName: customer.full_name,
           phone: customer.phone,
           email: customer.email,
           notes: customer.notes,
           isActive: customer.is_active,
           createdAt: customer.created_at,
+          clientSource: customer.client_source,
+          referredBy: customer.referred_by,
+          preferredLanguage: customer.preferred_language,
+          country: customer.country,
+          occupation: customer.occupation,
+          additionalEmail: customer.additional_email,
+          additionalPhone: customer.additional_phone,
+          gender: customer.gender,
+          pronouns: customer.pronouns,
+          dateOfBirth: customer.date_of_birth,
+          tags: customer.tags || [],
         },
         stats: {
           totalVisits,
@@ -8291,9 +8812,12 @@ export async function fetchCustomerProfile(customerId) {
           unpaidCount,
           mostBookedService,
           loyaltyTier,
+          amountOwing,
         },
         membership,
         history,
+        lastAppointment,
+        nextAppointment,
       },
       error: null,
     };
@@ -8328,6 +8852,107 @@ export async function updateCustomerContact(customerId, { email = null, phone = 
     if (error.code === '23505') {
       return { data: null, error: { code: 'DUPLICATE_PHONE', message: 'This phone number is already in use by another customer.' } };
     }
+    return { data: null, error };
+  }
+}
+
+// Staff-facing "Block" action on the customer detail page — toggles the
+// same is_active flag every customer list already filters on
+// (fetchCustomersLightweight etc.), so a blocked customer stops surfacing
+// in search/autocomplete but keeps their full booking/payment history
+// intact. Reversible (call again with isActive: true to unblock).
+export async function setCustomerActive(customerId, isActive) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can block customers.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update({ is_active: isActive })
+      .eq('id', customerId)
+      .select('id, is_active')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setCustomerActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-facing "Delete" action — a plain row delete, deliberately not a
+// soft-delete/RPC. customers has no ON DELETE CASCADE from bookings (or
+// memberships/packages/vouchers), so Postgres rejects this with a foreign-
+// key violation (23503) for any customer with real history — caught below
+// and turned into a message pointing at Block instead. Only succeeds for a
+// customer with zero history (e.g. an accidental duplicate entry), which is
+// the only case this is actually safe.
+export async function deleteCustomer(customerId) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customers.' } };
+    }
+
+    const { error } = await supabase.from('customers').delete().eq('id', customerId);
+    if (error) {
+      if (error.code === '23503') {
+        return { data: null, error: { code: 'HAS_HISTORY', message: "This customer has bookings or other records and can't be deleted. Use Block instead." } };
+      }
+      throw error;
+    }
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-side: edit the Fresha-style extra profile fields (source, referral,
+// language, country, occupation, additional contact, gender, pronouns, DOB,
+// free-text tags). Plain table update under the existing row-level RLS —
+// unlike updateCustomerContact, these fields have no customer_accounts
+// email-linking behavior, so no RPC is needed.
+export async function updateCustomerProfileDetails(customerId, {
+  clientSource, referredBy, preferredLanguage, country, occupation,
+  additionalEmail, additionalPhone, gender, pronouns, dateOfBirth, tags, notes,
+} = {}) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const updatePayload = {};
+    if (clientSource !== undefined) updatePayload.client_source = clientSource || null;
+    if (referredBy !== undefined) updatePayload.referred_by = referredBy || null;
+    if (preferredLanguage !== undefined) updatePayload.preferred_language = preferredLanguage || null;
+    if (country !== undefined) updatePayload.country = country || null;
+    if (occupation !== undefined) updatePayload.occupation = occupation || null;
+    if (additionalEmail !== undefined) updatePayload.additional_email = additionalEmail || null;
+    if (additionalPhone !== undefined) updatePayload.additional_phone = additionalPhone || null;
+    if (gender !== undefined) updatePayload.gender = gender || null;
+    if (pronouns !== undefined) updatePayload.pronouns = pronouns || null;
+    if (dateOfBirth !== undefined) updatePayload.date_of_birth = dateOfBirth || null;
+    if (tags !== undefined) updatePayload.tags = tags || [];
+    if (notes !== undefined) updatePayload.notes = notes || null;
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update(updatePayload)
+      .eq('id', customerId)
+      .select('id, client_source, referred_by, preferred_language, country, occupation, additional_email, additional_phone, gender, pronouns, date_of_birth, tags, notes')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCustomerProfileDetails error:', error.message);
     return { data: null, error };
   }
 }
@@ -12186,6 +12811,65 @@ export async function fetchVoucherWallets() {
   }
 }
 
+// Staff-facing "Gift Vouchers" tab on the customer detail page — every
+// voucher issued to this specific customer (not just wallet-type, unlike
+// fetchVoucherWallets), via the real vouchers.customer_id column.
+export async function fetchVouchersForCustomer(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data: vouchers, error: vouchersError } = await supabase
+      .from('vouchers')
+      .select(`
+        id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
+        total_amount_issued, remarks,
+        branch:branches ( id, name ),
+        voucher_type:voucher_types ( id, name, is_wallet ),
+        issuer:users!issued_by ( id, full_name )
+      `)
+      .eq('customer_id', customerId)
+      .order('issued_date', { ascending: false });
+    if (vouchersError) throw vouchersError;
+    if (!vouchers || vouchers.length === 0) return { data: [], error: null };
+
+    const { data: balances, error: balancesError } = await supabase
+      .from('voucher_balances')
+      .select('voucher_id, total_claimed, remaining_balance, status, last_claim_date')
+      .in('voucher_id', vouchers.map((v) => v.id));
+    if (balancesError) throw balancesError;
+
+    const balanceByVoucher = new Map((balances || []).map((b) => [b.voucher_id, b]));
+
+    const rows = vouchers.map((v) => {
+      const balance = balanceByVoucher.get(v.id) || {};
+      return {
+        id: v.id,
+        voucherCode: v.voucher_code,
+        voucherTypeName: v.voucher_type?.name || '—',
+        issuedDate: v.issued_date,
+        expiryDate: v.expiry_date,
+        issuedBranchName: v.branch?.name || '—',
+        issuedByName: v.issuer?.full_name || '—',
+        totalAmountIssued: Number(v.total_amount_issued || 0),
+        totalClaimed: Number(balance.total_claimed || 0),
+        remainingBalance: balance.remaining_balance != null
+          ? Number(balance.remaining_balance)
+          : Number(v.total_amount_issued || 0),
+        status: balance.status || 'unused',
+        lastClaimDate: balance.last_claim_date || null,
+      };
+    });
+
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchVouchersForCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // SERVICE PACKAGES (migration-141) — manager/admin issue; staff/manager/
 // admin can read (redemption is a staff-facing action). Mirrors the
@@ -12338,25 +13022,28 @@ export async function issuePackage({
 // Packages joined with their live balance (from the package_balances view,
 // computed from package_redemptions — not stored). Sorted alphabetically by
 // guest name, same as fetchVouchers.
-export async function fetchPackages() {
+export async function fetchPackages(customerId) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
+    let packagesQuery = supabase
+      .from('packages')
+      .select(`
+        id, package_code, issued_date, expiry_date, guest_name, guest_info,
+        paid_amount, sessions_total, remarks, created_at,
+        base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
+        branch:branches ( id, name ),
+        package_type:package_types ( id, name ),
+        service:services ( id, name, duration_minutes ),
+        issuer:users!issued_by ( id, full_name ),
+        customer:customers ( id, full_name, phone )
+      `)
+      .order('guest_name', { ascending: true });
+    if (customerId) packagesQuery = packagesQuery.eq('customer_id', customerId);
+
     const [packagesRes, balancesRes] = await Promise.all([
-      supabase
-        .from('packages')
-        .select(`
-          id, package_code, issued_date, expiry_date, guest_name, guest_info,
-          paid_amount, sessions_total, remarks, created_at,
-          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
-          branch:branches ( id, name ),
-          package_type:package_types ( id, name ),
-          service:services ( id, name, duration_minutes ),
-          issuer:users!issued_by ( id, full_name ),
-          customer:customers ( id, full_name, phone )
-        `)
-        .order('guest_name', { ascending: true }),
+      packagesQuery,
       supabase
         .from('package_balances')
         .select('package_id, sessions_used, sessions_remaining, status, last_redeemed_date'),
@@ -12407,6 +13094,13 @@ export async function fetchPackages() {
     console.error('[API] fetchPackages error:', error.message);
     return { data: null, error };
   }
+}
+
+// Staff-facing "Packages" tab on the customer detail page — this specific
+// customer's packages, via the real packages.customer_id column.
+export async function fetchPackagesForCustomer(customerId) {
+  if (!customerId) return { data: [], error: null };
+  return fetchPackages(customerId);
 }
 
 // Single package + its live balance, for the detail modal.

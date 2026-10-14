@@ -118,6 +118,13 @@ export function transformBooking(dbBooking) {
   const tipRows = Array.isArray(dbBooking.booking_tips) ? dbBooking.booking_tips : [];
   const tipTotal = tipRows.reduce((s, t) => s + Number(t.amount || 0), 0);
 
+  // Refunds against an already-collected payment (e.g. admin price correction).
+  // payments rows stay immutable/historical — refunds are tracked separately and
+  // only netted out for display, not folded into amountPaid (reports/reconciliation
+  // still sum raw payments).
+  const refundRows = Array.isArray(dbBooking.payment_refunds) ? dbBooking.payment_refunds : [];
+  const refundTotal = refundRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
   return {
     id: dbBooking.booking_number,
     bookingId: dbBooking.id,
@@ -162,6 +169,8 @@ export function transformBooking(dbBooking) {
       : [],
     tips: tipRows.map(t => ({ id: t.id || null, amount: Number(t.amount || 0), createdAt: t.created_at, receivedByName: t.receiver?.full_name || null })),
     tipTotal,
+    refunds: refundRows.map(r => ({ id: r.id || null, amount: Number(r.amount || 0), reason: r.reason || null, createdAt: r.created_at })),
+    refundTotal,
   };
 }
 

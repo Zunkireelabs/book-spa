@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import { getCustomerIntelligence } from '../../../../services/api';
 import { useAuth } from '../../../../contexts/AuthContext';
-import CustomerProfileModal from './CustomerProfileModal';
 import DuplicateCustomersPanel from './DuplicateCustomersPanel';
 import ManualMergeCustomersPanel from './ManualMergeCustomersPanel';
 
@@ -29,6 +29,8 @@ function formatNPR(amount) {
 }
 
 const CustomersPanel = ({ branchId, readOnly = false }) => {
+  const navigate = useNavigate();
+  const { orgSlug } = useParams();
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('customers');
   const [data, setData] = useState(null);
@@ -36,7 +38,6 @@ const CustomersPanel = ({ branchId, readOnly = false }) => {
   const [error, setError] = useState(null);
   const [filterTier, setFilterTier] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 
   const loadData = useCallback(async () => {
     if (!branchId) return;
@@ -246,7 +247,7 @@ const CustomersPanel = ({ branchId, readOnly = false }) => {
                   return (
                     <tr
                       key={c.id}
-                      onClick={() => setSelectedCustomerId(c.id)}
+                      onClick={() => navigate(`/${orgSlug}/customers/${c.id}`)}
                       className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
                     >
                       <td className="px-4 py-3 font-data font-data-normal text-xs text-text-tertiary">
@@ -309,14 +310,6 @@ const CustomersPanel = ({ branchId, readOnly = false }) => {
           </div>
         )}
       </div>
-
-      {/* Profile Modal */}
-      {selectedCustomerId && (
-        <CustomerProfileModal
-          customerId={selectedCustomerId}
-          onClose={() => setSelectedCustomerId(null)}
-        />
-      )}
     </div>
   );
 };
