@@ -43,6 +43,9 @@ import StatusLegend from '../../components/ui/StatusLegend';
 import PendingDiscountsPanel from './components/PendingDiscountsPanel';
 import DiscountsPanel from './components/DiscountsPanel';
 import AttendanceReportPanel from './components/AttendanceReportPanel';
+import ReportsLayout from './components/Reports/ReportsLayout';
+import { isReportView } from './components/Reports/reportRegistry';
+import AttendanceCalendarPage from 'pages/attendance-calendar';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
@@ -399,6 +402,27 @@ const BranchManagerDashboard = () => {
     <DailyOperationalReportPanel branchId={branchId} />
   );
 
+  // The Reports area: the layout frames each report; the panels themselves are unchanged and keep their own guards.
+  const isReportsView = isReportView(viewMode);
+  const renderReportView = (view) => {
+    switch (view) {
+      case 'reports': return renderReportsView();
+      case 'service-revenue': return <ServiceRevenueReportPanel branchId={branchId} />;
+      case 'category-revenue': return <CategoryRevenueReportPanel branchId={branchId} />;
+      case 'discounts': return <DiscountsPanel branchId={branchId} />;
+      case 'outstanding': return <OutstandingReportPanel branchId={branchId} />;
+      case 'performance': return <TherapistPerformancePanel branchId={branchId} />;
+      case 'attendance-report': return <AttendanceReportPanel branchId={branchId} />;
+      case 'attendance-calendar': return <AttendanceCalendarPage embedded />;
+      case 'transfer-report': return <TransferReportPanel />;
+      case 'referrals': return <ReferralsReportPanel branchId={branchId} />;
+      case 'customer-referrals': return CUSTOMER_REFERRALS_ENABLED ? <CustomerReferralsReportPanel branchId={branchId} /> : null;
+      case 'referral-wallet': return CUSTOMER_REFERRALS_ENABLED ? <ReferralWalletPanel branchId={branchId} /> : null;
+      case 'reward-catalog': return CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) ? <RewardCatalogPanel /> : null;
+      default: return null;
+    }
+  };
+
   const renderInfrastructureView = () => (
     <div className="space-y-8">
       <RoomManagementPanel branchId={branchId} />
@@ -415,7 +439,7 @@ const BranchManagerDashboard = () => {
       </Helmet>
 
       <AppShell
-        variant={viewMode === 'calendar' ? 'fill' : 'page'}
+        variant={viewMode === 'calendar' || isReportsView ? 'fill' : 'page'}
         sidebar={{ userRole: 'manager', userName: managerData.name, branchName: managerData.branch }}
         header={{
           realtimeStatus,
@@ -479,20 +503,9 @@ const BranchManagerDashboard = () => {
           {viewMode === 'dashboard' && renderDashboardView()}
           {viewMode === 'bookings' && <BookingsViewPanel branchId={branchId} />}
           {viewMode === 'calendar' && renderCalendarView()}
-          {viewMode === 'reports' && renderReportsView()}
+          {isReportsView && <ReportsLayout view={viewMode} renderReport={renderReportView} />}
           {viewMode === 'customers' && <CustomersPanel branchId={branchId} readOnly={isOverall} />}
           {viewMode === 'attendance' && !isOverall && <AttendancePanel branchId={branchId} />}
-          {viewMode === 'performance' && <TherapistPerformancePanel branchId={branchId} />}
-          {viewMode === 'discounts' && <DiscountsPanel branchId={branchId} />}
-          {viewMode === 'attendance-report' && <AttendanceReportPanel branchId={branchId} />}
-          {viewMode === 'transfer-report' && <TransferReportPanel />}
-          {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
-          {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
-          {viewMode === 'customer-referrals' && CUSTOMER_REFERRALS_ENABLED && <CustomerReferralsReportPanel branchId={branchId} />}
-          {viewMode === 'referral-wallet' && CUSTOMER_REFERRALS_ENABLED && <ReferralWalletPanel branchId={branchId} />}
-          {viewMode === 'reward-catalog' && CUSTOMER_REFERRALS_ENABLED && ['manager', 'admin'].includes(profile?.role) && <RewardCatalogPanel />}
-          {viewMode === 'service-revenue' && <ServiceRevenueReportPanel branchId={branchId} />}
-          {viewMode === 'category-revenue' && <CategoryRevenueReportPanel branchId={branchId} />}
           {viewMode === 'payroll' && ['admin', 'admin_viewer'].includes(profile?.role) && <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} />}
           {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
           {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
