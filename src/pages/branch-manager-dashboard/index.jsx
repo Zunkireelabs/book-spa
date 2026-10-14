@@ -662,13 +662,13 @@ const BranchManagerDashboard = () => {
               {viewMode === 'category-revenue' && <CategoryRevenueReportPanel branchId={branchId} />}
               {viewMode === 'payroll' && profile?.role === 'admin' && <PayrollPanel branchId={branchId} isOverall={isOverall} />}
               {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
-              {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
-              {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin'].includes(profile?.role) && <MembershipCollectionPanel />}
-              {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin'].includes(profile?.role) && <WalletUsagePanel />}
-              {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin'].includes(profile?.role) && <VoucherOverviewPanel />}
-              {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin'].includes(profile?.role) && <VoucherListPanel />}
-              {viewMode === 'package-overview' && ['manager','admin'].includes(profile?.role) && <PackageOverviewPanel />}
-              {viewMode === 'packages' && ['manager','admin'].includes(profile?.role) && <PackageListPanel />}
+              {MEMBERSHIP_ENABLED && viewMode === 'memberships' && ['manager','admin','admin_viewer'].includes(profile?.role) && <MembershipsPanel branchId={branchId} />}
+              {MEMBERSHIP_ENABLED && viewMode === 'membership-collection' && ['manager','admin','admin_viewer'].includes(profile?.role) && <MembershipCollectionPanel />}
+              {MEMBERSHIP_ENABLED && viewMode === 'wallet-usage' && ['manager','admin','admin_viewer'].includes(profile?.role) && <WalletUsagePanel />}
+              {VOUCHER_ENABLED && viewMode === 'voucher-overview' && ['manager','admin','admin_viewer'].includes(profile?.role) && <VoucherOverviewPanel />}
+              {VOUCHER_ENABLED && viewMode === 'vouchers' && ['manager','admin','admin_viewer'].includes(profile?.role) && <VoucherListPanel />}
+              {viewMode === 'package-overview' && ['manager','admin','admin_viewer'].includes(profile?.role) && <PackageOverviewPanel />}
+              {viewMode === 'packages' && ['manager','admin','admin_viewer'].includes(profile?.role) && <PackageListPanel />}
               {OUTREACH_ENABLED && viewMode === 'outreach' && profile?.role === 'admin' && <OutreachPanel />}
               {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
               {viewMode === 'infrastructure' && renderInfrastructureView()}
