@@ -131,8 +131,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Reset form when slot changes + pre-select therapist/room from column
   useEffect(() => {
-    setServiceId('');
-    setCustomerName('');
+    setServiceId(slotInfo?.defaultServiceId || '');
+    setCustomerName(slotInfo?.defaultCustomerName || '');
     setCustomerPhone('');
     setCustomerCountryCode('+977');
     setCustomerEmail('');
@@ -406,7 +406,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim())) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, ''))) return;
     if (blockOverlapMsg) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
@@ -537,8 +537,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? 'Therapist unavailable' : 'Overlaps a block')
     : bookingMode === 'group'
       ? (groupValid ? '' : 'Complete the group details')
-      : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : '';
-  const createDisabled = submitting || !!blockOverlapMsg || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim()));
+      : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : !customerPhone.replace(/\D/g, '') ? 'Enter the customer phone' : '';
+  const createDisabled = submitting || !!blockOverlapMsg || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, '')));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -714,7 +714,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     { value: '', label: 'Select a service' },
                     ...(services || []).map((s) => ({
                       value: s.id,
-                      label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                      label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                     })),
                   ]}
                   placeholder="Select a service"
@@ -894,7 +894,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             {/* Phone */}
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-                Phone
+                Phone <span className="text-error">*</span>
               </label>
               <div className="flex">
                 <CountryCodeSelect value={customerCountryCode} onChange={setCustomerCountryCode} />
@@ -905,6 +905,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   onBlur={() => checkPreviousDue(`${customerCountryCode}${customerPhone.replace(/\D/g, '')}`)}
                   branchId={branchId}
                   searchBy="phone"
+                  required
                   inputClassName="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                 />
               </div>
@@ -1059,7 +1060,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
                       ...groupServices.map((s) => ({
                         value: s.id,
-                        label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                        label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                       })),
                     ]}
                     placeholder={<>Select a service <span className="text-error">*</span></>}
@@ -1135,7 +1136,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                       type="tel"
                       value={p.phone}
                       onChange={(e) => setPerson(idx, { phone: e.target.value })}
-                      placeholder={idx === 0 ? 'Phone (required)' : 'Phone (optional)'}
+                      placeholder={idx === 0 ? 'Phone (required)' : 'Phone (optional — uses booking contact if blank)'}
                       className="flex-1 px-3 py-2 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     />
                   </div>
@@ -1177,7 +1178,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                           { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
                           ...groupServices.map((s) => ({
                             value: s.id,
-                            label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
+                            label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                           })),
                         ]}
                         placeholder={<>Select a service <span className="text-error">*</span></>}
