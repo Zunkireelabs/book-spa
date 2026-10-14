@@ -1099,7 +1099,7 @@ const CalendarGrid = ({
       ))}
       {days.includes(todayStr) && nowTop >= 0 && nowTop <= totalHeight && (
         <div className="absolute w-full pointer-events-none" style={{ top: nowTop }}>
-          <span className="absolute -top-2 right-2 px-1 rounded-sm bg-surface font-data text-[11px] font-medium text-[#E5484D]">
+          <span className="absolute -top-2 right-2 px-1 rounded-sm bg-surface font-data text-[11px] font-medium text-error">
             {nowLabel}
           </span>
         </div>
@@ -1126,8 +1126,8 @@ const CalendarGrid = ({
     if (day !== todayStr || nowTop < 0 || nowTop > totalHeight) return null;
     return (
       <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nowTop }}>
-        <div className="h-px bg-[#E5484D]" />
-        {showDot && <span className="absolute -left-[3px] -top-[2.5px] w-1.5 h-1.5 rounded-full bg-[#E5484D]" />}
+        <div className="h-px bg-error" />
+        {showDot && <span className="absolute -left-[3px] -top-[2.5px] w-1.5 h-1.5 rounded-full bg-error" />}
       </div>
     );
   };

@@ -349,7 +349,7 @@ const OperationalCalendar = ({ branchId }) => {
       {actionToast && (
         <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-toast px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in flex items-center space-x-2 ${
           actionToast.type === 'error' ? 'bg-error text-white' :
-          actionToast.type === 'info' ? 'bg-blue-500 text-white' :
+          actionToast.type === 'info' ? 'bg-primary text-white' :
           'bg-success text-white'
         }`}>
           <Icon name={actionToast.type === 'error' ? 'AlertCircle' : actionToast.type === 'info' ? 'Clock' : 'CheckCircle'} size={16} />

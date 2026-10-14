@@ -124,7 +124,7 @@ const CalendarToolbar = ({
                 key={m.key}
                 onClick={() => setColumnMode(m.key)}
                 className={`flex items-center gap-1.5 px-2.5 h-full text-[13px] rounded-[4px] font-body font-body-medium spa-transition-fast ${
-                  columnMode === m.key ? 'bg-text-primary text-white' : 'text-text-secondary hover:text-text-primary'
+                  columnMode === m.key ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
                 <Icon name={m.icon} size={14} />
@@ -367,7 +367,7 @@ const CalendarToolbar = ({
               aria-keyshortcuts={v.key === 'day' ? 'd' : 'f'}
               className={`px-3 h-full text-[13px] rounded-[4px] font-body font-body-medium spa-transition-fast whitespace-nowrap ${
                 viewMode === v.key
-                  ? 'bg-text-primary text-white'
+                  ? 'bg-primary text-white'
                   : 'text-text-secondary hover:text-text-primary'
               }`}
             >

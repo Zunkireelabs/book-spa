@@ -77,7 +77,7 @@ export const Segmented = ({ options, value, onChange, disabled }) => (
         aria-pressed={value === val}
         onClick={() => onChange(val)}
         className={`px-3 text-[13px] font-body font-body-medium rounded-[4px] transition-colors disabled:opacity-60 ${
-          value === val ? 'bg-text-primary text-white' : 'text-text-secondary hover:text-text-primary'
+          value === val ? 'bg-primary text-white' : 'text-text-secondary hover:text-text-primary'
         }`}
       >
         {label}

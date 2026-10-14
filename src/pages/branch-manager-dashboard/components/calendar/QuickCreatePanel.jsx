@@ -685,7 +685,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   onClick={() => setBookingMode(val)}
                   className={`px-3 text-[13px] font-body font-body-medium rounded-[4px] transition-colors ${
                     bookingMode === val
-                      ? 'bg-text-primary text-white'
+                      ? 'bg-primary text-white'
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >

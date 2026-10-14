@@ -164,7 +164,7 @@ const MiniMonthCalendar = ({ selectedDate, onDateSelect, branchId }) => {
 
   const pickerCell = (active) =>
     `py-2.5 rounded-spa text-[13px] spa-transition-fast ${
-      active ? 'bg-text-primary text-white font-semibold' : 'text-text-primary hover:bg-background'
+      active ? 'bg-primary text-white font-semibold' : 'text-text-primary hover:bg-background'
     }`;
 
   return (
@@ -250,7 +250,7 @@ const MiniMonthCalendar = ({ selectedDate, onDateSelect, branchId }) => {
                       w-11 h-11 flex flex-col items-center justify-center text-sm font-medium leading-none rounded-spa spa-transition-fast
                       ${cell.isOtherMonth ? 'text-text-tertiary/60' : todayCell ? '' : past ? 'text-text-secondary' : 'text-text-primary'}
                       ${todayCell && !selectedCell ? 'text-primary font-semibold' : ''}
-                      ${selectedCell ? 'bg-text-primary text-white font-semibold' : ''}
+                      ${selectedCell ? 'bg-primary text-white font-semibold' : ''}
                       ${!todayCell && !selectedCell ? 'hover:bg-background' : ''}
                     `}
                   >

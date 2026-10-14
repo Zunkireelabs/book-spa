@@ -207,7 +207,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
               <span className="flex-shrink-0 ml-auto flex items-center gap-1">
                 {sharedLabel && <span title={sharedLabel} aria-label={sharedLabel} className="text-text-tertiary"><Icon name="Users" size={11} /></span>}
                 {(booking.specialRequests || booking.customerNotes) && (
-                  <span title="Has notes" aria-label="Has notes" style={{ color: booking.customerNotes ? '#C98A12' : undefined }}><Icon name="AlertTriangle" size={11} /></span>
+                  <span title="Has notes" aria-label="Has notes" style={{ color: booking.customerNotes ? '#D97706' : undefined }}><Icon name="AlertTriangle" size={11} /></span>
                 )}
               </span>
             )}
@@ -228,7 +228,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
                   <span className="px-1 rounded-sm bg-primary/10 text-primary text-[10px] font-medium leading-4">New</span>
                 )}
                 {(booking.specialRequests || booking.customerNotes) && (
-                  <span title="Has notes" aria-label="Has notes" style={booking.customerNotes ? { color: '#C98A12' } : undefined}><Icon name="AlertTriangle" size={12} /></span>
+                  <span title="Has notes" aria-label="Has notes" style={booking.customerNotes ? { color: '#D97706' } : undefined}><Icon name="AlertTriangle" size={12} /></span>
                 )}
                 {isLocked && <Icon name="Lock" size={12} title="Locked" />}
                 {!isLocked && isPaid && <Icon name="Check" size={12} title="Paid" />}
