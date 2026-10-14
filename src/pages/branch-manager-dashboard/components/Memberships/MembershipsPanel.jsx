@@ -37,7 +37,7 @@ function formatDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-const MembershipsPanel = ({ branchId }) => {
+const MembershipsPanel = ({ branchId, readOnly = false }) => {
   const { profile } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -211,14 +211,16 @@ const MembershipsPanel = ({ branchId }) => {
               <span>Manage tiers</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setShowEnroll(true)}
-            className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
-          >
-            <Icon name="Plus" size={14} />
-            <span>New Member</span>
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => setShowEnroll(true)}
+              className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+            >
+              <Icon name="Plus" size={14} />
+              <span>New Member</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -308,7 +310,7 @@ const MembershipsPanel = ({ branchId }) => {
         )}
       </div>
 
-      {showEnroll && (
+      {!readOnly && showEnroll && (
         <EnrollMemberModal
           onClose={() => setShowEnroll(false)}
           onEnrolled={(newId) => {
@@ -327,6 +329,7 @@ const MembershipsPanel = ({ branchId }) => {
         <MembershipDetailModal
           membershipId={selectedId}
           isAdmin={profile?.role === 'admin'}
+          readOnly={readOnly}
           branchId={branchId}
           onClose={() => setSelectedId(null)}
           onChanged={loadData}

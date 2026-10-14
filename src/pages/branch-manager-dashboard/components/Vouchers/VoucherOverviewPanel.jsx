@@ -11,7 +11,7 @@ function formatNPR(amount) {
 // "All Voucher" — org-wide voucher dashboard: totals, status breakdown,
 // wallet summary, and a per-branch table showing how many vouchers each
 // branch has been given and what it still owes against them.
-const VoucherOverviewPanel = () => {
+const VoucherOverviewPanel = ({ readOnly = false }) => {
   const { profile } = useAuth();
   const userRole = profile?.role || 'manager';
   const [overview, setOverview] = useState(null);
@@ -81,14 +81,16 @@ const VoucherOverviewPanel = () => {
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">All Voucher</h3>
           <p className="font-body text-sm text-text-secondary">Org-wide voucher totals and branch breakdown</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowNewVoucher(true)}
-          className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast flex-shrink-0"
-        >
-          <Icon name="Plus" size={14} />
-          <span>New Voucher</span>
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => setShowNewVoucher(true)}
+            className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast flex-shrink-0"
+          >
+            <Icon name="Plus" size={14} />
+            <span>New Voucher</span>
+          </button>
+        )}
       </div>
 
       {/* Top-line totals */}
@@ -236,7 +238,7 @@ const VoucherOverviewPanel = () => {
         )}
       </div>
 
-      {showNewVoucher && (
+      {!readOnly && showNewVoucher && (
         <NewVoucherModal
           userRole={userRole}
           onClose={() => setShowNewVoucher(false)}

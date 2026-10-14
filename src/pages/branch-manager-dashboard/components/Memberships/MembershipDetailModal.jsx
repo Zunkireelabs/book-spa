@@ -53,7 +53,7 @@ function perkUsedInCurrentCycle(m) {
   return true;
 }
 
-const MembershipDetailModal = ({ membershipId, isAdmin = false, branchId, onClose, onChanged }) => {
+const MembershipDetailModal = ({ membershipId, isAdmin = false, readOnly = false, branchId, onClose, onChanged }) => {
   const [m, setMembership] = useState(null);
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -223,57 +223,59 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, branchId, onClos
                 </div>
               )}
 
-              {/* Actions */}
-              <div className="flex flex-wrap gap-2">
-                {isLapsed ? (
+              {/* Actions (hidden for read-only roles) */}
+              {!readOnly && (
+                <div className="flex flex-wrap gap-2">
+                  {isLapsed ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowExtend(true)}
+                      className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                    >
+                      <Icon name="CalendarClock" size={14} />
+                      <span>Extend membership</span>
+                    </button>
+                  ) : isDepleted ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowRenew(true)}
+                      className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                    >
+                      <Icon name="RefreshCw" size={14} />
+                      <span>Renew</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowTopUp(true)}
+                      className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                    >
+                      <Icon name="Plus" size={14} />
+                      <span>Top up</span>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setShowExtend(true)}
-                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
+                    onClick={() => setShowBirthday(true)}
+                    disabled={!canBirthday}
+                    title={!canBirthday ? (perkUsed ? 'Already used in this cycle' : 'Membership must be active') : undefined}
+                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa border border-accent/40 text-accent text-sm font-body font-body-medium hover:bg-accent/5 disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast"
                   >
-                    <Icon name="CalendarClock" size={14} />
-                    <span>Extend membership</span>
+                    <Icon name="Gift" size={14} />
+                    <span>Apply birthday perk</span>
                   </button>
-                ) : isDepleted ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowRenew(true)}
-                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
-                  >
-                    <Icon name="RefreshCw" size={14} />
-                    <span>Renew</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowTopUp(true)}
-                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast"
-                  >
-                    <Icon name="Plus" size={14} />
-                    <span>Top up</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowBirthday(true)}
-                  disabled={!canBirthday}
-                  title={!canBirthday ? (perkUsed ? 'Already used in this cycle' : 'Membership must be active') : undefined}
-                  className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa border border-accent/40 text-accent text-sm font-body font-body-medium hover:bg-accent/5 disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast"
-                >
-                  <Icon name="Gift" size={14} />
-                  <span>Apply birthday perk</span>
-                </button>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAdjust(true)}
-                    className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa border border-border text-text-secondary text-sm font-body font-body-medium hover:bg-background spa-transition-fast"
-                  >
-                    <Icon name="Pencil" size={14} />
-                    <span>Adjust</span>
-                  </button>
-                )}
-              </div>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAdjust(true)}
+                      className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa border border-border text-text-secondary text-sm font-body font-body-medium hover:bg-background spa-transition-fast"
+                    >
+                      <Icon name="Pencil" size={14} />
+                      <span>Adjust</span>
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Notes */}
               {m.notes && (

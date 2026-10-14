@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
-import StaffSidebar from '../../components/ui/StaffSidebar';
+import AppShell from '../../components/ui/AppShell';
 import SettingsRow from './components/SettingsRow';
 import StaffTypeToggle from './components/StaffTypeToggle';
 import StaffDetailsFields from './components/StaffDetailsFields';
@@ -45,7 +45,6 @@ const StaffDetailPage = () => {
   const userRole = profile?.role || 'staff';
   const isEdit = !!staffId;
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pageLoading, setPageLoading] = useState(isEdit);
   const [loadError, setLoadError] = useState(null);
   const [allPositionNames, setAllPositionNames] = useState([]);
@@ -204,10 +203,8 @@ const StaffDetailPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
-
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
+    <AppShell variant="flush" sidebar={{ userRole }} header={{ realtimeStatus: 'connected' }}>
+      <div className="bg-background min-h-full">
         {/* Breadcrumb header */}
         <div className="sticky top-0 z-header bg-surface border-b border-border px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3 font-accent text-2xl">
@@ -285,7 +282,7 @@ const StaffDetailPage = () => {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 };
 

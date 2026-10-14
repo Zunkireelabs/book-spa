@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
-import StaffSidebar from '../../components/ui/StaffSidebar';
+import AppShell from '../../components/ui/AppShell';
 import PaymentModal from '../../components/ui/PaymentModal';
 import BookingDetailsPanel from './components/BookingDetailsPanel';
 import TherapistAssignmentPanel from './components/TherapistAssignmentPanel';
@@ -22,7 +22,6 @@ const BookingDetailsAssignmentModal = () => {
   const { branchId } = useBranch();
   const userRole = profile?.role || 'staff';
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [isLoading, setIsLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -262,10 +261,8 @@ const BookingDetailsAssignmentModal = () => {
   } : null;
 
   return (
-    <div className="min-h-screen bg-background">
-      <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
-
-      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
+    <AppShell variant="flush" sidebar={{ userRole }} header={{ realtimeStatus: 'connected' }}>
+      <div className="bg-background min-h-full">
         <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-6xl max-h-[90vh] overflow-hidden animate-fade-in">
 
@@ -494,7 +491,7 @@ const BookingDetailsAssignmentModal = () => {
           </button>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 };
 

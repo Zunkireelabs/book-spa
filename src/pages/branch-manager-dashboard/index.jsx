@@ -442,6 +442,7 @@ const BranchManagerDashboard = () => {
   const areaForView = getAreaForView(viewMode);
   const renderAreaView = (view) => {
     if (branchLoading) return <BranchPending />; // panels need the resolved branch
+    const salesReadOnly = profile?.role === 'admin_viewer'; // #411 access is view-only
     const salesViewer = ['manager', 'admin', 'admin_viewer'].includes(profile?.role); // #411: admin_viewer can open Packages / Memberships / Vouchers
     const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
     switch (view) {
@@ -451,9 +452,9 @@ const BranchManagerDashboard = () => {
       case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />;
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
-      case 'package-overview': return salesViewer ? <PackageOverviewPanel /> : null;
+      case 'package-overview': return salesViewer ? <PackageOverviewPanel readOnly={salesReadOnly} /> : null;
       case 'packages': return salesViewer ? <PackageListPanel /> : null;
-      case 'memberships': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPanel branchId={branchId} /> : null;
+      case 'memberships': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPanel branchId={branchId} readOnly={salesReadOnly} /> : null;
       case 'membership-collection': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipCollectionPanel /> : null;
       case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <WalletUsagePanel /> : null;
       case 'outreach-rules': return outreachAdmin ? <RulesEditorPanel /> : null;
@@ -461,7 +462,7 @@ const BranchManagerDashboard = () => {
       case 'outreach-review': return outreachAdmin ? <ReviewQueuePanel /> : null;
       case 'outreach-log': return outreachAdmin ? <MessageLogPanel /> : null;
       case 'outreach-settings': return outreachAdmin ? <ProviderSettingsPanel /> : null;
-      case 'voucher-overview': return VOUCHER_ENABLED && salesViewer ? <VoucherOverviewPanel /> : null;
+      case 'voucher-overview': return VOUCHER_ENABLED && salesViewer ? <VoucherOverviewPanel readOnly={salesReadOnly} /> : null;
       case 'vouchers': return VOUCHER_ENABLED && salesViewer ? <VoucherListPanel /> : null;
       default: return null;
     }

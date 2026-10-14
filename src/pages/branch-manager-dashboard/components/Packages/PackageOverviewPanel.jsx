@@ -12,7 +12,7 @@ function formatNPR(amount) {
 // breakdown, package-type catalog, and a per-branch table showing how many
 // packages each branch has issued and how many sessions remain outstanding
 // against them. Packages counterpart of VoucherOverviewPanel.
-const PackageOverviewPanel = () => {
+const PackageOverviewPanel = ({ readOnly = false }) => {
   const { profile } = useAuth();
   const userRole = profile?.role || 'manager';
   const [overview, setOverview] = useState(null);
@@ -82,14 +82,16 @@ const PackageOverviewPanel = () => {
           <h3 className="font-heading font-heading-semibold text-lg text-text-primary">All Packages</h3>
           <p className="font-body text-sm text-text-secondary">Org-wide session-package totals and branch breakdown</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowNewPackage(true)}
-          className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast flex-shrink-0"
-        >
-          <Icon name="Plus" size={14} />
-          <span>New Package</span>
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => setShowNewPackage(true)}
+            className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 spa-transition-fast flex-shrink-0"
+          >
+            <Icon name="Plus" size={14} />
+            <span>New Package</span>
+          </button>
+        )}
       </div>
 
       {/* Top-line totals */}
@@ -238,7 +240,7 @@ const PackageOverviewPanel = () => {
         )}
       </div>
 
-      {showNewPackage && (
+      {!readOnly && showNewPackage && (
         <NewPackageModal
           userRole={userRole}
           onClose={() => setShowNewPackage(false)}
