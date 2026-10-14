@@ -9,6 +9,7 @@ import { useIndustry } from 'hooks/useIndustry';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from 'lib/featureFlags';
+import { isSettingsView } from 'pages/branch-manager-dashboard/components/Settings/settingsRegistry';
 import { isReportView } from 'pages/branch-manager-dashboard/components/Reports/reportRegistry';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
@@ -325,67 +326,10 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     }] : []),
     {
       id: 'infrastructure',
-      label: 'Setup',
+      label: 'Settings',
       icon: 'Settings',
-      roles: ['manager', 'admin', 'admin_viewer'],
-      children: [
-        // Only show rooms/locations for industries that use them
-        ...(enableRooms ? [{
-          id: 'rooms',
-          label: locationLabelPlural,
-          icon: 'DoorOpen',
-          path: `${basePath}?view=rooms`,
-          roles: ['manager', 'admin', 'admin_viewer'],
-          overallHidden: true
-        }] : []),
-        {
-          id: 'services',
-          label: 'Services',
-          icon: 'Sparkles',
-          path: `${basePath}?view=services`,
-          roles: ['manager', 'admin', 'admin_viewer'],
-          overallHidden: true
-        },
-        {
-          id: 'categories',
-          label: 'Categories',
-          icon: 'Tags',
-          path: `${basePath}?view=categories`,
-          roles: ['manager', 'admin', 'admin_viewer'],
-          overallHidden: true
-        },
-        {
-          id: 'payment-methods',
-          label: 'Payment Methods',
-          icon: 'CreditCard',
-          path: `${basePath}?view=payment-methods`,
-          roles: ['admin'],
-          overallHidden: true
-        },
-        {
-          id: 'booking-settings',
-          label: 'Booking Settings',
-          icon: 'Settings',
-          path: `${basePath}?view=booking-settings`,
-          roles: ['admin'],
-          overallHidden: true
-        },
-        {
-          id: 'provider-profile',
-          label: 'Provider Profile',
-          icon: 'Image',
-          path: `${basePath}?view=provider-profile`,
-          roles: ['admin'],
-          overallHidden: true
-        },
-        {
-          id: 'audit',
-          label: 'Audit Log',
-          icon: 'History',
-          path: `${basePath}?view=audit`,
-          roles: ['manager', 'admin', 'admin_viewer']
-        },
-      ]
+      path: `${basePath}?view=settings`,
+      roles: ['manager', 'admin', 'admin_viewer']
     },
   ];
 
@@ -446,6 +390,9 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
     // The Reports item is active for every report view (the area opens them in place).
     if (path === `${basePath}?view=all-reports`) {
       return location.pathname === basePath && isReportView(new URLSearchParams(location.search).get('view'));
+    }
+    if (path === `${basePath}?view=settings`) {
+      return location.pathname === basePath && isSettingsView(new URLSearchParams(location.search).get('view'));
     }
     if (path.includes('?')) {
       return currentUrl === path;
