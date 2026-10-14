@@ -43,6 +43,9 @@ function isTimeLocked(booking) {
 
 // Check if booking can be dragged
 export function canDragBooking(booking) {
+  // A couple booking split across two room columns (isRoomShared) has no per-companion drag target: a plain drag would move
+  // bookings.room_id only and desync it from the companion's booking_therapists.room_id. Reassign rooms in the booking panel.
+  if (booking.isRoomShared) return false;
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
   // Cannot drag paid bookings
@@ -111,8 +114,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     transform,
     isDragging,
   } = useDraggable({
-    id: booking._colTherapistId
-      ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
+    id: (booking._colTherapistId || booking._colRoomId)
+      ? `${booking.bookingId || booking.id}__${booking._colTherapistId || booking._colRoomId}`
       : (booking.bookingId || booking.id),
     data: {
       booking,
@@ -152,9 +155,9 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3]' : ''}`}
       data-booking-card="true"
       data-booking-key={booking.bookingId || booking.id}
-      data-booking-id={booking.isShared ? booking.bookingId : undefined}
-      data-shared={booking.isShared ? 'true' : undefined}
-      data-bar={booking.isShared ? colors.bar : undefined}
+      data-booking-id={(booking.isShared || booking.isRoomShared) ? booking.bookingId : undefined}
+      data-shared={(booking.isShared || booking.isRoomShared) ? 'true' : undefined}
+      data-bar={(booking.isShared || booking.isRoomShared) ? colors.bar : undefined}
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
@@ -185,10 +188,10 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         hoverHandlers.onKeyDown(e);
         if (!e.defaultPrevented && e.key === 'Enter' && e.target === e.currentTarget && !isResizing) { e.preventDefault(); hideNow(); onClick(booking); }
       }}
-      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); if (booking.isShared) onSharedActivate?.(booking.bookingId); }}
-      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); if (booking.isShared) onSharedDeactivate?.(); }}
-      onFocus={(e) => { hoverHandlers.onFocus?.(e); if (booking.isShared) onSharedActivate?.(booking.bookingId); }}
-      onBlur={(e) => { hoverHandlers.onBlur?.(e); if (booking.isShared) onSharedDeactivate?.(); }}
+      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); if (booking.isShared || booking.isRoomShared) onSharedActivate?.(booking.bookingId); }}
+      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); if (booking.isShared || booking.isRoomShared) onSharedDeactivate?.(); }}
+      onFocus={(e) => { hoverHandlers.onFocus?.(e); if (booking.isShared || booking.isRoomShared) onSharedActivate?.(booking.bookingId); }}
+      onBlur={(e) => { hoverHandlers.onBlur?.(e); if (booking.isShared || booking.isRoomShared) onSharedDeactivate?.(); }}
     >
       {/* Drag handle area — middle section of card, not edges */}
       <div

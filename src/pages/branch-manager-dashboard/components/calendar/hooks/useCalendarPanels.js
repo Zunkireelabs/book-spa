@@ -360,6 +360,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       therapistIds: formData.therapistIds || (formData.therapistId ? [formData.therapistId] : null),
       // Zennly: bookings.room_id is NOT NULL, so "Any available" must let createBooking auto-assign a room ('none' would insert NULL).
       roomId: formData.roomId || undefined,
+      therapistRoomOverrides: formData.therapistRoomOverrides,
+      companionName: formData.companionName,
+      companionPhone: formData.companionPhone,
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,

@@ -339,7 +339,6 @@ const OperationalCalendar = ({ branchId }) => {
         onCreateBooking={handleQuickCreateSubmit}
         onRebookStart={handleRebookStart}
         // TODO(step 7): onRescheduleStart (reschedule-as-new) and onGroupPaymentRecorded (atomic bundled payment) were Zennly props here; the modal falls back to the sequential payment loop and hides Reschedule until then.
-        // TODO(step 6): couple/companion fields on assign (therapist room overrides, companion name/phone).
         branchHours={calendarData?.branchHours}
         defaultNewBookingMode={rebookFallback ? 'rebook' : null}
         userRole={profile?.role || 'staff'}

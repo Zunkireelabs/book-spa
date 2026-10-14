@@ -13,8 +13,8 @@ import { to12h } from './calendarDates';
 // active drag) while it's in flight, then close once the drag ends.
 const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
   const isDraggable = canDragBooking(booking);
-  const dragId = booking._colTherapistId
-    ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
+  const dragId = (booking._colTherapistId || booking._colRoomId)
+    ? `${booking.bookingId || booking.id}__${booking._colTherapistId || booking._colRoomId}`
     : (booking.bookingId || booking.id);
 
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -118,7 +118,7 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {(bookings || []).map((booking) => (
             <OverflowPopoverRow
-              key={booking.id}
+              key={booking._colRoomId ? `${booking.id}__${booking._colRoomId}` : booking.id}
               booking={booking}
               onClick={(b) => {
                 setExpanded(false);

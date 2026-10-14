@@ -25,11 +25,23 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
     showToast(`Status updated to ${newStatus}`);
   };
 
-  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
-    const result = await assignTherapist({ bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined });
+    const result = await assignTherapist({
+      bookingId,
+      therapistIds: ids,
+      roomId: roomId !== undefined ? (roomId || null) : undefined,
+      // Couple services only (the booking panel gates these on is_couple): per-companion room override + companion info.
+      therapistRoomOverrides,
+      companionName,
+      companionPhone,
+    });
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
+      return;
+    }
+    if (result.data?.warning) {
+      showToast(`Assignment partially saved: ${result.data.warning}`, 'error');
       return;
     }
     showToast('Assignment saved successfully');

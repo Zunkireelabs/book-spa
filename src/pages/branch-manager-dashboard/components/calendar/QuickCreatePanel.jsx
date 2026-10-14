@@ -26,6 +26,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const [dragMinutes, setDragMinutes] = useState(0); // length of the range dragged on the grid; used until a service is picked
   const [selectedTherapistIds, setSelectedTherapistIds] = useState([]);
   const [roomId, setRoomId] = useState('');
+  // Couple (is_couple service + 2 therapists, Individual mode): per-companion (non-primary therapist) room override and
+  // the companion's name/phone. Not used by the Group flow.
+  const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
+  const [companionName, setCompanionName] = useState('');
+  const [companionPhone, setCompanionPhone] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   // Group booking state (Individual = default, behaves exactly as before)
@@ -142,6 +147,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setSelectedTherapistIds(slotInfo?.colType === 'therapist' && slotInfo.colId ? [slotInfo.colId] : []);
     setTherapistSearch('');
     setRoomId(slotInfo?.colType === 'room' ? slotInfo.colId : '');
+    setTherapistRoomOverrides({});
+    setCompanionName('');
+    setCompanionPhone('');
     setBookingDate(slotInfo?.day || '');
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
@@ -172,6 +180,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Compute which therapists & rooms are busy during the selected time slot
   const selectedService = (services || []).find((s) => s.id === serviceId);
+  // Gate the section AND the submitted payload on the same condition, so switching away from a couple service never
+  // ships hidden companion data.
+  const isCoupleBooking = bookingMode === 'individual' && selectedTherapistIds.length > 1 && !!selectedService?.is_couple;
+  // Group booking creates one independent booking per person, so a couple service would bill the combined price to each.
+  const groupServices = (services || []).filter((s) => !s.is_couple);
   // Warn (and disable Create) when the booking interval overlaps a manual block. Client-side only.
   const dayBlocks = useDayBlocks(branchId, bookingDate);
   const blockOverlapMsg = useMemo(() => {
@@ -421,6 +434,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           specialRequests: specialRequests.trim() || null,
           therapistIds: selectedTherapistIds.length > 0 ? selectedTherapistIds : null,
           roomId: roomId || null,
+          therapistRoomOverrides: isCoupleBooking
+            ? Object.fromEntries(selectedTherapistIds.slice(1).map((tid) => [tid, therapistRoomOverrides[tid] || roomId || null]))
+            : undefined,
+          companionName: isCoupleBooking ? (companionName.trim() || null) : undefined,
+          companionPhone: isCoupleBooking ? (companionPhone.trim() || null) : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -826,6 +844,38 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             </div>
 
+            {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}
+            {isCoupleBooking && (
+              <div className="space-y-2 p-3 border border-border rounded-spa-lg bg-background">
+                <p className="font-body font-body-medium text-[13px] text-text-primary">Couple · separate rooms &amp; companion (optional)</p>
+                <p className="text-xs text-text-secondary">Leave a companion's room unset to keep them in the room selected above.</p>
+                <div className="space-y-1.5">
+                  {selectedTherapistIds.slice(1).map((tid) => {
+                    const t = (therapists || []).find((th) => th.id === tid);
+                    return (
+                      <div key={tid} className="flex items-center gap-2">
+                        <span className="font-body font-body-medium text-[13px] text-text-primary w-24 truncate flex-shrink-0">{t?.name || 'Companion'}</span>
+                        <CustomSelect
+                          value={therapistRoomOverrides[tid] || ''}
+                          onChange={(val) => setTherapistRoomOverrides((prev) => ({ ...prev, [tid]: val }))}
+                          options={[{ value: '', label: 'Same room as above' }, ...(rooms || []).map((r) => ({ value: r.id, label: r.name }))]}
+                          placeholder="Same room as above"
+                          size="sm"
+                          className="flex-1"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input type="text" value={companionName} onChange={(e) => setCompanionName(e.target.value)} placeholder="Companion's name (optional)"
+                    className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                  <input type="tel" value={companionPhone} onChange={(e) => setCompanionPhone(e.target.value)} placeholder="Companion's phone (optional)"
+                    className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                </div>
+              </div>
+            )}
+
             {/* Customer name */}
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
@@ -1007,7 +1057,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     onChange={(val) => setGroupServiceId(val)}
                     options={[
                       { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                      ...(services || []).map((s) => ({
+                      ...groupServices.map((s) => ({
                         value: s.id,
                         label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
                       })),
@@ -1125,7 +1175,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                         onChange={(val) => setPerson(idx, { serviceId: val })}
                         options={[
                           { value: '', label: <>Select a service <span className="text-error">*</span></>, searchLabel: 'Select a service' },
-                          ...(services || []).map((s) => ({
+                          ...groupServices.map((s) => ({
                             value: s.id,
                             label: `${s.name} — ${s.duration_minutes}min — Rs.${s.price_npr}`,
                           })),
