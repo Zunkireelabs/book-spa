@@ -17,3 +17,4 @@ supabase/.temp/
 .agents/
 .claude/skills/higgsfield-*
 skills-lock.json
+.artifact-tmp/

@@ -442,7 +442,7 @@ const BranchManagerDashboard = () => {
   const areaForView = getAreaForView(viewMode);
   const renderAreaView = (view) => {
     if (branchLoading) return <BranchPending />; // panels need the resolved branch
-    const managerOrAdmin = ['manager', 'admin'].includes(profile?.role);
+    const salesViewer = ['manager', 'admin', 'admin_viewer'].includes(profile?.role); // #411: admin_viewer can open Packages / Memberships / Vouchers
     const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
     switch (view) {
       case 'bookings': return <BookingsViewPanel branchId={branchId} />;
@@ -451,18 +451,18 @@ const BranchManagerDashboard = () => {
       case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />;
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
-      case 'package-overview': return managerOrAdmin ? <PackageOverviewPanel /> : null;
-      case 'packages': return managerOrAdmin ? <PackageListPanel /> : null;
-      case 'memberships': return MEMBERSHIP_ENABLED && managerOrAdmin ? <MembershipsPanel branchId={branchId} /> : null;
-      case 'membership-collection': return MEMBERSHIP_ENABLED && managerOrAdmin ? <MembershipCollectionPanel /> : null;
-      case 'wallet-usage': return MEMBERSHIP_ENABLED && managerOrAdmin ? <WalletUsagePanel /> : null;
+      case 'package-overview': return salesViewer ? <PackageOverviewPanel /> : null;
+      case 'packages': return salesViewer ? <PackageListPanel /> : null;
+      case 'memberships': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPanel branchId={branchId} /> : null;
+      case 'membership-collection': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipCollectionPanel /> : null;
+      case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <WalletUsagePanel /> : null;
       case 'outreach-rules': return outreachAdmin ? <RulesEditorPanel /> : null;
       case 'outreach-templates': return outreachAdmin ? <TemplateEditorPanel /> : null;
       case 'outreach-review': return outreachAdmin ? <ReviewQueuePanel /> : null;
       case 'outreach-log': return outreachAdmin ? <MessageLogPanel /> : null;
       case 'outreach-settings': return outreachAdmin ? <ProviderSettingsPanel /> : null;
-      case 'voucher-overview': return VOUCHER_ENABLED && managerOrAdmin ? <VoucherOverviewPanel /> : null;
-      case 'vouchers': return VOUCHER_ENABLED && managerOrAdmin ? <VoucherListPanel /> : null;
+      case 'voucher-overview': return VOUCHER_ENABLED && salesViewer ? <VoucherOverviewPanel /> : null;
+      case 'vouchers': return VOUCHER_ENABLED && salesViewer ? <VoucherListPanel /> : null;
       default: return null;
     }
   };

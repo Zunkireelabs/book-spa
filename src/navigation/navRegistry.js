@@ -17,6 +17,7 @@ import { isSettingsView } from 'pages/branch-manager-dashboard/components/Settin
 const ALL = ['staff', 'manager', 'admin', 'admin_viewer'];
 const STAFF_UP = ['manager', 'admin', 'admin_viewer'];
 const MGR_ADMIN = ['manager', 'admin'];
+const MGR_ADMIN_VIEWER = ['manager', 'admin', 'admin_viewer']; // Packages / Memberships / Vouchers are read-only for admin_viewer (#411)
 
 const flagged = (enabled, items) => (enabled ? items : []);
 
@@ -32,12 +33,12 @@ export const NAV_SECTIONS = [
     { id: 'customers', label: 'Customers', icon: 'Users', view: 'customers', keywords: 'clients guests', roles: STAFF_UP },
   ] },
   { id: 'sales', label: 'Sales', items: [
-    { id: 'packages', label: 'Packages', icon: 'Layers', view: 'package-overview', keywords: 'sessions bundles', roles: MGR_ADMIN, activeViews: ['package-overview', 'packages'] },
+    { id: 'packages', label: 'Packages', icon: 'Layers', view: 'package-overview', keywords: 'sessions bundles', roles: MGR_ADMIN_VIEWER, activeViews: ['package-overview', 'packages'] },
     ...flagged(MEMBERSHIP_ENABLED, [
-      { id: 'memberships', label: 'Memberships', icon: 'CreditCard', view: 'memberships', keywords: 'wallet tiers', roles: MGR_ADMIN, activeViews: ['memberships', 'membership-collection', 'wallet-usage'] },
+      { id: 'memberships', label: 'Memberships', icon: 'CreditCard', view: 'memberships', keywords: 'wallet tiers', roles: MGR_ADMIN_VIEWER, activeViews: ['memberships', 'membership-collection', 'wallet-usage'] },
     ]),
     ...flagged(VOUCHER_ENABLED, [
-      { id: 'vouchers', label: 'Vouchers', icon: 'Ticket', view: 'voucher-overview', keywords: 'gift', roles: MGR_ADMIN, activeViews: ['voucher-overview', 'vouchers'] },
+      { id: 'vouchers', label: 'Vouchers', icon: 'Ticket', view: 'voucher-overview', keywords: 'gift', roles: MGR_ADMIN_VIEWER, activeViews: ['voucher-overview', 'vouchers'] },
     ]),
     ...flagged(PRODUCTS_ENABLED, [
       { id: 'products', label: 'Products', icon: 'ShoppingBag', view: 'products', keywords: 'retail stock', roles: ['staff', 'manager', 'admin'] },

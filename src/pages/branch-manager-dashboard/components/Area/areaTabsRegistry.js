@@ -4,6 +4,7 @@ import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from 'lib/featu
 // Roles, flags and `overallHidden` mirror the sidebar entries these tabs replace.
 const ALL = ['staff', 'manager', 'admin', 'admin_viewer'];
 const STAFF_UP = ['manager', 'admin', 'admin_viewer'];
+const MGR_ADMIN_VIEWER = STAFF_UP; // Packages / Memberships / Vouchers tabs: admin_viewer is read-only (#411)
 
 export const AREAS = [
   {
@@ -43,8 +44,8 @@ export const AREAS = [
     title: 'Packages',
     description: () => 'Packages you sell and the ones customers hold.',
     tabs: [
-      { view: 'package-overview', label: 'All packages', roles: ['manager', 'admin'] },
-      { view: 'packages', label: 'Issued', roles: ['manager', 'admin'] },
+      { view: 'package-overview', label: 'All packages', roles: MGR_ADMIN_VIEWER },
+      { view: 'packages', label: 'Issued', roles: MGR_ADMIN_VIEWER },
     ],
   },
   // Flagged areas: only present when the feature is on.
@@ -53,9 +54,9 @@ export const AREAS = [
     title: 'Memberships',
     description: () => 'Prepaid memberships, what has been collected and how wallets are used.',
     tabs: [
-      { view: 'memberships', label: 'All memberships', roles: ['manager', 'admin'] },
-      { view: 'membership-collection', label: 'Collection', roles: ['manager', 'admin'] },
-      { view: 'wallet-usage', label: 'Wallet usage', roles: ['manager', 'admin'] },
+      { view: 'memberships', label: 'All memberships', roles: MGR_ADMIN_VIEWER },
+      { view: 'membership-collection', label: 'Collection', roles: MGR_ADMIN_VIEWER },
+      { view: 'wallet-usage', label: 'Wallet usage', roles: MGR_ADMIN_VIEWER },
     ],
   }] : []),
   ...(VOUCHER_ENABLED ? [{
@@ -63,8 +64,8 @@ export const AREAS = [
     title: 'Vouchers',
     description: () => 'Gift vouchers you sell and the ones that have been issued.',
     tabs: [
-      { view: 'voucher-overview', label: 'All vouchers', roles: ['manager', 'admin'] },
-      { view: 'vouchers', label: 'Issued', roles: ['manager', 'admin'] },
+      { view: 'voucher-overview', label: 'All vouchers', roles: MGR_ADMIN_VIEWER },
+      { view: 'vouchers', label: 'Issued', roles: MGR_ADMIN_VIEWER },
     ],
   }] : []),
   ...(OUTREACH_ENABLED ? [{
