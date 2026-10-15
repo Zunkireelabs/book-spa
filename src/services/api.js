@@ -10,7 +10,7 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
-import { buildCustomerDirectory, nepalNow } from '../utils/customerDirectory';
+import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/customerDirectory';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -9401,6 +9401,34 @@ export async function getCustomerDirectory({ branchId, now = new Date() }) {
   }
 }
 
+// Side-panel detail for one customer (loaded lazily when the panel opens): their bookings (for now / upcoming / recent / owed /
+// preferences, derived in utils/customerDirectory.buildPanelDetail) and what they hold prepaid: membership, packages, vouchers.
+export async function getCustomerPanelDetail({ customerId, now = new Date() }) {
+  try {
+    const { today, hm } = nepalNow(now);
+    const [bookingsRes, membershipRes, packagesRes, vouchersRes] = await Promise.all([
+      supabase
+        .from('bookings')
+        .select('id, booking_number, branch_id, status, date, start_time, end_time, service_name_snapshot, therapist_name_snapshot, room_name_snapshot, special_requests, final_amount, payment_status, payments(amount)')
+        .eq('customer_id', customerId)
+        .order('date', { ascending: false })
+        .limit(1000),
+      MEMBERSHIP_ENABLED ? fetchMembershipForCustomer(customerId) : Promise.resolve({ data: null }),
+      fetchPackages(customerId),
+      VOUCHER_ENABLED ? fetchVouchers(customerId) : Promise.resolve({ data: [] }),
+    ]);
+    if (bookingsRes.error) throw bookingsRes.error;
+    const detail = buildPanelDetail({ bookings: bookingsRes.data || [], today, nowHM: hm });
+    const membership = membershipRes.data && ['active', 'pending'].includes(membershipRes.data.status) ? membershipRes.data : null;
+    const packages = (packagesRes.data || []).filter((p) => p.sessionsRemaining > 0 && p.status !== 'expired' && (!p.expiryDate || p.expiryDate >= today));
+    const vouchers = (vouchersRes.data || []).filter((v) => v.remainingBalance > 0 && (!v.expiryDate || v.expiryDate >= today));
+    return { data: { ...detail, membership, packages, vouchers, today }, error: null };
+  } catch (error) {
+    console.error('[API] getCustomerPanelDetail error:', error.message);
+    return { data: null, error };
+  }
+}
+
 
 // ============================================================
 // Phase 10D-4: Risk Indicators (Read-Only)
@@ -12385,22 +12413,25 @@ export async function fetchVoucherTypes() {
 // Vouchers joined with their live balance (from the voucher_balances view, computed
 // from voucher_claims — not stored, so it can't drift the way the old Excel sheet's
 // hand-maintained Balance Tracking sheet did). Sorted alphabetically by guest name.
-export async function fetchVouchers() {
+export async function fetchVouchers(customerId) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const [vouchersRes, balancesRes] = await Promise.all([
-      supabase
-        .from('vouchers')
-        .select(`
+    let vouchersQuery = supabase
+      .from('vouchers')
+      .select(`
           id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
           actual_price, discount_percent, total_amount_issued, remarks, created_at,
           branch:branches ( id, name ),
           voucher_type:voucher_types ( id, name, is_wallet ),
           issuer:users!issued_by ( id, full_name )
         `)
-        .order('guest_name', { ascending: true }),
+      .order('guest_name', { ascending: true });
+    if (customerId) vouchersQuery = vouchersQuery.eq('customer_id', customerId); // optional: one customer's vouchers (Customers side panel)
+
+    const [vouchersRes, balancesRes] = await Promise.all([
+      vouchersQuery,
       supabase
         .from('voucher_balances')
         .select('voucher_id, total_claimed, remaining_balance, status, last_claim_date'),

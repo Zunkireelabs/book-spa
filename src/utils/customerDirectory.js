@@ -229,3 +229,59 @@ export const initials = (name) => {
   if (!w.length) return '?';
   return ((w[0][0] || '') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
 };
+
+// ── Side-panel detail (one customer's bookings) ──────────────────────────────────────────────
+
+const topOf = (counts, visits) => {
+  // The most frequent value, only when it is at least 2 visits AND at least half of all rendered visits.
+  let best = null;
+  for (const [name, n] of counts) if (!best || n > best.n) best = { name, n };
+  return best && best.n >= 2 && best.n / visits >= 0.5 ? best : null;
+};
+
+/**
+ * @param {{bookings: object[], today: string, nowHM: string}} input  bookings: one customer's rows with
+ *  { id, booking_number, branch_id, status, date, start_time, end_time, service_name_snapshot, therapist_name_snapshot,
+ *    room_name_snapshot, special_requests, final_amount, payment_status, payments?: [{amount}] }
+ * @returns {{now, upcoming, recent, owed, preferences}} now = today's In-Progress booking; upcoming = the next Pending/Confirmed;
+ *  recent = last 3 rendered visits; owed = rendered unpaid visits oldest first (the same rule as the row's Balance);
+ *  preferences = { therapist, service, note }.
+ */
+export function buildPanelDetail({ bookings = [], today, nowHM }) {
+  const row = (b) => ({
+    id: b.id, bookingNumber: b.booking_number, branchId: b.branch_id || null, status: b.status, date: String(b.date).slice(0, 10),
+    start: hm(b.start_time), end: hm(b.end_time), service: b.service_name_snapshot || '', therapist: b.therapist_name_snapshot || '', room: b.room_name_snapshot || '',
+  });
+  const sorted = [...bookings].sort((a, b) => (String(b.date).slice(0, 10) + hm(b.start_time)).localeCompare(String(a.date).slice(0, 10) + hm(a.start_time))); // newest first
+  const rendered = sorted.filter((b) => RENDERED.includes(b.status) && String(b.date).slice(0, 10) <= today);
+
+  const now = rendered.filter((b) => b.status === 'In-Progress' && String(b.date).slice(0, 10) === today).map(row)[0] || null;
+  const upcoming = sorted
+    .filter((b) => UPCOMING.includes(b.status) && (String(b.date).slice(0, 10) > today || (String(b.date).slice(0, 10) === today && hm(b.start_time) > nowHM)))
+    .map(row).reverse()[0] || null; // sorted newest-first, so the last of the filtered ones is the earliest
+  const recent = rendered.slice(0, 3).map(row);
+
+  const owed = [...rendered].reverse()
+    .map((b) => ({ b, due: bookingDue(b, today) }))
+    .filter(({ due }) => due > 0)
+    .map(({ b, due }) => ({
+      bookingId: b.id, bookingNumber: b.booking_number, branchId: b.branch_id || null, date: String(b.date).slice(0, 10), serviceName: b.service_name_snapshot || '—',
+      finalAmount: Number(b.final_amount || 0), amountPaid: round2(Number(b.final_amount || 0) - due), amountDue: due, paymentStatus: b.payment_status,
+    }));
+
+  const therapistCounts = new Map();
+  const serviceCounts = new Map();
+  for (const b of rendered) {
+    if (b.therapist_name_snapshot) therapistCounts.set(b.therapist_name_snapshot, (therapistCounts.get(b.therapist_name_snapshot) || 0) + 1);
+    if (b.service_name_snapshot) serviceCounts.set(b.service_name_snapshot, (serviceCounts.get(b.service_name_snapshot) || 0) + 1);
+  }
+  const noted = sorted.find((b) => String(b.special_requests || '').trim() && !['Cancelled', 'No Show'].includes(b.status) && String(b.date).slice(0, 10) <= today);
+  return {
+    now, upcoming, recent, owed,
+    preferences: {
+      therapist: topOf(therapistCounts, rendered.length)?.name || null,
+      service: topOf(serviceCounts, rendered.length)?.name || null,
+      note: noted ? { text: String(noted.special_requests).trim(), date: String(noted.date).slice(0, 10) } : null,
+    },
+  };
+}

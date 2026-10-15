@@ -6,8 +6,10 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import {
   TABS, SORTS, LIFECYCLE, tabCounts, lifecycleCounts, matchesSearch, sortCustomers, relativeDayLabel, monthsSince, initials, daysBetween,
 } from '../../../../utils/customerDirectory';
-import { formatPhoneDisplay } from '../../../../utils/phone';
+import { formatPhoneGrouped } from '../../../../utils/phone';
 import { friendlyError } from '../../../../utils/friendlyError';
+import CustomerPanel from './CustomerPanel';
+import { StarIcon, InSpaTag } from './customerBits';
 
 const PAGE_SIZE = 25;
 const LAST_VISIT_OPTIONS = [
@@ -38,17 +40,6 @@ const EMPTY_SEGMENT = Object.fromEntries(LIFECYCLE.map((s) => [s.id, [`No ${s.la
 const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
 const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 const isTyping = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
-
-const StarIcon = ({ size = 13 }) => (
-  <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className="flex-shrink-0" style={{ fill: '#E7B93E', stroke: '#C9971C', strokeWidth: 1.2, strokeLinejoin: 'round' }}>
-    <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" />
-  </svg>
-);
-export const InSpaTag = () => (
-  <span className="h-5 rounded-full pl-1.5 pr-[7px] text-[11.5px] font-medium inline-flex items-center gap-[5px] whitespace-nowrap bg-[#EEF0FF] text-[#4F46E5]">
-    <i className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] shadow-[0_0_0_3px_rgba(79,70,229,.16)]" />In spa
-  </span>
-);
 
 const useDismiss = (open, setOpen, ref) => {
   useEffect(() => {
@@ -130,6 +121,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   const segment = LIFECYCLE.some((s) => s.id === segParam) ? segParam : null;
   const query = searchParams.get('q') || '';
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+  const openId = searchParams.get('open') || null;
   const sort = SORTS[searchParams.get('sort')] ? searchParams.get('sort') : 'next';
   const dir = searchParams.get('dir') === 'asc' || searchParams.get('dir') === 'desc' ? searchParams.get('dir') : SORTS[sort].dir;
 
@@ -229,9 +221,28 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     else patchParams({ sort: id, dir: SORTS[id].dir });
   };
 
+  // ↑/↓ moves between customers while the panel is open (Esc is handled by the panel).
+  useEffect(() => {
+    if (!openId) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      if (isTyping(e.target)) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], .z-modal-overlay')) return; // a modal (e.g. payment) is on top
+      const i = filtered.findIndex((c) => c.id === openId);
+      if (i < 0) return;
+      const nxt = filtered[i + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (!nxt) return;
+      e.preventDefault();
+      patchParams({ open: nxt.id, page: Math.floor(filtered.indexOf(nxt) / PAGE_SIZE) + 1 });
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [openId, filtered, patchParams]);
+
   // ── Navigation ────────────────────────────────────────────────────────────────
   const listUrl = `${location.pathname}${location.search}`;
   const openProfile = (c) => navigate(`/${orgSlug}/customers/${c.id}`, { state: { from: listUrl } });
+  const customerOpen = useMemo(() => (openId && customers ? customers.find((c) => c.id === openId) || null : null), [openId, customers]);
   const bookFor = (c) => navigate('?view=new-booking', { state: { prefill: { fullName: c.fullName, phone: c.phone, email: c.email, gender: c.gender } } });
 
   const exportCsv = () => {
@@ -365,8 +376,9 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       const atRisk = c.segment === 'at-risk' || c.segment === 'lapsed';
       const next = c.nextBooking;
       return (
-        <tr key={c.id} onClick={() => openProfile(c)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') openProfile(c); }} className="group cursor-pointer hover:bg-[#FAFAF9]">
-          <td className="h-14 border-b border-[#F1F1EF] pr-3">
+        <tr key={c.id} onClick={() => patchParams({ open: c.id })} tabIndex={0} aria-selected={c.id === openId || undefined} onKeyDown={(e) => { if (e.key === 'Enter') patchParams({ open: c.id }); }}
+          className={`group cursor-pointer ${c.id === openId ? 'bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]'}`}>
+          <td className={`h-14 border-b border-[#F1F1EF] pr-3 ${c.id === openId ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
             <div className="flex items-center gap-3 pl-2">
               <div className="w-8 h-8 rounded-full bg-[#F1F1EF] text-[#4A4A4F] text-[11.5px] font-semibold grid place-items-center flex-shrink-0">{initials(c.fullName)}</div>
               <div className="min-w-0">
@@ -375,7 +387,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
                   {c.inSpa ? <InSpaTag /> : c.segment === 'new' && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF3EC] text-primary">New</span>}
                   {c.vip && <StarIcon />}
                 </div>
-                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneDisplay(c.phone)}</div>
+                <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(c.phone)}</div>
                 <div className="sm:hidden text-[12.5px] text-[#515152] truncate">{next ? `${relativeDayLabel(next.date, today)} · ${next.time}` : 'No upcoming booking'}</div>
               </div>
             </div>
@@ -467,6 +479,17 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
           <button type="button" aria-label="Next page" disabled={safePage >= pageCount} onClick={() => patchParams({ page: safePage + 1 })} className="w-7 h-7 border border-border rounded-md grid place-items-center disabled:opacity-40 hover:bg-[#FAFAF9]"><Icon name="ChevronRight" size={14} /></button>
         </div>
       </div>
+      <CustomerPanel
+        customer={customerOpen}
+        today={today}
+        readOnly={readOnly}
+        branchId={branchId}
+        isAdmin={role === 'admin'}
+        onClose={() => patchParams({ open: '' })}
+        onNewBooking={() => customerOpen && bookFor(customerOpen)}
+        onOpenProfile={() => customerOpen && openProfile(customerOpen)}
+        onChanged={load}
+      />
     </div>
   );
 };

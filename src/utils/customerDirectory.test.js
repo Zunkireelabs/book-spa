@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildCustomerDirectory, lifecycleSegment, bookingDue, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
+  buildPanelDetail, buildCustomerDirectory, lifecycleSegment, bookingDue, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
   phoneSearchDigits, relativeDayLabel, daysBetween, TABS,
 } from './customerDirectory';
 
@@ -193,5 +193,48 @@ describe('labels', () => {
     expect(relativeDayLabel('2026-06-02', TODAY)).toBe('2 Jun');
     expect(relativeDayLabel('2025-06-02', TODAY)).toBe('2 Jun 2025');
     expect(daysBetween('2026-10-01', TODAY)).toBe(14);
+  });
+});
+
+describe('buildPanelDetail', () => {
+  const det = (bookings) => buildPanelDetail({ bookings, today: TODAY, nowHM: NOW_HM });
+  it('finds today\'s in-progress booking, the next booking and the last 3 visits', () => {
+    const d = det([
+      bk('a', TODAY, 'In-Progress', { start_time: '13:00:00', end_time: '14:30:00', room_name_snapshot: 'Oxford' }),
+      bk('a', ago(2)), bk('a', ago(9)), bk('a', ago(20)), bk('a', ago(30)),
+      bk('a', ahead(8), 'Confirmed'), bk('a', ahead(3), 'Pending'),
+    ]);
+    expect(d.now.room).toBe('Oxford');
+    expect(d.upcoming.date).toBe(ahead(3));
+    expect(d.upcoming.status).toBe('Pending');
+    expect(d.recent.map((r) => r.date)).toEqual([TODAY, ago(2), ago(9)]);
+  });
+  it('owed visits are the rendered unpaid ones, oldest first, and add up to the row balance', () => {
+    const bookings = [
+      bk('a', ago(1), 'Completed', { payment_status: 'unpaid', final_amount: 2000 }),
+      bk('a', ago(20), 'Completed', { payment_status: 'partial', final_amount: 3000, payments: [{ amount: 1000 }] }),
+      bk('a', ahead(4), 'Confirmed', { payment_status: 'unpaid', final_amount: 9000 }),
+      bk('a', ago(5), 'Cancelled', { payment_status: 'unpaid', final_amount: 9000 }),
+    ];
+    const d = det(bookings);
+    expect(d.owed.map((o) => [o.date, o.amountDue, o.amountPaid])).toEqual([[ago(20), 2000, 1000], [ago(1), 2000, 0]]);
+    expect(d.owed.reduce((s, o) => s + o.amountDue, 0)).toBe(one([cust('a')], bookings)[0].balance);
+  });
+  it('preferences need 2+ visits AND at least half of them', () => {
+    const t = (name, days) => bk('a', ago(days), 'Completed', { therapist_name_snapshot: name, service_name_snapshot: name === 'Anil T.' ? 'Hot Stone' : 'Swedish' });
+    expect(det([t('Anil T.', 3), t('Anil T.', 10), t('Asha T.', 20)]).preferences).toMatchObject({ therapist: 'Anil T.', service: 'Hot Stone' }); // 2 of 3
+    expect(det([t('Anil T.', 3), t('Asha T.', 10), t('Vina O.', 20)]).preferences).toMatchObject({ therapist: null, service: 'Swedish' }); // 1 each therapist; Swedish is 2 of 3
+    expect(det([t('Anil T.', 3), t('Anil T.', 10), t('Asha T.', 20), t('Vina O.', 30)]).preferences.therapist).toBe('Anil T.'); // 2 of 4 is exactly half: counts
+    expect(det([t('Anil T.', 3), t('Anil T.', 10), t('Asha T.', 20), t('Vina O.', 30), t('Gita B.', 40)]).preferences.therapist).toBeNull(); // 2 of 5 is under half
+  });
+  it('the note is the most recent non-empty request up to today (not cancelled, not in the future)', () => {
+    const d = det([
+      bk('a', ago(30), 'Completed', { special_requests: 'Prefers light pressure' }),
+      bk('a', ago(2), 'Completed', { special_requests: '  ' }),
+      bk('a', ago(5), 'Cancelled', { special_requests: 'cancelled note' }),
+      bk('a', ahead(2), 'Confirmed', { special_requests: 'future note' }),
+    ]);
+    expect(d.preferences.note).toEqual({ text: 'Prefers light pressure', date: ago(30) });
+    expect(det([bk('a', ago(2))]).preferences.note).toBeNull();
   });
 });
