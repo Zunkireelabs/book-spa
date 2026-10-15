@@ -5,8 +5,8 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { fetchMemberships } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import EnrollMemberPanel from './EnrollMemberPanel';
-import MembershipDetailModal from './MembershipDetailModal';
-import TiersModal from './TiersModal';
+import MembershipDetailPanel from './MembershipDetailPanel';
+import MembershipTiersPanel from './MembershipTiersPanel';
 
 const SORT_OPTIONS = [
   { value: 'latest', label: 'Latest first' },
@@ -262,9 +262,10 @@ const MembershipsPanel = ({ branchId, readOnly = false }) => {
                     <tr
                       key={m.id}
                       onClick={() => setSelectedId(m.id)}
-                      className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
+                      aria-selected={selectedId === m.id || undefined}
+                      className={`border-b border-border last:border-0 cursor-pointer spa-transition-fast ${selectedId === m.id ? 'bg-primary/[0.04]' : 'hover:bg-background/50'}`}
                     >
-                      <td className="px-4 py-3">
+                      <td className={`px-4 py-3 ${selectedId === m.id ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
                         <span className="font-data font-data-medium text-xs text-text-primary tracking-wide">{m.membershipNumber || '—'}</span>
                       </td>
                       <td className="px-4 py-3">
@@ -326,7 +327,7 @@ const MembershipsPanel = ({ branchId, readOnly = false }) => {
       )}
 
       {selectedId && (
-        <MembershipDetailModal
+        <MembershipDetailPanel
           membershipId={selectedId}
           isAdmin={profile?.role === 'admin'}
           readOnly={readOnly}
@@ -337,7 +338,7 @@ const MembershipsPanel = ({ branchId, readOnly = false }) => {
       )}
 
       {showTiers && (
-        <TiersModal
+        <MembershipTiersPanel
           orgId={profile?.org_id}
           onClose={() => setShowTiers(false)}
           onChanged={loadData}

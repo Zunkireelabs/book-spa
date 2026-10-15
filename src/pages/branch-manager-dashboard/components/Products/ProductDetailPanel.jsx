@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
-import { PanelShell, FormBody, InfoRows, TabBar } from '../../../../components/ui/PanelFormKit';
+import { PanelShell, FormBody, InfoRows, TabBar, OverflowMenu } from '../../../../components/ui/PanelFormKit';
 import { fetchProductSales } from '../../../../services/api';
 
 const formatNPR = (amount) => `NPR ${Number(amount).toLocaleString('en-IN')}`;
@@ -11,7 +11,7 @@ const headerBtn = 'h-8 px-2.5 text-[13px] font-body font-body-medium rounded-spa
 
 // Read-only product detail in the right-hand panel: image, name and status, then Details / Sales. Header actions: Edit (manager
 // and admin) and Sell (an active product with stock). Edit switches this same panel to the edit form.
-const ProductDetailPanel = ({ product, canEdit, canSell, onClose, onEdit, onSell }) => {
+const ProductDetailPanel = ({ product, canEdit, canSell, onClose, onEdit, onSell, onReceive }) => {
   const [tab, setTab] = useState('details');
   const [sales, setSales] = useState(null);
 
@@ -24,6 +24,10 @@ const ProductDetailPanel = ({ product, canEdit, canSell, onClose, onEdit, onSell
 
   const outOfStock = product.track_stock && product.stock_quantity === 0;
   const sellable = canSell && product.is_active && !outOfStock;
+  // Receiving stock only applies to tracked products. At zero stock it is the next action, so it takes Sell's place in the header;
+  // otherwise it lives in the overflow menu.
+  const canReceive = canEdit && product.track_stock && !!onReceive;
+  const receiveFirst = canReceive && outOfStock;
 
   return (
     <PanelShell
@@ -34,7 +38,9 @@ const ProductDetailPanel = ({ product, canEdit, canSell, onClose, onEdit, onSell
       headerExtra={(
         <>
           {canEdit && <button type="button" onClick={() => onEdit(product)} className={`${headerBtn} text-text-secondary hover:bg-black/[0.05]`}>Edit</button>}
+          {receiveFirst && <button type="button" onClick={() => onReceive(product)} className={`${headerBtn} bg-primary text-white hover:bg-primary/90`}>Receive stock</button>}
           {sellable && <button type="button" onClick={() => onSell(product)} className={`${headerBtn} bg-primary text-white hover:bg-primary/90`}>Sell</button>}
+          <OverflowMenu items={canReceive && !receiveFirst ? [{ key: 'receive', label: 'Receive stock', icon: 'ArrowLeftRight', run: () => onReceive(product) }] : []} />
         </>
       )}
     >
@@ -58,7 +64,7 @@ const ProductDetailPanel = ({ product, canEdit, canSell, onClose, onEdit, onSell
             <InfoRows rows={[
               ['Category', product.category || '—'],
               ['Price', formatNPR(product.price_npr)],
-              ['Stock', product.track_stock ? String(product.stock_quantity) : 'Unlimited', outOfStock ? 'amber' : undefined],
+              ['Stock', product.track_stock ? String(product.stock_quantity) : 'Unlimited', outOfStock ? 'error' : undefined],
               ['Added', formatDate(product.created_at)],
             ]} />
             <div>

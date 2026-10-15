@@ -202,8 +202,8 @@ const ProductsPanel = () => {
                 </tr>
               ) : (
                 filteredProducts.map((p) => (
-                  <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-background/50 spa-transition-fast">
-                    <td className="px-4 py-3">
+                  <tr key={p.id} aria-selected={panel?.product?.id === p.id || undefined} className={`border-b border-border last:border-b-0 spa-transition-fast ${panel?.product?.id === p.id ? 'bg-primary/[0.04]' : 'hover:bg-background/50'}`}>
+                    <td className={`px-4 py-3 ${panel?.product?.id === p.id ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-spa overflow-hidden border border-border bg-background flex-shrink-0 flex items-center justify-center">
                           {p.image_url ? (
@@ -331,6 +331,7 @@ const ProductsPanel = () => {
           onClose={closePanel}
           onEdit={(product) => setPanel({ kind: 'form', product, from: 'detail' })}
           onSell={(product) => setPanel({ kind: 'sell', product })}
+          onReceive={(product) => setPanel({ kind: 'transfer', product })}
         />
       )}
       {panel?.kind === 'sell' && (

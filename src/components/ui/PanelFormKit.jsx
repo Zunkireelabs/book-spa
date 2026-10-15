@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Icon from '../AppIcon';
 import SidePanel from './SidePanel';
+import { useMenuNav } from './useMenuNav';
 import CustomSelect from './CustomSelect';
 import MiniMonthCalendar from '../../pages/branch-manager-dashboard/components/calendar/MiniMonthCalendar';
 
@@ -206,6 +207,49 @@ export const Stepper = ({ value, onChange, min = 1, max, id, ariaLabel = 'Quanti
       <button type="button" aria-label="Increase" disabled={max != null && n >= max} onClick={() => onChange(String(clamp(n + 1)))} className="w-10 flex items-center justify-center text-text-secondary hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">
         <Icon name="Plus" size={14} />
       </button>
+    </div>
+  );
+};
+
+// "⋯" overflow menu for a panel header: items [{ key, label, icon, run, disabled, reason, danger }]. Same menu behaviour as elsewhere
+// (↑ ↓ Home End, Esc / outside click / Tab close, focus returns to the trigger). Renders nothing when there are no items.
+export const OverflowMenu = ({ items, label = 'More actions' }) => {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  useMenuNav({ open, onClose: () => setOpen(false), menuRef, triggerRef });
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="w-8 h-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05] spa-transition-fast"
+      >
+        <Icon name="MoreHorizontal" size={16} />
+      </button>
+      {open && (
+        <div ref={menuRef} role="menu" className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-spa-lg shadow-spa-elevated py-1 z-dropdown">
+          {items.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              role="menuitem"
+              disabled={it.disabled}
+              title={it.disabled ? it.reason : undefined}
+              onClick={() => { setOpen(false); it.run(); }}
+              className={`w-full flex items-center gap-2 px-3 h-9 text-[13px] font-body text-left hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent ${it.danger ? 'text-error' : 'text-text-primary'}`}
+            >
+              {it.icon && <Icon name={it.icon} size={14} className={it.danger ? 'text-error' : 'text-text-tertiary'} />}
+              <span className="flex-1">{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -447,7 +491,7 @@ export const InfoRows = ({ rows }) => (
     {rows.filter(Boolean).map(([k, v, tone]) => (
       <div key={k} className="flex items-center justify-between gap-3 px-3 py-2" style={tone === 'total' ? { borderTopColor: 'rgba(14,13,12,0.25)' } : undefined}>
         <dt className={tone === 'total' ? 'font-semibold text-text-primary' : 'text-text-secondary'}>{k}</dt>
-        <dd className={`text-right tabular-nums ${tone === 'amber' ? 'text-warning font-body-medium' : tone === 'total' ? 'text-text-primary font-semibold' : 'text-text-primary font-body-medium'}`}>{v}</dd>
+        <dd className={`text-right tabular-nums ${tone === 'amber' ? 'text-warning font-body-medium' : tone === 'error' ? 'text-error font-body-medium' : tone === 'total' ? 'text-text-primary font-semibold' : 'text-text-primary font-body-medium'}`}>{v}</dd>
       </div>
     ))}
   </dl>
