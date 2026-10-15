@@ -157,6 +157,10 @@ export function transformBooking(dbBooking) {
     branchId: dbBooking.branch_id || null,
     branchName: dbBooking.branch?.name || null,
     startTime: dbBooking.start_time || null,
+    endTime: dbBooking.end_time || null,
+    // created_by is NULL only for customer self-bookings from the public flow (migration-159), so it marks "Online" rows.
+    createdBy: dbBooking.created_by ?? null,
+    createdAt: dbBooking.created_at || null,
     specialRequests: dbBooking.special_requests || null,
     referredBy: dbBooking.referred_by || null,
     referralSource: dbBooking.referral_source || null,

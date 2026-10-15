@@ -68,6 +68,8 @@ export const AreaPage = ({ title, description, titleExtra = null, backLabel, onB
         {reopen}
         <h1 className="font-heading font-heading-semibold text-lg text-text-primary">{title}</h1>
         {titleExtra}
+        {/* Pages can portal their header actions here (e.g. Bookings: Live + Export). */}
+        <div id="area-header-actions" className="ml-auto flex items-center gap-2" />
       </div>
       <p className="text-[13px] text-text-secondary">{description}</p>
       {tabs}

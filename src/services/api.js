@@ -372,6 +372,76 @@ export async function fetchBookings(branchId, { date, dateFrom, dateTo, status }
 }
 
 /**
+ * Bookings for the Bookings list page: a real date range (inclusive), paged past the 1,000-row API cap, with the
+ * payment + refund rows the money model needs and every assigned therapist. Sorted by date, start time.
+ */
+export async function fetchBookingsForList(branchId, { dateFrom, dateTo }) {
+  try {
+    const rows = await pageAllRows(() => withBranch(
+      supabase
+        .from('bookings')
+        .select(`
+          *,
+          service:services(id, name, duration_minutes),
+          therapist:therapists(id, name, gender),
+          room:rooms(id, name),
+          payments(id, amount, payment_mode, created_at),
+          payment_refunds(id, amount, reason, created_at),
+          booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
+        `)
+        .gte('date', dateFrom)
+        .lte('date', dateTo)
+        .order('date')
+        .order('start_time')
+        .order('id'),
+      branchId,
+    ));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchBookingsForList error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Booking ids the current user has an unread notification for (drives the green "new" dot on the Bookings list). */
+export async function fetchUnreadBookingIds() {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('booking_id')
+      .eq('user_id', user.id)
+      .eq('read', false)
+      .not('booking_id', 'is', null);
+    if (error) throw error;
+    return { data: [...new Set((data || []).map((r) => r.booking_id))], error: null };
+  } catch (error) {
+    console.error('[API] fetchUnreadBookingIds error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Opening a booking marks the current user's unread notifications for it as read. */
+export async function markBookingNotificationsRead(bookingId) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', user.id)
+      .eq('booking_id', bookingId)
+      .eq('read', false);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] markBookingNotificationsRead error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
  * Fetch who created a booking + when. Returns { createdByName, createdAt }.
  * createdByName is null for anonymous customer self-bookings (online).
  */
