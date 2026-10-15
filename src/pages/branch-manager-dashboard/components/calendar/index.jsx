@@ -110,7 +110,7 @@ const OperationalCalendar = ({ branchId }) => {
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     transferCancelRequest, setTransferCancelRequest, blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef,
+    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick, handleConfirmTransferCancel,
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
@@ -312,8 +312,9 @@ const OperationalCalendar = ({ branchId }) => {
               <span className="font-caption text-[10px] text-text-secondary">
                 {rebookSource.duration}
               </span>
-              <span className="font-caption text-[10px] text-primary font-medium">
-                {rebookSource.isReschedule ? 'Click to move' : 'Click to place'}
+              <span className="font-caption text-[10px] text-primary font-medium inline-flex items-center gap-1">
+                {reschedulePending && <span className="w-2.5 h-2.5 rounded-full border-2 border-primary/30 border-t-primary animate-spin" aria-hidden="true" />}
+                {reschedulePending ? 'Moving…' : rebookSource.isReschedule ? 'Click to move' : 'Click to place'}
               </span>
             </div>
           </div>

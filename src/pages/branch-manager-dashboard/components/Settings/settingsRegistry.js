@@ -3,6 +3,7 @@ import { CUSTOMER_REFERRALS_ENABLED } from 'lib/featureFlags';
 // Registry for the Settings area (same shape as the report registry, plus `overallHidden`). Roles, gates and icons mirror the
 // sidebar's former "Setup" group. Reward Catalog moved here from Reports.
 const STAFF_UP = ['manager', 'admin', 'admin_viewer'];
+const MGR_ADMIN = ['manager', 'admin']; // master-data pages: admin_viewer cannot read them (RLS), so they are not offered
 
 export const SETTINGS_CATEGORIES = [
   { id: 'spa', label: 'Spa' },
@@ -13,9 +14,9 @@ export const SETTINGS_CATEGORIES = [
 
 export const SETTINGS = [
   // `location: true` -> the title uses the industry's location label (Rooms / ...); `needsRooms` -> only when the industry uses rooms.
-  { id: 'rooms', view: 'rooms', title: 'Rooms', location: true, needsRooms: true, description: 'Rooms customers are booked into.', icon: 'DoorOpen', category: 'spa', roles: STAFF_UP, overallHidden: true, keywords: 'locations' },
-  { id: 'services', view: 'services', title: 'Services', description: 'Services, prices and durations.', icon: 'Sparkles', category: 'spa', roles: STAFF_UP, overallHidden: true, keywords: 'treatments prices' },
-  { id: 'categories', view: 'categories', title: 'Categories', description: 'Groups that organise your services.', icon: 'Tags', category: 'spa', roles: STAFF_UP, overallHidden: true, keywords: 'groups' },
+  { id: 'rooms', view: 'rooms', title: 'Rooms', location: true, needsRooms: true, description: 'Rooms customers are booked into.', icon: 'DoorOpen', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'locations' },
+  { id: 'services', view: 'services', title: 'Services', description: 'Services, prices and durations.', icon: 'Sparkles', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'treatments prices' },
+  { id: 'categories', view: 'categories', title: 'Categories', description: 'Groups that organise your services.', icon: 'Tags', category: 'spa', roles: MGR_ADMIN, overallHidden: true, keywords: 'groups' },
 
   { id: 'payment-methods', view: 'payment-methods', title: 'Payment Methods', description: 'How customers can pay at the desk.', icon: 'CreditCard', category: 'payments', roles: ['admin'], overallHidden: true, keywords: 'cash card pay methods' },
   ...(CUSTOMER_REFERRALS_ENABLED ? [

@@ -158,7 +158,7 @@ const MembershipDetailModal = ({ membershipId, isAdmin = false, readOnly = false
                   {m.customerGender && <span> · {m.customerGender}</span>}
                   {m.customerEmail && <span> · {m.customerEmail}</span>}
                 </p>
-                {m.customerId && (
+                {m.customerId && !readOnly && (
                   <CustomerContactQuickEdit
                     customerId={m.customerId}
                     email={m.customerEmail}

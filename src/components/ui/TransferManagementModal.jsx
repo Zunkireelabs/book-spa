@@ -3,7 +3,8 @@ import Icon from '../AppIcon';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField, InlineError, InfoRows,
 } from './PanelFormKit';
-import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm } from '../../utils/transferPreview';
+import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm, validateExtension } from '../../utils/transferPreview';
+import { friendlyError } from '../../utils/friendlyError';
 import { useIndustry } from '../../hooks/useIndustry';
 import {
   transferTherapist,
@@ -105,7 +106,9 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     return () => { cancelled = true; };
   }, [therapistId, currentBranchId]);
 
-  const isExtendFormComplete = !!extendDurationUnit && !!extendDurationValue && Number(extendDurationValue) > 0;
+  // Whole number of 1+, and the new return at most a year ahead (client-side: the RPC has no ceiling).
+  const extendValidationError = activeTransfer ? validateExtension({ value: extendDurationValue, unit: extendDurationUnit, currentRevertAt: activeTransfer.revertAt }) : null;
+  const isExtendFormComplete = !!extendDurationUnit && !!extendDurationValue && Number(extendDurationValue) > 0 && !extendValidationError;
 
   const handleExtendTransfer = async () => {
     if (!isExtendFormComplete) {
@@ -122,7 +125,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     });
 
     if (result.error) {
-      setExtendError(result.error.message || 'Failed to extend transfer.');
+      setExtendError(friendlyError(result.error, 'Failed to extend transfer.'));
       setExtending(false);
       return;
     }
@@ -485,13 +488,13 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
           ['Current return', fmtDT(activeTransfer.revertAt), 'amber'],
           ['Status', 'Active'],
         ]} />
-        <InlineError message={extendError || (!useCustomReturnTime ? revertError : null)} />
+        <InlineError message={extendValidationError || extendError || (!useCustomReturnTime ? revertError : null)} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Add extra time">
             <SelectField placeholder="Select unit..." options={UNIT_OPTIONS} value={extendDurationUnit} onChange={setExtendDurationUnit} />
           </Field>
           <Field label="Amount">
-            <NumberInput min="1" value={extendDurationValue} onChange={(e) => setExtendDurationValue(e.target.value)} placeholder="e.g. 2" />
+            <NumberInput min="1" step="1" value={extendDurationValue} onChange={(e) => { setExtendDurationValue(e.target.value); setExtendError(null); }} placeholder="e.g. 2" />
           </Field>
         </div>
         {customReturnBlock(false)}

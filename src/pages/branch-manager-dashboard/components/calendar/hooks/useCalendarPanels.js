@@ -14,6 +14,7 @@ import { transformBooking } from '../../../../../services/bookingTransformers';
 import { isOverallBranch } from '../../../../../services/api';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blockOverlap';
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
+import { friendlyError } from '../../../../../utils/friendlyError';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
@@ -68,6 +69,15 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   // Shape: { booking, customerName, customerPhone, serviceId, serviceName, duration }
   const [rebookSource, setRebookSource] = useState(null);
   const [rebookFallback, setRebookFallback] = useState(false);
+  // A reschedule RPC is in flight: pick mode stays up (with a spinner on the card) and slot clicks / Escape are ignored until it answers.
+  const [reschedulePending, setReschedulePending] = useState(false);
+  const reschedulePendingRef = useRef(false);
+  const lastMouseRef = useRef(null);
+  useEffect(() => {
+    const track = (e) => { lastMouseRef.current = { x: e.clientX, y: e.clientY }; };
+    document.addEventListener('mousemove', track);
+    return () => document.removeEventListener('mousemove', track);
+  }, []);
 
   // Rebook floating card — mouse tracking
   const rebookCardRef = useRef(null);
@@ -75,6 +85,15 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
   useEffect(() => {
     if (!rebookSource) return;
+
+    // Put the card under the cursor straight away (also when pick mode is restored after a failed placement),
+    // instead of leaving it parked off-screen until the mouse next moves.
+    const parked = lastMouseRef.current;
+    if (parked && rebookCardRef.current) {
+      rebookCardRef.current.style.left = `${parked.x + 12}px`;
+      rebookCardRef.current.style.top = `${parked.y - 20}px`;
+      rebookCardRef.current.style.opacity = '0.95';
+    }
 
     const handleMouseMove = (e) => {
       const card = rebookCardRef.current;
@@ -96,8 +115,11 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && rebookSource && !e.defaultPrevented) {
+        if (reschedulePendingRef.current) return; // the move is already being saved
         if (rebookSource.isReschedule) {
-          // No inline fallback form for Reschedule: just drop out of pick mode.
+          // No inline fallback form for Reschedule: leave pick mode and bring the booking panel back.
+          setSelectedBooking(rebookSource.booking);
+          setModalOpen(true);
           setRebookSource(null);
           return;
         }
@@ -172,6 +194,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [rebookSource, calendarData, openQuickCreateForSlot]);
 
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
+    if (reschedulePendingRef.current) return; // a reschedule is being saved: ignore clicks until it answers
     // Refuse new bookings/blocks on any slot covered by a manual block.
     const manualBlock = findBlockOverlap([...(calendarData?.blockOccurrences || []), ...(calendarData?.transferOccurrences || [])], {
       date: slotInfo.day,
@@ -194,10 +217,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
     // Rebook mode — place booking at clicked slot
     if (rebookSource) {
-      // Capture and immediately clear to prevent double-click duplicates
       const source = rebookSource;
-      setRebookSource(null);
-
       const startTime = `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`;
       const therapistId = slotInfo.colType === 'therapist' ? slotInfo.colId : null;
       const roomId = slotInfo.colType === 'room' ? slotInfo.colId : null;
@@ -205,6 +225,10 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       if (source.isReschedule) {
         // Single DB transaction (reschedule_booking RPC): creates the new booking and cancels the original atomically, and
         // carries discount / special requests / companion / referral fields over, so there is no partial-failure state.
+        // Pick mode stays up while it runs (spinner on the card, further clicks ignored); on failure it simply stays, so the
+        // user can pick another slot.
+        reschedulePendingRef.current = true;
+        setReschedulePending(true);
         const result = await rescheduleBookingAsNewBooking({
           bookingId: source.originalBookingId,
           date: slotInfo.day,
@@ -213,15 +237,20 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
           roomId,
           reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
         });
+        reschedulePendingRef.current = false;
+        setReschedulePending(false);
         if (result.error) {
-          showToast(result.error.message || 'Failed to reschedule.', 'error');
-          setRebookSource(source);
+          showToast(friendlyError(result.error, 'Failed to reschedule.'), 'error');
         } else {
+          setRebookSource(null);
           showToast('Booking rescheduled successfully.');
           refreshCalendar();
         }
         return;
       }
+
+      // Capture and immediately clear to prevent double-click duplicates
+      setRebookSource(null);
 
       // The source booking may be one of the historical bookings created before phone became required: silently resubmitting
       // it would fail the DB's INSERT trigger. Route through the normal editable form instead, pre-filled with what's known,
@@ -246,7 +275,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         roomId,
       });
       if (result.error) {
-        showToast(result.error.message || 'Failed to rebook.', 'error');
+        showToast(friendlyError(result.error, 'Failed to rebook.'), 'error');
         // Restore rebook mode on failure so user can retry
         setRebookSource(source);
       } else {
@@ -548,7 +577,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
     transferCancelRequest, setTransferCancelRequest, blockPanelOpen, blockRetarget,
-    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef,
+    servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
     openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick, handleConfirmTransferCancel,
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,

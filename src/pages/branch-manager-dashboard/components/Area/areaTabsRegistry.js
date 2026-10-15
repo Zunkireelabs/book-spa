@@ -13,7 +13,7 @@ export const AREAS = [
     description: ({ branchName, isOverall }) => `Every booking at ${isOverall ? 'all branches' : (branchName || 'this branch')}.`,
     tabs: [
       { view: 'bookings', label: 'All bookings', roles: ALL },
-      { view: 'new-booking', label: 'New booking', roles: ALL, overallHidden: true },
+      { view: 'new-booking', label: 'New booking', roles: ['staff', 'manager', 'admin'], overallHidden: true },
       { view: 'check-booking', label: 'Check booking', roles: ALL, overallHidden: true },
       { view: 'collect-payment', label: 'Collect payment', roles: ['staff'] },
       ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', label: 'New membership', roles: ['staff'] }] : []),

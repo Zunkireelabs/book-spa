@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
@@ -14,6 +14,7 @@ import {
   enrollMember,
 } from '../../../../services/api';
 import { toDateInputValue } from '../../../../utils/date';
+import { friendlyError } from '../../../../utils/friendlyError';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -63,6 +64,13 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
   const [activationDate, setActivationDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const dialogRef = useRef(null);
+
+  // Focus the first field when the dialog opens.
+  useEffect(() => { dialogRef.current?.querySelector('input:not([disabled])')?.focus(); }, []);
+
+  // A shown error describes the last submit: drop it as soon as the user edits the form.
+  useEffect(() => { setError(null); }, [name, phone, customerCountryCode, email, gender, dateOfBirth, tierId, deposit, paymentMode, notes, activationDate, lockedCustomer]);
 
   // Load tier list + org customers (for inline suggestions) on mount.
   useEffect(() => {
@@ -136,7 +144,10 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
     setError(null);
 
     if (!name.trim()) { setError('Please enter the customer name.'); return; }
-    if (!normalizePhone(phone)) { setError('Phone number is required.'); return; }
+    const phoneDigits = normalizePhone(phone);
+    if (!phoneDigits) { setError('Phone number is required.'); return; }
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) { setError('Enter a valid phone number (7–15 digits).'); return; }
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError('Enter a valid email address.'); return; }
     if (!tierId) { setError('Please select a tier.'); return; }
     if (depositNum <= 0) { setError('Initial deposit must be greater than zero.'); return; }
 
@@ -155,7 +166,7 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
       });
       if (custErr) {
         setSubmitting(false);
-        setError(custErr.message || 'Failed to find or create the customer.');
+        setError(friendlyError(custErr, 'Failed to find or create the customer.'));
         return;
       }
       customerId = cust?.customerId;
@@ -173,7 +184,9 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
     setSubmitting(false);
 
     if (rpcError) {
-      setError(rpcError.message || 'Failed to enroll member.');
+      setError(/uniq_active_membership_per_customer/.test(rpcError?.message || '')
+        ? 'This customer already has an active membership. Open it from Memberships to top up or renew.'
+        : friendlyError(rpcError, 'Failed to enroll member.'));
       return;
     }
     onEnrolled(data?.membershipId || null);
@@ -183,12 +196,14 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
     <>
       <div className="fixed inset-0 bg-black/40 z-modal" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         className="fixed inset-0 z-modal-overlay flex items-center justify-center p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="enroll-member-title"
       >
         <form
+          noValidate
           onSubmit={handleSubmit}
           className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-lg max-h-[90vh] overflow-y-auto"
         >
@@ -230,7 +245,8 @@ const EnrollMemberModal = ({ onClose, onEnrolled, onRenewExisting }) => {
                     <input
                       type="tel"
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                      inputMode="numeric"
                       placeholder="98XXXXXXXX"
                       disabled={!!lockedCustomer}
                       className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:bg-background"

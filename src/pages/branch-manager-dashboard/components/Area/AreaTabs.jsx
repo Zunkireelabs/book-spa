@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
@@ -16,6 +16,11 @@ const AreaTabs = ({ area, view, children }) => {
 
   const ctx = { role: profile?.role, isOverall, branchName, staffLabelPlural };
   const tabs = getVisibleTabs(area, ctx);
+  // The role cannot open this view: send it to the area's first visible tab, or to the dashboard when it has none.
+  if (!tabs.some((t) => t.view === view)) {
+    return <Navigate to={{ search: `?view=${tabs[0]?.view || 'dashboard'}` }} replace />;
+  }
+
   const areaTitle = typeof area.title === 'function' ? area.title(ctx) : area.title;
 
   // Arrow keys / Home / End move focus between tabs; Enter or Space opens the focused one (it is a link).

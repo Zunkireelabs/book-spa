@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
@@ -560,7 +560,7 @@ const BranchManagerDashboard = () => {
           {isSettingsViewActive && <SettingsLayout view={viewMode} renderSetting={renderSettingView} />}
           {areaForView && <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>}
           {viewMode === 'customers' && (branchLoading ? <BranchPending /> : <CustomersPanel branchId={branchId} readOnly={isOverall} />)}
-          {PRODUCTS_ENABLED && viewMode === 'products' && <ProductsPanel />}
+          {PRODUCTS_ENABLED && viewMode === 'products' && (profile?.role === 'admin_viewer' ? <Navigate to={{ search: '?view=dashboard' }} replace /> : <ProductsPanel />)}
           {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
       </AppShell>
     </>

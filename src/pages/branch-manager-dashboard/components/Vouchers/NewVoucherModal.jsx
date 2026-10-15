@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
@@ -12,6 +12,7 @@ import { fetchVoucherTypes, issueVoucher, createVoucherType, fetchMembershipForC
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
 import { MEMBERSHIP_ENABLED } from '../../../../lib/featureFlags';
 import { toDateInputValue } from '../../../../utils/date';
+import { friendlyError } from '../../../../utils/friendlyError';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
@@ -41,6 +42,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   const { profile } = useAuth();
   const { orgId, paymentMethods } = useOrg();
   const isAdmin = userRole === 'admin';
+  const dialogRef = useRef(null);
 
   const [types, setTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
@@ -55,6 +57,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   const [guestOtherInfo, setGuestOtherInfo] = useState('');
   const [actualPrice, setActualPrice] = useState('');
   const [discountPercent, setDiscountPercent] = useState('0');
+  const [discountOutOfRange, setDiscountOutOfRange] = useState(false);
   const [issuedDate, setIssuedDate] = useState(() => toDateInputValue(new Date()));
   const [expiryDate, setExpiryDate] = useState(() => {
     const d = new Date();
@@ -69,6 +72,11 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [issued, setIssued] = useState(null); // the issued voucher row, shown as a success state
+
+  // Focus the first field when the form opens (not on the success screen).
+  useEffect(() => {
+    if (!issued) dialogRef.current?.querySelector('input:not([disabled])')?.focus();
+  }, [issued]);
 
   const [showNewType, setShowNewType] = useState(false);
   const [newType, setNewType] = useState(EMPTY_NEW_TYPE);
@@ -141,7 +149,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   };
 
   const actualPriceNum = Number(actualPrice) || 0;
-  const discountNum = Number(discountPercent) || 0;
+  const discountNum = Math.min(100, Math.max(0, Number(discountPercent) || 0));
   const totalAmount = useMemo(
     () => Math.round((actualPriceNum - (actualPriceNum * discountNum) / 100) * 100) / 100,
     [actualPriceNum, discountNum]
@@ -190,6 +198,24 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
   );
   const tenderRemaining = useMemo(() => Math.round((totalAmount - tenderTotal) * 100) / 100, [totalAmount, tenderTotal]);
 
+  // The "between 0 and 100" note is transient: the value has already been clamped, so drop the note after a moment.
+  useEffect(() => {
+    if (!discountOutOfRange) return undefined;
+    const t = setTimeout(() => setDiscountOutOfRange(false), 3000);
+    return () => clearTimeout(t);
+  }, [discountOutOfRange]);
+
+  // A shown error describes the last submit: drop it as soon as the user edits the form.
+  useEffect(() => { setError(null); }, [voucherTypeId, voucherCode, guestName, guestPhone, actualPrice, discountPercent, issuedDate, expiryDate, tenders]);
+
+  // Why "Issue voucher" is disabled, so the button never fails silently.
+  const issueBlockReason = isOverall ? 'Switch to a specific branch to issue a voucher.'
+    : loadingTypes ? 'Loading voucher types…'
+    : membershipOverWallet ? 'The membership wallet balance is too low for this payment.'
+    : tenderRemaining > 0 ? `Collect ${formatNPR(tenderRemaining)} more — payments must equal the total.`
+    : tenderRemaining < 0 ? `Payments exceed the total by ${formatNPR(-tenderRemaining)}.`
+    : '';
+
   const handleCreateNewType = async (e) => {
     e.preventDefault();
     setNewTypeError(null);
@@ -223,7 +249,6 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
     if (!voucherCode.trim()) { setError('Voucher code is required.'); return; }
     if (!guestName.trim()) { setError('Guest name is required.'); return; }
     if (actualPriceNum < 0) { setError('Price cannot be negative.'); return; }
-    if (discountNum < 0 || discountNum > 100) { setError('Discount must be between 0 and 100.'); return; }
     if (!issuedDate || !expiryDate) { setError('Issued and expiry dates are required.'); return; }
     if (expiryDate < issuedDate) { setError('Expiry date cannot be before the issued date.'); return; }
     if (tenderRemaining !== 0) { setError('Payment amount must equal the voucher total.'); return; }
@@ -259,7 +284,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
     setSubmitting(false);
 
     if (rpcError) {
-      setError(rpcError.message || 'Failed to issue voucher.');
+      setError(friendlyError(rpcError, 'Failed to issue voucher.'));
       return;
     }
     setIssued(data);
@@ -273,6 +298,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
     <>
       <div className="fixed inset-0 bg-black/40 z-modal" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         className="fixed inset-0 z-modal-overlay flex items-start justify-center overflow-y-auto p-4 pt-10 sm:pt-16"
         role="dialog"
         aria-modal="true"
@@ -298,6 +324,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
           </div>
         ) : (
           <form
+            noValidate
             onSubmit={handleSubmit}
             className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-lg max-h-[90vh] overflow-y-auto"
           >
@@ -530,9 +557,20 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
                     max="100"
                     step="any"
                     value={discountPercent}
-                    onChange={(e) => { setDiscountPercent(e.target.value); setDiscountTouched(true); }}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    onChange={(e) => {
+                      // Keep the discount within 0-100: out-of-range input is clamped and says so.
+                      const raw = e.target.value;
+                      const n = Number(raw);
+                      const outOfRange = raw !== '' && (n > 100 || n < 0);
+                      setDiscountOutOfRange(outOfRange);
+                      setDiscountPercent(outOfRange ? String(Math.min(100, Math.max(0, n))) : raw);
+                      setDiscountTouched(true);
+                    }}
+                    onBlur={() => setDiscountOutOfRange(false)}
+                    aria-invalid={discountOutOfRange}
+                    className={`w-full h-10 px-3 text-sm border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${discountOutOfRange ? 'border-error' : 'border-border'}`}
                   />
+                  {discountOutOfRange && <p className="mt-1 font-caption text-[11px] text-error">Discount must be between 0 and 100%.</p>}
                 </div>
               </div>
 
@@ -658,6 +696,9 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
             </div>
 
             <div className="sticky bottom-0 bg-surface border-t border-border px-5 py-3 flex items-center justify-end space-x-2">
+              {issueBlockReason && !submitting && (
+                <p className="mr-auto font-caption text-xs text-warning" data-testid="issue-block-reason">{issueBlockReason}</p>
+              )}
               <button
                 type="button"
                 onClick={onClose}
@@ -668,6 +709,7 @@ const NewVoucherModal = ({ userRole, onClose, onIssued }) => {
               <button
                 type="submit"
                 disabled={submitting || loadingTypes || isOverall || tenderRemaining !== 0 || membershipOverWallet}
+                title={issueBlockReason || undefined}
                 className="px-3 py-2 rounded-spa bg-primary text-white text-sm font-body font-body-medium hover:bg-primary/90 disabled:opacity-50 spa-transition-fast inline-flex items-center space-x-1.5"
               >
                 {submitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
