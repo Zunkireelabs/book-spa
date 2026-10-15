@@ -1,6 +1,9 @@
 // Pure derivation for the Customers list: one row per customer with next/last visit, in-spa flag, balance, spent and a single
 // lifecycle segment. "Today"/"now" are Nepal wall-clock values (never toISOString(), which shifts the date) and are injectable
-// so the boundaries can be tested.
+// so the boundaries can be tested. All money comes from ./bookingMoney (the one model); only the "Before" figure of the V12 notice still
+// uses the old rule (legacyDue).
+
+import { summarizeMoney, classifyBooking } from './bookingMoney';
 
 export const NEW_DAYS = 30;
 export const AT_RISK_DAYS = 60;
@@ -28,20 +31,6 @@ const dayNumber = (iso) => {
 };
 export const daysBetween = (fromISO, toISO) => dayNumber(toISO) - dayNumber(fromISO);
 const round2 = (n) => Math.round(n * 100) / 100;
-
-/**
- * Money still owed on ONE booking. Only RENDERED visits (Completed / In-Progress, date <= today) can be owed, so a future or
- * cancelled booking never counts; a paid booking owes nothing; never negative.
- * NOTE: the Outstanding report and the calendar's "Prev. due" still use the older unpaid/partial-status rule (which counts
- * confirmed future bookings). Aligning them is a separate, owner-approved task, so they are deliberately left alone here.
- */
-export function bookingDue(b, today) {
-  if (!RENDERED.includes(b.status)) return 0;
-  if (String(b.date).slice(0, 10) > today) return 0;
-  if (b.payment_status === 'paid') return 0;
-  const paid = (b.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
-  return Math.max(0, round2(Number(b.final_amount || 0) - paid));
-}
 
 /**
  * The OLD owed rule (what the Outstanding report and the calendar's "Prev. due" still use): any unpaid / partial booking that is
@@ -88,9 +77,7 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
     let next = null;
     let inSpa = false;
     let completedVisits = 0;
-    let balance = 0;
     let legacyBalance = 0;
-    let spent = 0;
     const therapists = new Map(); // id -> name
     const services = new Set();
     const therapistCounts = new Map(); // rendered visits only, for the "usual therapist" / "favourite service" lines
@@ -111,13 +98,15 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
       if (UPCOMING.includes(b.status) && (date > today || (date === today && time > nowHM))) {
         if (!next || date < next.date || (date === next.date && time < next.time)) next = info;
       }
-      balance = round2(balance + bookingDue(b, today));
       legacyBalance = round2(legacyBalance + legacyDue(b));
-      if (b.payment_status === 'paid') spent = round2(spent + Number(b.final_amount || 0));
       if (b.therapist_id && b.therapist_name_snapshot) therapists.set(b.therapist_id, b.therapist_name_snapshot);
       if (b.service_name_snapshot) services.add(b.service_name_snapshot);
     }
 
+    // Every money figure comes from the one model: payments − refunds, never payment_status.
+    const money = summarizeMoney(list, { today });
+    const spent = money.paidToDate;
+    const closedDue = money.dueBookings.filter((b) => b.is_locked).reduce((x, b) => x + b.money.due, 0);
     return {
       id: c.id,
       fullName: c.full_name || '',
@@ -129,8 +118,14 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
       lastVisit: last ? { date: last.date, service: last.service, therapist: last.therapist } : null,
       nextBooking: next ? { date: next.date, time: next.time, service: next.service, therapist: next.therapist } : null,
       inSpa,
-      spent,
-      balance,
+      spent, // paid to date (payments − refunds)
+      balance: money.due, // owed now: rendered visits only
+      unpaidVisits: money.dueCount,
+      lockedDue: round2(closedDue), // part of balance on closed (locked) days: owed, but can't be collected from here
+      upcoming: money.upcoming, // scheduled, not owed
+      deposit: money.deposit,
+      credit: money.credit,
+      unclosed: money.unclosed.map((b) => ({ id: b.id, date: String(b.date).slice(0, 10), service: b.service_name_snapshot || '', status: b.status, atStake: b.money.atStake, isLocked: !!b.is_locked })),
       legacyBalance,
       usualTherapist: topOf(therapistCounts, completedVisits)?.name || null,
       favouriteService: topOf(serviceCounts, completedVisits)?.name || null,
@@ -281,12 +276,12 @@ export function buildPanelDetail({ bookings = [], today, nowHM }) {
     .map(row).reverse()[0] || null; // sorted newest-first, so the last of the filtered ones is the earliest
   const recent = rendered.slice(0, 3).map(row);
 
-  const owed = [...rendered].reverse()
-    .map((b) => ({ b, due: bookingDue(b, today) }))
-    .filter(({ due }) => due > 0)
-    .map(({ b, due }) => ({
+  const owed = [...sorted].reverse() // every rendered booking, same set as the row's Balance
+    .map((b) => ({ b, m: classifyBooking(b, { today }) }))
+    .filter(({ m }) => m.due > 0)
+    .map(({ b, m }) => ({
       bookingId: b.id, bookingNumber: b.booking_number, branchId: b.branch_id || null, date: String(b.date).slice(0, 10), serviceName: b.service_name_snapshot || '—',
-      finalAmount: Number(b.final_amount || 0), amountPaid: round2(Number(b.final_amount || 0) - due), amountDue: due, paymentStatus: b.payment_status,
+      finalAmount: m.price, amountPaid: m.paid, amountDue: m.due, paymentStatus: b.payment_status, isLocked: !!b.is_locked,
     }));
 
   const therapistCounts = new Map();

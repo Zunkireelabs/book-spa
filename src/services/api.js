@@ -11,6 +11,7 @@ import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/customerDirectory';
+import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -1156,42 +1157,28 @@ export async function setDueHolder({ bookingId, dueHolderName }) {
   }
 }
 
-// Outstanding (unpaid + partial) balances grouped by responsible person.
-// from/to are ISO dates (inclusive); omit for all-time.
+// Outstanding balances grouped by responsible person: DUE only (the one money model, utils/bookingMoney). Only rendered visits
+// (In-Progress / Completed) can be owed; upcoming bookings never are; paid = payments − refunds, never payment_status (its trigger can
+// go stale), so the status is NOT a filter here. Rows are paged with .range() and summed in paisa. from/to are ISO dates (inclusive).
 export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   try {
-    // payments is embedded (FK payments_booking_id_fkey) instead of fetched via a
-    // second query keyed on `.in('booking_id', bookingIds)`. With "All Time" (no
-    // date filter) a busy branch can have 1000+ outstanding bookings; a bare
-    // booking-ID .in() list that large builds a URL long enough to get rejected
-    // upstream of PostgREST with a bare 400 "Bad Request" (no detail) — confirmed
-    // against prod (Lazimpat, all-time: 1095 outstanding bookings, failing
-    // consistently above ~500-700 IDs). Embedding returns everything in one
-    // request regardless of dataset size, so there's no ceiling to hit again.
-    let query = supabase
-      .from('bookings')
-      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot, payments(amount)')
-      .in('payment_status', ['unpaid', 'partial'])
-      .not('status', 'in', '("Cancelled","No Show")');
-    if (from) query = query.gte('date', from);
-    if (to) query = query.lte('date', to);
-    query = withBranch(query, branchId);
-    const { data: bookings, error } = await query;
-    if (error) throw error;
-
-    const all = bookings || [];
-
+    const rows = await pageAllRows(() => {
+      let query = supabase
+        .from('bookings')
+        .select('id, booking_number, customer_name, customer_phone, date, status, final_amount, payment_status, due_holder_name, service_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
+        .in('status', ['In-Progress', 'Completed'])
+        .order('id');
+      if (from) query = query.gte('date', from);
+      if (to) query = query.lte('date', to);
+      return withBranch(query, branchId);
+    });
+    const m = summarizeMoney(rows, { today: nepalNow().today });
     const groups = {};
-    for (const b of all) {
-      const collected = (b.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
-      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
-      if (due <= 0) continue;
+    for (const b of m.dueBookings) {
       const rawName = (b.due_holder_name || '').trim();
       const key = rawName || '__unassigned__';
-      if (!groups[key]) {
-        groups[key] = { dueHolderName: rawName || null, totalDue: 0, bookingCount: 0, bookings: [] };
-      }
-      groups[key].totalDue = Math.round((groups[key].totalDue + due) * 100) / 100;
+      if (!groups[key]) groups[key] = { dueHolderName: rawName || null, totalDue: 0, bookingCount: 0, bookings: [] };
+      groups[key].totalDue = roundMoney(groups[key].totalDue + b.money.due); // paisa-exact
       groups[key].bookingCount += 1;
       groups[key].bookings.push({
         bookingId: b.id,
@@ -1200,17 +1187,58 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
         customerPhone: b.customer_phone,
         date: b.date,
         serviceName: b.service_name_snapshot || '—',
-        finalAmount: Number(b.final_amount),
-        amountPaid: collected,
-        amountDue: due,
+        finalAmount: b.money.price,
+        amountPaid: b.money.paid,
+        amountDue: b.money.due,
         paymentStatus: b.payment_status,
+        isLocked: !!b.is_locked,
       });
     }
-
-    const result = Object.values(groups).sort((a, b) => b.totalDue - a.totalDue);
-    return { data: result, error: null };
+    return { data: Object.values(groups).sort((x, y) => y.totalDue - x.totalDue), error: null };
   } catch (error) {
     console.error('[API] getOutstandingByStaff error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Local-DB audit helper: how many bookings have a payment_status that disagrees with their recorded payments (payments − refunds)?
+export async function countPaymentStatusMismatches({ branchId } = {}) {
+  const rows = await pageAllRows(() => withBranch(supabase.from('bookings').select('id, status, payment_status, final_amount, date, payments(amount), payment_refunds(amount)').order('id'), branchId));
+  const today = nepalNow().today;
+  return rows.filter((b) => {
+    const m = classifyBooking(b, { today });
+    const expected = m.paid <= 0 ? 'unpaid' : m.paid + 1e-9 >= m.price && m.price > 0 ? 'paid' : 'partial';
+    return b.payment_status !== expected && !(b.payment_status === 'unpaid' && m.paid === 0);
+  }).length;
+}
+
+// Outstanding report extras: past Pending/Confirmed bookings that were never closed ("Needs closing", plus visits left In-Progress from an
+// earlier day) and the total of upcoming unpaid bookings (not owed yet). Same date-filter semantics as getOutstandingByStaff.
+export async function getNeedsClosing({ branchId, from, to } = {}) {
+  try {
+    const today = nepalNow().today;
+    const rows = await pageAllRows(() => {
+      let query = supabase
+        .from('bookings')
+        .select('id, booking_number, customer_id, customer_name, customer_phone, date, start_time, status, final_amount, service_name_snapshot, therapist_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
+        .in('status', ['Pending', 'Confirmed', 'In-Progress']) // In-Progress only matters when from a previous day (stale)
+        .order('id');
+      if (from) query = query.gte('date', from);
+      if (to) query = query.lte('date', to);
+      return withBranch(query, branchId);
+    });
+    const m = summarizeMoney(rows, { today });
+    const shape = (b, extra) => ({
+      bookingId: b.id, bookingNumber: b.booking_number, customerName: b.customer_name, customerId: b.customer_id, date: b.date,
+      startTime: (b.start_time || '').slice(0, 5), serviceName: b.service_name_snapshot || '—', therapistName: b.therapist_name_snapshot || '—',
+      status: b.status, isLocked: !!b.is_locked, ...extra,
+    });
+    const unclosed = m.unclosed.map((b) => shape(b, { atStake: b.money.atStake, stillInProgress: false }))
+      .concat(m.staleInProgress.map((b) => shape(b, { atStake: 0, stillInProgress: true }))) // its money is already in Outstanding
+      .sort((x, y) => (x.date + x.startTime < y.date + y.startTime ? -1 : 1));
+    return { data: { unclosed, unclosedAtStake: m.unclosedAtStake, upcoming: m.upcoming, upcomingCount: m.upcomingCount }, error: null };
+  } catch (error) {
+    console.error('[API] getNeedsClosing error:', error.message);
     return { data: null, error };
   }
 }
@@ -1227,62 +1255,52 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
 export async function getCustomerOutstandingBalance({ customerPhone, branchId, excludeBookingId } = {}) {
   try {
     const normalizedPhone = toE164(customerPhone);
-    // Need a full number (country code + national) before matching — a stray
-    // fragment must not sweep up unrelated bookings.
-    if (!normalizedPhone || normalizedPhone.length < 11) {
-      return { data: { totalDue: 0, bookingCount: 0, bookings: [] }, error: null };
-    }
-
-    let query = supabase
-      .from('bookings')
-      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, service_name_snapshot')
-      .in('payment_status', ['unpaid', 'partial'])
-      .not('status', 'in', '("Cancelled","No Show")');
-    if (excludeBookingId) query = query.neq('id', excludeBookingId);
-    query = withBranch(query, branchId);
-    const { data: bookings, error } = await query;
-    if (error) throw error;
-
-    const all = (bookings || []).filter((b) => samePhone(b.customer_phone, normalizedPhone));
-    const bookingIds = all.map(b => b.id);
-    const paidMap = {};
-    if (bookingIds.length > 0) {
-      const { data: payments, error: payError } = await supabase
-        .from('payments')
-        .select('booking_id, amount')
-        .in('booking_id', bookingIds);
-      if (payError) throw payError;
-      for (const p of (payments || [])) {
-        paidMap[p.booking_id] = (paidMap[p.booking_id] || 0) + Number(p.amount);
-      }
-    }
-
-    let totalDue = 0;
-    const dueBookings = [];
-    for (const b of all) {
-      const collected = paidMap[b.id] || 0;
-      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
-      if (due <= 0) continue;
-      totalDue = Math.round((totalDue + due) * 100) / 100;
-      dueBookings.push({
-        bookingId: b.id,
-        bookingNumber: b.booking_number,
-        customerName: b.customer_name,
-        date: b.date,
-        serviceName: b.service_name_snapshot || '—',
-        finalAmount: Number(b.final_amount),
-        amountPaid: collected,
-        amountDue: due,
-        paymentStatus: b.payment_status,
-      });
-    }
-
-    return { data: { totalDue, bookingCount: dueBookings.length, bookings: dueBookings }, error: null };
+    // Need a full number (country code + national) before matching — a stray fragment must not sweep up unrelated bookings.
+    if (!normalizedPhone || normalizedPhone.length < 11) return { data: dueSummary(summarizeMoney([], { today: nepalNow().today })), error: null };
+    const today = nepalNow().today;
+    // DUE only (the one money model): rendered visits (In-Progress / Completed), paid = payments − refunds. Candidates are chosen by
+    // status, NEVER by payment_status (it can be stale, and the pre-filter must never exclude a booking that is truly due). Filtered on the
+    // server by the normalised phone (bookings.customer_phone is canonicalised on write), so this no longer downloads the branch's history;
+    // samePhone below stays as a safety net for any legacy-format straggler. Fails open at the callers.
+    const rows = await pageAllRows(() => {
+      let query = supabase
+        .from('bookings')
+        .select(DUE_COLUMNS)
+        .eq('customer_phone', normalizedPhone)
+        .in('status', ['In-Progress', 'Completed'])
+        .order('id');
+      if (excludeBookingId) query = query.neq('id', excludeBookingId);
+      return withBranch(query, branchId);
+    });
+    const mine = rows.filter((b) => samePhone(b.customer_phone, normalizedPhone));
+    return { data: dueSummary(summarizeMoney(mine, { today, excludeBookingId })), error: null };
   } catch (error) {
     console.error('[API] getCustomerOutstandingBalance error:', error.message);
     return { data: null, error };
   }
 }
+
+const DUE_COLUMNS = 'id, booking_number, customer_id, customer_name, customer_phone, date, status, final_amount, payment_status, is_locked, service_name_snapshot, payments(amount), payment_refunds(amount)';
+
+// Shape returned to Prev. due / Collect callers. `bookings` are only the COLLECTABLE ones: bookings on closed (locked) days can't be paid
+// from here (the day is closed), so they are reported separately (lockedDue / lockedBookings) and never bundled.
+const dueSummary = (m) => {
+  const row = (b) => ({
+    bookingId: b.id, bookingNumber: b.booking_number, customerName: b.customer_name, date: b.date,
+    serviceName: b.service_name_snapshot || '—', finalAmount: b.money.price, amountPaid: b.money.paid, amountDue: b.money.due,
+    paymentStatus: b.payment_status, isLocked: !!b.is_locked,
+  });
+  const collectable = m.dueBookings.filter((b) => !b.is_locked);
+  const locked = m.dueBookings.filter((b) => b.is_locked);
+  return {
+    totalDue: m.due, // everything owed (the warning / chip)
+    bookingCount: m.dueCount,
+    collectableDue: roundMoney(collectable.reduce((x, b) => x + b.money.due, 0)),
+    bookings: collectable.map(row),
+    lockedDue: roundMoney(locked.reduce((x, b) => x + b.money.due, 0)),
+    lockedBookings: locked.map(row),
+  };
+};
 
 // History of bookings that used to carry an outstanding due and have since been
 // fully paid off — who owed it, when it was settled, and which payment method(s)
@@ -2327,8 +2345,7 @@ export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBo
   try {
     let query = supabase
       .from('bookings')
-      .select('id, booking_number, customer_id, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name)')
-      .eq('payment_status', 'unpaid')
+      .select('id, booking_number, customer_id, customer_name, date, start_time, end_time, base_amount, discount_amount, final_amount, payment_status, status, service:services(name, duration_minutes), room:rooms(name), therapist:therapists(name), payments(amount), payment_refunds(amount)')
       .not('status', 'in', '("Cancelled","No Show")')
       .neq('id', excludeBookingId);
 
@@ -2343,7 +2360,9 @@ export async function fetchRelatedUnpaidBookings({ customerName, date, excludeBo
     const { data, error } = await query.order('start_time');
 
     if (error) throw error;
-    return { data: data || [], error: null };
+    // "Unpaid" = nothing held on it (payments − refunds = 0), decided from the payments like every other money figure — the same rule the
+    // calendar's Prev. due uses to drop these siblings, so the two can never disagree.
+    return { data: (data || []).filter((b) => paidPaisa(b) === 0), error: null };
   } catch (error) {
     console.error('[API] fetchRelatedUnpaidBookings error:', error.message);
     return { data: [], error };
@@ -5199,28 +5218,28 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
       const visiblePhones = new Set((bookings || []).map(phoneOf).filter(Boolean));
       if (visiblePhones.size === 0) return {};
       try {
-        const { data: openAll, error } = await supabase
-          .from('bookings')
-          .select('id, customer_name, customer_phone, date, final_amount, payment_status')
-          .eq('branch_id', resolvedBranchId)
-          .in('payment_status', ['unpaid', 'partial'])
-          .not('status', 'in', '("Cancelled","No Show")');
-        if (error) throw error;
-        // Only rows for a phone that is actually on screen can matter; don't fetch payments for the rest of the branch.
-        const open = (openAll || []).filter(o => visiblePhones.has(phoneOf(o)));
-        const ids = open.map(o => o.id);
-        const paid = {};
-        if (ids.length > 0) {
-          const pays = await inChunks(ids, (chunk) => supabase.from('payments').select('booking_id, amount').in('booking_id', chunk));
-          for (const p of pays) paid[p.booking_id] = (paid[p.booking_id] || 0) + Number(p.amount);
+        // Only DUE counts (rendered visits owing money); future appointments never do. Candidates by status only (payment_status can be
+        // stale); paid = payments − refunds. Server-side filter on the normalised phones that are on screen (chunked: PostgREST puts .in()
+        // lists in the URL), so the calendar no longer downloads the branch's whole history; the phoneOf() check stays as a safety net.
+        const phoneList = [...visiblePhones];
+        const openAll = [];
+        for (let i = 0; i < phoneList.length; i += 40) {
+          openAll.push(...await pageAllRows(() => supabase
+            .from('bookings')
+            .select('id, customer_name, customer_phone, date, status, final_amount, payment_status, payments(amount), payment_refunds(amount)')
+            .eq('branch_id', resolvedBranchId)
+            .in('customer_phone', phoneList.slice(i, i + 40))
+            .in('status', ['In-Progress', 'Completed'])
+            .order('id')));
         }
+        const open = openAll.filter((o) => visiblePhones.has(phoneOf(o)));
         const byPhone = {};
-        for (const o of open) {
+        for (const o of summarizeMoney(open, { today: nepalNow().today }).dueBookings) {
           const ph = phoneOf(o);
           if (!ph) continue;
-          const due = Math.round((Number(o.final_amount) - (paid[o.id] || 0)) * 100) / 100;
-          if (due <= 0) continue;
-          (byPhone[ph] ||= []).push({ id: o.id, name: o.customer_name, date: o.date, unpaid: o.payment_status === 'unpaid', due });
+          // "Related services" bundled in the payment panel are same-name / same-date bookings with NOTHING paid on them: decided from the
+          // payments (bookingMoney), never from payment_status, so it can't disagree with the due amount.
+          (byPhone[ph] ||= []).push({ id: o.id, name: o.customer_name, date: o.date, unpaid: o.money.paid === 0, due: o.money.due });
         }
         const out = {};
         for (const b of (bookings || [])) {
@@ -9376,7 +9395,7 @@ export async function getCustomerDirectory({ branchId, now = new Date() }) {
     const [customers, bookings, statusResult] = await Promise.all([
       pageAllRows(() => supabase.from('customers').select('id, full_name, phone, email, gender, created_at').eq('org_id', orgId).order('id')),
       pageAllRows(() => supabase.from('bookings')
-        .select('id, customer_id, status, payment_status, final_amount, date, start_time, service_name_snapshot, therapist_id, therapist_name_snapshot, payments(amount)')
+        .select('id, customer_id, status, payment_status, final_amount, date, start_time, service_name_snapshot, therapist_id, therapist_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
         .not('customer_id', 'is', null)
         .in('branch_id', orgBranchIds)
         .order('id')),
@@ -9409,7 +9428,7 @@ export async function getCustomerPanelDetail({ customerId, now = new Date() }) {
     const [bookingsRes, membershipRes, packagesRes, vouchersRes] = await Promise.all([
       supabase
         .from('bookings')
-        .select('id, booking_number, branch_id, status, date, start_time, end_time, service_name_snapshot, therapist_name_snapshot, room_name_snapshot, special_requests, final_amount, payment_status, payments(amount)')
+        .select('id, booking_number, branch_id, status, date, start_time, end_time, service_name_snapshot, therapist_name_snapshot, room_name_snapshot, special_requests, final_amount, payment_status, is_locked, payments(amount), payment_refunds(amount)')
         .eq('customer_id', customerId)
         .order('date', { ascending: false })
         .limit(1000),

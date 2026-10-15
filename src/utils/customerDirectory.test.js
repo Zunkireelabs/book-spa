@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildPanelDetail, legacyDue, buildCustomerDirectory, lifecycleSegment, bookingDue, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
+  buildPanelDetail, legacyDue, buildCustomerDirectory, lifecycleSegment, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
   phoneSearchDigits, relativeDayLabel, daysBetween, TABS,
 } from './customerDirectory';
 
@@ -9,9 +9,13 @@ const NOW_HM = '14:00';
 const ago = (n) => { const d = new Date(Date.UTC(2026, 9, 15) - n * 86400000); return d.toISOString().slice(0, 10); };
 const ahead = (n) => ago(-n);
 const cust = (id, extra = {}) => ({ id, full_name: `Cust ${id}`, phone: '+977 980-000-0001', email: '', created_at: '2026-01-01T00:00:00Z', ...extra });
-const bk = (customer_id, date, status = 'Completed', extra = {}) => ({
-  customer_id, date, status, start_time: '10:00:00', payment_status: 'paid', final_amount: 1000, service_name_snapshot: 'Massage', therapist_id: 't1', therapist_name_snapshot: 'Anil T.', payments: [], ...extra,
-});
+// A booking row as the API returns it. Money comes from the payments rows (never payment_status), so a 'paid' booking gets a payment
+// for its full amount unless the test gives `payments` explicitly.
+const bk = (customer_id, date, status = 'Completed', extra = {}) => {
+  const b = { customer_id, date, status, start_time: '10:00:00', payment_status: 'paid', final_amount: 1000, service_name_snapshot: 'Massage', therapist_id: 't1', therapist_name_snapshot: 'Anil T.', ...extra };
+  if (!extra.payments) b.payments = b.payment_status === 'paid' ? [{ amount: b.final_amount }] : [];
+  return b;
+};
 const one = (customers, bookings, memberIds) => buildCustomerDirectory({ customers, bookings, memberIds, today: TODAY, nowHM: NOW_HM });
 const seg = (visits, lastAgo, { next = false, firstAgo } = {}) => {
   // `visits` completed visits, the latest `lastAgo` days ago, the first (if given) `firstAgo` days ago
@@ -132,7 +136,7 @@ describe('balance and spent', () => {
   it('subtracts partial payments, never goes negative, and skips paid bookings', () => {
     const partial = bk('a', ago(2), 'Completed', { payment_status: 'partial', final_amount: 3000, payments: [{ amount: 1000 }, { amount: '500' }] });
     const over = bk('a', ago(3), 'Completed', { payment_status: 'partial', final_amount: 1000, payments: [{ amount: 1500 }] });
-    const paid = bk('a', ago(4), 'Completed', { payment_status: 'paid', final_amount: 2000, payments: [] });
+    const paid = bk('a', ago(4), 'Completed', { payment_status: 'paid', final_amount: 2000 }); // 2000 payment row
     expect(one([cust('a')], [partial, over, paid])[0].balance).toBe(1500);
   });
   it('an in-progress unpaid booking today is owed (it is being rendered)', () => {
@@ -142,9 +146,27 @@ describe('balance and spent', () => {
     const c = one([cust('a')], [bk('a', ago(2), 'Completed', { final_amount: 1500 }), bk('a', ago(9), 'Completed', { final_amount: 2500 }), bk('a', ago(8), 'Completed', { payment_status: 'unpaid', final_amount: 9999 })])[0];
     expect(c.spent).toBe(4000);
   });
-  it('bookingDue is a pure per-booking helper', () => {
-    expect(bookingDue(bk('a', ahead(1), 'Confirmed', { payment_status: 'unpaid' }), TODAY)).toBe(0);
-    expect(bookingDue(bk('a', ago(1), 'Completed', { payment_status: 'unpaid', final_amount: 700 }), TODAY)).toBe(700);
+  it('payment_status is never read: a "paid" booking with no payment rows is owed, an "unpaid" one with full payments is not', () => {
+    expect(one([cust('a')], [bk('a', ago(2), 'Completed', { payment_status: 'paid', final_amount: 700, payments: [] })])[0].balance).toBe(700);
+    expect(one([cust('a')], [bk('a', ago(2), 'Completed', { payment_status: 'unpaid', final_amount: 700, payments: [{ amount: 700 }] })])[0].balance).toBe(0);
+  });
+  it('refunds put money back on the balance and take it out of spent', () => {
+    const c = one([cust('a')], [bk('a', ago(2), 'Completed', { final_amount: 1000, payment_refunds: [{ amount: 400 }] })])[0];
+    expect(c.balance).toBe(400);
+    expect(c.spent).toBe(600);
+  });
+  it('upcoming, deposit, credit and unclosed come from the same model', () => {
+    const c = one([cust('a')], [
+      bk('a', ahead(3), 'Confirmed', { payment_status: 'partial', final_amount: 3000, payments: [{ amount: 1000 }] }),
+      bk('a', ago(3), 'Confirmed', { payment_status: 'unpaid', final_amount: 2500, payments: [] }),
+      bk('a', ago(5), 'Cancelled', { payment_status: 'paid', final_amount: 800 }),
+    ])[0];
+    expect(c).toMatchObject({ balance: 0, upcoming: 2000, deposit: 1000, credit: 800, spent: 1800 });
+    expect(c.unclosed).toEqual([expect.objectContaining({ status: 'Confirmed', atStake: 2500, isLocked: false })]);
+  });
+  it('lockedDue is the part of the balance on closed days', () => {
+    const c = one([cust('a')], [bk('a', ago(3), 'Completed', { payment_status: 'unpaid', final_amount: 900, payments: [], is_locked: true }), bk('a', ago(2), 'Completed', { payment_status: 'unpaid', final_amount: 400, payments: [] })])[0];
+    expect(c).toMatchObject({ balance: 1300, lockedDue: 900, unpaidVisits: 2 });
   });
 });
 

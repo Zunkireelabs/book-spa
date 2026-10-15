@@ -6,6 +6,8 @@ import PaymentModal from '../../../../components/ui/PaymentModal';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getOutstandingByStaff, fetchDueHolderNames, setDueHolder, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
 import SettledDueHistoryPanel from './SettledDueHistoryPanel';
+import NeedsClosingSection from './NeedsClosingSection';
+import { useAuth } from '../../../../contexts/AuthContext';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -22,6 +24,8 @@ function formatDateOnly(d) {
 const UNASSIGNED_LABEL = 'Unassigned';
 
 const OutstandingReportPanel = ({ branchId }) => {
+  const { profile } = useAuth();
+  const canAct = profile?.role !== 'admin_viewer'; // viewers read the report; no Pay / Assign
   const [view, setView] = useState('outstanding'); // 'outstanding' | 'settled'
   const today = getTodayISO();
   const [groups, setGroups] = useState([]);
@@ -466,13 +470,13 @@ const OutstandingReportPanel = ({ branchId }) => {
                               <Icon name="HelpCircle" size={15} />
                               {UNASSIGNED_LABEL}
                             </span>
-                            <button
+                            {canAct && <button
                               onClick={() => startAssign(r.bookingId, '')}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-spa border border-border bg-surface text-xs font-body-medium text-primary hover:bg-background spa-transition-fast"
                             >
                               <Icon name="UserPlus" size={13} />
                               Assign
-                            </button>
+                            </button>}
                           </div>
                         )
                       ) : (
@@ -483,13 +487,13 @@ const OutstandingReportPanel = ({ branchId }) => {
                       {formatNPR(r.amountDue)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
+                      {canAct && <button
                         onClick={() => openPay(r)}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-spa bg-success text-white text-xs font-body-medium hover:bg-success/90 spa-transition-fast"
                       >
                         <Icon name="CreditCard" size={13} />
                         Pay
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))}
@@ -508,6 +512,7 @@ const OutstandingReportPanel = ({ branchId }) => {
           </div>
         )}
       </div>
+      <NeedsClosingSection branchId={branchId} from={range.from} to={range.to} />
       </>
       )}
 
