@@ -245,7 +245,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting }) => {
   }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────────────────────────
-  const primaryLabel = depositNum > 0 ? `Enroll · ${formatNPR(depositNum)}` : 'Enroll';
+  const primaryLabel = submitting ? 'Enrolling…' : depositNum > 0 ? `Enroll · ${formatNPR(depositNum)}` : 'Enroll';
   const tierOptions = (tiers || []).map((t) => ({
     value: t.id,
     title: t.name,

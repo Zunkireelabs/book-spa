@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchVoucherOverview, fetchVoucherTypes } from '../../../../services/api';
 import { useAuth } from '../../../../contexts/AuthContext';
-import NewVoucherModal from './NewVoucherModal';
+import NewVoucherPanel from './NewVoucherPanel';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -239,7 +239,7 @@ const VoucherOverviewPanel = ({ readOnly = false }) => {
       </div>
 
       {!readOnly && showNewVoucher && (
-        <NewVoucherModal
+        <NewVoucherPanel
           userRole={userRole}
           onClose={() => setShowNewVoucher(false)}
           onIssued={() => {

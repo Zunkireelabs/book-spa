@@ -14,7 +14,7 @@ import CollectPaymentPanel from './components/CollectPaymentPanel';
 import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
 import EnrollMemberPanel from '../branch-manager-dashboard/components/Memberships/EnrollMemberPanel';
-import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
+import NewVoucherPanel from '../branch-manager-dashboard/components/Vouchers/NewVoucherPanel';
 import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
 import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
 import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
@@ -492,7 +492,7 @@ const BranchStaffDashboard = () => {
         ) : null);
       case 'new-voucher':
         return withBookingsList(VOUCHER_ENABLED ? (
-          <NewVoucherModal
+          <NewVoucherPanel
             userRole={userRole}
             onClose={() => setSearchParams({ view: 'bookings' })}
             onIssued={() => {

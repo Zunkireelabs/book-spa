@@ -49,12 +49,15 @@ const parseTimeInput = (raw) => {
 
 // `error` (field-level): red 12px text under the control. Pair it with `controlA11y(id, error)` on the control so it gets
 // aria-invalid / aria-describedby and a red border; `id` ties the message to the control.
-export const Field = ({ label, required, hint, error, id, children, className = '' }) => (
+export const Field = ({ label, required, hint, error, id, labelExtra, children, className = '' }) => (
   <div className={className}>
     {label && (
-      <label htmlFor={id} className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
-        {label} {required && <span className="text-error">*</span>}
-      </label>
+      <div className="flex items-baseline justify-between gap-3 mb-1.5">
+        <label htmlFor={id} className="block font-body font-body-medium text-[13px] text-text-primary">
+          {label} {required && <span className="text-error">*</span>}
+        </label>
+        {labelExtra}
+      </div>
     )}
     {children}
     {error && <p id={id ? `${id}-error` : undefined} role="alert" className="mt-1.5 text-xs text-error">{error}</p>}
@@ -196,7 +199,7 @@ export const InlineWarning = ({ message, icon = 'AlertTriangle' }) => (message ?
 ) : null);
 
 // "Mon 12 Oct" button + mini-month popover.
-export const DateField = ({ value, onChange, label, required, disabled, hint, min }) => {
+export const DateField = ({ value, onChange, label, required, disabled, hint, min, max, id, error }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -210,15 +213,18 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
   const today = new Date();
   const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   return (
-    <Field label={label} required={required} hint={hint}>
+    <Field label={label} required={required} hint={hint} error={error} id={id}>
       <div className="relative" ref={ref}>
         <button
           type="button"
+          id={id}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error && id ? `${id}-error` : undefined}
           disabled={disabled}
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className="w-full h-10 pl-9 pr-3 flex items-center text-[13px] font-body text-text-primary bg-surface border border-border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60"
+          className={`w-full h-10 pl-9 pr-3 flex items-center text-[13px] font-body text-text-primary bg-surface border rounded-spa hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-left disabled:opacity-60 ${error ? 'border-error' : 'border-border'}`}
         >
           <Icon name="Calendar" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
           <span className="truncate">{value ? formatShortDate(value) : 'Pick a date'}</span>
@@ -227,7 +233,7 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
           <div className="absolute left-0 top-full mt-1 bg-surface border border-border rounded-spa-lg shadow-spa-elevated z-dropdown p-3">
             <MiniMonthCalendar
               selectedDate={value || min || todayYmd}
-              onDateSelect={(d) => { if (!min || d >= min) { onChange(d); setOpen(false); } }}
+              onDateSelect={(d) => { if ((!min || d >= min) && (!max || d <= max)) { onChange(d); setOpen(false); } }}
             />
           </div>
         )}
@@ -302,7 +308,7 @@ export const TimeField = ({ value, onChange, label, required, disabled, hint, st
 };
 
 const ghostBtn = 'h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast whitespace-nowrap disabled:opacity-50';
-const primaryBtn = 'h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap';
+const primaryBtn = 'h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap';
 
 // Form container: a docked SidePanel (variant="panel") or a centered modal (variant="modal").
 //  * footer = [left: optional destructive action + disabled reason] [Cancel (ghost)] [primary]; or `footerOverride`
@@ -341,7 +347,7 @@ export const PanelShell = ({
   ) : (
     <div key="actions" className="flex items-center gap-3">
       {footerLeft}
-      <p className="flex-1 min-w-0 text-xs text-text-secondary" aria-live="polite">{primary?.disabled ? reason : ''}</p>
+      <p className="flex-1 min-w-0 text-xs text-text-secondary" aria-live="polite">{primary?.loading ? '' : primary?.disabled ? (reason || 'Complete the required fields') : ''}</p>
       <button type="button" onClick={requestClose} disabled={busy} className={ghostBtn}>{cancelLabel}</button>
       {primary && (
         <button type="button" onClick={primary.onClick} disabled={primary.disabled || primary.loading} className={primaryBtn}>
@@ -387,9 +393,9 @@ export const FormBody = ({ children, className = '' }) => <div className={`px-5 
 export const InfoRows = ({ rows }) => (
   <dl className="border border-border rounded-spa divide-y divide-border text-[13px]">
     {rows.filter(Boolean).map(([k, v, tone]) => (
-      <div key={k} className="flex items-center justify-between gap-3 px-3 py-2">
-        <dt className="text-text-secondary">{k}</dt>
-        <dd className={`text-right tabular-nums ${tone === 'amber' ? 'text-warning' : 'text-text-primary'} font-body-medium`}>{v}</dd>
+      <div key={k} className="flex items-center justify-between gap-3 px-3 py-2" style={tone === 'total' ? { borderTopColor: 'rgba(14,13,12,0.25)' } : undefined}>
+        <dt className={tone === 'total' ? 'font-semibold text-text-primary' : 'text-text-secondary'}>{k}</dt>
+        <dd className={`text-right tabular-nums ${tone === 'amber' ? 'text-warning font-body-medium' : tone === 'total' ? 'text-text-primary font-semibold' : 'text-text-primary font-body-medium'}`}>{v}</dd>
       </div>
     ))}
   </dl>
