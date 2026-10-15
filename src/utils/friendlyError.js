@@ -8,6 +8,9 @@ const NETWORK = /failed to fetch|networkerror|network request failed|load failed
 // Deliberately does not promise "nothing was changed": a request can commit before the connection drops.
 export const NETWORK_ERROR_COPY = "Couldn't reach the server. Check your connection and try again.";
 
+// For non-idempotent writes (reschedule, rebook) whose request may have committed before the connection dropped.
+export const NETWORK_CHECK_CALENDAR_COPY = "Couldn't reach the server. Check the calendar before trying again.";
+
 export const isNetworkError = (err) => NETWORK.test((typeof err === 'string' ? err : err?.message) || '');
 
 export const friendlyError = (err, fallback = 'Something went wrong. Please try again.') => {

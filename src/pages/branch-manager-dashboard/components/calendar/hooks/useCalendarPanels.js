@@ -14,7 +14,7 @@ import { transformBooking } from '../../../../../services/bookingTransformers';
 import { isOverallBranch } from '../../../../../services/api';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blockOverlap';
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
-import { friendlyError, isNetworkError } from '../../../../../utils/friendlyError';
+import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
@@ -240,9 +240,15 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         reschedulePendingRef.current = false;
         setReschedulePending(false);
         if (result.error) {
-          showToast(friendlyError(result.error, 'Failed to reschedule.'), 'error');
-          // The request may have committed before the connection dropped (reschedule isn't idempotent): show the real state.
-          if (isNetworkError(result.error)) refreshCalendar();
+          if (isNetworkError(result.error)) {
+            // The request may have committed before the connection dropped and a retry isn't safe: leave pick mode and let
+            // the refreshed calendar show what actually happened.
+            setRebookSource(null);
+            showToast(NETWORK_CHECK_CALENDAR_COPY, 'error');
+            refreshCalendar();
+          } else {
+            showToast(friendlyError(result.error, 'Failed to reschedule.'), 'error');
+          }
         } else {
           setRebookSource(null);
           showToast('Booking rescheduled successfully.');
@@ -277,10 +283,16 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         roomId,
       });
       if (result.error) {
-        showToast(friendlyError(result.error, 'Failed to rebook.'), 'error');
-        if (isNetworkError(result.error)) refreshCalendar(); // the booking may have been created before the connection dropped
-        // Restore rebook mode on failure so user can retry
-        setRebookSource(source);
+        if (isNetworkError(result.error)) {
+          // Rebook isn't atomic: the insert may have committed before the connection dropped, so restoring pick mode would invite a
+          // duplicate on retry. Leave pick mode and show the real state.
+          showToast(NETWORK_CHECK_CALENDAR_COPY, 'error');
+          refreshCalendar();
+        } else {
+          showToast(friendlyError(result.error, 'Failed to rebook.'), 'error');
+          // Restore rebook mode on failure so user can retry
+          setRebookSource(source);
+        }
       } else {
         if (result.data?._therapistAssignmentWarning) {
           showToast(`Rebooked, but: ${result.data._therapistAssignmentWarning}`, 'error');

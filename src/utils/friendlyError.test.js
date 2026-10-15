@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { friendlyError, isNetworkError, NETWORK_ERROR_COPY } from './friendlyError';
+import { friendlyError, isNetworkError, NETWORK_ERROR_COPY, NETWORK_CHECK_CALENDAR_COPY } from './friendlyError';
 
 describe('friendlyError', () => {
   it('strips the SQL function prefix and capitalises', () => {
@@ -16,6 +16,10 @@ describe('friendlyError', () => {
   it('does not promise that nothing was changed', () => {
     expect(NETWORK_ERROR_COPY).toBe("Couldn't reach the server. Check your connection and try again.");
     expect(NETWORK_ERROR_COPY).not.toMatch(/nothing was changed/i);
+  });
+
+  it('has one single-sentence copy for non-idempotent writes', () => {
+    expect(NETWORK_CHECK_CALENDAR_COPY).toBe("Couldn't reach the server. Check the calendar before trying again.");
   });
 
   it('does not treat other TypeErrors as network problems', () => {
