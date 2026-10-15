@@ -12,6 +12,8 @@ import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/customerDirectory';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
+import { planClose, runCloseSteps } from '../utils/closeBooking';
+import { friendlyError } from '../utils/friendlyError';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -1207,15 +1209,10 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
 export async function closePastBooking({ bookingId, outcome, reason }) {
   const { data: b, error } = await supabase.from('bookings').select('id, status').eq('id', bookingId).single();
   if (error) return { data: null, error };
-  const steps = outcome === 'no_show'
-    ? [['No Show', reason]]
-    : { Pending: ['Confirmed', 'In-Progress', 'Completed'], Confirmed: ['In-Progress', 'Completed'], 'In-Progress': ['Completed'] }[b.status]?.map((st) => [st]);
+  const steps = planClose(b.status, outcome, reason);
   if (!steps) return { data: null, error: { code: 'NOT_OPEN', message: `This booking is already ${b.status}.` } };
-  for (const [newStatus, why] of steps) {
-    const res = await updateBookingStatus({ bookingId, newStatus, reason: why });
-    if (res.error) return res;
-  }
-  return { data: { bookingId }, error: null };
+  // A later step can be refused (e.g. a closed day), leaving the booking mid-way: runCloseSteps then says where it stopped.
+  return runCloseSteps(steps, (newStatus, why) => updateBookingStatus({ bookingId, newStatus, reason: why }), (e) => friendlyError(e, 'Something went wrong.'));
 }
 
 // "Honest Collect": record each bundled booking's allocation and CHECK every result. Returns the bookings that were NOT recorded (so the

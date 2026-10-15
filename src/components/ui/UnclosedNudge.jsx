@@ -19,7 +19,11 @@ const UnclosedNudge = ({ unclosed = [], stale = [], readOnly, onChanged }) => {
     setBusy(true); setError(null);
     const { error: err } = await closePastBooking({ bookingId: first.id, outcome, reason: why });
     setBusy(false);
-    if (err) { setError(err.message || 'Could not update this booking.'); return; }
+    if (err) {
+      setError(err.message || 'Could not update this booking.');
+      if (err.code === 'PARTIAL') onChanged?.(); // the booking is mid-way: refresh so the panel shows its real state
+      return;
+    }
     setAskReason(false); setReason('');
     onChanged?.();
   };
