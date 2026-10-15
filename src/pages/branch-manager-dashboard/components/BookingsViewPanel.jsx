@@ -100,8 +100,7 @@ const BookingsViewPanel = ({ branchId }) => {
     lists.forEach(([, l]) => l.addEventListener('change', on));
     return () => lists.forEach(([, l]) => l.removeEventListener('change', on));
   }, []);
-  // Columns follow the width of the LIST (not the viewport): with the booking panel docked beside it the list is narrower, so the
-  // lower-priority columns (therapist, then service) give way and the row buttons stay visible.
+  // Columns follow the width of the LIST (real window/container size only — the booking panel overlays and never changes it).
   const rootRef = useRef(null);
   const [cw, setCw] = useState(0);
   useEffect(() => {
@@ -116,11 +115,6 @@ const BookingsViewPanel = ({ branchId }) => {
   const isSm = cw ? cw >= 560 : bp.sm;
   const isMd = cw ? cw >= 700 : bp.md;
   const isLg = cw ? cw >= 900 : bp.lg;
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 1440;
-  const panelWidth = Math.min(560, Math.max(420, vw - 720));
-  // The booking panel is a docked side panel from lg up (a sheet below). The list makes room for it (so the row buttons stay
-  // reachable) only when at least ~520px is left for the list; narrower windows let the panel overlay it instead.
-  const panelDocked = bp.lg && vw - 240 - 64 - panelWidth >= 520;
   const [columns, setColumns] = useState(readCols);
   useEffect(() => { try { localStorage.setItem(COLS_KEY, JSON.stringify(columns)); } catch { /* ignore */ } }, [columns]);
 
@@ -698,7 +692,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const clearAll = () => { setSearchText(''); patch({ q: '', th: '', sv: '', rm: '', bv: '', nf: '' }); };
 
   return (
-    <div ref={rootRef} className="pb-6" style={{ '--bk-top': `${stickyTop}px`, paddingRight: openId && panelDocked ? panelWidth : undefined, transition: 'padding-right 200ms ease-out' }}>
+    <div ref={rootRef} className="pb-6" style={{ '--bk-top': `${stickyTop}px` }}>
       {headerActions}
       {toast && (
         <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
