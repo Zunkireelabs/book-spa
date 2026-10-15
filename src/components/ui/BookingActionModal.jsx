@@ -398,10 +398,10 @@ const BookingActionModal = ({
   // Valid next-status transitions (lowercase UI values)
   const getNextStatuses = (currentStatus) => {
     const transitions = {
-      // The panel (calendar) also offers "Mark no-show" (api.js VALID_TRANSITIONS allows it from Pending/Confirmed);
-      // the modal's status row is unchanged.
-      'pending': variant === 'panel' ? ['confirmed', 'cancelled', 'no show'] : ['confirmed', 'cancelled'],
-      'confirmed': variant === 'panel' ? ['in-progress', 'cancelled', 'no show'] : ['in-progress', 'cancelled'],
+      // "No show" is offered from Pending/Confirmed everywhere (api.js VALID_TRANSITIONS allows it); in the panel it is gated until the
+      // booking's scheduled time (see noShowGated below), and both variants ask for confirmation first.
+      'pending': ['confirmed', 'cancelled', 'no show'],
+      'confirmed': ['in-progress', 'cancelled', 'no show'],
       'in-progress': ['completed'],
     };
     return transitions[currentStatus] || [];
@@ -836,12 +836,14 @@ const BookingActionModal = ({
   // Clicking Start locks everything except Discount/Payment (still needed to
   // settle the bill); being paid locks Discount/Payment too (via canDiscount/
   // canPay below). Day-close and terminal status always lock everything.
-  const isMutationBlocked = isTerminal || isLocked || isServiceStarted || isSettled;
+  // admin_viewer is read-only: every write affordance below (status, assign, edit, discount, payment, extend) is off for them.
+  const isViewer = userRole === 'admin_viewer';
+  const isMutationBlocked = isViewer || isTerminal || isLocked || isServiceStarted || isSettled;
   // Assignment (therapist/room) locks once the service has started (or is
   // terminal/day-closed) — NOT merely because it's been paid. A booking can be
   // paid before it starts (pay-after-service isn't mandatory) and reassignment
   // should still be possible right up until the service actually begins.
-  const isAssignmentBlocked = isTerminal || isLocked || isServiceStarted;
+  const isAssignmentBlocked = isViewer || isTerminal || isLocked || isServiceStarted;
   // Always "Rebook" — this always creates a brand-new booking with the same
   // customer/service info, leaving the original untouched, regardless of
   // the source booking's status. "Reschedule" would wrongly imply the same
@@ -853,15 +855,15 @@ const BookingActionModal = ({
   const selectedRoomObj = rooms.find(r => r.id === selectedRoom);
   const isTherapistOptional = selectedRoomObj?.requires_therapist === false;
 
-  const nextStatuses = getNextStatuses(booking.status);
+  const nextStatuses = isViewer ? [] : getNextStatuses(booking.status);
   // Payment is allowed on Completed bookings (pay-after-service is standard cash-spa flow).
   // Only day-lock and already-paid block it — not terminal status.
-  const canPay = ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
+  const canPay = !isViewer && ['confirmed', 'in-progress', 'completed'].includes(booking.status) && booking.paymentStatus !== 'paid' && !isLocked;
   // Allow discounts on completed-but-unpaid bookings (standard cash-spa flow: service done → apply discount → pay).
   // Once the booking is fully paid, the price is locked — the discount can no longer move retroactively
   // against money already collected. 'partial' stays discountable so a discount can still be applied
   // against the still-owed remainder (e.g. after extending a booking that already had a payment).
-  const canDiscount = booking.paymentStatus !== 'paid' && !isLocked
+  const canDiscount = !isViewer && booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
   // TEMPORARY (2026-08-31): staff direct-apply limit raised from 15% to 50% to
   // match the hard cap below — see DISCOUNT_LIMITS in services/api.js for the
@@ -1014,7 +1016,7 @@ const BookingActionModal = ({
   // Primary next action for the booking's status; everything else lives in the "⋯" overflow.
   const primaryStatusTarget = booking.status === 'pending' ? 'confirmed' : booking.status === 'confirmed' ? 'in-progress' : booking.status === 'in-progress' ? 'completed' : null;
   const primaryAction = (() => {
-    if (isLocked) return null;
+    if (isLocked || isViewer) return null;
     if (booking.status === 'pending') return { key: 'confirm', label: 'Confirm', run: () => handleStatusUpdate('confirmed') };
     if (booking.status === 'confirmed') return { key: 'start', label: 'Start', run: () => handleStatusUpdate('in-progress') };
     if (booking.status === 'in-progress') return { key: 'complete', label: 'Complete', run: () => handleStatusUpdate('completed') };
@@ -1023,9 +1025,9 @@ const BookingActionModal = ({
   })();
   // Visible secondary actions (left), in collapse-priority order; disabled ones are not shown here (only in the overflow).
   const secondaryVisible = [
-    onCreateBooking && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
-    onCreateBooking && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => { setActiveTab('details'); openNewBookingForm('add-service'); } },
-    !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
+    !isViewer && onCreateBooking && !isEditing && { key: 'rebook', label: rebookLabel, icon: 'CalendarClock', run: () => onRebookStart?.(booking) },
+    !isViewer && onCreateBooking && !isEditing && { key: 'add', label: '+ Service', icon: 'PlusCircle', run: () => { setActiveTab('details'); openNewBookingForm('add-service'); } },
+    !isViewer && !isTerminal && !isLocked && extendOptions.length > 0 && { key: 'extend', label: 'Extend', icon: 'Timer', run: () => { setActiveTab('details'); setShowExtendPanel(true); } },
   ].filter(Boolean);
   // Fit: footer width minus the ⋯ button, the primary action and gaps; each button's width is estimated from its label.
   const primaryW = primaryAction ? 24 + primaryAction.label.length * 7.5 : 0;
@@ -1047,7 +1049,7 @@ const BookingActionModal = ({
       .filter((st) => st !== 'cancelled' && st !== 'no show' && st !== primaryStatusTarget)
       .map((st) => ({ key: `st-${st}`, label: st === 'in-progress' ? 'Start' : st.charAt(0).toUpperCase() + st.slice(1), icon: 'ArrowRight', run: () => handleStatusUpdate(st) })),
     // Zennly-only: Reschedule creates a new booking and cancels this one (the caller runs the slot picker).
-    onRescheduleStart && !isTerminal && !isLocked && (() => {
+    !isViewer && onRescheduleStart && !isTerminal && !isLocked && (() => {
       const blocked = isServiceStarted || booking.paymentStatus === 'paid';
       return { key: 'reschedule', label: 'Reschedule', icon: 'CalendarClock', disabled: blocked, reason: booking.paymentStatus === 'paid' ? 'Cannot reschedule a paid booking.' : 'This service has already started.', run: () => onRescheduleStart(booking) };
     })(),
@@ -1250,7 +1252,8 @@ const BookingActionModal = ({
                   {!isTerminal && !isLocked && nextStatuses.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => {
-                        const needsConfirm = status === 'cancelled';
+                        const needsConfirm = status === 'cancelled' || status === 'no show';
+                        const noShowBlocked = status === 'no show' && !hasBookingStarted(booking);
                         const rescheduleDisabled = isServiceStarted || isLocked || booking.paymentStatus === 'paid';
                         return (
                           <React.Fragment key={status}>
@@ -1272,8 +1275,10 @@ const BookingActionModal = ({
                               className="min-h-[40px] sm:min-h-0 sm:h-auto"
                               onClick={() => needsConfirm ? setPendingStatus(status) : handleStatusUpdate(status)}
                               loading={isLoading}
+                              disabled={noShowBlocked}
+                              title={noShowBlocked ? "Available after the booking's scheduled time" : undefined}
                             >
-                              {status === 'in-progress' ? 'Start' : status.charAt(0).toUpperCase() + status.slice(1)}
+                              {status === 'in-progress' ? 'Start' : status === 'no show' ? 'No show' : status.charAt(0).toUpperCase() + status.slice(1)}
                             </Button>
                           </React.Fragment>
                         );
@@ -1338,7 +1343,7 @@ const BookingActionModal = ({
                         <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                           <span className="font-body text-[13px] font-medium text-text-primary tabular-nums">{npr(booking.finalAmount ?? booking.baseAmount)}</span>
                           <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${pay.cls}`}>{pay.label}</span>
-                          {booking.paymentStatus !== 'paid' && (
+                          {!isViewer && booking.paymentStatus !== 'paid' && (
                             <button type="button" onClick={() => setActiveTab('payment')} className="text-[13px] text-primary hover:underline">Collect payment →</button>
                           )}
                           {booking.discountAmount > 0 && <span className="text-xs text-text-tertiary tabular-nums">−{npr(booking.discountAmount)} discount</span>}

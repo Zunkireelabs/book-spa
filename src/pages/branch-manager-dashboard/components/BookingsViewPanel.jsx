@@ -10,7 +10,7 @@ import { supabase } from '../../../lib/supabase';
 import {
   fetchBookingsForList, fetchBookingById, fetchServices, fetchTherapists, 
   fetchAttendance, fetchBlocksForRange, fetchTransferOccurrences, fetchRosterForDay, fetchServiceEligibility, fetchRenderedVisitTherapists,
-  updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount,
+  updateBookingStatus, updateBookingDetails, fetchRooms, assignTherapist, recordPayment, recordTip, applyDiscount,
 } from '../../../services/api';
 import { transformBooking, toDbStatus } from '../../../services/bookingTransformers';
 import { nepalNow } from '../../../utils/customerDirectory';
@@ -100,7 +100,27 @@ const BookingsViewPanel = ({ branchId }) => {
     lists.forEach(([, l]) => l.addEventListener('change', on));
     return () => lists.forEach(([, l]) => l.removeEventListener('change', on));
   }, []);
-  const { sm: isSm, md: isMd, lg: isLg } = bp;
+  // Columns follow the width of the LIST (not the viewport): with the booking panel docked beside it the list is narrower, so the
+  // lower-priority columns (therapist, then service) give way and the row buttons stay visible.
+  const rootRef = useRef(null);
+  const [cw, setCw] = useState(0);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const content = () => Math.round(el.clientWidth - parseFloat(getComputedStyle(el).paddingRight || '0') - parseFloat(getComputedStyle(el).paddingLeft || '0'));
+    const ro = new ResizeObserver(() => setCw(content())); // content box: the reserved panel padding doesn't count
+    ro.observe(el);
+    setCw(content());
+    return () => ro.disconnect();
+  }, []);
+  const isSm = cw ? cw >= 560 : bp.sm;
+  const isMd = cw ? cw >= 700 : bp.md;
+  const isLg = cw ? cw >= 900 : bp.lg;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1440;
+  const panelWidth = Math.min(560, Math.max(420, vw - 720));
+  // The booking panel is a docked side panel from lg up (a sheet below). The list makes room for it (so the row buttons stay
+  // reachable) only when at least ~520px is left for the list; narrower windows let the panel overlay it instead.
+  const panelDocked = bp.lg && vw - 240 - 64 - panelWidth >= 520;
   const [columns, setColumns] = useState(readCols);
   useEffect(() => { try { localStorage.setItem(COLS_KEY, JSON.stringify(columns)); } catch { /* ignore */ } }, [columns]);
 
@@ -137,6 +157,17 @@ const BookingsViewPanel = ({ branchId }) => {
     fetchServices(branchId).then((r) => { if (alive && r.data) setServices(r.data); });
     return () => { alive = false; };
   }, [branchId]);
+  const [rooms, setRooms] = useState([]);
+  const [branchHours, setBranchHours] = useState(undefined);
+  useEffect(() => {
+    if (isOverall || !branchId) { setRooms([]); setBranchHours(undefined); return undefined; }
+    let alive = true;
+    fetchRooms(branchId).then((r) => { if (alive && r.data) setRooms(r.data); });
+    supabase.from('branches').select('open_time, close_time').eq('id', branchId).maybeSingle().then(({ data }) => {
+      if (alive && data) setBranchHours({ openTime: data.open_time || '09:00:00', closeTime: data.close_time || '21:00:00' });
+    });
+    return () => { alive = false; };
+  }, [branchId, isOverall]);
   // The assign dropdown inside the booking dialog: the people on shift on the day being looked at.
   useEffect(() => {
     let alive = true;
@@ -250,36 +281,69 @@ const BookingsViewPanel = ({ branchId }) => {
   const anyFilter = !!(query || need || filters.therapist || filters.service || filters.room);
 
   // ── Actions ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // The open booking lives in the URL (?open=<id>) so it survives reload and the bell can deep-link to it; the full record is fetched by id.
+  const openId = sp.get('open') || '';
+  const openIdRef = useRef(openId);
+  openIdRef.current = openId;
   const [selected, setSelected] = useState(null);
+  const guardRef = useRef(null); // the open panel registers its dirty guard here (same pattern as the calendar)
+  // Clicking another row (or ↑/↓, or a "view" link inside the panel) switches the panel through its dirty guard.
   const openBooking = (b) => {
-    setSelected(b);
-    // The dialog acknowledges the booking for the whole team (fire-and-forget); clear the dot here right away.
-    if (!readOnly && isUnseen(b)) setRows((rs) => rs.map((r) => (r.bookingId === b.bookingId ? { ...r, acknowledgedAt: new Date().toISOString() } : r)));
+    const id = b?.bookingId || b?.id;
+    if (!id || id === openIdRef.current) return;
+    const go = () => patch({ open: id });
+    if (guardRef.current) guardRef.current(go); else go();
   };
-  // Deep link from the bell: ?view=bookings&open=<bookingId> opens that booking.
-  const openParam = sp.get('open');
+  const closePanel = useCallback(() => { patch({ open: '' }); setSelected(null); load(); }, [patch, load]);
   useEffect(() => {
-    if (!openParam) return;
-    patch({ open: '' }); // one-shot: strip it so refresh / back doesn't reopen
-    fetchBookingById(openParam).then((r) => { if (!r.error) openBooking(transformBooking(r.data)); });
-  }, [openParam]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleViewBooking = async (bookingId) => {
-    if (!bookingId) return;
-    const result = await fetchBookingById(bookingId);
-    if (!result.error) setSelected(transformBooking(result.data));
-  };
+    if (!openId) { setSelected(null); return undefined; }
+    let alive = true;
+    setSelected((cur) => (cur && cur.bookingId === openId ? cur : null)); // panel opens at once on the row's known data
+    fetchBookingById(openId).then((r) => {
+      if (!alive) return;
+      if (r.error) { showToast(friendlyError(r.error, "Couldn't open that booking."), 'error'); patch({ open: '' }); return; }
+      setSelected(transformBooking(r.data));
+    });
+    return () => { alive = false; };
+  }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The panel acknowledges an unopened online booking for the whole team (fire-and-forget); clear the dot here right away.
+  useEffect(() => {
+    if (!selected || readOnly || !isUnseen(selected)) return;
+    setRows((rs) => rs.map((r) => (r.bookingId === selected.bookingId ? { ...r, acknowledgedAt: new Date().toISOString() } : r)));
+  }, [selected?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleViewBooking = (bookingId) => openBooking({ bookingId });
+  // Re-fetch the open booking in place after an action (never closes the panel or shows a skeleton).
   const refreshSelected = async (bookingId) => {
-    if (selected && bookingId === selected.bookingId) {
-      const r = await fetchBookingById(bookingId);
-      if (!r.error) setSelected(transformBooking(r.data));
-    }
+    if (!bookingId || bookingId !== openIdRef.current) return;
+    const r = await fetchBookingById(bookingId);
+    if (!r.error && bookingId === openIdRef.current) setSelected(transformBooking(r.data));
   };
+  // ↑/↓ with the panel open moves to the previous/next booking in the list (through the guard), like Customers.
+  useEffect(() => {
+    if (!openId) return undefined;
+    const onKey = (e) => {
+      if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTyping(e.target) || e.target.closest?.('tr[data-booking-id], [role="listbox"], [role="menu"]')) return; // a focused row handles its own arrows
+      const i = visible.findIndex((b) => b.bookingId === openId);
+      const nxt = i < 0 ? null : visible[i + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (!nxt) return;
+      e.preventDefault();
+      openBooking(nxt);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [openId, visible]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Keep the open row visible below the sticky stack when it changes (rows carry scroll-margin-top).
+  useEffect(() => {
+    if (openId) document.querySelector(`tr[data-booking-id="${openId}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [openId, rows.length]);
 
   const handleStatusUpdate = async (bookingId, newStatus, reason) => {
     const result = await updateBookingStatus({ bookingId, newStatus: toDbStatus(newStatus), reason });
     if (result.error) { showToast(friendlyError(result.error, 'Failed to update status.'), 'error'); return; }
     showToast(`Status updated to ${newStatus}`);
     await load();
+    await refreshSelected(bookingId); // a row button (or the panel itself) changed the booking the panel may be showing
   };
   const runNext = async (b, action) => {
     if (action.id === 'assign') { openBooking(b); return; }
@@ -296,6 +360,7 @@ const BookingsViewPanel = ({ branchId }) => {
     if (result.error) { showToast(friendlyError(result.error, 'Failed to assign therapist.'), 'error'); return; }
     showToast('Therapist assigned successfully');
     await load();
+    await refreshSelected(bookingId);
   };
   const handleRecordPayment = async (bookingId, opts) => {
     const { tipSplits, ...paymentOpts } = opts;
@@ -314,14 +379,23 @@ const BookingsViewPanel = ({ branchId }) => {
   const handleGroupPaymentRecorded = async () => {
     showToast('Payment recorded successfully');
     load();
-    if (selected) await refreshSelected(selected.bookingId);
+    await refreshSelected(openIdRef.current);
   };
   const handleApplyDiscount = async (bookingId, { discountType, discountValue, discountReason, requestedTo }) => {
     const result = await applyDiscount({ bookingId, discountType, discountValue, discountReason, requestedTo });
     if (result.error) return { error: result.error };
     showToast(result.data?.isPending ? 'Discount request sent for approval' : 'Discount applied successfully');
     await load();
+    await refreshSelected(bookingId);
     return { data: result.data };
+  };
+  const handleEditBooking = async (bookingId, updates) => {
+    const result = await updateBookingDetails({ bookingId, ...updates });
+    if (result.error) { showToast(friendlyError(result.error, 'Failed to update booking.'), 'error'); return { error: result.error }; }
+    showToast('Booking updated successfully');
+    await load();
+    await refreshSelected(bookingId);
+    return { error: null };
   };
 
   const exportCsv = () => {
@@ -426,7 +500,11 @@ const BookingsViewPanel = ({ branchId }) => {
   const navRows = (dir, from) => {
     const all = [...(from.closest('[data-bookings-root]')?.querySelectorAll('tr[data-booking-id]') || [])];
     const i = all.indexOf(from);
-    all[i + dir]?.focus();
+    const nxt = all[i + dir];
+    if (!nxt) return;
+    nxt.focus();
+    // With the panel open, ↑/↓ on a row moves the panel along with the focus.
+    if (openIdRef.current) openBooking(rows.find((r) => r.bookingId === nxt.getAttribute('data-booking-id')));
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -510,10 +588,10 @@ const BookingsViewPanel = ({ branchId }) => {
     </colgroup>
   );
   const rowProps = (b) => ({
-    b, all: rows, columns, ctx, unread: isUnseen(b), selected: selected?.bookingId === b.bookingId,
+    b, all: rows, columns, ctx, unread: isUnseen(b), selected: b.bookingId === openId,
     dim: viewChip !== 'done' && viewChip !== 'void' && isDimmed(b, ctx), late: lateMinutes(b, ctx), amount: amountCell(b, ctx),
     suggestion: suggestions[b.bookingId], onSuggest: (tid) => { setBusyId(b.bookingId); handleAssignTherapist(b.bookingId, tid).finally(() => setBusyId(null)); },
-    action: nextAction(b, { readOnly }), busy: busyId === b.bookingId, onOpen: () => openBooking(b), onAction: (a) => runNext(b, a), onNav: navRows,
+    bp: { sm: isSm, md: isMd, lg: isLg }, action: nextAction(b, { readOnly }), busy: busyId === b.bookingId, onOpen: () => openBooking(b), onAction: (a) => runNext(b, a), onNav: navRows,
     scrollMargin: stickyTop + blockH + headH + (multiDay ? 36 : 6),
   });
   let body;
@@ -564,7 +642,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const clearAll = () => { setSearchText(''); patch({ q: '', th: '', sv: '', rm: '', bv: '', nf: '' }); };
 
   return (
-    <div className="pb-6" style={{ '--bk-top': `${stickyTop}px` }}>
+    <div ref={rootRef} className="pb-6" style={{ '--bk-top': `${stickyTop}px`, paddingRight: openId && panelDocked ? panelWidth : undefined, transition: 'padding-right 200ms ease-out' }}>
       {headerActions}
       {toast && (
         <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-toast px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
@@ -623,16 +701,23 @@ const BookingsViewPanel = ({ branchId }) => {
       )}
 
       <BookingActionModal
-        isOpen={!!selected}
-        // Refresh on close so an in-modal mutation (e.g. an admin correction) never leaves this list showing the old row.
-        onClose={() => { setSelected(null); load(); }}
+        variant="panel"
+        isOpen={!!openId}
+        previewBooking={rows.find((r) => r.bookingId === openId) || null}
+        onRefreshBooking={refreshSelected}
+        guardRef={guardRef}
+        onClose={closePanel}
         booking={selected}
         therapists={therapists}
+        rooms={rooms}
+        services={services}
+        branchHours={branchHours}
         onAssignTherapist={handleAssignTherapist}
         onUpdateStatus={handleStatusUpdate}
         onRecordPayment={handleRecordPayment}
         onGroupPaymentRecorded={handleGroupPaymentRecorded}
         onApplyDiscount={handleApplyDiscount}
+        onEditBooking={readOnly ? undefined : handleEditBooking}
         userRole={role}
         onViewBooking={handleViewBooking}
       />

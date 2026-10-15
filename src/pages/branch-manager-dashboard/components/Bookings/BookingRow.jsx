@@ -38,7 +38,7 @@ const AmountCell = ({ a }) => {
   return <span className="text-[#B4B4BA]">—</span>;
 };
 
-const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, onOpen, onAction, onNav, scrollMargin }) => {
+const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, bp, onOpen, onAction, onNav, scrollMargin }) => {
   const color = getBookingStatusColors(isNoShow(b) ? 'No Show' : toDbStatus(b.status)).bar;
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
@@ -67,17 +67,17 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
           {isOnline && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF0FF] text-[#4F46E5] flex-shrink-0">Online</span>}
         </div>
         <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">{formatPhoneGrouped(b.customerPhone)}</div>
-        <div className="md:hidden text-[12.5px] text-[#515152] truncate">{b.service}</div>
-        <div className="sm:hidden mt-0.5 flex items-center gap-2"><StatusPill b={b} />{late != null && <span className="text-[11.5px] font-medium text-[#B45309]">Late · {formatLate(late)}</span>}</div>
+        {!bp.md && <div className="text-[12.5px] text-[#515152] truncate">{b.service}</div>}
+        {!bp.sm && <div className="mt-0.5 flex items-center gap-2"><StatusPill b={b} />{late != null && <span className="text-[11.5px] font-medium text-[#B45309]">Late · {formatLate(late)}</span>}</div>}
       </td>
-      {columns.service && (
-        <td className={`${cell} pr-3 hidden md:table-cell ${dim ? 'opacity-[.55]' : ''}`}>
+      {bp.md && columns.service && (
+        <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
           <div className="text-[13px] truncate">{b.service}</div>
           <div className="text-[12.5px] text-[#8A8A90] truncate">{[b.roomName, grp > 1 && `Group of ${grp}`].filter(Boolean).join(' · ') || ' '}</div>
         </td>
       )}
-      {columns.therapist && (
-        <td className={`${cell} pr-3 hidden lg:table-cell ${dim ? 'opacity-[.55]' : ''}`}>
+      {bp.lg && columns.therapist && (
+        <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
           {people.length === 0 ? (
             <>
               <div className="text-[13px] font-medium text-[#B45309]">Unassigned</div>
@@ -97,11 +97,11 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
           )}
         </td>
       )}
-      <td className={`${cell} pr-3 hidden sm:table-cell ${dim ? 'opacity-[.55]' : ''}`}>
+      {bp.sm && <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
         <StatusPill b={b} />
         {late != null && <div className="text-[11.5px] font-medium text-[#B45309] mt-0.5">Late · {formatLate(late)}</div>}
-      </td>
-      {columns.amount && <td className={`${cell} pr-4 text-right whitespace-nowrap hidden sm:table-cell ${dim ? 'opacity-[.55]' : ''}`}><AmountCell a={amount} /></td>}
+      </td>}
+      {bp.sm && columns.amount && <td className={`${cell} pr-4 text-right whitespace-nowrap ${dim ? 'opacity-[.55]' : ''}`}><AmountCell a={amount} /></td>}
       <td className={`${cell} w-[88px] pl-1 pr-1`}>
         <div className="flex gap-1.5 justify-end items-center text-[#8A8A90]">
           {action && (
