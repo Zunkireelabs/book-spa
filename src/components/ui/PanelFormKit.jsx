@@ -307,7 +307,7 @@ export const TimeField = ({ value, onChange, label, required, disabled, hint, st
   );
 };
 
-const ghostBtn = 'h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast whitespace-nowrap disabled:opacity-50';
+const ghostBtn = 'h-9 px-2.5 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast whitespace-nowrap disabled:opacity-50';
 const primaryBtn = 'h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap';
 
 // Form container: a docked SidePanel (variant="panel") or a centered modal (variant="modal").
@@ -345,7 +345,7 @@ export const PanelShell = ({
   ) : footerOverride ? (
     <div key="override">{footerOverride}</div>
   ) : (
-    <div key="actions" className="flex items-center gap-3">
+    <div key="actions" className="flex items-center gap-2">
       {footerLeft}
       <p className="flex-1 min-w-0 text-xs text-text-secondary" aria-live="polite">{primary?.loading ? '' : primary?.disabled ? (reason || 'Complete the required fields') : ''}</p>
       <button type="button" onClick={requestClose} disabled={busy} className={ghostBtn}>{cancelLabel}</button>

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchPackageOverview, fetchPackageTypes } from '../../../../services/api';
 import { useAuth } from '../../../../contexts/AuthContext';
-import NewPackageModal from './NewPackageModal';
+import NewPackagePanel from './NewPackagePanel';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -241,7 +241,7 @@ const PackageOverviewPanel = ({ readOnly = false }) => {
       </div>
 
       {!readOnly && showNewPackage && (
-        <NewPackageModal
+        <NewPackagePanel
           userRole={userRole}
           onClose={() => setShowNewPackage(false)}
           onIssued={() => {
