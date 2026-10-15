@@ -409,7 +409,7 @@ const primaryBtn = 'h-9 px-4 text-[13px] font-body font-body-medium bg-primary t
 export const PanelShell = ({
   variant = 'panel', title, onClose, dirty = false, guardRef, busy = false,
   reason = '', primary, cancelLabel = 'Cancel', footerLeft, footerOverride, hideFooter = false,
-  headerExtra, onBack, children,
+  headerExtra, onBack, width, children,
 }) => {
   const [confirm, setConfirm] = useState(null); // { action? }
   const requestClose = useCallback(() => {
@@ -456,7 +456,7 @@ export const PanelShell = ({
 
   if (variant === 'panel') {
     return (
-      <SidePanel isOpen title={title} onClose={requestClose} onBack={onBack ? requestBack : undefined} footer={footerNode} headerExtra={headerExtra}>
+      <SidePanel isOpen title={title} onClose={requestClose} onBack={onBack ? requestBack : undefined} footer={footerNode} headerExtra={headerExtra} {...(width ? { width } : {})}>
         {children}
       </SidePanel>
     );

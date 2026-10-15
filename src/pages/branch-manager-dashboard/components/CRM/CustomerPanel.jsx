@@ -112,7 +112,7 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
     return (
       <>
         <PanelShell
-          variant="panel" title={`Collect from ${c.fullName}`} onClose={onClose} onBack={() => setView('main')}
+          variant="panel" width="460px" title={`Collect from ${c.fullName}`} onClose={onClose} onBack={() => setView('main')}
           reason={chosen.length === 0 ? 'Tick at least one visit' : ''}
           primary={{ label: chosen.length ? `Collect ${npr(chosenTotal)}` : 'Collect', disabled: chosen.length === 0, onClick: () => setPaying({ primary: chosen[0], others: chosen.slice(1) }) }}
         >
