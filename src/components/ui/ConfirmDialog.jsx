@@ -22,6 +22,8 @@ const ConfirmDialog = ({
   requireReason = true, // false: a plain confirm (no reason field), e.g. deleting a product
   reasonOptional = false, // true: shows a "Reason (optional)" field that never blocks confirm (wins over requireReason)
   error = null, // message shown inside the dialog, above the buttons (the dialog stays open on error)
+  reasonLabel = 'Reason', // label of the optional field (reasonOptional only), e.g. 'Note'
+  reasonPlaceholder = 'e.g. Customer changed their mind',
 }) => {
   const [reason, setReason] = useState('');
   const trimmedReason = reason.trim();
@@ -74,14 +76,14 @@ const ConfirmDialog = ({
           {reasonOptional ? (
             <div>
               <label htmlFor="confirm-reason-optional" className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
-                Reason <span className="text-text-tertiary font-normal">(optional)</span>
+                {reasonLabel} <span className="text-text-tertiary font-normal">(optional)</span>
               </label>
               <input
                 id="confirm-reason-optional"
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g. Customer changed their mind"
+                placeholder={reasonPlaceholder}
                 className="w-full h-10 px-3 border border-border rounded-spa font-body font-body-normal text-sm text-text-primary bg-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
                 disabled={isSubmitting}
                 autoFocus

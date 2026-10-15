@@ -17,6 +17,7 @@ import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel from './SidePanel';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
+import { formatPhoneGrouped } from '../../utils/phone';
 import { useBlockOverlap } from '../../hooks/useBlockOverlap';
 
 function getNepalNow() {
@@ -642,7 +643,9 @@ const BookingActionModal = ({
           isCoupleAssignment ? (companionPhone.trim() || null) : undefined
         );
       }
-      onClose();
+      // The panel stays open on the updated booking (like status changes); the modal closes as before.
+      if (variant === 'panel') await onRefreshBooking?.(booking.bookingId);
+      else onClose();
     } catch (error) {
       setActionError(error?.message || 'Assignment failed. Please try again.');
     } finally {
@@ -1312,7 +1315,7 @@ const BookingActionModal = ({
                     : booking.paymentStatus === 'partial' ? { label: 'Partially paid', cls: 'bg-warning/10 text-warning' }
                     : { label: 'Unpaid', cls: 'bg-warning/10 text-warning' };
                   const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`;
-                  const phone = booking.customerPhone ? String(booking.customerPhone).replace(/^(\+?977)?[-\s]?(\d{10})$/, '+977 $2') : '';
+                  const phone = booking.customerPhone ? formatPhoneGrouped(booking.customerPhone) : '';
                   const copy = (v) => { try { navigator.clipboard?.writeText(v); } catch (_) { /* clipboard unavailable */ } };
                   const copyBtn = (value, label) => (
                     <button type="button" onClick={() => copy(value)} aria-label={label} title={label}
@@ -1370,7 +1373,7 @@ const BookingActionModal = ({
                           <div className="group flex items-center gap-2 text-[13px] text-text-primary">
                             <Icon name="Phone" size={14} className="text-text-tertiary flex-shrink-0" />
                             <a href={`tel:${String(booking.customerPhone).replace(/\s/g, '')}`} className="hover:underline tabular-nums">{phone}</a>
-                            {copyBtn(phone, 'Copy phone')}
+                            {copyBtn(String(booking.customerPhone), 'Copy phone')}
                           </div>
                         )}
                         {booking.customerEmail && (
@@ -1443,7 +1446,7 @@ const BookingActionModal = ({
                           />
                         ) : (
                           booking.customerPhone ? (
-                            <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerPhone}</p>
+                            <p className="font-body font-body-normal text-sm text-text-primary">{formatPhoneGrouped(booking.customerPhone)}</p>
                           ) : (
                             <p className="font-body font-body-normal text-sm text-text-secondary italic">Not provided</p>
                           )
@@ -2879,11 +2882,25 @@ const BookingActionModal = ({
   const overlays = (
     <>
       {/* Cancel / No Show confirmation */}
-      {pendingStatus && (
+      {pendingStatus === 'no show' && (
         <ConfirmDialog
-          title={pendingStatus === 'no show' ? 'Mark as No Show' : 'Cancel Booking'}
-          message={pendingStatus === 'no show' ? 'This will mark the booking as a no-show. This cannot be undone.' : 'This will cancel the booking. This cannot be undone.'}
-          confirmLabel={pendingStatus === 'no show' ? 'Mark No Show' : 'Cancel Booking'}
+          title="Mark as no-show"
+          message={`Mark ${booking.customerName} as a no-show?`}
+          confirmLabel="Mark no-show"
+          reasonOptional
+          reasonLabel="Note"
+          reasonPlaceholder="e.g. Didn't arrive and didn't call"
+          isSubmitting={isLoading}
+          onClose={() => setPendingStatus(null)}
+          // The stored reason is the note, or "No show" when it is left empty.
+          onConfirm={(note) => handleStatusUpdate('no show', (note || '').trim() || 'No show')}
+        />
+      )}
+      {pendingStatus && pendingStatus !== 'no show' && (
+        <ConfirmDialog
+          title="Cancel Booking"
+          message="This will cancel the booking. This cannot be undone."
+          confirmLabel="Cancel Booking"
           reasonOptions={CANCEL_REASON_OPTIONS}
           isSubmitting={isLoading}
           onClose={() => setPendingStatus(null)}
@@ -2899,9 +2916,11 @@ const BookingActionModal = ({
         <AdminCorrectionModal
           booking={booking}
           onClose={() => setShowAdminCorrection(false)}
-          onSuccess={() => {
+          onSuccess={(result) => {
             setShowAdminCorrection(false);
-            if (onClose) onClose();
+            // Panel: refresh in place, unless the booking was deleted (then close; the parent reloads its list).
+            if (isPanel && !result?.deleted) onRefreshBooking?.(booking.bookingId);
+            else if (onClose) onClose();
           }}
         />
       )}
@@ -2917,7 +2936,8 @@ const BookingActionModal = ({
           onClose={() => setCorrectingPayment(null)}
           onSuccess={() => {
             setCorrectingPayment(null);
-            if (onClose) onClose();
+            if (isPanel) onRefreshBooking?.(booking.bookingId);
+            else if (onClose) onClose();
           }}
         />
       )}

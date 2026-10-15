@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
@@ -546,19 +546,75 @@ const BookingsViewPanel = ({ branchId }) => {
     </div>
   );
 
+  // View chips degrade gracefully: what doesn't fit moves into a "More ▾" menu (with counts); the active chip always stays visible.
+  const tabsBoxRef = useRef(null);
+  const tabsMeasureRef = useRef(null);
+  const [tabsAvail, setTabsAvail] = useState(0);
+  const [tabWidths, setTabWidths] = useState([]);
+  const countsKey = VIEWS.map((v) => counts[v.id]).join(',');
+  useLayoutEffect(() => {
+    const m = tabsMeasureRef.current;
+    if (m) setTabWidths([...m.children].map((c) => Math.ceil(c.getBoundingClientRect().width)));
+  }, [countsKey]);
+  useEffect(() => {
+    const el = tabsBoxRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setTabsAvail(Math.floor(el.getBoundingClientRect().width)));
+    ro.observe(el);
+    setTabsAvail(Math.floor(el.getBoundingClientRect().width));
+    return () => ro.disconnect();
+  }, []);
+  const tabGap = isSm ? 22 : 20;
+  const MORE_W = 74;
+  const visibleIds = (() => {
+    const ids = VIEWS.map((v) => v.id);
+    if (!tabsAvail || tabWidths.length !== ids.length) return ids;
+    const total = tabWidths.reduce((n, w) => n + w, 0) + tabGap * (ids.length - 1);
+    if (total <= tabsAvail) return ids;
+    const budget = tabsAvail - MORE_W - tabGap;
+    const activeIdx = ids.indexOf(viewChip);
+    const keep = new Set([activeIdx]);
+    let used = tabWidths[activeIdx];
+    for (let i = 0; i < ids.length; i += 1) {
+      if (keep.has(i)) continue;
+      if (used + tabGap + tabWidths[i] <= budget) { keep.add(i); used += tabGap + tabWidths[i]; } else break; // once one doesn't fit, later ones go to More
+    }
+    return ids.filter((_, i) => keep.has(i));
+  })();
+  const hiddenViews = VIEWS.filter((v) => !visibleIds.includes(v.id));
+  const tabButton = (v, measure = false) => {
+    const active = viewChip === v.id;
+    return (
+      <button key={v.id} type="button" role={measure ? undefined : 'tab'} aria-selected={measure ? undefined : active} tabIndex={measure ? -1 : undefined}
+        onClick={measure ? undefined : () => patch({ bv: v.id === 'all' ? '' : v.id })}
+        className={`h-[38px] inline-flex items-center gap-[7px] text-[13px] font-medium relative flex-shrink-0 ${active ? 'text-text-primary' : 'text-[#515152] hover:text-text-primary'}`}>
+        {v.color && <i className="w-1.5 h-1.5 rounded-full" style={{ background: v.color }} />}
+        {v.label}<span className="text-[#8A8A90] tabular-nums" data-count={measure ? undefined : v.id}>{counts[v.id]}</span>
+        {active && !measure && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-text-primary rounded-sm" />}
+      </button>
+    );
+  };
   const viewTabs = (
-    <div className="flex items-center gap-5 sm:gap-[22px] overflow-x-auto whitespace-nowrap min-w-0 flex-1" role="tablist" aria-label="Booking views">
-      {VIEWS.map((v) => {
-        const active = viewChip === v.id;
-        return (
-          <button key={v.id} type="button" role="tab" aria-selected={active} onClick={() => patch({ bv: v.id === 'all' ? '' : v.id })}
-            className={`h-[38px] inline-flex items-center gap-[7px] text-[13px] font-medium relative ${active ? 'text-text-primary' : 'text-[#515152] hover:text-text-primary'}`}>
-            {v.color && <i className="w-1.5 h-1.5 rounded-full" style={{ background: v.color }} />}
-            {v.label}<span className="text-[#8A8A90] tabular-nums" data-count={v.id}>{counts[v.id]}</span>
-            {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-text-primary rounded-sm" />}
-          </button>
-        );
-      })}
+    <div ref={tabsBoxRef} className="relative flex items-center whitespace-nowrap min-w-0 flex-1" style={{ gap: tabGap }} role="tablist" aria-label="Booking views">
+      {VIEWS.filter((v) => visibleIds.includes(v.id)).map((v) => tabButton(v))}
+      {hiddenViews.length > 0 && (
+        <Menu trigger={(open, toggle) => (
+          <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-views-more
+            className="h-[38px] inline-flex items-center gap-1 text-[13px] font-medium text-[#515152] hover:text-text-primary flex-shrink-0">
+            More<Icon name="ChevronDown" size={13} />
+          </button>)}>
+          {(close) => hiddenViews.map((v) => (
+            <button key={v.id} type="button" role="menuitem" onClick={() => { patch({ bv: v.id === 'all' ? '' : v.id }); close(); }}
+              className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] flex items-center gap-2 whitespace-nowrap">
+              {v.color && <i className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: v.color }} />}
+              <span className="flex-1">{v.label}</span><span className="text-[#8A8A90] tabular-nums">{counts[v.id]}</span>
+            </button>))}
+        </Menu>
+      )}
+      {/* Off-screen copy used only to measure every chip's natural width. */}
+      <div ref={tabsMeasureRef} aria-hidden="true" className="absolute left-0 top-0 invisible pointer-events-none flex whitespace-nowrap" style={{ gap: tabGap }}>
+        {VIEWS.map((v) => tabButton(v, true))}
+      </div>
     </div>
   );
   const viewRow = (
