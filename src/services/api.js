@@ -1201,6 +1201,37 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
   }
 }
 
+// Close a past Pending/Confirmed booking that never got a status ("Needs closing"). Uses the normal status path (updateBookingStatus),
+// so locks, terminal-status, role and No Show reason rules all apply. The state machine has no direct Confirmed → Completed, so completing
+// walks Pending → Confirmed → In-Progress → Completed one valid step at a time.
+export async function closePastBooking({ bookingId, outcome, reason }) {
+  const { data: b, error } = await supabase.from('bookings').select('id, status').eq('id', bookingId).single();
+  if (error) return { data: null, error };
+  const steps = outcome === 'no_show'
+    ? [['No Show', reason]]
+    : { Pending: ['Confirmed', 'In-Progress', 'Completed'], Confirmed: ['In-Progress', 'Completed'], 'In-Progress': ['Completed'] }[b.status]?.map((st) => [st]);
+  if (!steps) return { data: null, error: { code: 'NOT_OPEN', message: `This booking is already ${b.status}.` } };
+  for (const [newStatus, why] of steps) {
+    const res = await updateBookingStatus({ bookingId, newStatus, reason: why });
+    if (res.error) return res;
+  }
+  return { data: { bookingId }, error: null };
+}
+
+// "Honest Collect": record each bundled booking's allocation and CHECK every result. Returns the bookings that were NOT recorded (so the
+// caller can name them) — a failed bundled payment must never be swallowed.
+export async function recordBundledAllocations({ allocations = [], notes, bookings = [] }) {
+  const failures = [];
+  for (const alloc of allocations) {
+    const res = await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
+    if (res.error) {
+      const row = bookings.find((o) => o.bookingId === alloc.bookingId);
+      failures.push(`${row?.bookingNumber || alloc.bookingNumber || alloc.bookingId}${res.error.message ? ` (${res.error.message})` : ''}`);
+    }
+  }
+  return failures;
+}
+
 // Local-DB audit helper: how many bookings have a payment_status that disagrees with their recorded payments (payments − refunds)?
 export async function countPaymentStatusMismatches({ branchId } = {}) {
   const rows = await pageAllRows(() => withBranch(supabase.from('bookings').select('id, status, payment_status, final_amount, date, payments(amount), payment_refunds(amount)').order('id'), branchId));

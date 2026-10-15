@@ -917,8 +917,10 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 <p className="font-body font-body-normal text-sm text-warning">
                   <span className="font-body-medium">{customerName.trim() || 'This customer'}</span> has an outstanding
                   balance — NPR {previousDue.totalDue.toLocaleString('en-IN')} across {previousDue.bookingCount} earlier
-                  booking{previousDue.bookingCount > 1 ? 's' : ''}. You'll be able to collect it together with this
-                  booking's payment.
+                  visit{previousDue.bookingCount > 1 ? 's' : ''}.
+                  {previousDue.collectableDue > 0 && <> You'll be able to collect NPR {previousDue.collectableDue.toLocaleString('en-IN')} together with this
+                  booking's payment.</>}
+                  {previousDue.lockedDue > 0 && <> NPR {previousDue.lockedDue.toLocaleString('en-IN')} on closed days can’t be collected here.</>}
                 </p>
               </div>
             )}

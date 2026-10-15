@@ -125,6 +125,7 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
       upcoming: money.upcoming, // scheduled, not owed
       deposit: money.deposit,
       credit: money.credit,
+      stale: money.staleInProgress.map((b) => ({ id: b.id, date: String(b.date).slice(0, 10), service: b.service_name_snapshot || '', status: b.status, isLocked: !!b.is_locked })), // In-Progress from an earlier day
       unclosed: money.unclosed.map((b) => ({ id: b.id, date: String(b.date).slice(0, 10), service: b.service_name_snapshot || '', status: b.status, atStake: b.money.atStake, isLocked: !!b.is_locked })),
       legacyBalance,
       usualTherapist: topOf(therapistCounts, completedVisits)?.name || null,

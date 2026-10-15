@@ -6,7 +6,8 @@ import { PanelShell, FormBody, InfoRows } from '../../../../components/ui/PanelF
 import MembershipDetailPanel from '../Memberships/MembershipDetailPanel';
 import PackageDetailPanel from '../Packages/PackageDetailPanel';
 import VoucherDetailPanel from '../Vouchers/VoucherDetailPanel';
-import { getCustomerPanelDetail, recordPayment, recordTip } from '../../../../services/api';
+import UnclosedNudge from '../../../../components/ui/UnclosedNudge';
+import { getCustomerPanelDetail, recordPayment, recordTip, recordBundledAllocations } from '../../../../services/api';
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { initials, monthYear, dayBlock, relativeDayLabel, shortDate } from '../../../../utils/customerDirectory';
 import { friendlyError } from '../../../../utils/friendlyError';
@@ -84,7 +85,10 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
 
   // ── Collect: tick the owed visits, then pay them through the same PaymentModal path as the Outstanding report ──
   const [ticked, setTicked] = useState(null); // Set of bookingIds
-  const owed = detail?.owed || [];
+  // Only owed visits on OPEN days can be collected here; closed (locked) days are reported, never bundled.
+  const owed = useMemo(() => (detail?.owed || []).filter((o) => !o.isLocked), [detail]);
+  const lockedDue = c?.lockedDue || 0;
+  const collectable = Math.round(((c?.balance || 0) - lockedDue) * 100) / 100;
   useEffect(() => { if (view === 'collect') setTicked(new Set(owed.map((o) => o.bookingId))); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
   const chosen = useMemo(() => owed.filter((o) => ticked?.has(o.bookingId)), [owed, ticked]);
   const chosenTotal = Math.round(chosen.reduce((s, o) => s + o.amountDue, 0) * 100) / 100;
@@ -99,11 +103,13 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
       const tipResult = await recordTip({ bookingId: paying.primary.bookingId, amount: split.amount, receivedBy: split.receivedBy });
       if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
     }
-    for (const alloc of (additionalAllocations || [])) await recordPayment({ bookingId: alloc.bookingId, tenders: alloc.tenders, notes });
+    // Every bundled booking is its own payment: check each one and name any that was NOT recorded (never swallow a failure).
+    const failures = await recordBundledAllocations({ allocations: additionalAllocations, notes, bookings: paying.others });
+    const primaryNumber = paying.primary.bookingNumber;
     setPaySubmitting(false);
     setPaying(null);
     setView('main');
-    setNotice(`Payment recorded for ${c.fullName}.`);
+    setNotice(failures.length ? `Payment recorded for ${primaryNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.` : `Payment recorded for ${c.fullName}.`);
     refresh();
     return { error: null };
   };
@@ -175,8 +181,8 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
             <Icon name="Plus" size={15} />New booking
           </button>
         )}
-        {!readOnly && c.balance > 0 && (
-          <button type="button" onClick={() => setView('collect')} className="h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium hover:bg-[#FAFAF9]">Collect {npr(c.balance)}</button>
+        {!readOnly && collectable > 0 && (
+          <button type="button" onClick={() => setView('collect')} className="h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium hover:bg-[#FAFAF9]">Collect {npr(collectable)}</button>
         )}
         <button type="button" onClick={onOpenProfile} className="h-8 px-3 rounded-md border border-border bg-white text-[13px] font-medium inline-flex items-center gap-1.5 ml-auto hover:bg-[#FAFAF9]">
           <Icon name="FileText" size={14} />Open profile
@@ -196,6 +202,7 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
         {c && (
           <div className="px-5 py-[18px] flex flex-col gap-[22px]">
             {notice && <p role="status" className="flex items-start gap-2 border border-success/30 bg-success/5 rounded-spa px-3 py-2 text-[13px] text-success"><Icon name="CheckCircle2" size={14} className="mt-0.5 flex-shrink-0" /><span>{notice}</span></p>}
+            {!readOnly && <UnclosedNudge key={c.id} unclosed={c.unclosed} stale={c.stale} readOnly={readOnly} onChanged={refresh} />}
             {failed && <p role="alert" className="text-[13px] text-[#B45309]">Couldn't load this customer's bookings. <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="underline font-medium">Retry</button></p>}
 
             {detail?.now && (
@@ -225,10 +232,13 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
               ) : !failed && <p className="text-[13px] text-[#B4B4BA]">No upcoming booking</p>}
             </section>
 
-            <div className="grid grid-cols-3 border border-border rounded-lg">
-              <Stat label="Visits" value={c.completedVisits} />
-              <Stat label="Balance" value={c.balance > 0 ? npr(c.balance) : '—'} amber={c.balance > 0} divider />
-              <Stat label="Spent" value={npr(c.spent)} divider />
+            <div>
+              <div className="grid grid-cols-3 border border-border rounded-lg">
+                <Stat label="Visits" value={c.completedVisits} />
+                <Stat label="Balance" value={c.balance > 0 ? npr(c.balance) : '—'} amber={c.balance > 0} divider />
+                <Stat label="Spent" value={npr(c.spent)} divider />
+              </div>
+              {lockedDue > 0 && <p className="mt-2 text-[12.5px] text-[#8A6A2E]">{npr(lockedDue)} on closed days can’t be collected here.</p>}
             </div>
 
             {hasPrepaid && (
