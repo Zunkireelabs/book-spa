@@ -14,7 +14,7 @@ import { transformBooking } from '../../../../../services/bookingTransformers';
 import { isOverallBranch } from '../../../../../services/api';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blockOverlap';
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
-import { friendlyError } from '../../../../../utils/friendlyError';
+import { friendlyError, isNetworkError } from '../../../../../utils/friendlyError';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
@@ -241,6 +241,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         setReschedulePending(false);
         if (result.error) {
           showToast(friendlyError(result.error, 'Failed to reschedule.'), 'error');
+          // The request may have committed before the connection dropped (reschedule isn't idempotent): show the real state.
+          if (isNetworkError(result.error)) refreshCalendar();
         } else {
           setRebookSource(null);
           showToast('Booking rescheduled successfully.');
@@ -276,6 +278,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       });
       if (result.error) {
         showToast(friendlyError(result.error, 'Failed to rebook.'), 'error');
+        if (isNetworkError(result.error)) refreshCalendar(); // the booking may have been created before the connection dropped
         // Restore rebook mode on failure so user can retry
         setRebookSource(source);
       } else {
