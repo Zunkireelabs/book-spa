@@ -19,6 +19,7 @@ const ConfirmDialog = ({
   onConfirm,
   onClose,
   isSubmitting = false,
+  requireReason = true, // false: a plain confirm (no reason field), e.g. deleting a product
 }) => {
   const [reason, setReason] = useState('');
   const trimmedReason = reason.trim();
@@ -28,11 +29,12 @@ const ConfirmDialog = ({
   const trimmedCustomReason = customReason.trim();
   const isOthers = selectedReason === 'others';
 
-  const canConfirm = reasonOptions
+  const canConfirm = !requireReason ? true : reasonOptions
     ? Boolean(selectedReason) && (!isOthers || trimmedCustomReason.length > 0)
     : Boolean(trimmedReason);
 
   const handleConfirm = () => {
+    if (!requireReason) { onConfirm(''); return; }
     if (!reasonOptions) {
       onConfirm(trimmedReason);
       return;
@@ -66,7 +68,7 @@ const ConfirmDialog = ({
           <p className="font-body font-body-normal text-sm text-text-secondary">
             {message}
           </p>
-          {reasonOptions ? (
+          {!requireReason ? null : reasonOptions ? (
             <div className="space-y-4">
               <div>
                 <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">

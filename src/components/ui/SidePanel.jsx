@@ -22,7 +22,7 @@ function useMediaQuery(query) {
 //  * below lg: a right-hand sheet (full-screen under 640px) with a light scrim covering the whole viewport.
 // `onClose` is called for ×, Esc and the scrim — callers put any dirty-draft guard behind it. Both variants are portalled to <body>.
 // `width`: any CSS width for the docked panel (default 420px), e.g. 'min(560px, max(420px, 100vw - 720px))'.
-const SidePanel = ({ isOpen, title, onClose, children, footer, headerExtra, titleId: titleIdProp, width = `${PANEL_WIDTH}px` }) => {
+const SidePanel = ({ isOpen, title, onClose, onBack, children, footer, headerExtra, titleId: titleIdProp, width = `${PANEL_WIDTH}px` }) => {
   const docked = useMediaQuery('(min-width: 1024px)');
   const autoId = useId();
   const titleId = titleIdProp || `side-panel-title-${autoId}`;
@@ -67,7 +67,14 @@ const SidePanel = ({ isOpen, title, onClose, children, footer, headerExtra, titl
       style={{ width: '100%' }}
     >
       <div className="h-14 flex-shrink-0 flex items-center justify-between gap-2 px-5 border-b border-border bg-surface">
-        <h3 id={titleId} className="font-heading font-heading-semibold text-[15px] text-text-primary truncate">{title}</h3>
+        <div className="flex items-center gap-1 min-w-0">
+          {onBack && (
+            <button type="button" onClick={onBack} aria-label="Back" className="w-8 h-8 -ml-2 flex items-center justify-center rounded-spa text-text-secondary hover:bg-background spa-transition-fast flex-shrink-0">
+              <Icon name="ChevronLeft" size={18} />
+            </button>
+          )}
+          <h3 id={titleId} className="font-heading font-heading-semibold text-[15px] text-text-primary truncate">{title}</h3>
+        </div>
         <div className="flex items-center gap-1">
           {headerExtra}
           <button

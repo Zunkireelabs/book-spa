@@ -72,7 +72,7 @@ export const controlA11y = (id, error) => ({
 });
 export const CONTROL_ERROR = 'border-error focus:border-error focus:ring-error/30';
 
-export const TextInput = ({ error, ...props }) => <input type="text" {...props} className={`${CONTROL} ${error ? CONTROL_ERROR : ''} ${props.className || ''}`} />;
+export const TextInput = React.forwardRef(({ error, ...props }, ref) => <input ref={ref} type="text" {...props} className={`${CONTROL} ${error ? CONTROL_ERROR : ''} ${props.className || ''}`} />);
 
 // Money amount: "NPR" prefix inside the field, tabular figures, no negatives, at most 2 decimals. `value` is the raw string.
 export const sanitizeMoney = (raw) => {
@@ -80,10 +80,11 @@ export const sanitizeMoney = (raw) => {
   const [int, ...rest] = cleaned.split('.');
   return rest.length ? `${int}.${rest.join('').slice(0, 2)}` : int;
 };
-export const MoneyInput = ({ value, onChange, error, className = '', ...props }) => (
+export const MoneyInput = React.forwardRef(({ value, onChange, error, className = '', ...props }, ref) => (
   <div className="relative">
     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-text-tertiary pointer-events-none">NPR</span>
     <input
+      ref={ref}
       type="text"
       inputMode="decimal"
       autoComplete="off"
@@ -93,7 +94,7 @@ export const MoneyInput = ({ value, onChange, error, className = '', ...props })
       className={`${CONTROL} pl-11 font-data tabular-nums ${error ? CONTROL_ERROR : ''} ${className}`}
     />
   </div>
-);
+));
 export const NumberInput = (props) => <input type="number" {...props} className={`${CONTROL} ${props.className || ''}`} />;
 
 export const SelectField = ({ value, onChange, options, placeholder, disabled }) => (
@@ -158,6 +159,53 @@ export const RadioCards = ({ options, value, onChange, label, id, error }) => {
           </button>
         );
       })}
+    </div>
+  );
+};
+
+// Switch row (label + description on the left, a switch on the right), the kit's way to toggle a setting.
+export const SwitchRow = ({ label, description, checked, onChange, id, disabled }) => (
+  <div className="flex items-start justify-between gap-4 border border-border rounded-spa px-3 py-2.5">
+    <div className="min-w-0">
+      <p id={id ? `${id}-label` : undefined} className="text-[13px] font-body-medium text-text-primary">{label}</p>
+      {description && <p className="mt-0.5 text-xs text-text-secondary">{description}</p>}
+    </div>
+    <button
+      type="button"
+      role="switch"
+      id={id}
+      aria-checked={checked}
+      aria-labelledby={id ? `${id}-label` : undefined}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-60 ${checked ? 'bg-primary' : 'bg-border'}`}
+    >
+      <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+    </button>
+  </div>
+);
+
+// Quantity stepper: − n +, bounded by min / max, typing digits is allowed.
+export const Stepper = ({ value, onChange, min = 1, max, id, ariaLabel = 'Quantity', error }) => {
+  const n = Number(value) || 0;
+  const clamp = (v) => Math.max(min, max != null ? Math.min(max, v) : v);
+  return (
+    <div className={`inline-flex items-stretch h-10 border rounded-spa overflow-hidden ${error ? 'border-error' : 'border-border'}`}>
+      <button type="button" aria-label="Decrease" disabled={n <= min} onClick={() => onChange(String(clamp(n - 1)))} className="w-10 flex items-center justify-center text-text-secondary hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">
+        <Icon name="Minus" size={14} />
+      </button>
+      <input
+        id={id}
+        aria-label={ariaLabel}
+        aria-invalid={error ? true : undefined}
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 5))}
+        className="w-14 text-center text-[13px] font-data tabular-nums text-text-primary bg-surface border-x border-border focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary/30"
+      />
+      <button type="button" aria-label="Increase" disabled={max != null && n >= max} onClick={() => onChange(String(clamp(n + 1)))} className="w-10 flex items-center justify-center text-text-secondary hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">
+        <Icon name="Plus" size={14} />
+      </button>
     </div>
   );
 };
@@ -317,13 +365,17 @@ const primaryBtn = 'h-9 px-4 text-[13px] font-body font-body-medium bg-primary t
 export const PanelShell = ({
   variant = 'panel', title, onClose, dirty = false, guardRef, busy = false,
   reason = '', primary, cancelLabel = 'Cancel', footerLeft, footerOverride, hideFooter = false,
-  headerExtra, children,
+  headerExtra, onBack, children,
 }) => {
   const [confirm, setConfirm] = useState(null); // { action? }
   const requestClose = useCallback(() => {
     if (busy) return;
     if (dirty) setConfirm({}); else onClose?.();
   }, [busy, dirty, onClose]);
+  const requestBack = useCallback(() => {
+    if (busy) return;
+    if (dirty) setConfirm({ action: onBack }); else onBack?.();
+  }, [busy, dirty, onBack]);
   useEffect(() => {
     if (!guardRef) return undefined;
     guardRef.current = (action) => { if (dirty) setConfirm({ action }); else action(); };
@@ -360,7 +412,7 @@ export const PanelShell = ({
 
   if (variant === 'panel') {
     return (
-      <SidePanel isOpen title={title} onClose={requestClose} footer={footerNode} headerExtra={headerExtra}>
+      <SidePanel isOpen title={title} onClose={requestClose} onBack={onBack ? requestBack : undefined} footer={footerNode} headerExtra={headerExtra}>
         {children}
       </SidePanel>
     );
