@@ -6601,7 +6601,8 @@ export async function fetchTherapistsForManagement(branchId) {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    if (!['manager', 'admin'].includes(profile.role)) {
+    // admin_viewer may read the list (RLS allows the SELECT; writes stay manager/admin-only).
+    if (!['manager', 'admin', 'admin_viewer'].includes(profile.role)) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
     }
 
