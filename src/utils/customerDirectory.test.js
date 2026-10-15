@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildPanelDetail, buildCustomerDirectory, lifecycleSegment, bookingDue, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
+  buildPanelDetail, legacyDue, buildCustomerDirectory, lifecycleSegment, bookingDue, nepalNow, tabCounts, lifecycleCounts, matchesSearch, sortCustomers,
   phoneSearchDigits, relativeDayLabel, daysBetween, TABS,
 } from './customerDirectory';
 
@@ -236,5 +236,28 @@ describe('buildPanelDetail', () => {
     ]);
     expect(d.preferences.note).toEqual({ text: 'Prefers light pressure', date: ago(30) });
     expect(det([bk('a', ago(2))]).preferences.note).toBeNull();
+  });
+});
+
+describe('Spotlight inputs', () => {
+  it('legacyDue is the old rule: future unpaid counts, cancelled and paid do not', () => {
+    expect(legacyDue(bk('a', ahead(3), 'Confirmed', { payment_status: 'unpaid', final_amount: 900 }))).toBe(900);
+    expect(legacyDue(bk('a', ago(3), 'Completed', { payment_status: 'partial', final_amount: 900, payments: [{ amount: 400 }] }))).toBe(500);
+    expect(legacyDue(bk('a', ago(3), 'Cancelled', { payment_status: 'unpaid', final_amount: 900 }))).toBe(0);
+    expect(legacyDue(bk('a', ago(3), 'Completed', { payment_status: 'paid', final_amount: 900 }))).toBe(0);
+  });
+  it('a customer row carries both balances, so the notice can show a real before / now', () => {
+    const c = one([cust('a')], [bk('a', ago(1), 'Completed', { payment_status: 'unpaid', final_amount: 2000 }), bk('a', ahead(2), 'Confirmed', { payment_status: 'unpaid', final_amount: 9000 })])[0];
+    expect(c.balance).toBe(2000);
+    expect(c.legacyBalance).toBe(11000);
+  });
+  it('usual therapist and favourite service follow the 2-visit / half rule over rendered visits', () => {
+    const v = (days, t, s) => bk('a', ago(days), 'Completed', { therapist_name_snapshot: t, service_name_snapshot: s });
+    const c = one([cust('a')], [v(5, 'Anil T.', 'Hot Stone'), v(15, 'Anil T.', 'Hot Stone'), v(25, 'Asha T.', 'Facial')])[0];
+    expect(c.usualTherapist).toBe('Anil T.');
+    expect(c.favouriteService).toBe('Hot Stone');
+    const d = one([cust('a')], [v(5, 'Anil T.', 'Hot Stone'), v(15, 'Asha T.', 'Facial'), v(25, 'Vina O.', 'Foot')])[0];
+    expect(d.usualTherapist).toBeNull();
+    expect(d.favouriteService).toBeNull();
   });
 });

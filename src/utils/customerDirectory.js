@@ -44,6 +44,17 @@ export function bookingDue(b, today) {
 }
 
 /**
+ * The OLD owed rule (what the Outstanding report and the calendar's "Prev. due" still use): any unpaid / partial booking that is
+ * not cancelled or a no-show, future ones included. Kept only so the Customers notice can show a real before/after total.
+ */
+export function legacyDue(b) {
+  if (!['unpaid', 'partial'].includes(b.payment_status)) return 0;
+  if (['Cancelled', 'No Show'].includes(b.status)) return 0;
+  const paid = (b.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+  return Math.max(0, round2(Number(b.final_amount || 0) - paid));
+}
+
+/**
  * The one lifecycle segment (so the counts sum to the total), in priority order:
  * new → lapsed → at-risk → regular → occasional.
  */
@@ -78,9 +89,12 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
     let inSpa = false;
     let completedVisits = 0;
     let balance = 0;
+    let legacyBalance = 0;
     let spent = 0;
     const therapists = new Map(); // id -> name
     const services = new Set();
+    const therapistCounts = new Map(); // rendered visits only, for the "usual therapist" / "favourite service" lines
+    const serviceCounts = new Map();
 
     for (const b of list) {
       const date = String(b.date).slice(0, 10);
@@ -91,11 +105,14 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
         if (!first || date < first.date) first = info;
         if (!last || date > last.date || (date === last.date && time > last.time)) last = info;
         if (b.status === 'In-Progress' && date === today) inSpa = true;
+        if (info.therapist) therapistCounts.set(info.therapist, (therapistCounts.get(info.therapist) || 0) + 1);
+        if (info.service) serviceCounts.set(info.service, (serviceCounts.get(info.service) || 0) + 1);
       }
       if (UPCOMING.includes(b.status) && (date > today || (date === today && time > nowHM))) {
         if (!next || date < next.date || (date === next.date && time < next.time)) next = info;
       }
       balance = round2(balance + bookingDue(b, today));
+      legacyBalance = round2(legacyBalance + legacyDue(b));
       if (b.payment_status === 'paid') spent = round2(spent + Number(b.final_amount || 0));
       if (b.therapist_id && b.therapist_name_snapshot) therapists.set(b.therapist_id, b.therapist_name_snapshot);
       if (b.service_name_snapshot) services.add(b.service_name_snapshot);
@@ -114,6 +131,9 @@ export function buildCustomerDirectory({ customers = [], bookings = [], memberId
       inSpa,
       spent,
       balance,
+      legacyBalance,
+      usualTherapist: topOf(therapistCounts, completedVisits)?.name || null,
+      favouriteService: topOf(serviceCounts, completedVisits)?.name || null,
       vip: completedVisits >= VIP_MIN_VISITS && spent >= VIP_MIN_SPENT,
       member: memberIds.has(c.id),
       segment: lifecycleSegment({ completedVisits, firstVisitDate: first?.date, lastVisitDate: last?.date, hasNext: !!next, today }),

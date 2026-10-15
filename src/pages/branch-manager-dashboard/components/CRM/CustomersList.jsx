@@ -9,6 +9,8 @@ import {
 import { formatPhoneGrouped } from '../../../../utils/phone';
 import { friendlyError } from '../../../../utils/friendlyError';
 import CustomerPanel from './CustomerPanel';
+import CustomersSpotlight from './CustomersSpotlight';
+import { useBranch } from '../../../../contexts/BranchContext';
 import { StarIcon, InSpaTag } from './customerBits';
 
 const PAGE_SIZE = 25;
@@ -106,6 +108,7 @@ const SortHeader = ({ id, label, sort, dir, onSort, right }) => (
 // `readOnly`: the Overall (all branches) view, or admin_viewer: no booking or export actions.
 const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDuplicates }) => {
   const { profile } = useAuth();
+  const { branchName } = useBranch();
   const { orgSlug } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -122,6 +125,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   const query = searchParams.get('q') || '';
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
   const openId = searchParams.get('open') || null;
+  const noMember = searchParams.get('member') === 'no';
   const sort = SORTS[searchParams.get('sort')] ? searchParams.get('sort') : 'next';
   const dir = searchParams.get('dir') === 'asc' || searchParams.get('dir') === 'desc' ? searchParams.get('dir') : SORTS[sort].dir;
 
@@ -202,6 +206,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     const list = customers.filter((c) => {
       if (!TABS[tab](c)) return false;
       if (segment && c.segment !== segment) return false;
+      if (noMember && c.member) return false;
       if (!matchesSearch(c, query)) return false;
       if (filters.therapist && !c.therapistIds.includes(filters.therapist)) return false;
       if (filters.service && !c.services.includes(filters.service)) return false;
@@ -209,7 +214,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       return true;
     });
     return sortCustomers(list, sort, dir);
-  }, [customers, tab, segment, query, filters, sort, dir, today]);
+  }, [customers, tab, segment, noMember, query, filters, sort, dir, today]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -262,7 +267,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
 
   // ── Render ─────────────────────────────────────────────────────────────────────
   const total = counts?.all;
-  const anyFilter = query || Object.values(filters).some(Boolean) || segment;
+  const anyFilter = query || Object.values(filters).some(Boolean) || segment || noMember;
   const showSpent = columns.spent && isMgrUp;
   const colCount = 3 + (columns.visits ? 1 : 0) + (showSpent ? 1 : 0) + (columns.balance ? 1 : 0) + 1;
 
@@ -285,6 +290,15 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       </div>
     </div>
   );
+
+  const spotlight = customers && today ? (
+    <CustomersSpotlight
+      customers={customers} today={today} role={role} orgId={profile?.org_id} branchName={branchName}
+      onSeeOwes={() => patchParams({ tab: 'owes', segment: '', member: '', page: 1 }, { push: true })}
+      onReviewAtRisk={() => patchParams({ segment: 'at-risk', tab: '', member: '', page: 1 }, { push: true })}
+      onSeeRegularsNoMember={() => patchParams({ segment: 'regular', member: 'no', tab: '', page: 1 }, { push: true })}
+    />
+  ) : null;
 
   const strip = (
     <div className="grid grid-cols-2 lg:grid-cols-5 border border-border rounded-[10px] mt-[18px] overflow-hidden" role="group" aria-label="Customer lifecycle">
@@ -341,6 +355,12 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       </div>
       <FilterChip label="Therapist" value={filters.therapist} options={therapistOptions} onChange={setFilter('therapist')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
       <FilterChip label="Service" value={filters.service} options={serviceOptions} onChange={setFilter('service')} selectedLabel={filters.service} />
+      {noMember && (
+        <span className="h-7 rounded-full inline-flex items-center text-[12.5px] font-medium border border-border bg-[#FAFAF9] text-text-primary">
+          <span className="pl-2.5 pr-2">No membership</span>
+          <button type="button" onClick={() => patchParams({ member: '', page: 1 })} aria-label="Clear No membership" className="h-full pr-2 -ml-1 text-[#8A8A90] hover:text-text-primary"><Icon name="X" size={12} /></button>
+        </span>
+      )}
       <FilterChip label="Last visit" value={filters.last} options={LAST_VISIT_OPTIONS} onChange={setFilter('last')} selectedLabel={LAST_VISIT_OPTIONS.find((o) => o.id === filters.last)?.label} />
       <div className="ml-auto flex items-center gap-2">
         <Menu trigger={(open, toggle) => (
@@ -436,6 +456,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   return (
     <div className="h-full flex flex-col pt-1 overflow-hidden">
       {header}
+      {spotlight}
       {strip}
       {views}
       {toolbar}
@@ -467,7 +488,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
             <p className="text-[14px] font-medium text-text-primary">{emptyTitle}</p>
             <p className="text-[13px] text-[#8A8A90] mt-1">{emptyHint}</p>
             {anyFilter && (
-              <button type="button" onClick={() => { setFilters({ therapist: '', service: '', last: '' }); setSearchText(''); patchParams({ q: '', segment: '', page: 1 }); }} className="mt-3 text-[13px] font-medium text-primary hover:underline">Clear search and filters</button>
+              <button type="button" onClick={() => { setFilters({ therapist: '', service: '', last: '' }); setSearchText(''); patchParams({ q: '', segment: '', member: '', page: 1 }); }} className="mt-3 text-[13px] font-medium text-primary hover:underline">Clear search and filters</button>
             )}
           </div>
         )}
