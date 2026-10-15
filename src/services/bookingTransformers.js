@@ -95,6 +95,8 @@ export function transformBooking(dbBooking) {
         gender: bt.therapist.gender || null,
         roomId: bt.room_id || null,
         roomName: bt.room?.name || null,
+        startTime: bt.start_time || null,
+        endTime: bt.end_time || null,
       }));
   } else if (therapist) {
     therapists = [therapist];

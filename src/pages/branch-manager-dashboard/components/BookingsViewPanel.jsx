@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
 import { Menu, FilterChip } from '../../../components/ui/ListToolbarKit';
@@ -9,6 +9,7 @@ import { useBranch } from '../../../contexts/BranchContext';
 import { supabase } from '../../../lib/supabase';
 import {
   fetchBookingsForList, fetchBookingById, fetchServices, fetchTherapists, fetchUnreadBookingIds, markBookingNotificationsRead,
+  fetchAttendance, fetchBlocksForRange, fetchTransferOccurrences, fetchRosterForDay, fetchServiceEligibility, fetchRenderedVisitTherapists,
   updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount,
 } from '../../../services/api';
 import { transformBooking, toDbStatus } from '../../../services/bookingTransformers';
@@ -18,7 +19,12 @@ import {
   makeRange, VIEWS, SORTS, inView, viewCounts, matchesBookingSearch, matchesFilters, sortBookings, groupByDay, dayHeading, nowLineIndex,
   isDimmed, lateMinutes, formatLate, clockLabel, amountCell, nextAction, moneyOf,
 } from '../../../utils/bookingsList';
+import {
+  toMin, fromMin, clock, rosterDay, shiftSource, availabilityNow, nextSlot10, suggestTherapist, usualTherapistId, needsYouNow, matchesNeed, isUnseen, needsTherapist,
+} from '../../../utils/freeNow';
 import DateNavigator from './Bookings/DateNavigator';
+import NeedsYouNow from './Bookings/NeedsYouNow';
+import FreeNowChip from './Bookings/FreeNowChip';
 import BookingRow, { COLUMN_DEFS } from './Bookings/BookingRow';
 
 const COLS_KEY = 'zennly.bookings.columns';
@@ -40,9 +46,10 @@ const BookingsViewPanel = ({ branchId }) => {
   const { profile } = useAuth();
   const { isOverall } = useBranch();
   const role = profile?.role || 'staff';
-  const readOnly = role === 'admin_viewer';
+  const readOnly = !profile?.role || role === 'admin_viewer'; // no write affordances until the role is known
   const canExport = role === 'manager' || role === 'admin';
   const [sp, setSp] = useSearchParams();
+  const navigate = useNavigate();
 
   // Nepal-local clock; ticks every 30s so the Now line, Late flags and dimming stay current (and the date can roll over).
   const [clock, setClock] = useState(() => nepalNow());
@@ -54,6 +61,10 @@ const BookingsViewPanel = ({ branchId }) => {
   const range = useMemo(() => rangeFromParams(sp, today), [sp, today]);
   const viewChip = VIEWS.some((v) => v.id === sp.get('bv')) ? sp.get('bv') : 'all';
   const sort = SORTS[sp.get('sort')] ? sp.get('sort') : 'time';
+  const need = ['online', 'late', 'assign'].includes(sp.get('nf')) ? sp.get('nf') : '';
+  const isTodayView = range.from === range.to && range.from === today && !isOverall;
+  const nowMin = toMin(nowHM);
+  const needCtx = useMemo(() => ({ date: today, nowMin }), [today, nowMin]);
   const filters = { therapist: sp.get('th') || '', service: sp.get('sv') || '', room: sp.get('rm') || '' };
   const query = sp.get('q') || '';
   const paramsRef = useRef(sp);
@@ -157,6 +168,63 @@ const BookingsViewPanel = ({ branchId }) => {
     return () => { alive = false; clearTimeout(timer); supabase.removeChannel(channel); };
   }, [branchId, isOverall]);
 
+  // ── Today-only signals: who is free, who to suggest, what needs attention ────────────────────────────────────────────
+  const [signals, setSignals] = useState(null);   // attendance / blocks / transfers for today (refetched with the bookings)
+  const [roster, setRoster] = useState(null);     // { workingHours, eligibility } (rarely changes)
+  const [usual, setUsual] = useState({});         // customerId -> usual therapist id
+  useEffect(() => {
+    if (!isTodayView) { setSignals(null); return undefined; }
+    let alive = true;
+    Promise.all([fetchAttendance({ branchId, date: today }), fetchBlocksForRange(branchId, today, today), fetchTransferOccurrences(branchId, today, today)])
+      .then(([att, blocks, transfers]) => { if (alive) setSignals({ attendance: att.data || [], blocks: blocks.data || [], transfers: transfers.data || [] }); });
+    return () => { alive = false; };
+  }, [branchId, today, isTodayView, rows]);
+  const therapistKey = therapists.map((t) => t.id).join(',');
+  useEffect(() => {
+    if (!isTodayView || !therapistKey) { setRoster(null); return undefined; }
+    let alive = true;
+    Promise.all([fetchRosterForDay(therapistKey.split(','), rosterDay(today)), fetchServiceEligibility()])
+      .then(([wh, el]) => { if (alive) setRoster({ workingHours: wh.data || {}, eligibility: el.data || {} }); });
+    return () => { alive = false; };
+  }, [isTodayView, therapistKey, today]);
+  const fnCtx = useMemo(() => {
+    if (!signals || !roster) return null;
+    return {
+      date: today, nowMin, source: shiftSource(signals.attendance), bookings: rows, blocks: signals.blocks, transfers: signals.transfers,
+      attendanceById: Object.fromEntries(signals.attendance.map((a) => [a.therapistId, a])), workingHoursById: roster.workingHours,
+    };
+  }, [signals, roster, today, nowMin, rows]);
+  const availability = useMemo(() => (fnCtx ? availabilityNow(therapists, fnCtx) : null), [fnCtx, therapists]);
+  const eligibility = useMemo(() => new Map(Object.entries(roster?.eligibility || {}).map(([sid, ids]) => [sid, new Set(ids)])), [roster]);
+  const unassignedToday = useMemo(() => (isTodayView && !readOnly ? rows.filter((b) => needsTherapist(b, needCtx)) : []), [isTodayView, readOnly, rows, needCtx]);
+  const customerKey = [...new Set(unassignedToday.map((b) => b.customerId).filter(Boolean))].sort().join(',');
+  useEffect(() => {
+    if (!customerKey) { setUsual({}); return undefined; }
+    let alive = true;
+    fetchRenderedVisitTherapists(customerKey.split(',')).then((r) => { if (alive && r.data) setUsual(Object.fromEntries(Object.entries(r.data).map(([cid, v]) => [cid, usualTherapistId(v)]))); });
+    return () => { alive = false; };
+  }, [customerKey]);
+  const suggestions = useMemo(() => {
+    const out = {};
+    if (!fnCtx) return out;
+    // Each suggestion is treated as taken for the next ones, so two overlapping unassigned bookings are not offered the same person.
+    const held = [];
+    for (const b of unassignedToday) {
+      const s = suggestTherapist(b, therapists, { ...fnCtx, bookings: [...fnCtx.bookings, ...held] }, { eligibility, usualId: usual[b.customerId] || null });
+      if (!s) continue;
+      out[b.bookingId] = s;
+      held.push({ bookingId: `held-${b.bookingId}`, status: 'pending', date: today, time: fromMin(s.start), endTime: fromMin(s.end), therapists: [{ id: s.therapist.id }] });
+    }
+    return out;
+  }, [fnCtx, unassignedToday, therapists, eligibility, usual, today]);
+  const needsItems = isTodayView && !readOnly && !loading && !error ? needsYouNow(rows, needCtx) : null;
+  const serviceNamesFor = (therapistId) => {
+    const names = [];
+    eligibility.forEach((set, sid) => { if (set.has(therapistId)) { const n = serviceOptions.find((o) => o.id === sid)?.label; if (n) names.push(n); } });
+    return names.slice(0, 2).join(', ');
+  };
+  const bookTherapist = (therapistId) => navigate(`?view=calendar&newBooking=1&bt=${therapistId}&btime=${fromMin(nextSlot10(nowMin))}`);
+
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   // ── Derived ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -176,13 +244,13 @@ const BookingsViewPanel = ({ branchId }) => {
     return [...m].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
 
-  const base = useMemo(() => rows.filter((b) => matchesBookingSearch(b, query) && matchesFilters(b, filters)), [rows, query, filters.therapist, filters.service, filters.room]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo(() => rows.filter((b) => matchesBookingSearch(b, query) && matchesFilters(b, filters) && (!need || matchesNeed(b, need, needCtx))), [rows, query, need, needCtx, filters.therapist, filters.service, filters.room]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts = useMemo(() => viewCounts(base, ctx), [base, ctx]);
   const visible = useMemo(() => sortBookings(base.filter((b) => inView(b, viewChip, ctx)), sort, ctx), [base, viewChip, sort, ctx]);
   const groups = useMemo(() => groupByDay(visible), [visible]);
   const multiDay = range.from !== range.to;
   const showNow = !multiDay && range.from === today && sort === 'time';
-  const anyFilter = !!(query || filters.therapist || filters.service || filters.room);
+  const anyFilter = !!(query || need || filters.therapist || filters.service || filters.room);
 
   // ── Actions ─────────────────────────────────────────────────────────────────────────────────────────────────────────
   const [selected, setSelected] = useState(null);
@@ -217,8 +285,12 @@ const BookingsViewPanel = ({ branchId }) => {
     await handleStatusUpdate(b.bookingId, action.to);
     setBusyId(null);
   };
-  const handleAssignTherapist = async (bookingId, therapistId) => {
-    const result = await assignTherapist({ bookingId, therapistId });
+  // Same signature the booking dialog calls it with (bookingId, therapistIds[], notes, roomId, overrides, companion…); a single id also works.
+  const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
+    const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
+    const result = await assignTherapist({
+      bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone,
+    });
     if (result.error) { showToast(friendlyError(result.error, 'Failed to assign therapist.'), 'error'); return; }
     showToast('Therapist assigned successfully');
     await load();
@@ -314,7 +386,7 @@ const BookingsViewPanel = ({ branchId }) => {
   const searchBox = (
     <div className="relative w-full sm:w-[280px]">
       <Icon name="Search" size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8A8A90]" />
-      <input ref={searchRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search name, phone or booking"
+      <input ref={searchRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search name, phone, booking"
         aria-label="Search bookings" className="w-full h-[34px] pl-8 pr-8 border border-border rounded-[7px] text-[13px] bg-white placeholder:text-[#8A8A90] focus:outline-none focus:border-[#cfd2cc] focus:shadow-[0_0_0_3px_rgba(45,90,39,.08)]" />
       <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] font-medium text-[#8A8A90] border border-border rounded px-[5px] py-px bg-white">/</kbd>
     </div>
@@ -347,8 +419,8 @@ const BookingsViewPanel = ({ branchId }) => {
     </div>
   );
 
-  const viewRow = (
-    <div className="flex items-center gap-5 sm:gap-[22px] border-b border-border overflow-x-auto whitespace-nowrap" role="tablist" aria-label="Booking views">
+  const viewTabs = (
+    <div className="flex items-center gap-5 sm:gap-[22px] overflow-x-auto whitespace-nowrap min-w-0 flex-1" role="tablist" aria-label="Booking views">
       {VIEWS.map((v) => {
         const active = viewChip === v.id;
         return (
@@ -362,6 +434,15 @@ const BookingsViewPanel = ({ branchId }) => {
       })}
     </div>
   );
+  const viewRow = (
+    <div className="flex items-center border-b border-border">
+      {viewTabs}
+      {isTodayView && availability && therapists.length > 0 && (
+        <FreeNowChip availability={availability} nowLabel={clockLabel(nowHM)} serviceNamesFor={serviceNamesFor} onBook={readOnly ? undefined : bookTherapist} />
+      )}
+    </div>
+  );
+  const needsLine = needsItems && <NeedsYouNow items={needsItems} active={need} onPick={(id) => patch({ nf: id })} />;
 
   const th = `h-[34px] text-[12px] font-medium whitespace-nowrap border-b border-border bg-white sticky z-[5] text-[#8A8A90] ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''}`;
   const thStyle = { top: stickyTop + blockH };
@@ -390,8 +471,9 @@ const BookingsViewPanel = ({ branchId }) => {
       g.rows.forEach((b, i) => {
         if (showNow && i === lineAt) out.push(<NowLine key="now" label={clockLabel(nowHM)} colSpan={colCount} />);
         out.push(
-          <BookingRow key={b.bookingId} b={b} all={rows} columns={columns} ctx={ctx} unread={unread.has(b.bookingId)} selected={selected?.bookingId === b.bookingId}
+          <BookingRow key={b.bookingId} b={b} all={rows} columns={columns} ctx={ctx} unread={isUnseen(b, unread)} selected={selected?.bookingId === b.bookingId}
             dim={viewChip !== 'done' && viewChip !== 'void' && isDimmed(b, ctx)} late={lateMinutes(b, ctx)} amount={amountCell(b, ctx)}
+            suggestion={suggestions[b.bookingId]} onSuggest={(tid) => { setBusyId(b.bookingId); handleAssignTherapist(b.bookingId, tid).finally(() => setBusyId(null)); }}
             action={nextAction(b, { readOnly })} busy={busyId === b.bookingId} onOpen={() => openBooking(b)} onAction={(a) => runNext(b, a)}
             scrollMargin={stickyTop + blockH + headH + (multiDay ? 36 : 6)} />,
         );
@@ -406,7 +488,7 @@ const BookingsViewPanel = ({ branchId }) => {
       done: ['Nothing completed yet', 'Completed visits appear here.'], spa: ['Nobody is in the spa right now', 'Visits that have started appear here.'],
       come: ['Nothing still to come', 'Pending and confirmed bookings that haven\'t started appear here.'], unpaid: ['Nothing unpaid', 'Visits with a balance to collect appear here.'],
       void: ['No cancellations or no-shows', 'Cancelled and no-show bookings appear here.'] }[viewChip];
-  const clearAll = () => { setSearchText(''); patch({ q: '', th: '', sv: '', rm: '', bv: '' }); };
+  const clearAll = () => { setSearchText(''); patch({ q: '', th: '', sv: '', rm: '', bv: '', nf: '' }); };
 
   return (
     <div className="pb-6" style={{ '--bk-top': `${stickyTop}px` }}>
@@ -423,9 +505,11 @@ const BookingsViewPanel = ({ branchId }) => {
           <span className="hidden md:flex items-center gap-2">{chips}</span>
           <span className="hidden md:contents">{sortCols}</span>
         </div>
+        {isMd && needsLine}
         {viewRow}
       </div>
       <div className="md:hidden flex items-center gap-2 py-2.5 flex-wrap">{chips}{sortCols}</div>
+      {!isMd && needsLine}
       <div>
         {error ? (
           <div className="border border-error/20 bg-error/5 rounded-lg p-4 mt-3 flex items-center gap-3 text-[13px] text-error">

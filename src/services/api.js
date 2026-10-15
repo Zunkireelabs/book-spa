@@ -403,6 +403,62 @@ export async function fetchBookingsForList(branchId, { dateFrom, dateTo }) {
   }
 }
 
+/** Roster rows (with breaks) for one weekday (0 = Monday) across a set of therapists: { [therapistId]: { startTime, endTime, isDayOff, breaks } }. */
+export async function fetchRosterForDay(therapistIds, dayOfWeek) {
+  try {
+    if (!therapistIds?.length) return { data: {}, error: null };
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .select('therapist_id, start_time, end_time, is_day_off, therapist_working_hours_breaks(name, start_time, end_time)')
+      .in('therapist_id', therapistIds)
+      .eq('day_of_week', dayOfWeek);
+    if (error) throw error;
+    const out = {};
+    for (const r of data || []) {
+      out[r.therapist_id] = {
+        startTime: r.start_time, endTime: r.end_time, isDayOff: r.is_day_off,
+        breaks: (r.therapist_working_hours_breaks || []).map((b) => ({ name: b.name, startTime: b.start_time, endTime: b.end_time })),
+      };
+    }
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchRosterForDay error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Who can do which service (service_therapists): { [serviceId]: [therapistId…] }. A service with no rows has no restriction. */
+export async function fetchServiceEligibility() {
+  try {
+    const rows = await pageAllRows(() => supabase.from('service_therapists').select('service_id, therapist_id').order('service_id').order('therapist_id'));
+    const out = {};
+    for (const r of rows) (out[r.service_id] ||= []).push(r.therapist_id);
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceEligibility error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Rendered (Completed / In-Progress) visits for some customers: { [customerId]: [{ therapistId }] }, used for the "usual therapist" rule. */
+export async function fetchRenderedVisitTherapists(customerIds) {
+  try {
+    if (!customerIds?.length) return { data: {}, error: null };
+    const rows = await pageAllRows(() => supabase
+      .from('bookings')
+      .select('id, customer_id, therapist_id')
+      .in('customer_id', customerIds)
+      .in('status', ['Completed', 'In-Progress'])
+      .order('id'));
+    const out = {};
+    for (const r of rows) (out[r.customer_id] ||= []).push({ therapistId: r.therapist_id });
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchRenderedVisitTherapists error:', error.message);
+    return { data: null, error };
+  }
+}
+
 /** Booking ids the current user has an unread notification for (drives the green "new" dot on the Bookings list). */
 export async function fetchUnreadBookingIds() {
   try {

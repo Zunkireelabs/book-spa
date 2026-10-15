@@ -38,7 +38,7 @@ const AmountCell = ({ a }) => {
   return <span className="text-[#B4B4BA]">—</span>;
 };
 
-const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, online, onOpen, onAction, scrollMargin }) => {
+const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, onOpen, onAction, scrollMargin }) => {
   const color = getBookingStatusColors(isNoShow(b) ? 'No Show' : toDbStatus(b.status)).bar;
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
@@ -74,7 +74,18 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       )}
       {columns.therapist && (
         <td className={`${cell} pr-3 hidden lg:table-cell ${dim ? 'opacity-[.55]' : ''}`}>
-          {people.length === 0 ? <span className="text-[13px] font-medium text-[#B45309]">Unassigned</span> : (
+          {people.length === 0 ? (
+            <>
+              <div className="text-[13px] font-medium text-[#B45309]">Unassigned</div>
+              {suggestion && (
+                <button type="button" title={suggestion.label} aria-label={`Assign ${suggestion.therapist.name}: ${suggestion.label}`} data-suggest={suggestion.therapist.id}
+                  onClick={(e) => { e.stopPropagation(); onSuggest(suggestion.therapist.id); }}
+                  className="text-[12px] text-[#8A8A90] mt-0.5 hover:text-text-primary text-left max-w-full truncate block">
+                  <span aria-hidden="true" className="text-primary">✦ </span>Suggest <b className="text-primary font-medium">{suggestion.therapist.name}</b> · free
+                </button>
+              )}
+            </>
+          ) : (
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-6 h-6 rounded-full bg-[#F1F1EF] text-[#4A4A4F] text-[10px] font-semibold grid place-items-center flex-shrink-0">{initials(people[0].name)}</span>
               <span className="text-[13px] truncate" title={people.map((t) => t.name).join(' + ')}>{people.map((t) => t.name).join(' + ')}</span>

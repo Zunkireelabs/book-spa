@@ -386,16 +386,26 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   useEffect(() => {
     if (!branchId) return;
     if (searchParams.get('newBooking') !== '1') return;
-    handleEmptySlotClick({
-      day: currentDate,
-      colType: null,
-      colId: null,
-      colName: 'Unassigned',
-    });
+    // The Bookings page's Free-now "Book" adds &bt=<therapistId>&btime=HH:MM: open quick-create on that therapist at that slot.
+    const bt = searchParams.get('bt');
+    const btime = searchParams.get('btime');
+    if (bt && /^\d{2}:\d{2}$/.test(btime || '')) {
+      const [hour, minute] = btime.split(':').map(Number);
+      openQuickCreateForSlot({ day: currentDate, colType: 'therapist', colId: bt, hour, minute });
+    } else {
+      handleEmptySlotClick({
+        day: currentDate,
+        colType: null,
+        colId: null,
+        colName: 'Unassigned',
+      });
+    }
     const next = new URLSearchParams(searchParams);
     next.delete('newBooking');
+    next.delete('bt');
+    next.delete('btime');
     setSearchParams(next, { replace: true });
-  }, [searchParams, branchId, currentDate, handleEmptySlotClick, setSearchParams]);
+  }, [searchParams, branchId, currentDate, handleEmptySlotClick, openQuickCreateForSlot, setSearchParams]);
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
     if (!branchId) return 'Missing branch info.';
