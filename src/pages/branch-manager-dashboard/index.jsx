@@ -453,7 +453,7 @@ const BranchManagerDashboard = () => {
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'package-overview': return salesViewer ? <PackageOverviewPanel readOnly={salesReadOnly} /> : null;
-      case 'packages': return salesViewer ? <PackageListPanel /> : null;
+      case 'packages': return salesViewer ? <PackageListPanel readOnly={salesReadOnly} /> : null;
       case 'memberships': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPanel branchId={branchId} readOnly={salesReadOnly} /> : null;
       case 'membership-collection': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipCollectionPanel /> : null;
       case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <WalletUsagePanel /> : null;
@@ -463,7 +463,7 @@ const BranchManagerDashboard = () => {
       case 'outreach-log': return outreachAdmin ? <MessageLogPanel /> : null;
       case 'outreach-settings': return outreachAdmin ? <ProviderSettingsPanel /> : null;
       case 'voucher-overview': return VOUCHER_ENABLED && salesViewer ? <VoucherOverviewPanel readOnly={salesReadOnly} /> : null;
-      case 'vouchers': return VOUCHER_ENABLED && salesViewer ? <VoucherListPanel /> : null;
+      case 'vouchers': return VOUCHER_ENABLED && salesViewer ? <VoucherListPanel readOnly={salesReadOnly} /> : null;
       default: return null;
     }
   };

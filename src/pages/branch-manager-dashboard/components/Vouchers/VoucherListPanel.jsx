@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchVouchers } from '../../../../services/api';
-import VoucherDetailModal from './VoucherDetailModal';
+import VoucherDetailPanel from './VoucherDetailPanel';
 
 const SORT_OPTIONS = [
   { value: 'latest', label: 'Latest first' },
@@ -35,7 +35,7 @@ const SUMMARY_FILTERS = [
 // Claimed / Partially Claimed / Not Claimed pill computed from voucher_claims
 // (via the voucher_balances view) — replaces the "Vouchers Issued" +
 // "Balance Tracking" sheets from the old Excel workbook.
-const VoucherListPanel = () => {
+const VoucherListPanel = ({ readOnly = false }) => {
   const [vouchers, setVouchers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -44,16 +44,21 @@ const VoucherListPanel = () => {
   const [sortOrder, setSortOrder] = useState('latest');
   const [selectedId, setSelectedId] = useState(null);
 
+  // Only the first load shows the skeleton; refreshes after an action in the open detail panel swap data in silently
+  // (otherwise the list's skeleton would unmount the panel mid-action).
+  const hasLoadedRef = useRef(false);
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const { data, error: fetchError } = await fetchVouchers();
     if (fetchError) {
       setError(fetchError.message || 'Failed to load vouchers.');
+      hasLoadedRef.current = true;
       setLoading(false);
       return;
     }
     setVouchers(data || []);
+    hasLoadedRef.current = true;
     setLoading(false);
   }, []);
 
@@ -228,9 +233,10 @@ const VoucherListPanel = () => {
                     <tr
                       key={v.id}
                       onClick={() => setSelectedId(v.id)}
-                      className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
+                      aria-selected={selectedId === v.id || undefined}
+                      className={`border-b border-border last:border-0 cursor-pointer spa-transition-fast ${selectedId === v.id ? 'bg-primary/[0.04]' : 'hover:bg-background/50'}`}
                     >
-                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                      <td className={`px-2.5 py-1.5 whitespace-nowrap ${selectedId === v.id ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
                         <span className="font-data font-data-normal text-[11px] text-text-secondary tracking-wide">{v.voucherCode}</span>
                       </td>
                       <td className="px-2.5 py-1.5">
@@ -294,8 +300,9 @@ const VoucherListPanel = () => {
       </div>
 
       {selectedId && (
-        <VoucherDetailModal
+        <VoucherDetailPanel
           voucherId={selectedId}
+          readOnly={readOnly}
           onClose={() => setSelectedId(null)}
           onChanged={loadData}
         />

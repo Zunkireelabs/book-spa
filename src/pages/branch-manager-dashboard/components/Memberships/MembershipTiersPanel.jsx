@@ -19,14 +19,16 @@ const TierForm = ({ tiers, orgId, onBack, onClose, onSaved }) => {
   const [prefix, setPrefix] = useState('');
   const [advance, setAdvance] = useState('');
   const [days, setDays] = useState('365');
+  const [order, setOrder] = useState('');
+  const [showMore, setShowMore] = useState(false);
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const submitRef = useRef(null);
 
-  const initial = useRef(JSON.stringify([name, prefix, advance, days])).current;
-  const dirty = JSON.stringify([name, prefix, advance, days]) !== initial;
+  const initial = useRef(JSON.stringify([name, prefix, advance, days, order])).current;
+  const dirty = JSON.stringify([name, prefix, advance, days, order]) !== initial;
 
   const validate = () => {
     const e = {};
@@ -51,7 +53,7 @@ const TierForm = ({ tiers, orgId, onBack, onClose, onSaved }) => {
     if (first) { document.getElementById(`tier-${first}`)?.focus({ preventScroll: true }); return; }
     busyRef.current = true;
     setBusy(true);
-    const { error } = await createMembershipTier({ orgId, name: name.trim(), codePrefix: prefix.trim().toUpperCase(), advanceAmount: Number(advance), validityDays: Number(days), displayOrder: tiers.length + 1 });
+    const { error } = await createMembershipTier({ orgId, name: name.trim(), codePrefix: prefix.trim().toUpperCase(), advanceAmount: Number(advance), validityDays: Number(days), displayOrder: Number(order) || tiers.length + 1 });
     busyRef.current = false;
     setBusy(false);
     if (error) { setServerError(friendlyError(error, 'Failed to create the tier.')); return; }
@@ -91,6 +93,13 @@ const TierForm = ({ tiers, orgId, onBack, onClose, onSaved }) => {
             <WholeNumberInput {...controlA11y('tier-days', errors.days)} error={!!errors.days} value={days} onChange={setDays} />
           </Field>
         </div>
+        {showMore ? (
+          <Field label="Display order" id="tier-order" hint={`Leave blank to append (will be ${tiers.length + 1}).`}>
+            <WholeNumberInput {...controlA11y('tier-order')} value={order} onChange={setOrder} placeholder={String(tiers.length + 1)} />
+          </Field>
+        ) : (
+          <button type="button" onClick={() => setShowMore(true)} className="block text-[13px] font-body-medium text-primary hover:underline">More options</button>
+        )}
       </FormBody>
     </PanelShell>
   );

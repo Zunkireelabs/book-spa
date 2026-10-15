@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchPackages } from '../../../../services/api';
-import PackageDetailModal from './PackageDetailModal';
+import PackageDetailPanel from './PackageDetailPanel';
 
 const SORT_OPTIONS = [
   { value: 'latest', label: 'Latest first' },
@@ -38,7 +38,7 @@ const SUMMARY_FILTERS = [
 // package_redemptions (via the package_balances view) — the packages
 // counterpart of VoucherListPanel, replacing the old "Annual Package
 // Details" / "Membership Details" Excel workbooks.
-const PackageListPanel = () => {
+const PackageListPanel = ({ readOnly = false }) => {
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -47,16 +47,21 @@ const PackageListPanel = () => {
   const [sortOrder, setSortOrder] = useState('latest');
   const [selectedId, setSelectedId] = useState(null);
 
+  // Only the first load shows the skeleton; refreshes after an action in the open detail panel swap data in silently
+  // (otherwise the list's skeleton would unmount the panel mid-action).
+  const hasLoadedRef = useRef(false);
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     const { data, error: fetchError } = await fetchPackages();
     if (fetchError) {
       setError(fetchError.message || 'Failed to load packages.');
+      hasLoadedRef.current = true;
       setLoading(false);
       return;
     }
     setPackages(data || []);
+    hasLoadedRef.current = true;
     setLoading(false);
   }, []);
 
@@ -236,9 +241,10 @@ const PackageListPanel = () => {
                     <tr
                       key={p.id}
                       onClick={() => setSelectedId(p.id)}
-                      className="border-b border-border last:border-0 hover:bg-background/50 cursor-pointer spa-transition-fast"
+                      aria-selected={selectedId === p.id || undefined}
+                      className={`border-b border-border last:border-0 cursor-pointer spa-transition-fast ${selectedId === p.id ? 'bg-primary/[0.04]' : 'hover:bg-background/50'}`}
                     >
-                      <td className="px-2.5 py-1.5">
+                      <td className={`px-2.5 py-1.5 ${selectedId === p.id ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
                         <span className="font-body font-body-medium text-xs text-text-primary">{p.guestName}</span>
                       </td>
                       <td className="px-2.5 py-1.5">
@@ -313,8 +319,9 @@ const PackageListPanel = () => {
       </div>
 
       {selectedId && (
-        <PackageDetailModal
+        <PackageDetailPanel
           packageId={selectedId}
+          readOnly={readOnly}
           onClose={() => setSelectedId(null)}
           onChanged={loadData}
         />
