@@ -90,8 +90,9 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
                 const isDiscount = n.type === 'discount';
                 const isApproved = n.type === 'discount_approved';
                 const isDeclined = n.type === 'discount_declined';
+                const isOnline = n.type === 'new_online_booking';
                 const isDecision = isApproved || isDeclined;
-                const iconName = isDiscount ? 'Percent' : isApproved ? 'Check' : isDeclined ? 'X' : 'Calendar';
+                const iconName = isOnline ? 'Globe' : isDiscount ? 'Percent' : isApproved ? 'Check' : isDeclined ? 'X' : 'Calendar';
                 const iconWrap = isDiscount ? 'bg-amber-50' : isApproved ? 'bg-emerald-50' : isDeclined ? 'bg-red-50' : 'bg-primary/10';
                 const iconColor = isDiscount ? 'text-amber-600' : isApproved ? 'text-emerald-600' : isDeclined ? 'text-red-600' : 'text-primary';
                 const dotColor = isDiscount ? 'bg-amber-500' : isApproved ? 'bg-emerald-500' : isDeclined ? 'bg-red-500' : 'bg-primary';
@@ -115,6 +116,14 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
                           </p>
                           <p className="text-[11px] text-gray-400 mt-0.5">
                             {n.bookingNumber || 'Awaiting your approval'}
+                          </p>
+                        </>
+                      ) : isOnline ? (
+                        <>
+                          <p className="text-sm text-gray-900">{n.title}</p>
+                          {n.body && <p className="text-xs text-gray-500">{n.body}</p>}
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            {n.seenBy ? <span className="text-gray-500">Seen by {n.seenBy} · {timeAgo(n.seenAt)}</span> : timeAgo(n.createdAt)}
                           </p>
                         </>
                       ) : isDecision ? (

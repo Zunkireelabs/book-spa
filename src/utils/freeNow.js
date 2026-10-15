@@ -176,9 +176,10 @@ export function suggestTherapist(booking, therapists, ctx, { eligibility = new M
 }
 
 // ── Highlight + "Needs you now" ─────────────────────────────────────────────────────────────────────────────────────────
-/** Online (customer-made) bookings stay highlighted until confirmed; an unread notification for me is a second trigger. */
-export const isNewOnline = (b) => b.createdBy == null && dbStatus(b) === 'pending';
-export const isUnseen = (b, unread) => !!(unread && unread.has(b.bookingId)) || isNewOnline(b);
+/** The ONE place that decides "nobody has opened this online booking yet" (team-level, migration-282): online (created_by IS NULL), not acknowledged, still live. */
+export const isNewOnline = (b) => b.createdBy == null && !b.acknowledgedAt && !['cancelled', 'no show', 'completed'].includes(dbStatus(b));
+/** Row highlight (dot, bold name, tint). Kept as a function of the booking alone — a personal unread notification is no longer a trigger. */
+export const isUnseen = (b) => isNewOnline(b);
 
 const isToday = (b, ctx) => String(b.date).slice(0, 10) === ctx.date;
 export const needsTherapist = (b, ctx) => isToday(b, ctx) && (dbStatus(b) === 'pending' || dbStatus(b) === 'confirmed') && !((b.therapists || []).length || b.therapist);
@@ -200,7 +201,7 @@ export function needsYouNow(rows, ctx) {
   const nowHM = fromMin(ctx.nowMin);
   const items = [];
   const online = today.filter(isNewOnline);
-  if (online.length) items.push({ id: 'online', count: online.length, text: `${online.length} new online booking${online.length === 1 ? '' : 's'} to confirm`, action: 'Review' });
+  if (online.length) items.push({ id: 'online', count: online.length, text: `${online.length} new online booking${online.length === 1 ? '' : 's'}`, action: 'Review' });
   const late = today.map((b) => ({ b, m: lateMinutes(b, { today: ctx.date, nowHM }) })).filter((x) => x.m != null).sort((a, b) => b.m - a.m);
   if (late.length === 1) {
     const { b, m } = late[0];

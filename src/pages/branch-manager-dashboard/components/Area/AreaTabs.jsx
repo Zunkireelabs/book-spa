@@ -58,7 +58,7 @@ const AreaTabs = ({ area, view, children }) => {
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      <AreaPage title={areaTitle} description={area.description(ctx)} tabs={tabRow}>
+      <AreaPage title={areaTitle} description={area.description(ctx)} tabs={tabRow} scrollHeader={area.id === 'bookings' && view === 'bookings'}>
         {children}
       </AreaPage>
     </div>

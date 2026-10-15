@@ -38,7 +38,7 @@ const AmountCell = ({ a }) => {
   return <span className="text-[#B4B4BA]">—</span>;
 };
 
-const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, onOpen, onAction, scrollMargin }) => {
+const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, action, busy, suggestion, onSuggest, onOpen, onAction, onNav, scrollMargin }) => {
   const color = getBookingStatusColors(isNoShow(b) ? 'No Show' : toDbStatus(b.status)).bar;
   const edge = unread ? '#2D5A27' : color;
   const people = b.therapists || [];
@@ -49,7 +49,11 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
   const cell = 'h-14 border-b border-[#F1F1EF]';
   return (
     <tr data-booking-id={b.bookingId} data-unread={unread || undefined} data-dim={dim || undefined} tabIndex={0} aria-selected={selected || undefined}
-      onClick={onOpen} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(); }}
+      onClick={onOpen} onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter') onOpen();
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); onNav?.(e.key === 'ArrowDown' ? 1 : -1, e.currentTarget); }
+      }}
       style={{ scrollMarginTop: scrollMargin }} className={`group cursor-pointer ${bg}`}>
       <td className={`${cell} pl-2 pr-2 ${dim ? 'opacity-[.55]' : ''}`} style={{ boxShadow: `inset 3px 0 0 0 ${edge}` }}>
         <div className="pl-2 text-[13px] font-medium tabular-nums whitespace-nowrap">{b.time ? to12h(b.time) : '—'}</div>
@@ -57,7 +61,7 @@ const BookingRow = ({ b, all, columns, unread, selected, dim, late, amount, acti
       </td>
       <td className={`${cell} pr-3 ${dim ? 'opacity-[.55]' : ''}`}>
         <div className={`text-[13.5px] tracking-[-0.1px] flex items-center gap-1.5 text-text-primary ${unread ? 'font-semibold' : 'font-medium'}`}>
-          {unread && <i className="w-2 h-2 rounded-full bg-[#22A04B] flex-shrink-0" aria-label="New" />}
+          {unread && <i className="w-2 h-2 rounded-full bg-[#22A04B] flex-shrink-0" aria-label="New online booking, not opened yet" title="New online booking · not opened yet" />}
           <span className="truncate">{b.customerName}</span>
           {b.specialRequests && <span title={b.specialRequests} aria-label={`Note: ${b.specialRequests}`} className="text-[#8A8A90] flex-shrink-0"><Icon name="MessageSquare" size={13} /></span>}
           {isOnline && <span className="h-5 rounded-full px-[7px] text-[11.5px] font-medium inline-flex items-center bg-[#EEF0FF] text-[#4F46E5] flex-shrink-0">Online</span>}

@@ -459,40 +459,17 @@ export async function fetchRenderedVisitTherapists(customerIds) {
   }
 }
 
-/** Booking ids the current user has an unread notification for (drives the green "new" dot on the Bookings list). */
-export async function fetchUnreadBookingIds() {
+/**
+ * Team-level "seen": the first staff member to open/handle a booking acknowledges it for everyone (migration-282). Fire and forget —
+ * callers don't wait on it. Read-only roles and other orgs are refused by the RPC itself.
+ */
+export async function acknowledgeBooking(bookingId) {
   try {
-    const { user, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('booking_id')
-      .eq('user_id', user.id)
-      .eq('read', false)
-      .not('booking_id', 'is', null);
+    const { data, error } = await supabase.rpc('acknowledge_booking', { p_booking_id: bookingId });
     if (error) throw error;
-    return { data: [...new Set((data || []).map((r) => r.booking_id))], error: null };
+    return { data, error: null };
   } catch (error) {
-    console.error('[API] fetchUnreadBookingIds error:', error.message);
-    return { data: null, error };
-  }
-}
-
-/** Opening a booking marks the current user's unread notifications for it as read. */
-export async function markBookingNotificationsRead(bookingId) {
-  try {
-    const { user, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-    const { error } = await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('user_id', user.id)
-      .eq('booking_id', bookingId)
-      .eq('read', false);
-    if (error) throw error;
-    return { data: { success: true }, error: null };
-  } catch (error) {
-    console.error('[API] markBookingNotificationsRead error:', error.message);
+    console.warn('[API] acknowledgeBooking:', error.message);
     return { data: null, error };
   }
 }
@@ -505,7 +482,7 @@ export async function fetchBookingCreator(bookingId) {
   try {
     const { data, error } = await supabase
       .from('bookings')
-      .select('created_at, creator:users!created_by(full_name)')
+      .select('created_at, acknowledged_at, creator:users!created_by(full_name), acknowledger:users!acknowledged_by(full_name)')
       .eq('id', bookingId)
       .single();
 
@@ -515,6 +492,8 @@ export async function fetchBookingCreator(bookingId) {
       data: {
         createdByName: data.creator?.full_name || null,
         createdAt: data.created_at || null,
+        acknowledgedAt: data.acknowledged_at || null,
+        acknowledgedByName: data.acknowledger?.full_name || null,
       },
       error: null,
     };
@@ -3330,7 +3309,7 @@ export async function fetchNotifications(limit = 30) {
 
     const { data, error } = await supabase
       .from('notifications')
-      .select('id, type, title, body, booking_id, read, created_at')
+      .select('id, type, title, body, booking_id, read, created_at, booking:bookings(acknowledged_at, acknowledger:users!acknowledged_by(full_name))')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(limit);

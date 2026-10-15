@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import BookingActionModal from '../../../components/ui/BookingActionModal';
 import { Menu, FilterChip } from '../../../components/ui/ListToolbarKit';
@@ -8,7 +8,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useBranch } from '../../../contexts/BranchContext';
 import { supabase } from '../../../lib/supabase';
 import {
-  fetchBookingsForList, fetchBookingById, fetchServices, fetchTherapists, fetchUnreadBookingIds, markBookingNotificationsRead,
+  fetchBookingsForList, fetchBookingById, fetchServices, fetchTherapists, 
   fetchAttendance, fetchBlocksForRange, fetchTransferOccurrences, fetchRosterForDay, fetchServiceEligibility, fetchRenderedVisitTherapists,
   updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount,
 } from '../../../services/api';
@@ -108,7 +108,6 @@ const BookingsViewPanel = ({ branchId }) => {
   const [rows, setRows] = useState([]);
   const [services, setServices] = useState([]);
   const [therapists, setTherapists] = useState([]);
-  const [unread, setUnread] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -123,11 +122,10 @@ const BookingsViewPanel = ({ branchId }) => {
     const req = ++reqRef.current;
     if (loadedKeyRef.current !== rangeKey) setLoading(true); // skeleton only when there is nothing valid to show
     setError(null);
-    const [res, unreadRes] = await Promise.all([fetchBookingsForList(branchId, { dateFrom: range.from, dateTo: range.to }), fetchUnreadBookingIds()]);
+    const res = await fetchBookingsForList(branchId, { dateFrom: range.from, dateTo: range.to });
     if (req !== reqRef.current) return; // a newer request superseded this one
     if (res.error) setError(friendlyError(res.error, "Couldn't load bookings."));
     else { setRows(res.data.map(transformBooking)); loadedKeyRef.current = rangeKey; }
-    if (unreadRes.data) setUnread(new Set(unreadRes.data));
     setLoading(false);
   }, [branchId, range.from, range.to, rangeKey]);
   useEffect(() => { load(); }, [load]);
@@ -148,7 +146,7 @@ const BookingsViewPanel = ({ branchId }) => {
     return () => { alive = false; };
   }, [branchId, range.from]);
 
-  // Realtime: any booking change in this branch (or a notification for me) refreshes the list in place.
+  // Realtime: any booking change in this branch refreshes the list in place.
   const loadRef = useRef(load);
   loadRef.current = load;
   useEffect(() => {
@@ -159,7 +157,6 @@ const BookingsViewPanel = ({ branchId }) => {
     const channel = supabase
       .channel(`bookings-list-${branchId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `branch_id=eq.${branchId}` }, bump)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, bump)
       .subscribe((status) => {
         if (!alive) return;
         if (status === 'SUBSCRIBED') setLive('connected');
@@ -256,11 +253,16 @@ const BookingsViewPanel = ({ branchId }) => {
   const [selected, setSelected] = useState(null);
   const openBooking = (b) => {
     setSelected(b);
-    if (unread.has(b.bookingId)) {
-      setUnread((s) => { const n = new Set(s); n.delete(b.bookingId); return n; });
-      markBookingNotificationsRead(b.bookingId);
-    }
+    // The dialog acknowledges the booking for the whole team (fire-and-forget); clear the dot here right away.
+    if (!readOnly && isUnseen(b)) setRows((rs) => rs.map((r) => (r.bookingId === b.bookingId ? { ...r, acknowledgedAt: new Date().toISOString() } : r)));
   };
+  // Deep link from the bell: ?view=bookings&open=<bookingId> opens that booking.
+  const openParam = sp.get('open');
+  useEffect(() => {
+    if (!openParam) return;
+    patch({ open: '' }); // one-shot: strip it so refresh / back doesn't reopen
+    fetchBookingById(openParam).then((r) => { if (!r.error) openBooking(transformBooking(r.data)); });
+  }, [openParam]); // eslint-disable-line react-hooks/exhaustive-deps
   const handleViewBooking = async (bookingId) => {
     if (!bookingId) return;
     const result = await fetchBookingById(bookingId);
@@ -355,6 +357,10 @@ const BookingsViewPanel = ({ branchId }) => {
   const [scroller, setScroller] = useState(null);
   const [stickyTop, setStickyTop] = useState(-16);
   const [blockH, setBlockH] = useState(0);
+  const headRef = useRef(null);
+  const [headH, setHeadH] = useState(35);
+  const navType = useNavigationType();
+  const location = useLocation();
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
     const sc = sentinelRef.current?.closest('.content-scroll') || null;
@@ -364,9 +370,11 @@ const BookingsViewPanel = ({ branchId }) => {
   useEffect(() => {
     const el = blockRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
-    const ro = new ResizeObserver(() => setBlockH(Math.round(el.getBoundingClientRect().height)));
+    const measure = () => { setBlockH(Math.ceil(el.getBoundingClientRect().height)); if (headRef.current) setHeadH(Math.ceil(headRef.current.getBoundingClientRect().height)); };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setBlockH(Math.round(el.getBoundingClientRect().height));
+    if (headRef.current) ro.observe(headRef.current);
+    measure();
     return () => ro.disconnect();
   }, []);
   useEffect(() => {
@@ -379,6 +387,47 @@ const BookingsViewPanel = ({ branchId }) => {
     io.observe(el);
     return () => io.disconnect();
   }, [scroller]);
+  const stuckRef = useRef(false);
+  stuckRef.current = stuck;
+  // Scroll so the list's natural top (where the sticky block begins to stick) is at the top edge.
+  const scrollToListTop = useCallback(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !scroller) return;
+    scroller.scrollTo({ top: scroller.scrollTop + sentinel.getBoundingClientRect().top - scroller.getBoundingClientRect().top });
+  }, [scroller]);
+  // Range / view / sort / search / filter change → back to the list top, but only if the list is scrolled past it.
+  const listKey = `${range.from}|${range.to}|${viewChip}|${sort}|${query}|${need}|${filters.therapist}|${filters.service}|${filters.room}`;
+  const firstKey = useRef(true);
+  useEffect(() => {
+    if (firstKey.current) { firstKey.current = false; return; }
+    if (stuckRef.current) scrollToListTop();
+  }, [listKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Remember the scroll position per list URL (sessionStorage) and restore it on back / reload, not on a fresh visit.
+  const scrollKey = `zennly.bookings.scroll:${location.pathname}${location.search}`;
+  const savedOnMount = useRef(undefined);
+  if (savedOnMount.current === undefined) { try { savedOnMount.current = sessionStorage.getItem(scrollKey); } catch { savedOnMount.current = null; } }
+  const persist = useCallback(() => { try { if (scroller) sessionStorage.setItem(scrollKey, String(scroller.scrollTop)); } catch { /* storage unavailable */ } }, [scrollKey, scroller]);
+  useEffect(() => {
+    if (!scroller) return undefined;
+    let t;
+    const save = () => { clearTimeout(t); t = setTimeout(persist, 120); };
+    scroller.addEventListener('scroll', save, { passive: true });
+    return () => { clearTimeout(t); scroller.removeEventListener('scroll', save); };
+  }, [scroller, persist]);
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || loading || !scroller) return;
+    restored.current = true;
+    if (navType !== 'POP' || savedOnMount.current == null) return;
+    const y = Number(savedOnMount.current);
+    requestAnimationFrame(() => { scroller.scrollTop = y; });
+  }, [loading, scroller]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ↑/↓ moves between rows; the rows carry scroll-margin-top so a focused row is never hidden under the sticky stack.
+  const navRows = (dir, from) => {
+    const all = [...(from.closest('[data-bookings-root]')?.querySelectorAll('tr[data-booking-id]') || [])];
+    const i = all.indexOf(from);
+    all[i + dir]?.focus();
+  };
 
   // ── Render ──────────────────────────────────────────────────────────────────────────────────────────────────────────
   const setFilter = (k) => (v) => patch({ [k]: v });
@@ -444,42 +493,66 @@ const BookingsViewPanel = ({ branchId }) => {
   );
   const needsLine = needsItems && <NeedsYouNow items={needsItems} active={need} onPick={(id) => patch({ nf: id })} />;
 
-  const th = `h-[34px] text-[12px] font-medium whitespace-nowrap border-b border-border bg-white sticky z-[5] text-[#8A8A90] ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''}`;
-  const thStyle = { top: stickyTop + blockH };
-  const headH = 35; // the column-heading row (34px + its bottom border)
+  const th = 'h-[34px] text-[12px] font-medium whitespace-nowrap border-b border-border bg-white text-[#8A8A90]';
   // colSpan must equal the number of columns actually showing (hidden ones are display:none), or the fixed layout grows a phantom column.
   const colCount = 3 + (isSm ? (columns.amount ? 2 : 1) : 0) + (isMd && columns.service ? 1 : 0) + (isLg && columns.therapist ? 1 : 0);
 
+  // One <colgroup> shared by the heading table and every day table so their columns line up exactly.
+  const colgroup = (
+    <colgroup>
+      <col style={{ width: isSm ? 104 : 92 }} />
+      <col />
+      {isMd && columns.service && <col style={{ width: '18%' }} />}
+      {isLg && columns.therapist && <col style={{ width: '16%' }} />}
+      {isSm && <col style={{ width: 132 }} />}
+      {isSm && columns.amount && <col style={{ width: 112 }} />}
+      <col style={{ width: isSm ? 88 : 84 }} />
+    </colgroup>
+  );
+  const rowProps = (b) => ({
+    b, all: rows, columns, ctx, unread: isUnseen(b), selected: selected?.bookingId === b.bookingId,
+    dim: viewChip !== 'done' && viewChip !== 'void' && isDimmed(b, ctx), late: lateMinutes(b, ctx), amount: amountCell(b, ctx),
+    suggestion: suggestions[b.bookingId], onSuggest: (tid) => { setBusyId(b.bookingId); handleAssignTherapist(b.bookingId, tid).finally(() => setBusyId(null)); },
+    action: nextAction(b, { readOnly }), busy: busyId === b.bookingId, onOpen: () => openBooking(b), onAction: (a) => runNext(b, a), onNav: navRows,
+    scrollMargin: stickyTop + blockH + headH + (multiDay ? 36 : 6),
+  });
   let body;
   if (loading) {
-    body = Array.from({ length: 8 }).map((_, i) => (
-      <tr key={i}><td colSpan={colCount} className="h-14 border-b border-[#F1F1EF]"><div className="h-8 rounded bg-[#F1F1EF] animate-pulse" /></td></tr>
-    ));
+    body = (
+      <table className="w-full border-collapse table-fixed">
+        {colgroup}
+        <tbody>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <tr key={i}><td colSpan={colCount} className="h-14 border-b border-[#F1F1EF]"><div className="h-8 rounded bg-[#F1F1EF] animate-pulse" /></td></tr>
+          ))}
+        </tbody>
+      </table>
+    );
   } else {
     const lineAt = showNow ? nowLineIndex(groups[0]?.rows || [], nowHM) : -1;
-    body = groups.flatMap((g) => {
+    // One table per day: a sticky day heading is bounded by its own table, so the next day's heading pushes it out.
+    body = groups.map((g) => {
       const out = [];
-      if (multiDay) {
-        out.push(
-          <tr key={`h-${g.date}`} data-day={g.date}>
-            <td colSpan={colCount} className="h-[34px] bg-[#FAFAF9] border-b border-border text-[12px] font-semibold text-[#515152] pl-2" style={{ position: 'sticky', top: stickyTop + blockH + headH, zIndex: 4 }}>
-              {dayHeading(g.date, today)} <span className="font-medium text-[#8A8A90]">· {g.rows.length} booking{g.rows.length === 1 ? '' : 's'}</span>
-            </td>
-          </tr>,
-        );
-      }
       g.rows.forEach((b, i) => {
         if (showNow && i === lineAt) out.push(<NowLine key="now" label={clockLabel(nowHM)} colSpan={colCount} />);
-        out.push(
-          <BookingRow key={b.bookingId} b={b} all={rows} columns={columns} ctx={ctx} unread={isUnseen(b, unread)} selected={selected?.bookingId === b.bookingId}
-            dim={viewChip !== 'done' && viewChip !== 'void' && isDimmed(b, ctx)} late={lateMinutes(b, ctx)} amount={amountCell(b, ctx)}
-            suggestion={suggestions[b.bookingId]} onSuggest={(tid) => { setBusyId(b.bookingId); handleAssignTherapist(b.bookingId, tid).finally(() => setBusyId(null)); }}
-            action={nextAction(b, { readOnly })} busy={busyId === b.bookingId} onOpen={() => openBooking(b)} onAction={(a) => runNext(b, a)}
-            scrollMargin={stickyTop + blockH + headH + (multiDay ? 36 : 6)} />,
-        );
+        out.push(<BookingRow key={b.bookingId} {...rowProps(b)} />);
       });
       if (showNow && lineAt >= g.rows.length) out.push(<NowLine key="now" label={clockLabel(nowHM)} colSpan={colCount} />);
-      return out;
+      return (
+        <table key={g.date} className="w-full border-collapse table-fixed" data-day-table={g.date}>
+          {colgroup}
+          {multiDay && (
+            <thead>
+              <tr data-day={g.date}>
+                <th colSpan={colCount} className="h-[34px] bg-[#FAFAF9] border-b border-border text-left text-[12px] font-semibold text-[#515152] pl-2" style={{ position: 'sticky', top: stickyTop + blockH + headH, zIndex: 4 }}>
+                  {dayHeading(g.date, today)} <span className="font-medium text-[#8A8A90]">· {g.rows.length} booking{g.rows.length === 1 ? '' : 's'}</span>
+                </th>
+              </tr>
+            </thead>
+          )}
+          <tbody>{out}</tbody>
+        </table>
+      );
     });
   }
 
@@ -498,39 +571,43 @@ const BookingsViewPanel = ({ branchId }) => {
           <span className="text-sm font-medium">{toast.msg}</span>
         </div>
       )}
+      {needsLine}
       <div ref={sentinelRef} aria-hidden="true" className="h-px -mb-px" />
       <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>
         <div className="flex items-center gap-2 pt-3.5 pb-3 flex-wrap">
           {dateNav}{searchBox}
-          <span className="hidden md:flex items-center gap-2">{chips}</span>
-          <span className="hidden md:contents">{sortCols}</span>
+          {isMd && <>{chips}</>}
+          {isMd && sortCols}
         </div>
-        {isMd && needsLine}
         {viewRow}
       </div>
-      <div className="md:hidden flex items-center gap-2 py-2.5 flex-wrap">{chips}{sortCols}</div>
-      {!isMd && needsLine}
-      <div>
+      {!isMd && <div className="flex items-center gap-2 py-2.5 flex-wrap">{chips}{sortCols}</div>}
+      <div data-bookings-root>
         {error ? (
           <div className="border border-error/20 bg-error/5 rounded-lg p-4 mt-3 flex items-center gap-3 text-[13px] text-error">
             <Icon name="AlertCircle" size={16} />{error}
             <button type="button" onClick={load} className="ml-auto underline font-medium">Retry</button>
           </div>
         ) : (
-          <table className="w-full border-collapse table-fixed">
-            <thead>
-              <tr>
-                <th className={`${th} text-left w-[92px] sm:w-[104px] pl-2`} style={thStyle}>Time</th>
-                <th className={`${th} text-left`} style={thStyle}>Customer</th>
-                {columns.service && <th className={`${th} text-left w-[18%] hidden md:table-cell`} style={thStyle}>Service</th>}
-                {columns.therapist && <th className={`${th} text-left w-[16%] hidden lg:table-cell`} style={thStyle}>Therapist</th>}
-                <th className={`${th} text-left w-[132px] hidden sm:table-cell`} style={thStyle}>Status</th>
-                {columns.amount && <th className={`${th} text-right pr-4 w-[112px] hidden sm:table-cell`} style={thStyle}>Amount</th>}
-                <th className={`${th} w-[84px] sm:w-[88px]`} style={thStyle} />
-              </tr>
-            </thead>
-            <tbody>{body}</tbody>
-          </table>
+          <>
+            <div ref={headRef} className={`sticky z-[5] bg-white ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''}`} style={{ top: stickyTop + blockH }}>
+              <table className="w-full border-collapse table-fixed">
+                {colgroup}
+                <thead>
+                  <tr>
+                    <th className={`${th} text-left pl-2`}>Time</th>
+                    <th className={`${th} text-left`}>Customer</th>
+                    {isMd && columns.service && <th className={`${th} text-left`}>Service</th>}
+                    {isLg && columns.therapist && <th className={`${th} text-left`}>Therapist</th>}
+                    {isSm && <th className={`${th} text-left`}>Status</th>}
+                    {isSm && columns.amount && <th className={`${th} text-right pr-4`}>Amount</th>}
+                    <th className={th} />
+                  </tr>
+                </thead>
+              </table>
+            </div>
+            {body}
+          </>
         )}
         {!loading && !error && visible.length === 0 && (
           <div className="text-center py-16">

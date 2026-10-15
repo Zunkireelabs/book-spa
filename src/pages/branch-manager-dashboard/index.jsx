@@ -173,8 +173,9 @@ const BranchManagerDashboard = () => {
           const today = new Date().toISOString().split('T')[0];
           const isToday = newBooking.date === today;
 
-          // Add every new booking to the header notification feed (deduped by id)
-          setNotifications((prev) =>
+          // Add every new booking to the header notification feed (deduped by id). Online bookings (created_by IS NULL) already
+          // arrive as a persisted new_online_booking notification (migration-282), so they are not added a second time here.
+          if (newBooking.created_by != null) setNotifications((prev) =>
             prev.some((n) => n.id === newBooking.id)
               ? prev
               : [
@@ -325,6 +326,11 @@ const BranchManagerDashboard = () => {
     if (n.type === 'discount') {
       setReadDiscountIds((prev) => new Set(prev).add(n.id));
       navigate(`?view=dashboard&highlight=${n.bookingId}`);
+      return;
+    }
+    if (n.type === 'new_online_booking' && n.bookingId) {
+      markPersistentRead(n.id);
+      navigate(`?view=bookings&open=${n.bookingId}`);
       return;
     }
     if (n.type === 'discount_approved' || n.type === 'discount_declined') {

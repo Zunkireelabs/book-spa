@@ -21,6 +21,9 @@ export function usePersistentNotifications(userId) {
     bookingId: row.booking_id,
     read: row.read,
     createdAt: row.created_at,
+    // "Seen by Asha" once a teammate has opened the booking (new_online_booking items; from the embedded booking row).
+    seenBy: row.booking?.acknowledged_at ? (row.booking.acknowledger?.full_name || 'a teammate') : null,
+    seenAt: row.booking?.acknowledged_at || null,
   }), []);
 
   const load = useCallback(async () => {
@@ -58,6 +61,8 @@ export function usePersistentNotifications(userId) {
         const row = payload.new;
         if (!row) return;
         seen.current.add(row.id);
+        // A teammate acknowledging flips `read` on our row; the "seen by" name lives on the booking, so reload to pick it up.
+        if (row.type === 'new_online_booking') { load(); return; }
         setItems((prev) => prev.map((n) => (n.id === row.id ? normalize(row) : n)));
       })
       .on('postgres_changes', {
@@ -73,7 +78,7 @@ export function usePersistentNotifications(userId) {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [userId, normalize]);
+  }, [userId, normalize, load]);
 
   const markRead = useCallback(async (id) => {
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));

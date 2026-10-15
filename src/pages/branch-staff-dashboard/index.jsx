@@ -37,7 +37,7 @@ const BranchStaffDashboard = () => {
 
   const handleNotificationClick = (n) => {
     markNotifRead(n.id);
-    setSearchParams({ view: 'bookings' });
+    setSearchParams(n.type === 'new_online_booking' && n.bookingId ? { view: 'bookings', open: n.bookingId } : { view: 'bookings' });
   };
 
   const viewMode = searchParams.get('view') || 'calendar'; // staff land on the calendar; the sidebar's Dashboard link is ?view=dashboard

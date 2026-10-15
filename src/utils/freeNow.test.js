@@ -216,24 +216,25 @@ describe('usual therapist', () => {
 
 describe('unseen + needs you now', () => {
   const rows = [
-    bk({ bookingId: '1', status: 'pending', createdBy: null, time: '17:00' }), // online pending, future
-    bk({ bookingId: '2', status: 'confirmed', createdBy: null, time: '17:30' }), // online but confirmed
+    bk({ bookingId: '1', status: 'pending', createdBy: null, time: '17:00' }), // online, nobody opened it
+    bk({ bookingId: '2', status: 'confirmed', createdBy: null, time: '17:30', acknowledgedAt: '2026-10-15T08:00:00Z' }), // online, opened
     bk({ bookingId: '3', status: 'confirmed', time: '12:30', customerName: 'Dhiren Rai', customerPhone: '+977 98' }), // late, unassigned
     bk({ bookingId: '4', status: 'pending', time: '16:00', therapists: [{ id: 'a' }] }),
     bk({ bookingId: '5', status: 'pending', time: '16:00', date: '2026-10-16', createdBy: null }), // tomorrow: ignored
     bk({ bookingId: '6', status: 'completed', time: '09:00' }),
   ];
-  it('online + Pending is unseen until confirmed; unread notification is a second trigger', () => {
+  it('unopened = online AND not acknowledged AND still live (team-level, not per person)', () => {
     expect(isNewOnline(rows[0])).toBe(true);
-    expect(isNewOnline(rows[1])).toBe(false);
-    expect(isUnseen(rows[1], new Set())).toBe(false);
-    expect(isUnseen(rows[1], new Set(['2']))).toBe(true);
-    expect(isUnseen(rows[3], new Set())).toBe(false);
+    expect(isUnseen(rows[0])).toBe(true);
+    expect(isNewOnline(rows[1])).toBe(false); // someone opened it
+    expect(isUnseen(rows[3])).toBe(false); // staff-made
+    expect(isNewOnline(bk({ createdBy: null, status: 'confirmed' }))).toBe(true); // confirmed but never opened still counts
+    expect(isNewOnline(bk({ createdBy: null, status: 'cancelled' }))).toBe(false);
   });
   it('counts, today only', () => {
     const items = needsYouNow(rows, ctx());
     expect(items.map((i) => [i.id, i.count])).toEqual([['online', 1], ['late', 1], ['assign', 3]]);
-    expect(items[0].text).toBe('1 new online booking to confirm');
+    expect(items[0].text).toBe('1 new online booking');
     expect(items[1]).toMatchObject({ text: 'Dhiren is 1h 22m late', action: 'Call', tel: '+977 98' });
     expect(items[2].text).toBe('3 bookings need a therapist');
   });

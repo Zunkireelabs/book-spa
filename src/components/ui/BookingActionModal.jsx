@@ -8,7 +8,7 @@ import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import AdminCorrectionModal from './AdminCorrectionModal';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -318,13 +318,20 @@ const BookingActionModal = ({
   }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
 
   // Load who created this booking when the modal opens
+  // Opening an unopened online booking acknowledges it for the whole team (migration-282). Fire and forget: never blocks the UI,
+  // read-only roles don't call it, and the RPC itself only ever sets it once.
+  const acknowledgedRef = useRef(null);
   useEffect(() => {
     if (isOpen && booking?.bookingId) {
       fetchBookingCreator(booking.bookingId).then(result => setCreator(result.data || null));
+      if (userRole !== 'admin_viewer' && booking.createdBy == null && !booking.acknowledgedAt && acknowledgedRef.current !== booking.bookingId) {
+        acknowledgedRef.current = booking.bookingId;
+        acknowledgeBooking(booking.bookingId).then(() => fetchBookingCreator(booking.bookingId).then(result => setCreator(result.data || null)));
+      }
     } else {
       setCreator(null);
     }
-  }, [isOpen, booking?.bookingId]);
+  }, [isOpen, booking?.bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the customer-to-customer referral attached to this booking (if this is
   // the referred customer's first booking) — distinct from the legacy free-text
@@ -1661,6 +1668,9 @@ const BookingActionModal = ({
                       <span className="text-text-secondary">{creator.createdByName || 'Online booking'}</span>
                       {creator.createdAt ? ` · ${formatCreatedAt(creator.createdAt)}` : ''}
                     </p>
+                    {creator.acknowledgedAt && !creator.createdByName && creator.acknowledgedByName && (
+                      <p className="font-caption text-xs text-text-tertiary mt-1">Seen by <span className="text-text-secondary">{creator.acknowledgedByName}</span> · {formatCreatedAt(creator.acknowledgedAt)}</p>
+                    )}
                   </div>
                 )}
 
@@ -1676,6 +1686,7 @@ const BookingActionModal = ({
                       </button>
                     )}
                     {creator?.createdByName && <span>· Created by {creator.createdByName}{creator.createdAt ? ` · ${formatCreatedAt(creator.createdAt)}` : ''}</span>}
+                    {creator && !creator.createdByName && creator.acknowledgedAt && creator.acknowledgedByName && <span>· Seen by {creator.acknowledgedByName} · {formatCreatedAt(creator.acknowledgedAt)}</span>}
                   </div>
                 )}
 

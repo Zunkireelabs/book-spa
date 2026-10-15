@@ -56,8 +56,8 @@ const AreaLayout = ({ title, menuStorageKey, menuTop = null, categories, activeV
 };
 
 // A page inside an area: slim header (back link on mobile, title, optional ☆, description) over a `.content-scroll` body.
-export const AreaPage = ({ title, description, titleExtra = null, backLabel, onBack, reopen, tabs = null, children }) => (
-  <>
+export const AreaPage = ({ title, description, titleExtra = null, backLabel, onBack, reopen, tabs = null, scrollHeader = false, children }) => {
+  const header = (
     <div className="px-4 sm:px-6 lg:px-8 pt-3 pb-3 border-b border-border flex-shrink-0">
       {backLabel && (
         <button type="button" onClick={onBack} className="lg:hidden mb-2 inline-flex items-center gap-1 text-[13px] text-text-secondary hover:text-text-primary">
@@ -74,10 +74,25 @@ export const AreaPage = ({ title, description, titleExtra = null, backLabel, onB
       <p className="text-[13px] text-text-secondary">{description}</p>
       {tabs}
     </div>
-    <div className="content-scroll flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">
-      {children}
-    </div>
-  </>
-);
+  );
+  // scrollHeader: the header is part of the one scroller (it scrolls away, like Customers) so the page's own toolbar can stick at the very top.
+  // The scroller itself is unpadded, so a page's sticky block rests flush at top: 0.
+  if (scrollHeader) {
+    return (
+      <div className="content-scroll flex-1 min-h-0 overflow-y-auto">
+        {header}
+        <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">{children}</div>
+      </div>
+    );
+  }
+  return (
+    <>
+      {header}
+      <div className="content-scroll flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">
+        {children}
+      </div>
+    </>
+  );
+};
 
 export default AreaLayout;
