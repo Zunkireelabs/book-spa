@@ -28,7 +28,7 @@ function firstLeafValue(tree) {
 }
 
 // Shared frame: panel shell + body + the ⌘/Ctrl+Enter shortcut + autofocus of the first field.
-const ActionFrame = ({ title, icon, onBack, onClose, dirty, busy, reason, primary, onSubmit, focusId, serverError, children }) => {
+const ActionFrame = ({ title, icon, onBack, onClose, dirty, busy, reason, primary, onSubmit, focusId, serverError, width, children }) => {
   const submitRef = useRef(onSubmit);
   submitRef.current = onSubmit;
   useEffect(() => {
@@ -42,7 +42,7 @@ const ActionFrame = ({ title, icon, onBack, onClose, dirty, busy, reason, primar
     return () => clearTimeout(t);
   }, [focusId]);
   return (
-    <PanelShell variant="panel" title={title} onBack={onBack} onClose={onClose} dirty={dirty} busy={busy} reason={reason} primary={primary}>
+    <PanelShell width={width} variant="panel" title={title} onBack={onBack} onClose={onClose} dirty={dirty} busy={busy} reason={reason} primary={primary}>
       <FormBody>
         <InlineError message={serverError} />
         {children}
@@ -88,7 +88,7 @@ const useAction = (run, onDone) => {
 };
 
 // ── Top up ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-export const TopUpView = ({ membership, branchId, onBack, onClose, onDone }) => {
+export const TopUpView = ({ membership, branchId, onBack, onClose, onDone, width }) => {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const [amount, setAmount] = useState('');
@@ -124,7 +124,7 @@ export const TopUpView = ({ membership, branchId, onBack, onClose, onDone }) => 
   if (pending) rows.unshift(['Deposited', `${formatNPR(deposited)} → ${formatNPR(deposited + amountNum)} of ${formatNPR(advance)}`]);
 
   return (
-    <ActionFrame
+    <ActionFrame width={width}
       title="Top up" onBack={onBack} onClose={onClose} dirty={!!(amount || notes || backdatedAt)} busy={busy} reason={reason} onSubmit={onSubmit}
       focusId="mem-amount" serverError={error || fieldError}
       primary={{ label: busy ? 'Recording…' : (amountNum > 0 ? `Top up · ${formatNPR(amountNum)}` : 'Top up'), onClick: onSubmit, disabled: !!reason, loading: busy }}
@@ -154,7 +154,7 @@ export const TopUpView = ({ membership, branchId, onBack, onClose, onDone }) => 
 };
 
 // ── Renew ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-export const RenewView = ({ membership, branchId, onBack, onClose, onDone }) => {
+export const RenewView = ({ membership, branchId, onBack, onClose, onDone, width }) => {
   const { profile } = useAuth();
   const { paymentMethods } = useOrg();
   const orgId = profile?.org_id;
@@ -193,7 +193,7 @@ export const RenewView = ({ membership, branchId, onBack, onClose, onDone }) => 
   rows.push(['Balance', `${formatNPR(membership.balance)} → ${formatNPR(membership.balance + amountNum)}`, 'total']);
 
   return (
-    <ActionFrame
+    <ActionFrame width={width}
       title="Renew membership" onBack={onBack} onClose={onClose} dirty={!!(amount || notes || tierChanged)} busy={busy} reason={reason} onSubmit={onSubmit}
       focusId="mem-amount" serverError={error}
       primary={{ label: busy ? 'Renewing…' : (amountNum > 0 ? `Renew · ${formatNPR(amountNum)}` : 'Renew'), onClick: onSubmit, disabled: !!reason, loading: busy }}
@@ -215,7 +215,7 @@ export const RenewView = ({ membership, branchId, onBack, onClose, onDone }) => 
 };
 
 // ── Extend (lapsed with balance: no payment) ────────────────────────────────────────────────────────────────────────────────────
-export const ExtendView = ({ membership, branchId, onBack, onClose, onDone }) => {
+export const ExtendView = ({ membership, branchId, onBack, onClose, onDone, width }) => {
   const today = toDateInputValue(new Date()); // Nepal date
   const tomorrow = plusDays(today, 1);
   const suggested = plusDays(today, Number(membership.tierValidityDays) > 0 ? Number(membership.tierValidityDays) : 365);
@@ -235,7 +235,7 @@ export const ExtendView = ({ membership, branchId, onBack, onClose, onDone }) =>
   };
 
   return (
-    <ActionFrame
+    <ActionFrame width={width}
       title="Extend membership" onBack={onBack} onClose={onClose} dirty={!!notes || newExpiry !== suggested} busy={busy} reason="" onSubmit={onSubmit}
       focusId="mem-expiry" serverError={error}
       primary={{ label: busy ? 'Extending…' : 'Extend', onClick: onSubmit, disabled: false, loading: busy }}
@@ -249,7 +249,7 @@ export const ExtendView = ({ membership, branchId, onBack, onClose, onDone }) =>
 };
 
 // ── Adjust (admin) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
-export const AdjustView = ({ membership, branchId, onBack, onClose, onDone }) => {
+export const AdjustView = ({ membership, branchId, onBack, onClose, onDone, width }) => {
   const today = toDateInputValue(new Date());
   const [direction, setDirection] = useState('credit');
   const [amount, setAmount] = useState('');
@@ -271,7 +271,7 @@ export const AdjustView = ({ membership, branchId, onBack, onClose, onDone }) =>
   const onSubmit = () => { if (!reason) submit('Failed to record the adjustment.'); };
 
   return (
-    <ActionFrame
+    <ActionFrame width={width}
       title="Adjust balance" onBack={onBack} onClose={onClose} dirty={!!(amount || notes || backdatedAt)} busy={busy} reason={reason} onSubmit={onSubmit}
       focusId="mem-amount" serverError={error}
       primary={{ label: busy ? 'Saving…' : (amountNum > 0 ? `${direction === 'credit' ? 'Add' : 'Deduct'} ${formatNPR(amountNum)}` : 'Adjust'), onClick: onSubmit, disabled: !!reason, loading: busy }}
@@ -300,7 +300,7 @@ export const AdjustView = ({ membership, branchId, onBack, onClose, onDone }) =>
 };
 
 // ── Birthday perk ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-export const BirthdayView = ({ membership, branchId, onBack, onClose, onDone }) => {
+export const BirthdayView = ({ membership, branchId, onBack, onClose, onDone, width }) => {
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const { busy, error, submit } = useAction(async () => {
@@ -309,7 +309,7 @@ export const BirthdayView = ({ membership, branchId, onBack, onClose, onDone }) 
   }, onDone);
   const onSubmit = () => submit('Failed to record the birthday perk.');
   return (
-    <ActionFrame
+    <ActionFrame width={width}
       title="Birthday perk" onBack={onBack} onClose={onClose} dirty={!!notes} busy={busy} reason="" onSubmit={onSubmit} focusId={null} serverError={error}
       primary={{ label: busy ? 'Recording…' : 'Record gift', onClick: onSubmit, disabled: false, loading: busy }}
     >

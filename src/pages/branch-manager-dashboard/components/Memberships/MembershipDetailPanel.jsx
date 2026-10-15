@@ -44,7 +44,7 @@ function perkUsedInCurrentCycle(m) {
 // Membership detail in the right-hand panel. Header: the one primary action for the status (Top up / Renew / Extend) + a "⋯" menu
 // (Apply birthday perk, Adjust for admin). Each action is a stacked sub-view with a back arrow; on success we land back here with the
 // record refreshed in place. Same props and role gating as the modal this replaces.
-const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false, branchId, onClose, onChanged }) => {
+const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false, branchId, width, onClose, onChanged }) => {
   const { orgSlug } = useParams();
   const [m, setMembership] = useState(null);
   const [txns, setTxns] = useState([]);
@@ -75,7 +75,7 @@ const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false
   const back = () => setView('detail');
 
   if (m && !readOnly) {
-    const props = { membership: m, branchId, onBack: back, onClose, onDone: done };
+    const props = { membership: m, branchId, onBack: back, onClose, onDone: done, width };
     if (view === 'topup') return <TopUpView {...props} />;
     if (view === 'renew') return <RenewView {...props} />;
     if (view === 'extend') return <ExtendView {...props} />;
@@ -94,7 +94,7 @@ const MembershipDetailPanel = ({ membershipId, isAdmin = false, readOnly = false
 
   return (
     <PanelShell
-      variant="panel"
+      width={width} variant="panel"
       title={m?.membershipNumber || 'Membership'}
       onClose={onClose}
       hideFooter

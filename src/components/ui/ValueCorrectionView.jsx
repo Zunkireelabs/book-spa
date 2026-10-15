@@ -9,7 +9,7 @@ const REASON_MIN = 10;
 // Generic over the *value*: the caller supplies `onSubmit` so each entity keeps its own RPC and refusal messages.
 //   kind 'integer' | 'number'; `afterRows(value)` → InfoRows rows previewing the result; `blocked(value)` → string reason to
 //   stop (e.g. below the sessions already redeemed). `onDone()` runs after a successful save.
-const ValueCorrectionView = ({ title, label, currentLabel, kind = 'number', warning, onSubmit, afterRows, blocked, onBack, onClose, onDone }) => {
+const ValueCorrectionView = ({ title, label, currentLabel, kind = 'number', warning, onSubmit, afterRows, blocked, onBack, onClose, onDone, width }) => {
   const [value, setValue] = useState('');
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState({});
@@ -55,7 +55,7 @@ const ValueCorrectionView = ({ title, label, currentLabel, kind = 'number', warn
   const rows = num != null && !Number.isNaN(num) && afterRows ? afterRows(num) : null;
   return (
     <PanelShell
-      variant="panel" title={title} onBack={onBack} onClose={onClose} dirty={!!(value || reason)} busy={busy} reason={disabledReason}
+      width={width} variant="panel" title={title} onBack={onBack} onClose={onClose} dirty={!!(value || reason)} busy={busy} reason={disabledReason}
       primary={{ label: busy ? 'Applying…' : 'Apply correction', onClick: submit, disabled: !!disabledReason, loading: busy }}
     >
       <FormBody>

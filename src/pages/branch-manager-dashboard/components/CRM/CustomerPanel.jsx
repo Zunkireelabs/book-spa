@@ -280,9 +280,9 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
         )}
       </SidePanel>
 
-      {prepaid?.kind === 'membership' && <MembershipDetailPanel membershipId={prepaid.id} isAdmin={isAdmin} readOnly={readOnly} branchId={branchId} onClose={() => setPrepaid(null)} onChanged={refresh} />}
-      {prepaid?.kind === 'package' && <PackageDetailPanel packageId={prepaid.id} readOnly={readOnly} onClose={() => setPrepaid(null)} onChanged={refresh} />}
-      {prepaid?.kind === 'voucher' && <VoucherDetailPanel voucherId={prepaid.id} readOnly={readOnly} onClose={() => setPrepaid(null)} onChanged={refresh} />}
+      {prepaid?.kind === 'membership' && <MembershipDetailPanel width="460px" membershipId={prepaid.id} isAdmin={isAdmin} readOnly={readOnly} branchId={branchId} onClose={() => setPrepaid(null)} onChanged={refresh} />}
+      {prepaid?.kind === 'package' && <PackageDetailPanel width="460px" packageId={prepaid.id} readOnly={readOnly} onClose={() => setPrepaid(null)} onChanged={refresh} />}
+      {prepaid?.kind === 'voucher' && <VoucherDetailPanel width="460px" voucherId={prepaid.id} readOnly={readOnly} onClose={() => setPrepaid(null)} onChanged={refresh} />}
     </>
   );
 };

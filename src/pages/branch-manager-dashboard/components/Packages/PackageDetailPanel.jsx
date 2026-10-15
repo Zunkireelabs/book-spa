@@ -20,7 +20,7 @@ const TABS = [{ id: 'details', label: 'Details' }, { id: 'usage', label: 'Usage'
 
 // Package detail in the right-hand panel (manager/admin). Read-only apart from the admin "Correct sessions" sub-view: session
 // redemptions run through redeem_package_session() at booking checkout, so there is deliberately no "record usage" here.
-const PackageDetailPanel = ({ packageId, readOnly = false, onClose, onChanged }) => {
+const PackageDetailPanel = ({ packageId, readOnly = false, width, onClose, onChanged }) => {
   const { orgSlug } = useParams();
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
@@ -47,7 +47,7 @@ const PackageDetailPanel = ({ packageId, readOnly = false, onClose, onChanged })
 
   if (pkg && isAdmin && !readOnly && view === 'correct') {
     return (
-      <ValueCorrectionView
+      <ValueCorrectionView width={width}
         title="Correct sessions" label="Total sessions on this package" currentLabel={`${pkg.sessionsTotal} total, ${pkg.sessionsUsed} used`} kind="integer"
         warning="Sessions remaining is calculated as total minus redemptions, so this corrects the total. It cannot be set below the number already redeemed; void the incorrect redemption first."
         blocked={(v) => (v < pkg.sessionsUsed ? `Can't be below the ${pkg.sessionsUsed} already redeemed.` : null)}
@@ -62,7 +62,7 @@ const PackageDetailPanel = ({ packageId, readOnly = false, onClose, onChanged })
   const cfg = pkg ? STATUS_CONFIG[pkg.status] || STATUS_CONFIG.unused : null;
   return (
     <PanelShell
-      variant="panel" title={pkg?.packageTypeName || 'Package'} onClose={onClose} hideFooter
+      width={width} variant="panel" title={pkg?.packageTypeName || 'Package'} onClose={onClose} hideFooter
       headerExtra={pkg && isAdmin && !readOnly ? <OverflowMenu items={[{ key: 'correct', label: 'Correct sessions', icon: 'Pencil', run: () => setView('correct') }]} /> : null}
     >
       <FormBody>

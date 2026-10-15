@@ -25,7 +25,7 @@ const TABS = [{ id: 'details', label: 'Details' }, { id: 'claims', label: 'Claim
 const headerBtn = 'h-8 px-2.5 text-[13px] font-body font-body-medium rounded-spa spa-transition-fast whitespace-nowrap';
 
 // ── Record a claim (stacked sub-view) ──────────────────────────────────────────────────────────────────────────────────────────
-const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone }) => {
+const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone, width }) => {
   const { branchId: currentBranchId, isOverall } = useBranch();
   const remaining = Number(voucher.remainingBalance || 0);
   const [redeemedDate, setRedeemedDate] = useState(() => toDateInputValue(new Date()));
@@ -77,7 +77,7 @@ const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone }) => 
 
   return (
     <PanelShell
-      variant="panel" title="Record claim" onBack={onBack} onClose={onClose} dirty={dirty} busy={busy} reason={reason}
+      width={width} variant="panel" title="Record claim" onBack={onBack} onClose={onClose} dirty={dirty} busy={busy} reason={reason}
       primary={{ label: busy ? 'Recording…' : (amountNum > 0 ? `Record claim · ${formatNPR(amountNum)}` : 'Record claim'), onClick: submit, disabled: !!reason, loading: busy }}
     >
       <FormBody>
@@ -111,7 +111,7 @@ const ClaimView = ({ voucher, branches, services, onBack, onClose, onDone }) => 
 // ── Voucher detail ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Manager/admin. Header: Record claim (while balance remains) + "⋯" (Correct balance, admin only). The claim and the correction are
 // stacked sub-views; success returns here with the voucher refreshed in place.
-const VoucherDetailPanel = ({ voucherId, readOnly = false, onClose, onChanged }) => {
+const VoucherDetailPanel = ({ voucherId, readOnly = false, width, onClose, onChanged }) => {
   const { orgSlug } = useParams();
   const { profile } = useAuth();
   const orgId = profile?.org_id;
@@ -150,11 +150,11 @@ const VoucherDetailPanel = ({ voucherId, readOnly = false, onClose, onChanged })
   const done = (message) => { setView('detail'); setNotice(message || ''); loadData(); onChanged?.(); };
 
   if (voucher && !readOnly && view === 'claim' && voucher.remainingBalance > 0) {
-    return <ClaimView voucher={{ ...voucher, id: voucherId }} branches={branches} services={services} onBack={() => setView('detail')} onClose={onClose} onDone={done} />;
+    return <ClaimView voucher={{ ...voucher, id: voucherId }} branches={branches} services={services} onBack={() => setView('detail')} onClose={onClose} onDone={done} width={width} />;
   }
   if (voucher && isAdmin && !readOnly && view === 'correct') {
     return (
-      <ValueCorrectionView
+      <ValueCorrectionView width={width}
         title="Correct balance" label="Correct remaining balance (NPR)" kind="number"
         currentLabel={`${formatNPR(voucher.remainingBalance)} remaining of ${formatNPR(voucher.totalAmountIssued)} issued`}
         warning={`Remaining is calculated as issued minus claims, so this adjusts the issued total and leaves the claim history intact. Because it changes the issued figure, the "Gift vouchers distributed" report total for ${formatDate(voucher.issuedDate)} will change to match. Cash reconciliation is unaffected. To remove a claim that never happened, void that claim instead.`}
@@ -169,7 +169,7 @@ const VoucherDetailPanel = ({ voucherId, readOnly = false, onClose, onChanged })
   const canClaim = !!voucher && !readOnly && voucher.remainingBalance > 0;
   return (
     <PanelShell
-      variant="panel" title={voucher?.voucherCode || 'Voucher'} onClose={onClose} hideFooter
+      width={width} variant="panel" title={voucher?.voucherCode || 'Voucher'} onClose={onClose} hideFooter
       headerExtra={voucher ? (
         <>
           {canClaim && <button type="button" onClick={() => setView('claim')} className={`${headerBtn} bg-primary text-white hover:bg-primary/90`}>Record claim</button>}
