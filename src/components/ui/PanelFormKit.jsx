@@ -496,3 +496,20 @@ export const InfoRows = ({ rows }) => (
     ))}
   </dl>
 );
+
+// List rows for the record whose panel is open ("selected") or that was just created ("flash", fades out after `ms`).
+// Usage: const [flashId, flash] = useFlashRow(); flash(newId) after a create; <tr className={rowTone(selected, flashId === id)}> and
+// <td className={rowBar(selected || flashId === id)}> on the first cell.
+export const useFlashRow = (ms = 2000) => {
+  const [flashId, setFlashId] = useState(null);
+  const timer = useRef(null);
+  const flash = useCallback((id) => {
+    clearTimeout(timer.current);
+    setFlashId(id);
+    timer.current = setTimeout(() => setFlashId(null), ms);
+  }, [ms]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return [flashId, flash];
+};
+export const rowTone = (selected, flashing) => `transition-colors duration-700 ${flashing ? 'bg-primary/[0.12]' : selected ? 'bg-primary/[0.04]' : 'hover:bg-background/50'}`;
+export const rowBar = (on) => (on ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : '');
