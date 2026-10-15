@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams, useLocation, useNavigationType } from 'react-router-dom';
+import { useAppScroller } from '../../../../components/ui/AppShell';
 import Icon from '../../../../components/AppIcon';
 import { getCustomerDirectory, fetchDuplicateCandidates } from '../../../../services/api';
 import { useAuth } from '../../../../contexts/AuthContext';
@@ -95,10 +96,10 @@ const Menu = ({ trigger, children }) => {
   );
 };
 
-const WIDTHS = { name: 'w-[32%]', next: 'w-[24%] hidden sm:table-cell', last: 'w-[20%] hidden md:table-cell', visits: 'w-[72px] hidden md:table-cell', spent: 'w-[116px] hidden lg:table-cell', balance: 'w-[128px] hidden sm:table-cell' };
-const SortHeader = ({ id, label, sort, dir, onSort, right }) => (
+const WIDTHS = { name: 'sm:w-[32%]', next: 'w-[24%] hidden sm:table-cell', last: 'w-[20%] hidden md:table-cell', visits: 'w-[72px] hidden md:table-cell', spent: 'w-[116px] hidden lg:table-cell', balance: 'w-[128px] hidden sm:table-cell' };
+const SortHeader = ({ id, label, sort, dir, onSort, right, stuck }) => (
   <th scope="col" aria-sort={sort === id ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-    className={`h-[34px] text-[12px] ${WIDTHS[id] || ''} ${id === 'visits' || id === 'spent' ? 'pr-4' : 'pr-3'} font-medium whitespace-nowrap border-b border-border bg-white sticky top-0 z-10 ${right ? 'text-right' : 'text-left'} ${sort === id ? 'text-text-primary' : 'text-[#8A8A90]'}`}>
+    className={`h-[34px] text-[12px] ${WIDTHS[id] || ''} ${id === 'visits' || id === 'spent' ? 'pr-4' : 'pr-3'} font-medium whitespace-nowrap border-b border-border bg-white sticky top-[calc(var(--cust-top)+var(--cust-block))] z-[5] ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''} ${right ? 'text-right' : 'text-left'} ${sort === id ? 'text-text-primary' : 'text-[#8A8A90]'}`}>
     <button type="button" onClick={() => onSort(id)} className={`inline-flex items-center gap-1 hover:text-text-primary ${right ? 'flex-row-reverse' : ''}`}>
       {label}{sort === id && <Icon name={dir === 'asc' ? 'ArrowUp' : 'ArrowDown'} size={12} />}
     </button>
@@ -150,6 +151,60 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   const [searchText, setSearchText] = useState(query);
   const searchRef = useRef(null);
   const hasLoadedRef = useRef(false);
+
+  // ── One page scroll (V13): the AppShell frame scrolls on desktop, the window below lg. The tabs + toolbar stick to the top
+  //    (offset by the 48px app header below lg), the column headings stick under them, and a sentinel + IntersectionObserver
+  //    tells us when they are "stuck" (no scroll listeners for that).
+  const appScroller = useAppScroller();
+  const navType = useNavigationType();
+  const mq = (q) => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(q).matches : true);
+  const [isLg, setIsLg] = useState(() => mq('(min-width: 1024px)'));
+  const [isSm, setIsSm] = useState(() => mq('(min-width: 640px)'));
+  useEffect(() => {
+    const lg = window.matchMedia('(min-width: 1024px)');
+    const sm = window.matchMedia('(min-width: 640px)');
+    const on = () => { setIsLg(lg.matches); setIsSm(sm.matches); };
+    lg.addEventListener('change', on); sm.addEventListener('change', on);
+    return () => { lg.removeEventListener('change', on); sm.removeEventListener('change', on); };
+  }, []);
+  // `edge` = where the scrollport's top is (the 48px sticky app header covers the window's top below lg). On desktop the frame's own
+  // vertical padding (16px) is inside the scrollport, and `position: sticky` offsets are measured inside it, so cancel it (-16).
+  const edge = isLg ? 0 : 48;
+  const stickyTop = isLg ? -16 : 48;
+  const sentinelRef = useRef(null);
+  const blockRef = useRef(null);
+  const [blockH, setBlockH] = useState(0);
+  const [stuck, setStuck] = useState(false);
+  const stuckRef = useRef(false);
+  stuckRef.current = stuck;
+  const getScrollEl = useCallback(() => (isLg ? appScroller?.current || null : null), [isLg, appScroller]);
+  useEffect(() => {
+    const el = blockRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setBlockH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    setBlockH(Math.round(el.getBoundingClientRect().height));
+    return () => ro.disconnect();
+  }, [isSm]);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver(([entry]) => {
+      const rootTop = entry.rootBounds ? entry.rootBounds.top : 0;
+      setStuck(!entry.isIntersecting && entry.boundingClientRect.top < rootTop);
+    }, { root: getScrollEl(), rootMargin: `-${edge}px 0px 0px 0px`, threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [getScrollEl, edge]);
+  // Scroll so the list's natural top (where the sticky block begins to stick) is at the top edge.
+  const scrollToListTop = useCallback(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const sc = getScrollEl();
+    const containerTop = sc ? sc.getBoundingClientRect().top : 0;
+    const delta = sentinel.getBoundingClientRect().top - containerTop - edge;
+    if (sc) sc.scrollTo({ top: sc.scrollTop + delta }); else window.scrollTo({ top: window.scrollY + delta });
+  }, [getScrollEl, edge]);
 
   const load = useCallback(async () => {
     if (!branchId) return;
@@ -244,6 +299,45 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     return () => document.removeEventListener('keydown', onKey);
   }, [openId, filtered, patchParams]);
 
+  // Page / tab / segment / filter / sort / search change → back to the list top, but only if the list is scrolled past it.
+  const listKey = `${safePage}|${tab}|${segment}|${noMember}|${sort}|${dir}|${query}|${filters.therapist}|${filters.service}|${filters.last}`;
+  const firstKey = useRef(true);
+  useEffect(() => {
+    if (firstKey.current) { firstKey.current = false; return; }
+    if (stuckRef.current) scrollToListTop();
+  }, [listKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ↑/↓ (or a click) selecting a row: keep it visible below the sticky block (the rows carry scroll-margin-top).
+  useEffect(() => {
+    if (!openId) return;
+    document.querySelector(`tr[data-customer-id="${openId}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [openId, rows.length]);
+
+  // Remember the scroll position per list URL (sessionStorage) and restore it on back / reload, not on a fresh visit.
+  const scrollKey = `zennly.customers.scroll:${location.pathname}${location.search}`;
+  const readSaved = () => { try { return sessionStorage.getItem(scrollKey); } catch { return null; } };
+  const savedOnMount = useRef(undefined);
+  if (savedOnMount.current === undefined) savedOnMount.current = readSaved(); // read before anything overwrites it
+  const scrollNow = useCallback(() => { const sc = getScrollEl(); return sc ? sc.scrollTop : window.scrollY; }, [getScrollEl]);
+  const persist = useCallback(() => { try { sessionStorage.setItem(scrollKey, String(scrollNow())); } catch { /* storage unavailable */ } }, [scrollKey, scrollNow]);
+  useEffect(() => {
+    const target = getScrollEl() || window;
+    let t;
+    const save = () => { clearTimeout(t); t = setTimeout(persist, 120); };
+    target.addEventListener('scroll', save, { passive: true });
+    return () => { clearTimeout(t); target.removeEventListener('scroll', save); };
+  }, [getScrollEl, persist]);
+  const keyMounted = useRef(false);
+  useEffect(() => { if (keyMounted.current) persist(); else keyMounted.current = true; }, [scrollKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || loading || !customers) return;
+    restored.current = true;
+    if (navType !== 'POP' || savedOnMount.current == null) return;
+    const y = Number(savedOnMount.current);
+    requestAnimationFrame(() => { const sc = getScrollEl(); if (sc) sc.scrollTop = y; else window.scrollTo(0, y); });
+  }, [loading, customers]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Navigation ────────────────────────────────────────────────────────────────
   const listUrl = `${location.pathname}${location.search}`;
   const openProfile = (c) => navigate(`/${orgSlug}/customers/${c.id}`, { state: { from: listUrl } });
@@ -301,7 +395,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   ) : null;
 
   const strip = (
-    <div className="grid grid-cols-2 lg:grid-cols-5 border border-border rounded-[10px] mt-[18px] overflow-hidden" role="group" aria-label="Customer lifecycle">
+    <div className="grid grid-cols-2 lg:grid-cols-5 border border-border rounded-[10px] mt-[18px] mb-5 overflow-hidden" role="group" aria-label="Customer lifecycle">
       {LIFECYCLE.map((s, i) => {
         const n = mix ? mix[s.id] : null;
         const pct = mix && total ? Math.round((n / total) * 100) : 0;
@@ -324,7 +418,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   );
 
   const views = (
-    <div className="flex items-center gap-[22px] border-b border-border mt-5 overflow-x-auto overflow-y-hidden lg:overflow-visible" role="tablist" aria-label="Customer views">
+    <div className="flex items-center gap-[22px] border-b border-border overflow-x-auto overflow-y-hidden lg:overflow-visible" role="tablist" aria-label="Customer views">
       {TAB_DEFS.map((v) => {
         const on = tab === v.id;
         return (
@@ -345,14 +439,16 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
     </div>
   );
 
-  const toolbar = (
-    <div className="flex items-center gap-2 py-3.5 flex-wrap">
-      <div className="relative w-full sm:w-[320px]">
+  const searchBox = (
+    <div className="relative w-full sm:w-[320px]">
         <Icon name="Search" size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8A8A90]" />
         <input ref={searchRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search name, phone or email"
           aria-label="Search customers" className="w-full h-[34px] pl-8 pr-8 border border-border rounded-[7px] text-[13px] bg-white placeholder:text-[#8A8A90] focus:outline-none focus:border-[#cfd2cc] focus:shadow-[0_0_0_3px_rgba(45,90,39,.08)]" />
         <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] font-medium text-[#8A8A90] border border-border rounded px-[5px] py-px bg-white">/</kbd>
       </div>
+  );
+  const chips = (
+    <>
       <FilterChip label="Therapist" value={filters.therapist} options={therapistOptions} onChange={setFilter('therapist')} selectedLabel={therapistOptions.find((o) => o.id === filters.therapist)?.label} />
       <FilterChip label="Service" value={filters.service} options={serviceOptions} onChange={setFilter('service')} selectedLabel={filters.service} />
       {noMember && (
@@ -380,10 +476,13 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
             </label>))}
         </Menu>
       </div>
-    </div>
+    </>
   );
+  const toolbar = isSm ? <div className="flex items-center gap-2 py-3.5 flex-wrap">{searchBox}{chips}</div> : <div className="py-2.5">{searchBox}</div>;
+  // Below sm only the tabs + search stick; the chips / sort / columns scroll with the page so the pinned block stays compact.
+  const chipsRow = isSm ? null : <div className="flex items-center gap-2 pb-3 flex-wrap">{chips}</div>;
 
-  const th = { sort, dir, onSort };
+  const th = { sort, dir, onSort, stuck };
   let body;
   if (loading) {
     body = Array.from({ length: 8 }).map((_, i) => (
@@ -396,7 +495,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
       const atRisk = c.segment === 'at-risk' || c.segment === 'lapsed';
       const next = c.nextBooking;
       return (
-        <tr key={c.id} onClick={() => patchParams({ open: c.id })} tabIndex={0} aria-selected={c.id === openId || undefined} onKeyDown={(e) => { if (e.key === 'Enter') patchParams({ open: c.id }); }}
+        <tr key={c.id} data-customer-id={c.id} style={{ scrollMarginTop: 'calc(var(--cust-edge) + var(--cust-block) + 42px)' }} onClick={() => patchParams({ open: c.id })} tabIndex={0} aria-selected={c.id === openId || undefined} onKeyDown={(e) => { if (e.key === 'Enter') patchParams({ open: c.id }); }}
           className={`group cursor-pointer ${c.id === openId ? 'bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]'}`}>
           <td className={`h-14 border-b border-[#F1F1EF] pr-3 ${c.id === openId ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
             <div className="flex items-center gap-3 pl-2">
@@ -454,13 +553,17 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
   const [emptyTitle, emptyHint] = anyFilter ? ['No customers match', 'Try a different search or clear a filter.'] : (segment ? EMPTY_SEGMENT[segment] : EMPTY_TAB[tab]);
 
   return (
-    <div className="h-full flex flex-col pt-1 overflow-hidden">
+    <div className="pt-1 pb-6" style={{ '--cust-top': `${stickyTop}px`, '--cust-edge': `${edge}px`, '--cust-block': `${blockH}px` }}>
       {header}
       {spotlight}
       {strip}
-      {views}
-      {toolbar}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div ref={sentinelRef} aria-hidden="true" className="h-px -mb-px" />
+      <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>
+        {views}
+        {toolbar}
+      </div>
+      {chipsRow}
+      <div>
         {error ? (
           <div className="border border-error/20 bg-error/5 rounded-lg p-4 flex items-center gap-3 text-[13px] text-error">
             <Icon name="AlertCircle" size={16} />{error}
@@ -476,7 +579,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
                 {columns.visits && <SortHeader id="visits" label="Visits" right {...th} />}
                 {showSpent && <SortHeader id="spent" label="Spent" right {...th} />}
                 {columns.balance && <SortHeader id="balance" label="Balance" right {...th} />}
-                <th className="h-[34px] w-[88px] border-b border-border bg-white sticky top-0" />
+                <th className={`h-[34px] w-[88px] border-b border-border bg-white sticky top-[calc(var(--cust-top)+var(--cust-block))] z-[5] ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''}`} />
               </tr>
             </thead>
             <tbody>{body}</tbody>
@@ -493,7 +596,7 @@ const CustomersList = ({ branchId, readOnly: overallReadOnly = false, onShowDupl
           </div>
         )}
       </div>
-      <div className="flex items-center justify-between h-[52px] flex-shrink-0 text-[12.5px] text-[#8A8A90] border-t border-border">
+      <div className="flex items-center justify-between h-[52px] text-[12.5px] text-[#8A8A90] border-t border-border">
         <span className="tabular-nums">{filtered.length === 0 ? '0 customers' : `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, filtered.length)} of ${filtered.length}`}</span>
         <div className="flex gap-1.5">
           <button type="button" aria-label="Previous page" disabled={safePage <= 1} onClick={() => patchParams({ page: safePage - 1 })} className="w-7 h-7 border border-border rounded-md grid place-items-center disabled:opacity-40 hover:bg-[#FAFAF9]"><Icon name="ChevronLeft" size={14} /></button>
