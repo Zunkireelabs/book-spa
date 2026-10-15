@@ -13,7 +13,7 @@ import CheckBookingPanel from './components/CheckBookingPanel';
 import CollectPaymentPanel from './components/CollectPaymentPanel';
 import TherapistAvailability from './components/TherapistAvailability';
 import OperationalCalendar from '../branch-manager-dashboard/components/calendar';
-import EnrollMemberModal from '../branch-manager-dashboard/components/Memberships/EnrollMemberModal';
+import EnrollMemberPanel from '../branch-manager-dashboard/components/Memberships/EnrollMemberPanel';
 import NewVoucherModal from '../branch-manager-dashboard/components/Vouchers/NewVoucherModal';
 import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
 import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
@@ -465,25 +465,33 @@ const BranchStaffDashboard = () => {
   // Staff get one tabbed area, Bookings (All bookings, New booking, Check booking, Collect payment, ...).
   const bookingsArea = getAreaForView('bookings');
   const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : null;
+  // Bookings, "New membership" and "New voucher" share one tree: the bookings list keeps its key and the panel is the second
+  // child, so switching between these tabs doesn't remount the list (which would refetch and flash).
+  const withBookingsList = (overlay = null) => (
+    <>
+      <BookingsViewPanel key="bookings-list" branchId={branchId} />
+      {overlay}
+    </>
+  );
   const renderAreaView = (view) => {
     if (branchLoading) return <BranchPending />; // panels need the resolved branch
     switch (view) {
-      case 'bookings': return <BookingsViewPanel branchId={branchId} />;
+      case 'bookings': return withBookingsList();
       case 'collect-payment': return <CollectPaymentPanel onSuccess={showSuccess} />;
       case 'new-booking': return <StaffBookingForm onBookingCreated={loadData} />;
       case 'check-booking': return <CheckBookingPanel branchId={branchId} />;
       case 'new-membership':
-        return MEMBERSHIP_ENABLED ? (
-          <EnrollMemberModal
+        return withBookingsList(MEMBERSHIP_ENABLED ? (
+          <EnrollMemberPanel
             onClose={() => setSearchParams({ view: 'bookings' })}
-            onEnrolled={() => {
+            onEnrolled={(id, info) => {
               setSearchParams({ view: 'bookings' });
-              showSuccess('Membership created.');
+              showSuccess(info?.message || 'Membership created.');
             }}
           />
-        ) : null;
+        ) : null);
       case 'new-voucher':
-        return VOUCHER_ENABLED ? (
+        return withBookingsList(VOUCHER_ENABLED ? (
           <NewVoucherModal
             userRole={userRole}
             onClose={() => setSearchParams({ view: 'bookings' })}
@@ -492,7 +500,7 @@ const BranchStaffDashboard = () => {
               showSuccess('Voucher issued.');
             }}
           />
-        ) : null;
+        ) : null);
       default: return null;
     }
   };

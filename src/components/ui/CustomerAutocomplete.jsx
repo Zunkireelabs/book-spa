@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react';
 import Icon from '../AppIcon';
 import { fetchCustomersLightweight } from 'services/api';
 
@@ -24,18 +24,36 @@ const CustomerAutocomplete = ({
   inputRef: externalRef,
   onBlur,
   required = false,
+  id,
+  ariaInvalid,
+  ariaDescribedBy,
+  customers: preloaded, // optional: a customer list the caller already loaded (skips this component's own fetch)
 }) => {
-  const [customers, setCustomers] = useState([]);
+  const [fetched, setFetched] = useState([]);
+  const customers = preloaded || fetched;
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const containerRef = useRef(null);
   const listRef = useRef(null);
   const internalRef = useRef(null);
+  // Suggestions open only after the user types, and stay closed after one is picked (until they type again): a pick rewrites
+  // other fields, which would otherwise re-open this list (and the sibling field's) over the form.
+  const typedRef = useRef(false);
+  // A value change that did not come from this input (a pick made in a sibling field) also closes the list and clears `typed`.
+  const ownChangeRef = useRef(false);
+  const prevValueRef = useRef(value);
+  useLayoutEffect(() => {
+    if (prevValueRef.current !== value) {
+      if (!ownChangeRef.current) typedRef.current = false;
+      prevValueRef.current = value;
+    }
+    ownChangeRef.current = false;
+  }, [value]);
   const ref = externalRef || internalRef;
 
   // Fetch customers once on mount / when branchId changes
   useEffect(() => {
-    if (!branchId) return;
+    if (!branchId || preloaded) return undefined;
     let cancelled = false;
     (async () => {
       const { data, error } = await fetchCustomersLightweight(branchId);
@@ -43,10 +61,10 @@ const CustomerAutocomplete = ({
         console.error('[CustomerAutocomplete] Failed to load customers:', error.message || error);
         return;
       }
-      if (!cancelled && data) setCustomers(data);
+      if (!cancelled && data) setFetched(data);
     })();
     return () => { cancelled = true; };
-  }, [branchId]);
+  }, [branchId, preloaded]);
 
   // Filter suggestions client-side
   const suggestions = useMemo(() => {
@@ -79,7 +97,7 @@ const CustomerAutocomplete = ({
 
   // Show/hide suggestions based on matches
   useEffect(() => {
-    setShowSuggestions(suggestions.length > 0);
+    setShowSuggestions(typedRef.current && suggestions.length > 0);
     setFocusedIndex(-1);
   }, [suggestions]);
 
@@ -105,6 +123,7 @@ const CustomerAutocomplete = ({
   }, [focusedIndex]);
 
   const handleSelectCustomer = useCallback((customer) => {
+    typedRef.current = false;
     onSelect(customer);
     setShowSuggestions(false);
   }, [onSelect]);
@@ -139,11 +158,19 @@ const CustomerAutocomplete = ({
     <div ref={containerRef} className="relative">
       <input
         ref={ref}
+        id={id}
+        aria-invalid={ariaInvalid || undefined}
+        aria-describedby={ariaDescribedBy}
         type="text"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          typedRef.current = true;
+          ownChangeRef.current = true;
+          setTimeout(() => { ownChangeRef.current = false; }, 0);
+          onChange(e.target.value);
+        }}
         onKeyDown={handleKeyDown}
-        onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+        onFocus={() => { if (typedRef.current && suggestions.length > 0) setShowSuggestions(true); }}
         onBlur={onBlur}
         required={required}
         placeholder={placeholder}
@@ -153,7 +180,7 @@ const CustomerAutocomplete = ({
       {showSuggestions && (
         <div
           ref={listRef}
-          className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1 max-h-48 overflow-y-auto"
+          className={`absolute top-full mt-1 w-full min-w-[280px] max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1 max-h-48 overflow-y-auto ${searchBy === 'phone' ? 'right-0' : 'left-0'}`}
         >
           {suggestions.map((customer, index) => {
             const m = customer.primaryMembership;

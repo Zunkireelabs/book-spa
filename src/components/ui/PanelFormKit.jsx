@@ -47,19 +47,50 @@ const parseTimeInput = (raw) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
-export const Field = ({ label, required, hint, children, className = '' }) => (
+// `error` (field-level): red 12px text under the control. Pair it with `controlA11y(id, error)` on the control so it gets
+// aria-invalid / aria-describedby and a red border; `id` ties the message to the control.
+export const Field = ({ label, required, hint, error, id, children, className = '' }) => (
   <div className={className}>
     {label && (
-      <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
+      <label htmlFor={id} className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
         {label} {required && <span className="text-error">*</span>}
       </label>
     )}
     {children}
-    {hint && <p className="mt-1.5 text-xs text-text-secondary">{hint}</p>}
+    {error && <p id={id ? `${id}-error` : undefined} role="alert" className="mt-1.5 text-xs text-error">{error}</p>}
+    {!error && hint && <p className="mt-1.5 text-xs text-text-secondary">{hint}</p>}
   </div>
 );
 
-export const TextInput = (props) => <input type="text" {...props} className={`${CONTROL} ${props.className || ''}`} />;
+export const controlA11y = (id, error) => ({
+  id,
+  'aria-invalid': error ? true : undefined,
+  'aria-describedby': error ? `${id}-error` : undefined,
+});
+export const CONTROL_ERROR = 'border-error focus:border-error focus:ring-error/30';
+
+export const TextInput = ({ error, ...props }) => <input type="text" {...props} className={`${CONTROL} ${error ? CONTROL_ERROR : ''} ${props.className || ''}`} />;
+
+// Money amount: "NPR" prefix inside the field, tabular figures, no negatives, at most 2 decimals. `value` is the raw string.
+export const sanitizeMoney = (raw) => {
+  const cleaned = String(raw ?? '').replace(/[^\d.]/g, '');
+  const [int, ...rest] = cleaned.split('.');
+  return rest.length ? `${int}.${rest.join('').slice(0, 2)}` : int;
+};
+export const MoneyInput = ({ value, onChange, error, className = '', ...props }) => (
+  <div className="relative">
+    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-text-tertiary pointer-events-none">NPR</span>
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      {...props}
+      value={value}
+      onChange={(e) => onChange(sanitizeMoney(e.target.value))}
+      className={`${CONTROL} pl-11 font-data tabular-nums ${error ? CONTROL_ERROR : ''} ${className}`}
+    />
+  </div>
+);
 export const NumberInput = (props) => <input type="number" {...props} className={`${CONTROL} ${props.className || ''}`} />;
 
 export const SelectField = ({ value, onChange, options, placeholder, disabled }) => (
@@ -87,6 +118,47 @@ export const Segmented = ({ options, value, onChange, disabled }) => (
 );
 
 // Equal-fit tab bar, same style as the booking panel's (primary underline, icon + label).
+// Radio cards (a short list of plans): role=radiogroup, arrow keys move the choice, one card per row.
+export const RadioCards = ({ options, value, onChange, label, id, error }) => {
+  const refs = useRef([]);
+  const move = (i, dir) => {
+    const next = (i + dir + options.length) % options.length;
+    onChange(options[next].value);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div id={id} role="radiogroup" aria-label={label} aria-invalid={error ? true : undefined} aria-describedby={error && id ? `${id}-error` : undefined} className="space-y-2">
+      {options.map((o, i) => {
+        const on = o.value === value;
+        return (
+          <button
+            key={o.value}
+            ref={(el) => { refs.current[i] = el; }}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={on || (!value && i === 0) ? 0 : -1}
+            onClick={() => onChange(o.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); move(i, 1); }
+              if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); move(i, -1); }
+            }}
+            className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-spa border spa-transition-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${on ? 'border-primary bg-primary/5' : 'border-border hover:bg-background'}`}
+          >
+            <span className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${on ? 'border-primary' : 'border-border'}`} aria-hidden="true">
+              {on && <span className="w-2 h-2 rounded-full bg-primary" />}
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[13px] font-body-medium text-text-primary truncate">{o.title}</span>
+              {o.detail && <span className="block text-xs text-text-secondary tabular-nums">{o.detail}</span>}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 export const TabBar = ({ tabs, value, onChange }) => (
   <div className="sticky top-0 z-10 bg-surface border-b border-border">
     <nav className="grid" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }} role="tablist">

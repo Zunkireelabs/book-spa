@@ -4,7 +4,7 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { fetchMemberships } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
-import EnrollMemberModal from './EnrollMemberModal';
+import EnrollMemberPanel from './EnrollMemberPanel';
 import MembershipDetailModal from './MembershipDetailModal';
 import TiersModal from './TiersModal';
 
@@ -311,7 +311,7 @@ const MembershipsPanel = ({ branchId, readOnly = false }) => {
       </div>
 
       {!readOnly && showEnroll && (
-        <EnrollMemberModal
+        <EnrollMemberPanel
           onClose={() => setShowEnroll(false)}
           onEnrolled={(newId) => {
             setShowEnroll(false);
