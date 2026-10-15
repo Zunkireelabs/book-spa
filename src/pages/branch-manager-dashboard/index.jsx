@@ -449,7 +449,7 @@ const BranchManagerDashboard = () => {
       case 'bookings': return <BookingsViewPanel branchId={branchId} />;
       case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
       case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
-      case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />;
+      case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall || salesReadOnly} />;
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'package-overview': return salesViewer ? <PackageOverviewPanel readOnly={salesReadOnly} /> : null;
