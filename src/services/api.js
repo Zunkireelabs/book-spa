@@ -10,6 +10,7 @@ import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideH
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
+import { buildCustomerDirectory, nepalNow } from '../utils/customerDirectory';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -9336,6 +9337,70 @@ export async function getCustomerIntelligence({ branchId }) {
     return { data: null, error };
   }
 }
+
+// Customers list (V11): every customer of the org with next/last visit, in-spa flag, balance, spent and a lifecycle segment
+// (derivation in utils/customerDirectory). Org-wide like getCustomerIntelligence. Both big tables are paged with .range() so
+// PostgREST's 1,000-row cap never truncates the list; membership status comes from the existing staff-safe RPC (one call).
+const pageAllRows = async (buildQuery) => {
+  const PAGE = 1000;
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return rows;
+};
+
+export async function getCustomerDirectory({ branchId, now = new Date() }) {
+  try {
+    if (!branchId) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    }
+    // Resolve the org (the Overall sentinel has no branches row, so use the logged-in user's profile for it).
+    let orgId;
+    if (isOverallBranch(branchId)) {
+      const { profile, error: authError } = await getAuthenticatedUser();
+      if (authError) return { data: null, error: authError };
+      orgId = profile.org_id;
+    } else {
+      const { data: branch, error: branchErr } = await supabase.from('branches').select('org_id').eq('id', resolveBranchId(branchId)).single();
+      if (branchErr) throw branchErr;
+      orgId = branch.org_id;
+    }
+    const { data: orgBranches, error: orgBranchesErr } = await supabase.from('branches').select('id').eq('org_id', orgId);
+    if (orgBranchesErr) throw orgBranchesErr;
+    const orgBranchIds = (orgBranches || []).map((b) => b.id);
+
+    const [customers, bookings, statusResult] = await Promise.all([
+      pageAllRows(() => supabase.from('customers').select('id, full_name, phone, email, gender, created_at').eq('org_id', orgId).order('id')),
+      pageAllRows(() => supabase.from('bookings')
+        .select('id, customer_id, status, payment_status, final_amount, date, start_time, service_name_snapshot, therapist_id, therapist_name_snapshot, payments(amount)')
+        .not('customer_id', 'is', null)
+        .in('branch_id', orgBranchIds)
+        .order('id')),
+      MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
+    ]);
+
+    const memberIds = new Set((statusResult.data || []).filter((r) => r.status === 'active').map((r) => r.customerId));
+    const { today, hm } = nepalNow(now);
+    const therapists = new Map();
+    for (const b of bookings) if (b.therapist_id && b.therapist_name_snapshot && !therapists.has(b.therapist_id)) therapists.set(b.therapist_id, b.therapist_name_snapshot);
+    return {
+      data: {
+        customers: buildCustomerDirectory({ customers, bookings, memberIds, today, nowHM: hm }),
+        therapists: [...therapists].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+        today,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] getCustomerDirectory error:', error.message);
+    return { data: null, error };
+  }
+}
+
 
 // ============================================================
 // Phase 10D-4: Risk Indicators (Read-Only)
