@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Input from '../../../../components/ui/Input';
 import Button from '../../../../components/ui/Button';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import { friendlyError } from '../../../../utils/friendlyError';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { mergeCustomers, updateCustomerContact } from '../../../../services/api';
 import { canSearchForMerge } from './manualMergeBranchGate';
@@ -117,7 +119,7 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
       // Nothing destructive happened yet — safe to leave the modal open and
       // let the admin retry or cancel.
       setSubmitting(false);
-      setError(mergeError.message || 'Merge failed.');
+      setError(friendlyError(mergeError, 'Merge failed.'));
       return;
     }
 
@@ -246,7 +248,7 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
             />
           </div>
 
-          {error && (
+          {error && !confirming && (
             <div className="bg-error/5 border border-error/20 rounded-spa p-3 flex items-center space-x-2">
               <Icon name="AlertCircle" size={16} className="text-error flex-shrink-0" />
               <p className="font-body text-sm text-error">{error}</p>
@@ -270,43 +272,16 @@ const ManualMergeCustomersPanel = ({ branchId, isOverall = false }) => {
       )}
 
       {confirming && (
-        <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in">
-            <div className="flex items-center space-x-3 p-5 border-b border-border">
-              <div className="w-10 h-10 bg-error/10 rounded-lg flex items-center justify-center">
-                <Icon name="AlertTriangle" size={20} className="text-error" />
-              </div>
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary">Merge customers?</h2>
-            </div>
-            <div className="p-5">
-              <p className="font-body text-sm text-text-secondary">
-                <strong>{duplicate.full_name}</strong> ({duplicate.phone || 'no phone'}) will be
-                merged into <strong>{form.fullName || canonical.full_name}</strong>. All bookings,
-                memberships, vouchers, packages, and history move to the surviving record. This
-                cannot be undone.
-              </p>
-              {error && (
-                <div className="bg-error/5 border border-error/20 rounded-spa p-3 mt-3 flex items-start space-x-2">
-                  <Icon name="AlertCircle" size={16} className="text-error flex-shrink-0 mt-0.5" />
-                  <p className="font-body text-sm text-error">{error}</p>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-end gap-3 p-5 border-t border-border">
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={() => setConfirming(false)}
-                className="font-body font-body-medium text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <Button variant="primary" size="sm" disabled={submitting} onClick={handleConfirmMerge}>
-                {submitting ? 'Merging…' : 'Merge'}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Merge customers?"
+          message={`${duplicate.full_name} (${duplicate.phone || 'no phone'}) will be merged into ${form.fullName || canonical.full_name}. All bookings, memberships, vouchers, packages, and history move to the surviving record. This cannot be undone.`}
+          confirmLabel={submitting ? 'Merging…' : 'Merge'}
+          requireReason={false}
+          isSubmitting={submitting}
+          error={error}
+          onConfirm={handleConfirmMerge}
+          onClose={() => { if (!submitting) { setConfirming(false); setError(null); } }}
+        />
       )}
     </div>
   );

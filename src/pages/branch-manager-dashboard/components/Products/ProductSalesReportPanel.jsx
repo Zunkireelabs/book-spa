@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { fetchProductSales, refundProductSale } from '../../../../services/api';
@@ -32,7 +33,6 @@ const ProductSalesReportPanel = () => {
 
   const [confirmRefund, setConfirmRefund] = useState(null);
   const [refunding, setRefunding] = useState(false);
-  const [refundReason, setRefundReason] = useState('');
 
   const isPreset = mode === 'preset';
 
@@ -107,17 +107,16 @@ const ProductSalesReportPanel = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleRefund = async () => {
+  const handleRefund = async (reason) => {
     if (!confirmRefund) return;
     setRefunding(true);
-    const result = await refundProductSale({ saleId: confirmRefund.id, reason: refundReason.trim() || null });
+    const result = await refundProductSale({ saleId: confirmRefund.id, reason: (reason || '').trim() || null });
     if (result.error) {
       setError(result.error.message || 'Refund failed.');
     } else {
       await load();
     }
     setConfirmRefund(null);
-    setRefundReason('');
     setRefunding(false);
   };
 
@@ -272,38 +271,16 @@ const ProductSalesReportPanel = () => {
         </table>
       </div>
 
-      {/* Refund Confirmation Dialog */}
       {confirmRefund && (
-        <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !refunding && setConfirmRefund(null)}>
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
-                <Icon name="Undo2" size={20} className="text-error" />
-              </div>
-              <div>
-                <h3 className="font-heading font-heading-semibold text-text-primary">Refund this sale?</h3>
-                <p className="font-body text-sm text-text-secondary">
-                  "{confirmRefund.product_name}" × {confirmRefund.quantity} — {formatNPR(confirmRefund.total_amount)}. This marks the sale as refunded and cannot be undone.
-                </p>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">
-                Reason <span className="text-text-tertiary font-normal">(optional)</span>
-              </label>
-              <input
-                value={refundReason}
-                onChange={(e) => setRefundReason(e.target.value)}
-                placeholder="e.g. Customer changed their mind"
-                className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmRefund(null)} disabled={refunding}>Cancel</Button>
-              <Button variant="danger" size="sm" onClick={handleRefund} loading={refunding}>Refund</Button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Refund this sale?"
+          message={`"${confirmRefund.product_name}" × ${confirmRefund.quantity} — ${formatNPR(confirmRefund.total_amount)}. This marks the sale as refunded and cannot be undone.`}
+          confirmLabel="Refund"
+          reasonOptional
+          isSubmitting={refunding}
+          onConfirm={handleRefund}
+          onClose={() => !refunding && setConfirmRefund(null)}
+        />
       )}
     </div>
   );

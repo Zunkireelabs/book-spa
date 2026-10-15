@@ -20,6 +20,8 @@ const ConfirmDialog = ({
   onClose,
   isSubmitting = false,
   requireReason = true, // false: a plain confirm (no reason field), e.g. deleting a product
+  reasonOptional = false, // true: shows a "Reason (optional)" field that never blocks confirm (wins over requireReason)
+  error = null, // message shown inside the dialog, above the buttons (the dialog stays open on error)
 }) => {
   const [reason, setReason] = useState('');
   const trimmedReason = reason.trim();
@@ -29,11 +31,12 @@ const ConfirmDialog = ({
   const trimmedCustomReason = customReason.trim();
   const isOthers = selectedReason === 'others';
 
-  const canConfirm = !requireReason ? true : reasonOptions
+  const canConfirm = reasonOptional || !requireReason ? true : reasonOptions
     ? Boolean(selectedReason) && (!isOthers || trimmedCustomReason.length > 0)
     : Boolean(trimmedReason);
 
   const handleConfirm = () => {
+    if (reasonOptional) { onConfirm(trimmedReason); return; }
     if (!requireReason) { onConfirm(''); return; }
     if (!reasonOptions) {
       onConfirm(trimmedReason);
@@ -68,7 +71,23 @@ const ConfirmDialog = ({
           <p className="font-body font-body-normal text-sm text-text-secondary">
             {message}
           </p>
-          {!requireReason ? null : reasonOptions ? (
+          {reasonOptional ? (
+            <div>
+              <label htmlFor="confirm-reason-optional" className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
+                Reason <span className="text-text-tertiary font-normal">(optional)</span>
+              </label>
+              <input
+                id="confirm-reason-optional"
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Customer changed their mind"
+                className="w-full h-10 px-3 border border-border rounded-spa font-body font-body-normal text-sm text-text-primary bg-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+                disabled={isSubmitting}
+                autoFocus
+              />
+            </div>
+          ) : !requireReason ? null : reasonOptions ? (
             <div className="space-y-4">
               <div>
                 <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
@@ -113,6 +132,12 @@ const ConfirmDialog = ({
                 disabled={isSubmitting}
                 autoFocus
               />
+            </div>
+          )}
+          {error && (
+            <div role="alert" className="flex items-start gap-2 bg-error/5 border border-error/20 rounded-spa p-3">
+              <Icon name="AlertCircle" size={16} className="text-error flex-shrink-0 mt-0.5" />
+              <p className="font-body text-sm text-error">{error}</p>
             </div>
           )}
         </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
@@ -84,6 +85,7 @@ const AttendancePanel = ({ branchId }) => {
   const [transferStatusByTherapist, setTransferStatusByTherapist] = useState({});
   const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
   const [cancellingTransfer, setCancellingTransfer] = useState(null);
+  const [confirmRevert, setConfirmRevert] = useState(null); // the active transfer row awaiting "cancel and bring back now" confirmation
 
   // Track local edits per therapist: { [therapistId]: { status, checkInTime, checkOutTime, notes, dirty } }
   const [edits, setEdits] = useState({});
@@ -478,7 +480,7 @@ const AttendancePanel = ({ branchId }) => {
   // rescheduling the return date still goes through the full TransferManagementModal (opened
   // via the staff name), since those aren't "undo" actions.
   const handleCancelActiveTransfer = async (s) => {
-    if (!window.confirm(`Cancel ${s.therapistName}'s transfer and bring them back to this branch now?`)) return;
+    setConfirmRevert(null);
     setCancellingTransfer(s.id);
     const { error: cancelError } = await revertStaffTransferNow({ transferId: s.id, revertedAt: null });
     setCancellingTransfer(null);
@@ -748,7 +750,7 @@ const AttendancePanel = ({ branchId }) => {
                   <button
                     onClick={() => s.isPending
                       ? handleCancelTransfer(s.id)
-                      : handleCancelActiveTransfer(s)}
+                      : setConfirmRevert(s)}
                     disabled={cancellingTransfer === s.id}
                     className="inline-flex items-center justify-center h-8 px-3 rounded-spa bg-surface border border-[#B45309]/30 text-[#B45309] hover:bg-[#B45309]/10 spa-transition-fast font-body font-body-medium text-xs whitespace-nowrap disabled:opacity-50"
                   >
@@ -888,6 +890,7 @@ const AttendancePanel = ({ branchId }) => {
       {/* Transfer Modal */}
       {transferTarget && (
         <TransferManagementModal
+          variant="panel"
           therapistId={transferTarget.therapistId}
           therapistName={transferTarget.therapistName}
           currentBranchId={branchId}
@@ -898,6 +901,17 @@ const AttendancePanel = ({ branchId }) => {
             if (message) showToast(message);
             loadData();
           }}
+        />
+      )}
+
+      {confirmRevert && (
+        <ConfirmDialog
+          title="Cancel transfer?"
+          message={`Cancel ${confirmRevert.therapistName}'s transfer and bring them back to this branch now?`}
+          confirmLabel="Cancel transfer"
+          requireReason={false}
+          onConfirm={() => handleCancelActiveTransfer(confirmRevert)}
+          onClose={() => setConfirmRevert(null)}
         />
       )}
 

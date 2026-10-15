@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
 import { getDailySummary, closeDay } from '../../../services/api';
 
 function formatNPR(amount) {
@@ -306,49 +307,16 @@ const DailyClosingPanel = ({ branchId }) => {
         </div>
       )}
 
-      {/* Unpaid Warning Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-          <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in">
-            <div className="p-6 space-y-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-warning/10 rounded-lg flex items-center justify-center">
-                  <Icon name="AlertTriangle" size={20} className="text-warning" />
-                </div>
-                <h3 className="font-heading font-heading-semibold text-lg text-text-primary">
-                  Unpaid Bookings Warning
-                </h3>
-              </div>
-
-              <p className="font-body font-body-normal text-sm text-text-secondary">
-                <strong className="text-warning">{summary?.unpaidCount}</strong> booking{summary?.unpaidCount !== 1 ? 's' : ''} still
-                {summary?.unpaidCount !== 1 ? ' have' : ' has'} unpaid status. Closing the day will lock all bookings,
-                preventing further payment recording for these bookings.
-              </p>
-              <p className="font-body font-body-normal text-sm text-text-secondary">
-                Do you still want to close the day?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end space-x-3 p-6 border-t border-border">
-              <Button
-                variant="outline"
-                onClick={() => setShowConfirmModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="warning"
-                iconName="Lock"
-                iconPosition="left"
-                onClick={handleCloseDay}
-                loading={closing}
-              >
-                Close Anyway
-              </Button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Unpaid bookings warning"
+          message={`${summary?.unpaidCount} booking${summary?.unpaidCount !== 1 ? 's' : ''} still ${summary?.unpaidCount !== 1 ? 'have' : 'has'} unpaid status. Closing the day will lock all bookings, preventing further payment recording for these bookings. Do you still want to close the day?`}
+          confirmLabel="Close anyway"
+          requireReason={false}
+          isSubmitting={closing}
+          onConfirm={handleCloseDay}
+          onClose={() => setShowConfirmModal(false)}
+        />
       )}
     </div>
   );
