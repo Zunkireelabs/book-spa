@@ -229,7 +229,6 @@ const BookingDetailsAssignmentModal = () => {
     }
 
     setPaymentSuccess(true);
-    setShowPaymentModal(false);
     setPaymentSubmitting(false);
     await loadBooking();
     return { error: null };

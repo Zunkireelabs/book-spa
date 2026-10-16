@@ -705,8 +705,7 @@ const BookingActionModal = ({
           if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
         }
 
-        setShowPaymentModal(false);
-        setSelectedPreviousDueIds(new Set());
+        // Checkout stays open on its success state until staff press Done (see onClose below).
         onGroupPaymentRecorded();
         return { data: data?.[0], error: null };
       }
@@ -731,8 +730,6 @@ const BookingActionModal = ({
       // Stay open on the Payment tab (rather than closing the whole modal) so
       // staff immediately see the refreshed status, balance, and — for members —
       // the updated wallet amount, instead of having to reopen the booking.
-      setShowPaymentModal(false);
-      setSelectedPreviousDueIds(new Set());
       if (failedAllocations.length > 0) {
         setActionError(`Payment recorded for this booking, but failed for: ${failedAllocations.join(', ')}. Open ${failedAllocations.length > 1 ? 'those bookings' : 'that booking'} directly and record payment again.`);
       }
@@ -2957,6 +2954,17 @@ const BookingActionModal = ({
             amountPaid: booking.amountPaid,
             dueHolderName: booking.dueHolderName,
           }}
+          addOnCandidates={[
+            ...relatedBookings.map(rb => ({
+              bookingId: rb.id,
+              bookingNumber: rb.booking_number,
+              service: rb.service?.name,
+              base_amount: rb.base_amount,
+              discount_amount: rb.discount_amount,
+              final_amount: rb.final_amount,
+            })),
+            ...previousDueBookings,
+          ]}
           additionalBookings={[
             ...relatedBookings.filter(rb => selectedRelatedIds.has(rb.id)).map(rb => ({
               bookingId: rb.id,
@@ -2970,7 +2978,10 @@ const BookingActionModal = ({
           ]}
           dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handlePaymentConfirm}
-          onClose={() => setShowPaymentModal(false)}
+          onClose={(res) => {
+            setShowPaymentModal(false);
+            if (res?.paid) setSelectedPreviousDueIds(new Set());
+          }}
           isSubmitting={paymentSubmitting}
         />
       )}

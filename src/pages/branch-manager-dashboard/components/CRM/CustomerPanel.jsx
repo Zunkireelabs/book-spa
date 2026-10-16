@@ -107,8 +107,7 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
     const failures = await recordBundledAllocations({ allocations: additionalAllocations, notes, bookings: paying.others });
     const primaryNumber = paying.primary.bookingNumber;
     setPaySubmitting(false);
-    setPaying(null);
-    setView('main');
+    // Checkout stays open on its success state; onClose (Done) returns to the main view.
     setNotice(failures.length ? `Payment recorded for ${primaryNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.` : `Payment recorded for ${c.fullName}.`);
     refresh();
     return { error: null };
@@ -147,7 +146,7 @@ const CustomerPanel = ({ customer, today, readOnly, branchId, isAdmin, onClose, 
             }}
             additionalBookings={paying.others}
             onConfirm={handleRecordPayment}
-            onClose={() => { if (!paySubmitting) setPaying(null); }}
+            onClose={(res) => { if (paySubmitting) return; setPaying(null); if (res?.paid) setView('main'); }}
             isSubmitting={paySubmitting}
           />
         )}

@@ -235,8 +235,7 @@ const OutstandingReportPanel = ({ branchId }) => {
     const failures = await recordBundledAllocations({ allocations: additionalAllocations, notes, bookings: otherDueBookings });
     const failureMessage = failures.length ? `Payment recorded for ${payingRow.bookingNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.` : null;
     setPaymentSubmitting(false);
-    setPayingRow(null);
-    setOtherDueBookings([]);
+    // Checkout stays open on its success state; onClose (Done) clears payingRow.
     await load();
     if (failureMessage) setError(failureMessage);
     fetchDueHolderNames(branchId).then(({ data }) => {

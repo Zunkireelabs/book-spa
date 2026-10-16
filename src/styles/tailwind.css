@@ -156,7 +156,22 @@
   .spa-shadow-modal {
     box-shadow: var(--shadow-xl);
   }
+
+  /* Frosted modal backdrop: used by Checkout only (other dialogs keep the plain dim). */
+  .modal-backdrop-frost {
+    background: rgba(24, 22, 20, 0.18);
+    -webkit-backdrop-filter: blur(10px) saturate(0.9);
+    backdrop-filter: blur(10px) saturate(0.9);
+  }
   
+  /* Checkout: keyboard focus on buttons/links uses the app's green, not the browser's default blue ring. */
+  .checkout-dialog button:focus-visible,
+  .checkout-dialog a:focus-visible,
+  .checkout-dialog [role="checkbox"]:focus-visible {
+    outline: 2px solid rgba(45, 90, 39, 0.45);
+    outline-offset: 2px;
+  }
+
   .spa-transition-fast {
     transition-duration: var(--timing-fast);
     transition-timing-function: var(--easing-out);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
@@ -29,6 +29,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
 
   const [payingBookings, setPayingBookings] = useState(null); // [primary, ...additional]
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const pendingFailureRef = useRef(null); // shown once Checkout is dismissed (the lookup reset would otherwise wipe it)
 
   useEffect(() => {
     fetchDueHolderNames(branchId).then(({ data }) => {
@@ -106,10 +107,9 @@ const CollectPaymentPanel = ({ onSuccess }) => {
     // Honest Collect: check every bundled allocation and name any booking that was NOT recorded.
     const failures = await recordBundledAllocations({ allocations: additionalAllocations, notes, bookings: additionalBookings });
     setPaymentSubmitting(false);
-    setPayingBookings(null);
+    // Checkout stays open on its success state; it's dismissed via onClose (Done).
     if (!failures.length) onSuccess?.('Payment recorded successfully.');
-    resetLookup();
-    if (failures.length) setError(`Payment recorded for ${primary.bookingNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.`);
+    pendingFailureRef.current = failures.length ? `Payment recorded for ${primary.bookingNumber}, but NOT recorded for: ${failures.join('; ')}. Those bookings still show as owed.` : null;
     return { error: null };
   };
 
@@ -257,7 +257,14 @@ const CollectPaymentPanel = ({ onSuccess }) => {
           additionalBookings={additionalBookings}
           dueHolderSuggestions={dueHolderSuggestions}
           onConfirm={handleRecordPayment}
-          onClose={() => setPayingBookings(null)}
+          onClose={(res) => {
+            setPayingBookings(null);
+            if (res?.paid) {
+              resetLookup();
+              if (pendingFailureRef.current) setError(pendingFailureRef.current);
+              pendingFailureRef.current = null;
+            }
+          }}
           isSubmitting={paymentSubmitting}
         />
       )}

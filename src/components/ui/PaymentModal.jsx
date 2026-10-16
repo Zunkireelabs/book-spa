@@ -1,12 +1,8 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, forwardRef } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
-import PaymentMethodSelector from './PaymentMethodSelector';
-import MembershipWalletCard from './MembershipWalletCard';
-import ReferralRewardCard from './ReferralRewardCard';
-import VoucherWalletCard from './VoucherWalletCard';
-import PackageWalletCard from './PackageWalletCard';
 import {
   fetchMembershipForBooking,
   fetchReferralRewardForBooking,
@@ -21,6 +17,8 @@ import {
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
 import { useOrg } from '../../contexts/OrgContext';
+import { useBranch } from '../../contexts/BranchContext';
+import { computeChange, buildReceiptText, buildReceiptHtml, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 
@@ -41,15 +39,185 @@ function formatNPR(amount) {
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
+// Credit-type tender modes: they draw on a wallet/voucher/package rather than being
+// a payment method staff pick from the org's configured list.
+const CREDIT_MODES = ['Membership', 'ReferralWallet', 'VoucherWallet', 'ReferralVoucher', 'SessionPackage'];
+const isCreditMode = (m) => CREDIT_MODES.includes(m);
+
+const METHOD_ICONS = [
+  [/cash/i, 'Banknote'],
+  [/qr|fonepay/i, 'QrCode'],
+  [/card|visa|master/i, 'CreditCard'],
+  [/esewa|khalti|ime|wallet|pay/i, 'Smartphone'],
+  [/bank/i, 'Landmark'],
+  [/cheque|check/i, 'FileText'],
+];
+const methodIcon = (mode) => {
+  if (mode === 'Membership' || mode === 'ReferralWallet') return 'Wallet';
+  if (mode === 'VoucherWallet') return 'Ticket';
+  if (mode === 'ReferralVoucher') return 'Gift';
+  if (mode === 'SessionPackage') return 'PackageCheck';
+  const hit = METHOD_ICONS.find(([re]) => re.test(String(mode)));
+  return hit ? hit[1] : 'CircleDollarSign';
+};
+
+// Small presentational pieces (module scope so they keep a stable identity across renders).
+const Check = ({ on, disabled }) => (
+  <span className={`w-[14px] h-[14px] rounded-[4px] border grid place-items-center flex-none ${on ? 'bg-primary border-primary text-white' : 'bg-white border-[#CFD0CC]'} ${disabled ? 'opacity-70' : ''}`}>
+    {on && <Icon name="Check" size={10} strokeWidth={3} />}
+  </span>
+);
+const SectionLabel = ({ children, hint }) => (
+  <div className="flex items-baseline justify-between text-[11px] font-medium text-[#8A8A90] tracking-[.04em] uppercase mb-2">
+    <span>{children}</span>{hint && <span className="normal-case tracking-normal font-normal">{hint}</span>}
+  </div>
+);
+// Amount field: shows "1,800" while state keeps the raw "1800" (so every calculation downstream is untouched).
+const sanitizeAmount = (s) => {
+  const [a, ...rest] = String(s).replace(/[^0-9.]/g, '').split('.');
+  return rest.length ? `${a}.${rest.join('')}` : a;
+};
+const formatAmountDisplay = (raw) => {
+  if (raw == null || raw === '') return '';
+  const [i, d] = String(raw).split('.');
+  const intPart = i === '' ? '' : Number(i).toLocaleString('en-IN');
+  return d === undefined ? intPart : `${intPart || '0'}.${d}`;
+};
+const AmountInput = forwardRef(({ value, onChange, ...rest }, ref) => {
+  const innerRef = useRef(null);
+  const caretRef = useRef(null); // count of digits/dots left of the caret after the last edit
+  const display = formatAmountDisplay(value);
+  useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (caretRef.current == null || !el || document.activeElement !== el) { caretRef.current = null; return; }
+    let seen = 0, pos = 0;
+    while (pos < display.length && seen < caretRef.current) { if (/[0-9.]/.test(display[pos])) seen++; pos++; }
+    el.setSelectionRange(pos, pos);
+    caretRef.current = null;
+  }, [display]);
+  return (
+    <input
+      {...rest}
+      ref={(el) => { innerRef.current = el; if (typeof ref === 'function') ref(el); else if (ref) ref.current = el; }}
+      type="text" inputMode="decimal" value={display}
+      onChange={(e) => {
+        const el = e.target;
+        caretRef.current = (el.value.slice(0, el.selectionStart ?? el.value.length).match(/[0-9.]/g) || []).length;
+        onChange(sanitizeAmount(el.value));
+      }}
+    />
+  );
+});
+// The REST row of a split: the first non-credit row that has a method, while staff haven't typed in it.
+// Its amount is always "total minus every other row" (see the sync effect in PaymentModal).
+const restIndexOf = (rows, restOn) => {
+  if (!restOn || rows.length < 2) return -1;
+  return rows.findIndex((t) => t.paymentMode && !isCreditMode(t.paymentMode));
+};
+
+// Per-row method dropdown menu: grouped listbox (design-system pattern, never a native <select>), portalled so the
+// scroll areas can't clip it. Methods already used on another row are shown disabled with "in use".
+const MethodMenu = ({ rect, tree, usedValues, activeValue, onPick, onClose }) => {
+  const ref = useRef(null);
+  const groups = useMemo(() => tree.map((item) => (item.subMethods && item.subMethods.length
+    ? { title: item.label, items: item.subMethods }
+    : { title: null, items: [item] })), [tree]);
+  const flat = useMemo(() => groups.flatMap((g) => g.items.map((it) => ({ ...it, disabled: usedValues.has(String(it.value)) }))), [groups, usedValues]);
+  const [hi, setHi] = useState(() => {
+    const a = flat.findIndex((o) => !o.disabled && String(o.value) === String(activeValue));
+    return a >= 0 ? a : flat.findIndex((o) => !o.disabled);
+  });
+  useEffect(() => {
+    ref.current?.focus();
+    const onDown = (e) => {
+      if (ref.current?.contains(e.target) || e.target.closest?.('[data-method-trigger]')) return;
+      onClose();
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [onClose]);
+  const move = (dir) => {
+    if (!flat.some((o) => !o.disabled)) return;
+    let i = hi;
+    for (let n = 0; n < flat.length; n++) { i = (i + dir + flat.length) % flat.length; if (!flat[i].disabled) break; }
+    setHi(i);
+    requestAnimationFrame(() => ref.current?.querySelector(`#mm-opt-${i}`)?.scrollIntoView({ block: 'nearest' }));
+  };
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    else if (e.key === 'Home') { e.preventDefault(); setHi(flat.findIndex((o) => !o.disabled)); }
+    else if (e.key === 'End') { e.preventDefault(); for (let i = flat.length - 1; i >= 0; i--) if (!flat[i].disabled) { setHi(i); break; } }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (hi >= 0 && !flat[hi].disabled) onPick(flat[hi].value); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
+    else if (e.key === 'Tab') { e.preventDefault(); onClose(); }
+  };
+  const width = Math.max(rect.width, 224);
+  const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+  const flipUp = rect.bottom + 330 > window.innerHeight && rect.top > 330;
+  let idx = -1;
+  return (
+    <div ref={ref} role="listbox" tabIndex={-1} aria-label="Payment method" data-checkout-menu aria-activedescendant={hi >= 0 ? `mm-opt-${hi}` : undefined}
+      onKeyDown={onKeyDown}
+      style={{ position: 'fixed', left, width, ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
+      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-[320px] overflow-y-auto text-[13px] outline-none">
+      {groups.map((g, gi) => (
+        <div key={gi}>
+          {g.title && <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{g.title}</div>}
+          {g.items.map((it) => {
+            idx += 1;
+            const i = idx;
+            const o = flat[i];
+            const selected = String(activeValue) === String(it.value);
+            return (
+              <div key={it.value} id={`mm-opt-${i}`} role="option" aria-selected={selected} aria-disabled={o.disabled || undefined}
+                onMouseEnter={() => !o.disabled && setHi(i)} onClick={() => !o.disabled && onPick(it.value)}
+                className={`flex items-center gap-2 px-2.5 h-9 rounded-md select-none ${o.disabled ? 'text-[#B4B4BA] cursor-not-allowed' : 'cursor-pointer text-[#0E0D0C]'} ${hi === i && !o.disabled ? 'bg-[#F4F4F2]' : ''} ${selected ? 'font-medium text-primary' : ''}`}>
+                <Icon name={methodIcon(it.value)} size={14} strokeWidth={1.6} className={o.disabled ? 'text-[#CFD0CC]' : 'text-[#515152]'} />
+                <span className="flex-1 truncate">{it.label}</span>
+                {o.disabled ? <span className="text-[11px] text-[#B4B4BA]">in use</span> : selected && <Icon name="Check" size={13} strokeWidth={2.4} />}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const CreditRow = ({ icon, title, sub, applied, onApply, onRemove, disabledText }) => (
+  <div className="flex items-center gap-2.5 min-h-[44px] border-b border-[#F1F1EF] last:border-b-0 py-1.5">
+    <span className="w-7 h-7 rounded-[7px] border border-[#E7E8E6] bg-white grid place-items-center text-[#515152] flex-none"><Icon name={icon} size={15} strokeWidth={1.6} /></span>
+    <span className="flex-1 min-w-0">
+      <span className="block font-medium text-[13px] text-[#0E0D0C] truncate">{title}</span>
+      <span className="block text-[12px] text-[#8A8A90] tabular-nums truncate">{sub}</span>
+    </span>
+    {disabledText ? (
+      <span className="text-[11.5px] text-[#8A8A90] text-right max-w-[110px] leading-tight">{disabledText}</span>
+    ) : (
+      <button
+        type="button"
+        onClick={applied ? onRemove : onApply}
+        className={`h-[26px] px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 flex-none border ${applied ? 'border-transparent bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] bg-white text-[#0E0D0C] hover:bg-[#F7F7F5]'}`}
+      >
+        {applied && <Icon name="Check" size={12} strokeWidth={2.4} />}{applied ? 'Applied' : 'Apply'}
+      </button>
+    )}
+  </div>
+);
+
+
 const PaymentModal = ({
   booking,
-  additionalBookings = [],
+  additionalBookings: initialAdditional = [],
+  addOnCandidates = null, // optional: every bundle-able booking; `additionalBookings` is then just the initially ticked subset
   onConfirm,
   onClose,
   isSubmitting,
   dueHolderSuggestions = [],
 }) => {
-  const { paymentMethods } = useOrg();
+  const { paymentMethods, orgName } = useOrg();
+  const { branchName } = useBranch();
   const { profile } = useAuth();
   const userRole = profile?.role || 'staff';
   const canResolveReferralReward = ['manager', 'admin'].includes(userRole);
@@ -58,6 +226,15 @@ const PaymentModal = ({
     [paymentMethods]
   );
 
+  // Bundle-able bookings (related group services / earlier balances). Without an explicit
+  // candidate list, the passed `additionalBookings` are the candidates, all ticked (the
+  // behaviour every caller had before the Checkout dialog made them individually optional).
+  const candidates = addOnCandidates || initialAdditional;
+  const [checkedAddOns, setCheckedAddOns] = useState(() => new Set(initialAdditional.map((b) => b.bookingId)));
+  const additionalBookings = useMemo(
+    () => candidates.filter((b) => checkedAddOns.has(b.bookingId)),
+    [candidates, checkedAddOns]
+  );
   const hasPreviousDue = additionalBookings.length > 0;
 
   // Remaining balance for any booking-like object — prefers a precomputed amountDue
@@ -300,15 +477,6 @@ const PaymentModal = ({
     return Array.from(map.entries()).map(([voucherId, v]) => ({ voucherId, ...v }));
   }, [tenders]);
 
-  const selectVoucherForTender = (i, v) => {
-    updateTender(i, {
-      voucherId: v.voucher_id,
-      voucherLabel: v.voucher_code,
-      voucherRemainingBalance: Number(v.remaining_balance),
-      amount: String(round2(Math.min(Number(v.remaining_balance), Math.max(leftover, 0) || Number(v.remaining_balance)))),
-    });
-  };
-
   // --- session packages (migration-141) ---
   // Prepaid session bundles for a specific service — "Redeem 1 Session" always
   // settles this booking's ENTIRE own remaining balance (never a partial or a
@@ -322,12 +490,14 @@ const PaymentModal = ({
   // "replace, don't append" approach as the Membership auto-fill effect above —
   // rather than being added alongside other tenders.
   const [customerPackages, setCustomerPackages] = useState([]);
+  const [bookingRowInfo, setBookingRowInfo] = useState(null); // guest name/phone/therapist for the header + receipt
   useEffect(() => {
     if (!bookingId) return;
     let cancelled = false;
     (async () => {
       const { data: bookingRow } = await fetchBookingById(bookingId);
       if (cancelled || !bookingRow) return;
+      setBookingRowInfo(bookingRow);
       const { data } = await getActivePackagesForCustomer(
         bookingRow.customer_id,
         bookingRow.customer_phone,
@@ -505,6 +675,10 @@ const PaymentModal = ({
       setError('Apply this customer\'s referral wallet reward before completing payment.');
       return;
     }
+    if (tenders.some((t) => !t.paymentMode)) {
+      setError('Choose a payment method for every row.');
+      return;
+    }
     if (entered <= 0 && leftover <= 0) {
       setError('Enter a payment amount.');
       return;
@@ -577,614 +751,946 @@ const PaymentModal = ({
       tipAmount,
       tipSplits,
     });
-    if (result?.error) setError(result.error.message || 'Failed to record payment.');
+    if (result?.error) {
+      setError(result.error.message || 'Failed to record payment.');
+      return;
+    }
+    setReceipt(buildReceipt(cleanedTenders, tipAmount, tipSplits));
   };
 
-  return (
-    <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-      <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-success/10 rounded-lg flex items-center justify-center">
-              <Icon name="CreditCard" size={20} className="text-success" />
-            </div>
-            <div>
-              <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
-                Record Payment
-              </h2>
-              <p className="font-caption font-caption-normal text-sm text-text-secondary">
-                {booking.booking_number || booking.id}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="p-2 rounded-spa hover:bg-background spa-transition-fast spa-touch-target"
-          >
-            <Icon name="X" size={20} className="text-text-secondary" />
-          </button>
-        </div>
+  // ───────────────────────── Checkout UI state (no money logic below this line) ─────────────────────────
+  const [receipt, setReceipt] = useState(null); // snapshot shown by the success state
+  const [touched, setTouched] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [showVoucherSearch, setShowVoucherSearch] = useState(false);
+  const [restOn, setRestOn] = useState(true); // false once staff type into the REST row themselves
+  const [leaveDue, setLeaveDue] = useState(false); // the "Leave as due" choice for an uncovered gap
+  const [menu, setMenu] = useState(null); // { idx, rect } — the open per-row method menu
+  const [pendingOpen, setPendingOpen] = useState(null); // row index whose menu should open once it has rendered
+  const methodBtnRefs = useRef({});
+  const listRef = useRef(null);
+  const [fade, setFade] = useState({ top: false, bottom: false });
+  const measureFade = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const top = el.scrollTop > 2;
+    const bottom = el.scrollHeight - el.clientHeight - el.scrollTop > 2;
+    setFade((f) => (f.top === top && f.bottom === bottom ? f : { top, bottom }));
+  };
+  useLayoutEffect(measureFade);
+  useEffect(() => { window.addEventListener('resize', measureFade); return () => window.removeEventListener('resize', measureFade); }, []);
+  const [activeIdx, setActiveIdx] = useState(null);
+  const [popover, setPopover] = useState(null); // { kind: 'sub' | 'more', value?, rect }
+  const dialogRef = useRef(null);
+  const firstAmountRef = useRef(null);
+  const submittingRef = useRef(false);
 
-        {/* Body */}
-        <div className="p-5 space-y-5">
-          {/* Financial Summary (read-only) */}
-          <div className="bg-background rounded-spa p-4 space-y-3">
-            <h4 className="font-heading font-heading-medium text-sm text-text-secondary uppercase tracking-wider">
-              Payment Summary
-            </h4>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-body font-body-normal text-sm text-text-secondary truncate pr-2">
-                  {booking.service?.name || booking.service || 'This booking'}
-                </span>
-                <span className="font-body font-body-medium text-sm text-text-primary flex-shrink-0">
-                  {formatNPR(remaining)}
-                </span>
-              </div>
-              {!hasPreviousDue && alreadyPaid > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-text-secondary">Already paid</span>
-                  <span className="font-body font-body-medium text-sm text-success">- {formatNPR(alreadyPaid)}</span>
-                </div>
-              )}
-              {hasPreviousDue && (
-                <div className="flex items-center justify-between">
-                  <span className="font-body font-body-normal text-sm text-warning">
-                    Previous due ({additionalBookings.length})
-                  </span>
-                  <span className="font-body font-body-medium text-sm text-warning flex-shrink-0">
-                    {formatNPR(additionalRemaining)}
-                  </span>
-                </div>
-              )}
-              <div className="border-t border-border pt-2 flex items-center justify-between">
-                <span className="font-body font-body-semibold text-base text-text-primary">
-                  {hasPreviousDue ? 'Total Due' : 'Balance Due'}
-                </span>
-                <span className="font-heading font-heading-semibold text-lg text-success">
-                  {formatNPR(grandTotal)}
-                </span>
-              </div>
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+  const svcName = (b) => (typeof b.service === 'string' ? b.service : b.service?.name) || b.serviceName || b.service_name_snapshot || 'Service';
+  const guestName = bookingRowInfo?.customer_name || booking.customerName || '';
+  const guestPhone = bookingRowInfo?.customer_phone || booking.customerPhone || '';
+  const tierName = membership?.tierName || null;
+  const bookingNumber = booking.booking_number || booking.id;
+  const busy = !!isSubmitting;
+
+  const leafLabel = (value) => {
+    for (const item of PAYMENT_TREE) {
+      if (String(item.value) === String(value)) return item.label;
+      const sub = (item.subMethods || []).find((s) => String(s.value) === String(value));
+      if (sub) return sub.label;
+    }
+    return String(value);
+  };
+  const tenderLabel = (t) => {
+    switch (t.paymentMode) {
+      case 'Membership': return 'Membership wallet';
+      case 'ReferralWallet': return 'Referral wallet';
+      case 'VoucherWallet': return t.voucherLabel ? `Voucher ${t.voucherLabel}` : 'Vouchers';
+      case 'ReferralVoucher': return t.voucherLabel || 'Referral voucher';
+      case 'SessionPackage': return t.packageLabel || 'Package';
+      default: return leafLabel(t.paymentMode);
+    }
+  };
+  const isCash = (t) => /^cash$/i.test(String(t.paymentMode));
+
+  // The tender the method picker edits: the one last touched, else the last non-credit row.
+  const lastNonCreditIdx = (() => {
+    for (let i = tenders.length - 1; i >= 0; i--) if (!isCreditMode(tenders[i].paymentMode)) return i;
+    return -1;
+  })();
+  const activeTenderIdx = activeIdx != null && tenders[activeIdx] && !isCreditMode(tenders[activeIdx].paymentMode) ? activeIdx : lastNonCreditIdx;
+
+  // When a bundled booking (earlier balance / group service) is ticked or unticked, the total moves and the
+  // "rest of the bill" row — the last non-credit row — absorbs the change. Never adds a second row for it
+  // (a new row appears only when there is no cash/card row at all, e.g. a wallet covered everything).
+  // Ticking only grows the bill when the rows fully covered it before, so a deliberately part-paid
+  // bill keeps its leftover; unticking only trims when the rows would now exceed the total.
+  const prevTotalRef = useRef(grandTotal);
+  useEffect(() => {
+    const prev = prevTotalRef.current;
+    prevTotalRef.current = grandTotal;
+    if (prev === grandTotal) return;
+    setTenders((cur) => {
+      if (restIndexOf(cur, restOn) >= 0) return cur; // the REST row absorbs any change in the total
+      const enteredNow = sumTenders(cur);
+      if (grandTotal > prev) {
+        if (enteredNow + 0.001 < prev) return cur;
+        const delta = round2(grandTotal - prev);
+        let idx = -1;
+        for (let i = cur.length - 1; i >= 0; i--) if (!isCreditMode(cur[i].paymentMode)) { idx = i; break; }
+        if (idx < 0) return [...cur, defaultRow(delta)];
+        return cur.map((t, i) => (i === idx ? { ...t, amount: String(round2((Number(t.amount) || 0) + delta)) } : t));
+      }
+      let over = round2(enteredNow - grandTotal);
+      if (over <= 0.001) return cur;
+      const next = cur.map((t) => ({ ...t }));
+      const trim = (credit) => {
+        for (let i = next.length - 1; i >= 0 && over > 0.001; i--) {
+          if (isCreditMode(next[i].paymentMode) !== credit) continue;
+          if (credit && (next[i].paymentMode === 'SessionPackage' || next[i].paymentMode === 'ReferralVoucher')) continue;
+          const have = Number(next[i].amount) || 0;
+          const cut = Math.min(have, over);
+          next[i].amount = cut >= have ? '' : String(round2(have - cut));
+          over = round2(over - cut);
+        }
+      };
+      trim(false); trim(true);
+      return next.filter((t) => Number(t.amount) > 0);
+    });
+  }, [grandTotal]);
+
+  const defaultRow = (amount = '') => ({ amount: amount === '' ? '' : String(amount), paymentMode: firstLeafValue(PAYMENT_TREE) });
+  const sumTenders = (list) => round2(list.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0));
+
+  // Apply a wallet/voucher: adds a credit tender (first in the list) sized to what it can cover and
+  // shrinks the cash/card rows by the same amount so the total stays exactly covered.
+  const applyCredit = (mode, available, extra = {}) => {
+    setTouched(true);
+    setTenders((prev) => {
+      const credit = sumTenders(prev.filter((t) => isCreditMode(t.paymentMode)));
+      const a = round2(Math.max(0, Math.min(available, grandTotal - credit)));
+      if (a <= 0) return prev;
+      let next = prev.map((t) => ({ ...t }));
+      const ri = restIndexOf(next, restOn); // the REST row re-balances itself; only the other rows are trimmed here
+      let overflow = round2(sumTenders(next) - (ri >= 0 ? Number(next[ri].amount) || 0 : 0) + a - grandTotal);
+      for (let i = next.length - 1; i >= 0 && overflow > 0.001; i--) {
+        if (isCreditMode(next[i].paymentMode) || i === ri) continue;
+        const cur = Number(next[i].amount) || 0;
+        const cut = Math.min(cur, overflow);
+        next[i].amount = cut >= cur ? '' : String(round2(cur - cut));
+        overflow = round2(overflow - cut);
+      }
+      next = next.filter((t, i) => isCreditMode(t.paymentMode) || Number(t.amount) > 0 || !t.paymentMode || i === ri);
+      next.unshift({ amount: String(a), paymentMode: mode, ...extra });
+      const rest = round2(grandTotal - sumTenders(next));
+      if (rest > 0.001 && !next.some((t) => !isCreditMode(t.paymentMode))) next.push(defaultRow(rest));
+      return next;
+    });
+  };
+
+  // Un-apply: drop the matching credit rows and give the freed amount back to the cash/card row.
+  const removeCredit = (pred) => {
+    setTouched(true);
+    setTenders((prev) => {
+      const next = prev.filter((t) => !pred(t)).map((t) => ({ ...t }));
+      const need = round2(grandTotal - sumTenders(next));
+      if (need > 0.001 && restIndexOf(next, restOn) < 0) {
+        let idx = -1;
+        for (let i = next.length - 1; i >= 0; i--) if (!isCreditMode(next[i].paymentMode)) { idx = i; break; }
+        if (idx >= 0) next[idx].amount = String(round2((Number(next[idx].amount) || 0) + need));
+        else next.push(defaultRow(need));
+      }
+      return next;
+    });
+  };
+
+  const amountRefs = useRef({});
+  const focusRow = (i) => {
+    setActiveIdx(i);
+    requestAnimationFrame(() => { const el = amountRefs.current[i]; if (el) { el.focus(); el.select?.(); } });
+  };
+  // Single-payment mode: the segmented picker changes THAT row's method.
+  const pickMethod = (value) => {
+    setTouched(true);
+    setPopover(null);
+    if (tenders.length === 1 && !isCreditMode(tenders[0].paymentMode)) updateTender(0, { paymentMode: value });
+  };
+
+  // ── split mode ──
+  const restIdx = restIndexOf(tenders, restOn);
+  // REST = total minus every other row, never below 0. Kept in state so everything downstream (entered, leftover,
+  // submit, receipt) keeps reading plain tender amounts.
+  useEffect(() => {
+    if (restIdx < 0 || !tenders[restIdx]) return;
+    const others = round2(tenders.reduce((sum, t, i) => (i === restIdx ? sum : sum + (Number(t.amount) > 0 ? Number(t.amount) : 0)), 0));
+    const want = Math.max(0, round2(grandTotal - others));
+    if ((Number(tenders[restIdx].amount) || 0) !== want) updateTender(restIdx, { amount: String(want) });
+  }, [tenders, grandTotal, restIdx]);
+
+  const openMenu = (idx) => {
+    const el = methodBtnRefs.current[idx];
+    if (el) setMenu({ idx, rect: el.getBoundingClientRect() });
+  };
+  // Closing the menu without choosing drops a new row that still has no method.
+  const closeMenu = () => {
+    setMenu(null);
+    setTenders((prev) => (prev.some((t) => !t.paymentMode) ? prev.filter((t) => t.paymentMode) : prev));
+  };
+  useEffect(() => {
+    if (pendingOpen == null) return;
+    openMenu(pendingOpen);
+    setPendingOpen(null);
+  }, [pendingOpen, tenders.length]);
+  const chooseMethod = (value) => {
+    const idx = menu?.idx;
+    if (idx == null) return;
+    setTouched(true);
+    updateTender(idx, { paymentMode: value });
+    closeMenu();
+    focusRow(idx);
+  };
+  // "Split across methods" / "Add another method": always available. The new row has NO method (staff choose it),
+  // its menu opens straight away, and it is prefilled with what's still uncovered (empty when fully covered).
+  const addSplit = () => {
+    setTouched(true);
+    if (tenders.length <= 1) setRestOn(true);
+    addTenderRow(setTenders, { amount: leftover > 0 ? String(leftover) : '', paymentMode: '' });
+    setPendingOpen(tenders.length);
+  };
+  const dropRow = (i) => {
+    setTouched(true);
+    removeTender(i);
+    if (tenders.length - 1 <= 1) setRestOn(true);
+  };
+  const overrideRest = (i) => { setRestOn(false); focusRow(i); };
+  const startLeaveDue = () => {
+    setTouched(true);
+    setLeaveDue(true);
+    if (!dueHolderName.trim() && guestName) setDueHolderName(guestName);
+  };
+  useEffect(() => { if (leaveDue && leftover <= 0.001) setLeaveDue(false); }, [leaveDue, leftover]);
+
+  // A specific voucher chosen through "Redeem a voucher code": one compact credit row, sized to what it can
+  // cover, with the cash/card rows shrinking by the same amount (same mechanics as the wallet).
+  const applyVoucherCode = (v) => {
+    if (tenders.some((t) => t.paymentMode === 'VoucherWallet' && t.voucherId === v.voucher_id)) { setShowVoucherSearch(false); return; }
+    applyCredit('VoucherWallet', Number(v.remaining_balance), {
+      voucherId: v.voucher_id,
+      voucherLabel: v.voucher_code,
+      voucherRemainingBalance: Number(v.remaining_balance),
+    });
+    setShowVoucherSearch(false);
+  };
+  const toggleAddOn = (id) => {
+    setTouched(true);
+    setCheckedAddOns((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
+
+  // ── validation shown as the primary button's reason (handleSubmit keeps its own guards as a safety net) ──
+  const walletOver = (membershipUsable && membershipCommitted > membership.balance)
+    || (referralWalletUsable && referralWalletCommitted > referralReward.walletBalance)
+    || (voucherPoolUsable && voucherPoolCommitted > voucherPoolBalance)
+    || appliedVoucherBalances.some((v) => (voucherWalletCommittedByVoucher.get(v.voucherId) || 0) > v.remainingBalance);
+  const tipActive = showTip && Number(tip) > 0;
+  const blockReason = (() => {
+    if (referralRewardBlocksPayment) return 'Apply the referral reward first';
+    if (tenders.some((t) => !t.paymentMode)) return 'Choose a method for the new row';
+    if (entered <= 0 && leftover <= 0) return 'Enter an amount';
+    if (entered > grandTotal) return `Over the total by NPR ${fmt(round2(entered - grandTotal))}`;
+    if (walletOver) return 'A wallet or voucher amount exceeds its balance';
+    if (leftover > 0 && !leaveDue) return `${fmt(leftover)} not covered yet`;
+    if (leftover > 0 && !dueHolderName.trim()) return 'Add who the remaining due is under';
+    if (tipActive && tipRecipients.some((r) => !r.receivedBy || !(Number(r.amount) > 0))) return 'Choose who received the tip';
+    if (tipActive && Math.abs(tipRecipientsTotal - round2(Number(tip))) > 0.001) return 'Tip split must add up to the tip';
+    return '';
+  })();
+  const canSubmit = !blockReason && !busy;
+  const primaryLabel = entered > 0 ? (leftover > 0 ? `Collect ${fmt(entered)} · ${fmt(leftover)} due` : `Collect NPR ${fmt(entered)}`) : `Leave NPR ${fmt(leftover)} due`;
+
+  const doSubmit = async () => {
+    if (!canSubmit || submittingRef.current) return;
+    submittingRef.current = true;
+    try { await handleSubmit(); } finally { submittingRef.current = false; }
+  };
+
+  const requestClose = () => {
+    if (busy) return;
+    if (receipt) { onClose?.({ paid: true }); return; }
+    if (touched) { setConfirmDiscard(true); return; }
+    onClose?.();
+  };
+
+  // Snapshot for the success state / receipt (taken at submit, so the booking refreshing underneath can't change it).
+  const buildReceipt = (cleaned, tipAmount, tipSplits) => {
+    const staffName = (id) => branchStaffOptions.find((s) => s.id === id)?.name || 'staff';
+    const gross = Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount;
+    const discount = round2(Number(booking.discount_amount ?? booking.discountAmount ?? 0));
+    const lines = [{ label: svcName(booking), amount: gross }];
+    if (discount > 0) lines.push({ label: 'Discount', amount: -discount, sub: true });
+    if (alreadyPaid > 0) lines.push({ label: 'Already paid', amount: -alreadyPaid, sub: true });
+    additionalBookings.forEach((b) => lines.push({ label: `${svcName(b)} · ${b.bookingNumber || ''}`.replace(/ · $/, ''), amount: bookingRemaining(b) }));
+    const tenderRows = tenders
+      .filter((t) => t.paymentMode && Number(t.amount) > 0 && (t.paymentMode !== 'SessionPackage' || t.packageId))
+      .map((t) => {
+        const change = isCash(t) ? computeChange(t.received, t.amount) : null;
+        return {
+          label: tenderLabel(t),
+          amount: round2(t.amount),
+          detail: change ? `received ${fmt(Number(t.received))}, change ${fmt(change)}` : '',
+        };
+      });
+    const walletAfter = [];
+    if (membershipUsable && membershipCommitted > 0) walletAfter.push({ label: 'Wallet balance now', amount: round2(membership.balance - membershipCommitted) });
+    if (referralWalletUsable && referralWalletCommitted > 0) walletAfter.push({ label: 'Referral wallet now', amount: round2(referralReward.walletBalance - referralWalletCommitted) });
+    if (voucherPoolUsable && voucherPoolCommitted > 0) walletAfter.push({ label: 'Voucher balance now', amount: round2(voucherPoolBalance - voucherPoolCommitted) });
+    return {
+      orgName, branchName, guestName, guestPhone, bookingNumber,
+      dateLabel: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      lines, tenders: tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
+      tipTotal: tipAmount,
+      tipLabel: tipAmount > 0 ? `Tip to ${tipSplits.map((s) => staffName(s.receivedBy)).join(', ')}` : '',
+      walletAfter,
+    };
+  };
+
+  // ── keyboard: Esc = dirty guard, Enter = primary, Tab trapped inside the dialog ──
+  // Registered on window (capture) so it keeps working when focus has left the dialog (e.g. after a
+  // stray click on the backdrop) and so a page behind us never sees the same Esc/Enter.
+  const onKeyDown = (e) => {
+    if ((e.key === 'Escape' || e.key === 'Enter') && (dialogRef.current?.querySelector('[role="listbox"]') || document.querySelector('[data-checkout-menu]'))) return; // an open CustomSelect / method menu owns the key
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      if (popover) { setPopover(null); return; }
+      if (confirmDiscard) { setConfirmDiscard(false); return; }
+      requestClose();
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      const tag = e.target.tagName;
+      if (tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'A' || e.defaultPrevented || confirmDiscard || popover) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (receipt) onClose?.({ paid: true });
+      else doSubmit();
+      return;
+    }
+    if (e.key === 'Tab' && dialogRef.current && (dialogRef.current.contains(e.target) || e.target === document.body)) {
+      const items = Array.from(dialogRef.current.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
+        .filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.target === document.body) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && (e.target === first || e.target === dialogRef.current)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && e.target === last) { e.preventDefault(); first.focus(); }
+    }
+  };
+
+  const keyHandlerRef = useRef(onKeyDown);
+  keyHandlerRef.current = onKeyDown;
+  useEffect(() => {
+    const h = (e) => keyHandlerRef.current(e);
+    window.addEventListener('keydown', h, true);
+    return () => window.removeEventListener('keydown', h, true);
+  }, []);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      if (firstAmountRef.current) { firstAmountRef.current.focus(); firstAmountRef.current.select?.(); }
+      else dialogRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+  useEffect(() => { if (receipt) dialogRef.current?.focus(); }, [receipt]);
+
+  const printReceipt = () => {
+    const w = window.open('', '_blank', 'width=420,height=680');
+    if (!w) return;
+    w.document.write(buildReceiptHtml(receipt));
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 250);
+  };
+  const whatsappUrl = receipt ? buildWhatsAppUrl(receipt.guestPhone, buildReceiptText(receipt)) : null;
+
+  // ───────────────────────── render helpers ─────────────────────────
+  const openPopover = (kind, value, el) => setPopover({ kind, value, rect: el.getBoundingClientRect() });
+
+  const topItems = PAYMENT_TREE.slice(0, 4);
+  const moreItems = PAYMENT_TREE.slice(4);
+  const activeTender = activeTenderIdx >= 0 ? tenders[activeTenderIdx] : null;
+  const itemIsActive = (item) => !!activeTender && (String(activeTender.paymentMode) === String(item.value)
+    || (item.subMethods || []).some((s) => String(s.value) === String(activeTender.paymentMode)));
+  const onSegClick = (item, el) => {
+    if (item.subMethods && item.subMethods.length > 0) openPopover('sub', item.value, el);
+    else pickMethod(item.value);
+  };
+
+  const inputBase = 'h-8 w-[120px] rounded-[7px] border bg-white px-2.5 text-right text-[13px] font-medium tabular-nums text-[#0E0D0C] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10';
+
+  // ───────────────────────── render ─────────────────────────
+  const dueFraction = grandTotal > 0 ? Math.min(entered / grandTotal, 1) : 0;
+  const fullyCovered = grandTotal > 0 && leftover <= 0.001 && entered > 0;
+
+  const singleMode = tenders.length === 1 && !isCreditMode(tenders[0].paymentMode);
+  const menuEl = menu && tenders[menu.idx] && createPortal(
+    <MethodMenu rect={menu.rect} tree={PAYMENT_TREE}
+      usedValues={new Set(tenders.filter((x, xi) => xi !== menu.idx && x.paymentMode).map((x) => String(x.paymentMode)))}
+      activeValue={tenders[menu.idx].paymentMode} onPick={chooseMethod} onClose={closeMenu} />,
+    document.body
+  );
+  const popoverEl = popover && createPortal(
+    <PopoverList
+      rect={popover.rect}
+      onClose={() => setPopover(null)}
+      groups={popover.kind === 'sub'
+        ? [{ title: null, items: (PAYMENT_TREE.find((i) => i.value === popover.value)?.subMethods || []) }]
+        : moreItems.map((i) => (i.subMethods && i.subMethods.length ? { title: i.label, items: i.subMethods } : { title: null, items: [i] }))}
+      activeValue={activeTender?.paymentMode}
+      onPick={pickMethod}
+    />,
+    document.body
+  );
+
+  const dialog = receipt ? (
+    <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Payment collected"
+      className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
+      <div className="px-7 py-7 text-center overflow-y-auto flex-1 min-h-0"><div className="min-h-full flex flex-col justify-center">
+        <div className="w-10 h-10 rounded-full bg-[#EEF3EC] text-primary grid place-items-center mx-auto"><Icon name="Check" size={20} strokeWidth={2.2} /></div>
+        <div className="mt-3.5 text-[12.5px] text-[#8A8A90]">Payment collected</div>
+        <div className="text-[30px] font-semibold tracking-[-1px] mt-0.5 tabular-nums"><span className="text-[15px] font-medium text-[#8A8A90] mr-1.5 tracking-normal">NPR</span>{fmt(receipt.total)}</div>
+        <div className="text-[13px] text-[#515152] mt-0.5">
+          {receipt.guestName && <>{receipt.guestName} · </>}
+          {receipt.leftover > 0
+            ? <span className="text-[#B45309]">NPR {fmt(receipt.leftover)} still due</span>
+            : <>{receipt.bookingNumber}{receipt.extraCount > 0 ? ` + ${receipt.extraCount} more` : ''} {receipt.extraCount > 0 ? 'are' : 'is'} fully paid</>}
+        </div>
+        <div className="mt-5 border-t border-[#E7E8E6] text-left text-[13px] pb-1">
+          {receipt.tenders.map((t, i) => (
+            <div key={i} className="flex justify-between items-center h-9 border-b border-[#F1F1EF]">
+              <span className="text-[#515152]">{t.label}{t.detail && <span className="text-[#8A8A90]"> · {t.detail}</span>}</span>
+              <span className="tabular-nums">{fmt(t.amount)}</span>
             </div>
+          ))}
+          {receipt.tipTotal > 0 && (
+            <div className="flex justify-between items-center h-9 border-b border-[#F1F1EF] text-[#8A8A90]"><span>{receipt.tipLabel}, recorded separately</span><span className="tabular-nums">{fmt(receipt.tipTotal)}</span></div>
+          )}
+          {receipt.walletAfter.map((w, i) => (
+            <div key={i} className="flex justify-between items-center h-9 border-b border-[#F1F1EF] last:border-b-0 text-[#8A8A90]"><span>{w.label}</span><span className="tabular-nums">{fmt(w.amount)}</span></div>
+          ))}
+        </div>
+      </div></div>
+      <div className="h-16 px-5 border-t border-[#E7E8E6] flex items-center gap-2 flex-none">
+        <button type="button" onClick={printReceipt} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="Printer" size={15} strokeWidth={1.6} />Print</button>
+        {whatsappUrl && (
+          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#F7F7F5]"><Icon name="MessageCircle" size={15} strokeWidth={1.6} />WhatsApp</a>
+        )}
+        <button type="button" autoFocus onClick={() => onClose?.({ paid: true })} className="ml-auto h-9 pl-4 pr-3 rounded-[7px] bg-primary text-white text-[13px] font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25)]">Done<kbd className="text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd></button>
+      </div>
+    </div>
+  ) : (
+    <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Checkout"
+      className="checkout-dialog relative bg-white rounded-[14px] w-[900px] max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]">
+      {/* Header */}
+      <div className="h-[60px] pl-6 pr-5 flex items-center gap-3 border-b border-[#E7E8E6] flex-none">
+        <h2 className="text-[15px] font-semibold tracking-[-.2px]">Checkout</h2>
+        <span className="flex items-center gap-2 text-[#8A8A90] min-w-0">
+          {guestName && <b className="font-medium text-[#515152] truncate">{guestName}</b>}
+          <span className="whitespace-nowrap">· {bookingNumber}</span>
+          {tierName && (
+            <span className="inline-flex items-center gap-1 h-5 px-[7px] rounded-full bg-[#FBF3DF] text-[#9A6B0B] text-[11px] font-semibold">
+              <Icon name="Star" size={10} className="fill-current" strokeWidth={0} />{tierName}
+            </span>
+          )}
+        </span>
+        <kbd className="ml-auto text-[10.5px] font-medium text-[#8A8A90] border border-[#E7E8E6] rounded px-[5px] py-px bg-white font-sans">Esc</kbd>
+        <button type="button" onClick={requestClose} disabled={busy} aria-label="Close" className="w-[30px] h-[30px] rounded-[7px] grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={16} /></button>
+      </div>
+
+      {/* Body */}
+      <div className="grid grid-cols-1 min-[960px]:grid-cols-[380px_minmax(0,1fr)] min-[960px]:grid-rows-[minmax(0,1fr)] flex-1 overflow-y-auto min-[960px]:overflow-hidden min-h-0"
+        onInputCapture={() => setTouched(true)}
+        onClickCapture={(e) => { if (e.target.closest && e.target.closest('button, input, label')) setTouched(true); }}>
+        {/* Left: paying for */}
+        <div className={`px-6 pt-5 ${Number(tip) > 0 ? 'pb-44' : 'pb-5'} min-[960px]:border-r border-b min-[960px]:border-b-0 border-[#E7E8E6] bg-[#FCFCFB] min-[960px]:overflow-y-auto min-h-0`}>
+          <SectionLabel>Paying for</SectionLabel>
+          <div className="flex items-center gap-2.5 h-[38px]">
+            <Check on disabled />
+            <span className="flex-1 min-w-0 truncate">{svcName(booking)}{bookingRowInfo?.service?.duration_minutes ? ` · ${bookingRowInfo.service.duration_minutes} min` : ''}{bookingRowInfo?.therapist?.name && <small className="text-[#8A8A90] text-[12px]"> · {bookingRowInfo.therapist.name}</small>}</span>
+            <span className="font-medium tabular-nums">{fmt(Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount)}</span>
           </div>
+          {Number(booking.discount_amount ?? booking.discountAmount ?? 0) > 0 && (
+            <div className="flex items-center h-[30px] text-[#8A8A90]"><span className="flex-1 pl-6">Discount</span><span className="tabular-nums">−{fmt(Number(booking.discount_amount ?? booking.discountAmount))}</span></div>
+          )}
+          {alreadyPaid > 0 && (
+            <div className="flex items-center h-[30px] text-[#8A8A90]"><span className="flex-1 pl-6">Already paid</span><span className="tabular-nums">−{fmt(alreadyPaid)}</span></div>
+          )}
+
+          {candidates.length > 0 && (
+            <div className="mt-5">
+              <SectionLabel>Add to this payment</SectionLabel>
+              {candidates.map((b) => {
+                const on = checkedAddOns.has(b.bookingId);
+                const earlier = b.amountDue !== undefined && b.amountDue !== null;
+                const d = b.date ? new Date(`${b.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+                return (
+                  <button key={b.bookingId} type="button" role="checkbox" aria-checked={on} onClick={() => toggleAddOn(b.bookingId)}
+                    className="w-full flex items-center gap-2.5 h-[38px] border-b border-[#F1F1EF] last:border-b-0 text-left">
+                    <Check on={on} />
+                    <span className="flex-1 min-w-0 truncate">
+                      {earlier ? 'Earlier balance' : svcName(b)}
+                      <small className="text-[#8A8A90] text-[12px]"> · {earlier ? `${svcName(b)} · ${b.bookingNumber || ''}${d ? `, ${d}` : ''}` : `${b.bookingNumber || ''} · same group`}</small>
+                    </span>
+                    <span className={`tabular-nums font-medium ${on ? '' : 'text-[#515152]'}`}>{fmt(bookingRemaining(b))}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {skippedBookingsPreview.length > 0 && (
-            <div className="flex items-start space-x-2 px-3 py-2.5 rounded-spa bg-warning/5 border border-warning/20">
-              <Icon name="AlertTriangle" size={14} className="text-warning flex-shrink-0 mt-0.5" />
-              <span className="font-body font-body-normal text-xs sm:text-sm text-warning">
-                Entered amount won't cover: {skippedBookingsPreview.map(s => s.bookingNumber || s.bookingId).join(', ')} — {skippedBookingsPreview.length > 1 ? 'these will' : 'this will'} stay unpaid.
-              </span>
+            <div className="mt-3 flex items-start gap-2 px-3 py-2 rounded-lg bg-[#FEF7E8] border border-[#F3E2B8] text-[12px] text-[#92600A]">
+              <Icon name="AlertTriangle" size={13} className="mt-0.5 flex-none" />
+              <span>Entered amount won't cover {skippedBookingsPreview.map((s) => s.bookingNumber || s.bookingId).join(', ')}. {skippedBookingsPreview.length > 1 ? 'These stay' : 'This stays'} unpaid.</span>
             </div>
           )}
 
-          <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} />
-
           {activePendingReward && (
-            <div className="rounded-spa border border-amber-300 bg-amber-50 p-3 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <Icon name="Gift" size={14} className="text-amber-700 flex-shrink-0" />
-                <p className="font-body font-body-medium text-sm text-amber-900">
-                  {activePendingReward.referredName} they referred has completed a visit — this customer has earned a referral reward.
-                </p>
+            <div className="mt-5 rounded-lg border border-[#F3E2B8] bg-[#FEF7E8] p-3 space-y-2">
+              <div className="flex items-start gap-2 text-[12.5px] text-[#92600A]">
+                <Icon name="Gift" size={14} className="mt-0.5 flex-none" />
+                <p>{activePendingReward.referredName} they referred has completed a visit. This customer has earned a referral reward.</p>
               </div>
-
               {canResolveReferralReward ? (
                 <>
-                  <p className="font-body font-body-medium text-xs text-text-primary">Wallet credit amount</p>
-                  <input
-                    type="number"
-                    min="0"
-                    value={rewardAmount}
-                    onChange={(e) => setRewardAmount(e.target.value)}
-                    placeholder="e.g. 500 (leave blank for the org default)"
-                    className="w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleResolveReferralReward}
-                    loading={rewardSubmitting}
-                    disabled={rewardSubmitting}
-                  >
-                    Apply as wallet credit
-                  </Button>
-                  {rewardError && (
-                    <p className="font-caption text-xs text-error">{rewardError}</p>
-                  )}
+                  <input type="text" inputMode="decimal" value={rewardAmount} onChange={(e) => setRewardAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                    placeholder="Wallet credit, e.g. 500 (blank = org default)"
+                    className="w-full h-9 px-3 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
+                  <Button type="button" variant="outline" size="sm" onClick={handleResolveReferralReward} loading={rewardSubmitting} disabled={rewardSubmitting}>Apply as wallet credit</Button>
+                  {rewardError && <p className="text-xs text-error">{rewardError}</p>}
                 </>
               ) : (
-                <p className="font-caption text-xs text-amber-800">
-                  Ask a manager or admin to apply this referral's wallet reward.
-                </p>
+                <p className="text-[12px] text-[#92600A]">Ask a manager or admin to apply this referral's wallet reward.</p>
               )}
             </div>
           )}
 
-          <ReferralRewardCard
-            referralReward={referralReward ? { walletBalance: referralReward.walletBalance, vouchers: availableVouchers } : null}
-            pendingWalletDeduction={referralWalletCommitted}
-            onApplyVoucher={applyReferralVoucher}
-          />
-
-          <VoucherWalletCard
-            vouchers={appliedVoucherBalances.map(v => ({
-              voucherId: v.voucherId,
-              code: v.code,
-              balance: v.remainingBalance,
-              pendingDeduction: voucherWalletCommittedByVoucher.get(v.voucherId) || 0,
-            }))}
-            poolBalance={voucherPoolBalance}
-            poolPendingDeduction={voucherPoolCommitted}
-          />
-
-          <PackageWalletCard
-            packages={customerPackages}
-            selectedPackageId={selectedPackageTender?.packageId || null}
-            redeemDisabled={remaining <= 0}
-            splitInProgress={tenders.length > 1}
-            onRedeem={redeemPackage}
-            onUndo={undoPackage}
-          />
-
-          {/* Split payment — one or more tenders, even when a previous due is bundled in */}
-          <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="block font-body font-body-medium text-sm text-text-primary">
-                  Payment Method{tenders.length > 1 ? 's' : ''}
-                </label>
-                <button
-                  type="button"
-                  onClick={addTender}
-                  className="flex items-center gap-1 text-sm text-primary hover:underline"
-                >
-                  <Icon name="Plus" size={14} /> Add method
+          {(membershipUsable || referralWalletUsable || (referralReward?.vouchers || []).length > 0 || voucherPoolUsable || VOUCHER_ENABLED || packagesUsable) && (
+            <div className="mt-5">
+              <SectionLabel>Guest credit</SectionLabel>
+              {membershipUsable && (
+                <CreditRow icon="Wallet" title="Membership wallet"
+                  applied={membershipCommitted > 0}
+                  sub={membershipCommitted > 0 ? `${fmt(membershipCommitted)} applied · ${fmt(walletRemaining)} remains` : `${fmt(membership.balance)} available`}
+                  onApply={() => applyCredit('Membership', membership.balance)}
+                  onRemove={() => removeCredit((t) => t.paymentMode === 'Membership')} />
+              )}
+              {referralWalletUsable && (
+                <CreditRow icon="Wallet" title="Referral wallet"
+                  applied={referralWalletCommitted > 0}
+                  sub={referralWalletCommitted > 0 ? `${fmt(referralWalletCommitted)} applied · ${fmt(referralWalletRemaining)} remains` : `${fmt(referralReward.walletBalance)} available`}
+                  onApply={() => applyCredit('ReferralWallet', referralReward.walletBalance)}
+                  onRemove={() => removeCredit((t) => t.paymentMode === 'ReferralWallet')} />
+              )}
+              {(referralReward?.vouchers || []).map((v) => {
+                const applied = appliedVoucherReferralIds.includes(v.referralId);
+                return (
+                  <CreditRow key={v.referralId} icon="Gift" title={v.label || 'Referral voucher'} sub={`${fmt(v.value)} voucher`}
+                    applied={applied}
+                    onApply={() => { setTouched(true); applyReferralVoucher(v); }}
+                    onRemove={() => removeCredit((t) => t.paymentMode === 'ReferralVoucher' && t.referralId === v.referralId)} />
+                );
+              })}
+              {voucherPoolUsable && (
+                <CreditRow icon="Ticket" title="Vouchers"
+                  applied={voucherPoolCommitted > 0}
+                  sub={voucherPoolCommitted > 0 ? `${fmt(voucherPoolCommitted)} applied · ${fmt(round2(voucherPoolBalance - voucherPoolCommitted))} remains` : `${fmt(voucherPoolBalance)} available`}
+                  onApply={() => applyCredit('VoucherWallet', voucherPoolBalance)}
+                  onRemove={() => removeCredit((t) => t.paymentMode === 'VoucherWallet' && !t.voucherId)} />
+              )}
+              {customerPackages.map((p) => {
+                const selected = selectedPackageTender?.packageId === p.packageId;
+                return (
+                  <CreditRow key={p.packageId} icon="PackageCheck" title={p.packageName}
+                    sub={`${p.sessionsRemaining} of ${p.sessionsTotal} sessions left`}
+                    applied={selected}
+                    disabledText={!selected && remaining <= 0 ? 'Booking already settled' : (!selected && tenders.length > 1 ? 'Clear other payments first' : null)}
+                    onApply={() => { setTouched(true); redeemPackage(p); }}
+                    onRemove={() => { setTouched(true); undoPackage(); }} />
+                );
+              })}
+              {appliedVoucherBalances.map((v) => {
+                const committed = voucherWalletCommittedByVoucher.get(v.voucherId) || 0;
+                return (
+                  <CreditRow key={v.voucherId} icon="Ticket" title={`Voucher ${v.code}`} applied
+                    sub={`${fmt(committed)} applied · ${fmt(Math.max(0, round2(v.remainingBalance - committed)))} remains`}
+                    onRemove={() => removeCredit((t) => t.paymentMode === 'VoucherWallet' && t.voucherId === v.voucherId)} />
+                );
+              })}
+              {VOUCHER_ENABLED && (showVoucherSearch ? (
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-[12px] text-[#8A8A90] mb-1.5">
+                    <span>Redeem a voucher code</span>
+                    <button type="button" aria-label="Close voucher search" onClick={() => setShowVoucherSearch(false)} className="w-5 h-5 rounded grid place-items-center hover:bg-[#F4F4F2]"><Icon name="X" size={13} /></button>
+                  </div>
+                  <VoucherSearchInline onSelect={applyVoucherCode} />
+                </div>
+              ) : (
+                <button type="button" onClick={() => { setTouched(true); setShowVoucherSearch(true); }}
+                  className="mt-2 text-[12.5px] text-primary font-medium inline-flex items-center gap-1.5 hover:underline">
+                  <Icon name="Ticket" size={13} strokeWidth={1.8} />Redeem a voucher code
                 </button>
-              </div>
+              ))}
+            </div>
+          )}
 
+          {/* Tip: separate booking_tips write, never part of the total */}
+          <div className="mt-5">
+            <SectionLabel hint="Given to staff · not in the total">Tip</SectionLabel>
+            {showTip ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#8A8A90]"><Icon name="Heart" size={14} strokeWidth={1.6} /></span>
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#B4B4BA]">NPR</span>
+                    <AmountInput value={tip} onChange={setTip} placeholder="e.g. 200" aria-label="Tip amount"
+                      className="w-full h-8 rounded-[7px] border border-[#E7E8E6] bg-white pl-10 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
+                  </div>
+                  <button type="button" aria-label="Remove tip" onClick={() => { setShowTip(false); setTip(''); setTipRecipients([{ key: nextTipRecipientKey(), receivedBy: '', amount: '' }]); }}
+                    className="w-6 h-6 rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={14} /></button>
+                </div>
+                {Number(tip) > 0 && (
+                  <div className="space-y-2 pl-6">
+                    <div className="flex items-center justify-between text-[12px] text-[#8A8A90]">
+                      <span>Received by</span>
+                      {tipRecipients.length > 1 && <span className="tabular-nums">{fmt(tipRecipientsTotal)} / {fmt(round2(Number(tip)))}</span>}
+                    </div>
+                    {tipRecipients.map((r) => (
+                      <div key={r.key} className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <CustomSelect value={r.receivedBy} onChange={(v) => updateTipRecipient(r.key, { receivedBy: v })}
+                            options={branchStaffOptions.map((s) => ({ value: s.id, label: s.name }))} placeholder="Who got this tip?" searchable size="sm" />
+                        </div>
+                        {tipRecipients.length > 1 && (
+                          <AmountInput value={r.amount} onChange={(v) => updateTipRecipient(r.key, { amount: v })} placeholder="0" aria-label="Recipient amount"
+                            className="w-20 h-8 rounded-[7px] border border-[#E7E8E6] bg-white px-2 text-right text-[13px] tabular-nums focus:outline-none focus:border-[#B9C7B6]" />
+                        )}
+                        {tipRecipients.length > 1 && (
+                          <button type="button" aria-label="Remove recipient" onClick={() => removeTipRecipient(r.key)} className="w-6 h-6 rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={13} /></button>
+                        )}
+                      </div>
+                    ))}
+                    <button type="button" onClick={addTipRecipient} className="text-[12px] text-primary font-medium inline-flex items-center gap-1 hover:underline"><Icon name="Plus" size={12} />Split with another person</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button type="button" onClick={() => setShowTip(true)} className="inline-flex items-center gap-2 text-[#515152] hover:text-[#0E0D0C]">
+                <Icon name="Heart" size={14} strokeWidth={1.6} />Add a tip
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Right: amount due + tenders */}
+        <div className="min-w-0 min-h-0 flex flex-col">
+         <div className="px-6 pt-5 flex-none">
+          <div className="text-[12.5px] text-[#8A8A90]">Amount due</div>
+          <div className="text-[34px] leading-[1.1] font-semibold tracking-[-1.1px] mt-0.5 tabular-nums"><span className="text-[16px] font-medium text-[#8A8A90] tracking-normal mr-1.5">NPR</span>{fmt(grandTotal)}</div>
+          <div className="h-[3px] rounded-sm bg-[#F1F1EF] mt-3.5 mb-1.5 overflow-hidden"><i className={`block h-full transition-all ${leftover > 0.001 && entered > 0 ? 'bg-[#C99A2E]' : 'bg-primary'}`} style={{ width: `${dueFraction * 100}%` }} /></div>
+          <div className="flex justify-between text-[12px] text-[#8A8A90]">
+            <span className="tabular-nums">{entered > 0 ? `${fmt(Math.min(entered, grandTotal))} of ${fmt(grandTotal)} covered` : 'Nothing entered yet'}</span>
+            {leftover > 0.001
+              ? <span className="text-[#B45309] tabular-nums">{fmt(leftover)} left</span>
+              : fullyCovered && <span className="text-primary inline-flex items-center gap-1"><Icon name="Check" size={12} strokeWidth={2.4} />Fully covered</span>}
+          </div>
+
+          {singleMode ? (
+            <>
+              <div className="mt-5 mb-2 text-[12.5px] text-[#515152]">How is the guest paying?</div>
+              {/* Method picker: the org's configured methods. In single-payment mode it changes the one row's method. */}
+              <div className="flex bg-[#F4F4F2] rounded-[9px] p-[3px] gap-[3px]" role="group" aria-label="Payment method">
+                {topItems.map((item) => {
+                  const on = itemIsActive(item);
+                  const sub = on && item.subMethods?.length ? leafLabel(activeTender.paymentMode) : item.label;
+                  return (
+                    <button key={item.value} type="button" aria-pressed={on} onClick={(e) => onSegClick(item, e.currentTarget)}
+                      className={`flex-auto min-w-0 h-[34px] rounded-[7px] inline-flex items-center justify-center gap-1.5 px-2.5 font-medium whitespace-nowrap ${on ? 'bg-white text-[#0E0D0C] shadow-[0_0_0_1px_rgba(14,13,12,.06),0_1px_2px_rgba(14,13,12,.08)]' : 'text-[#515152] hover:text-[#0E0D0C]'}`}>
+                      {on && <Icon name={methodIcon(item.value)} size={15} strokeWidth={1.6} className="flex-none" />}
+                      <span className="truncate whitespace-nowrap">{sub}</span>
+                      {on && item.subMethods?.length > 0 && <Icon name="ChevronDown" size={12} className="flex-none opacity-60" />}
+                    </button>
+                  );
+                })}
+                {moreItems.length > 0 && (
+                  <button type="button" aria-pressed={!!activeTender && moreItems.some(itemIsActive)} onClick={(e) => openPopover('more', null, e.currentTarget)}
+                    className={`flex-auto min-w-0 h-[34px] rounded-[7px] inline-flex items-center justify-center gap-1.5 px-2.5 font-medium whitespace-nowrap ${activeTender && moreItems.some(itemIsActive) ? 'bg-white text-[#0E0D0C] shadow-[0_0_0_1px_rgba(14,13,12,.06),0_1px_2px_rgba(14,13,12,.08)]' : 'text-[#515152] hover:text-[#0E0D0C]'}`}>
+                    <span className="truncate">{activeTender && moreItems.some(itemIsActive) ? leafLabel(activeTender.paymentMode) : 'More'}</span>
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="mt-5 flex items-baseline justify-between text-[12px]">
+              <span className="text-[13px] font-medium text-[#515152]">Payments</span>
+              <span className="text-[#8A8A90]">Each row is one method</span>
+            </div>
+          )}
+         </div>
+
+         {error && (
+           <div role="alert" className="mx-6 mt-3 flex-none flex items-start gap-2 px-3 py-2.5 rounded-lg bg-error/5 border border-error/20 text-[12.5px] text-error">
+             <Icon name="AlertCircle" size={14} className="mt-0.5 flex-none" /><span>{error}</span>
+           </div>
+         )}
+
+         {/* Only this area scrolls: the payments list, split link, gap box, note */}
+         <div className="relative flex-1 min-h-0">
+          <div ref={listRef} onScroll={measureFade} className="min-[960px]:h-full min-[960px]:overflow-y-auto px-6 pt-3 pb-5" data-testid="checkout-scroll">
+          {/* Tender list */}
+          {tenders.length > 0 && (
+            <div className="border border-[#E7E8E6] rounded-[10px]">
               {tenders.map((t, i) => {
+                const credit = isCreditMode(t.paymentMode);
                 const isMembership = t.paymentMode === 'Membership';
                 const isReferralWallet = t.paymentMode === 'ReferralWallet';
-                const isReferralVoucher = t.paymentMode === 'ReferralVoucher';
                 const isVoucherWallet = t.paymentMode === 'VoucherWallet';
                 const isSessionPackage = t.paymentMode === 'SessionPackage';
-                const isVoucherPoolRow = isVoucherWallet && !t.voucherId && voucherPoolUsable && !t.manualSearch;
+                const isVoucherPoolRow = isVoucherWallet && !t.voucherId && voucherPoolUsable;
                 const overWallet = isMembership && Number(t.amount) > Number(membership?.balance || 0);
                 const overReferralWallet = isReferralWallet && Number(t.amount) > Number(referralReward?.walletBalance || 0);
                 const overVoucherPool = isVoucherPoolRow && voucherPoolCommitted > voucherPoolBalance;
-                const overVoucherWallet = isVoucherWallet && t.voucherId &&
-                  (voucherWalletCommittedByVoucher.get(t.voucherId) || 0) > t.voucherRemainingBalance;
-
-                // A VoucherWallet tender with no specific voucher picked yet: defaults
-                // to the pooled combined-balance entry (just an amount field, like
-                // Membership) when this customer has one; a small link switches this
-                // one row into the manual search box instead, for a walk-in/gift
-                // voucher not linked to this customer.
-                if (isVoucherPoolRow) {
-                  return (
-                    <div key={i} className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-36 flex-shrink-0">
-                          <PaymentMethodSelector
-                            paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
-                            value={t.paymentMode}
-                            onChange={(v) => updateTender(i, { paymentMode: v })}
-                            size="md"
-                          />
-                        </div>
-                        <div className="relative flex-1">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={t.amount}
-                            onChange={(e) => updateTender(i, { amount: e.target.value })}
-                            placeholder="0"
-                            className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overVoucherPool ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
-                          />
-                        </div>
-                        {tenders.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeTender(i)}
-                            className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                            aria-label="Remove method"
-                          >
-                            <Icon name="Trash2" size={16} />
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <p className={`text-[11px] font-caption ${overVoucherPool ? 'text-error' : 'text-text-tertiary'}`}>
-                          {overVoucherPool
-                            ? `Exceeds voucher balance (${formatNPR(voucherPoolBalance)}).`
-                            : `Voucher available: ${formatNPR(Math.max(0, round2(voucherPoolBalance - voucherPoolCommitted)))}`}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => updateTender(i, { manualSearch: true })}
-                          className="text-[11px] font-caption text-primary hover:underline flex-shrink-0"
-                        >
-                          Use a specific voucher code
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (isVoucherWallet && !t.voucherId) {
-                  return (
-                    <div key={i} className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-36 flex-shrink-0">
-                          <PaymentMethodSelector
-                            paymentMethods={paymentMethods}
-                            extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
-                            value={t.paymentMode}
-                            onChange={(v) => updateTender(i, { paymentMode: v })}
-                            size="md"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <VoucherSearchInline onSelect={(v) => selectVoucherForTender(i, v)} />
-                        </div>
-                        {tenders.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeTender(i)}
-                            className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                            aria-label="Remove method"
-                          >
-                            <Icon name="Trash2" size={16} />
-                          </button>
-                        )}
-                      </div>
-                      {voucherPoolUsable && (
-                        <button
-                          type="button"
-                          onClick={() => updateTender(i, { manualSearch: false })}
-                          className="text-[11px] font-caption text-primary hover:underline"
-                        >
-                          ← Use combined voucher balance
-                        </button>
-                      )}
-                    </div>
-                  );
-                }
-
-                if (isVoucherWallet) {
-                  return (
-                    <div key={i} className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-spa border border-primary/30 bg-primary/5 flex-shrink-0">
-                          <Icon name="Ticket" size={14} className="text-primary" />
-                          <span className="font-data font-data-medium text-xs text-text-primary">{t.voucherLabel}</span>
-                        </div>
-                        <div className="relative flex-1">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={t.amount}
-                            onChange={(e) => updateTender(i, { amount: e.target.value })}
-                            placeholder="0"
-                            className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overVoucherWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeTender(i)}
-                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                          aria-label="Remove voucher"
-                        >
-                          <Icon name="Trash2" size={16} />
-                        </button>
-                      </div>
-                      <p className={`text-[11px] font-caption ${overVoucherWallet ? 'text-error' : 'text-text-tertiary'}`}>
-                        {overVoucherWallet
-                          ? `Exceeds this voucher's balance (${formatNPR(t.voucherRemainingBalance)}).`
-                          : `Voucher balance: ${formatNPR(t.voucherRemainingBalance)}`}
-                      </p>
-                    </div>
-                  );
-                }
-
-                if (isReferralVoucher) {
-                  return (
-                    <div key={i} className="flex items-center gap-2">
-                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-spa border border-accent/30 bg-accent/5">
-                        <Icon name="Gift" size={14} className="text-accent flex-shrink-0" />
-                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.voucherLabel}</span>
-                        <span className="font-data font-data-medium text-sm text-accent ml-auto">{formatNPR(t.amount)}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeTender(i)}
-                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                        aria-label="Remove voucher"
-                      >
-                        <Icon name="Trash2" size={16} />
-                      </button>
-                    </div>
-                  );
-                }
-
-                // A SessionPackage tender is only ever created by PackageWalletCard's
-                // "Claim" button (redeemPackage below), which always sets packageId +
-                // a locked, full-covering amount in the same call — it's never
-                // independently selectable from the dropdown (not in any extraLeaf
-                // array, same as ReferralVoucher), so packageId is always present
-                // here. Rendered as a locked summary row, never a free-typed amount,
-                // since a session redemption is never partial.
-                if (isSessionPackage) {
-                  return (
-                    <div key={i} className="flex items-center gap-2">
-                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-spa border border-primary/30 bg-primary/5">
-                        <Icon name="PackageCheck" size={14} className="text-primary flex-shrink-0" />
-                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.packageLabel || 'Package'}</span>
-                        <span className="font-data font-data-medium text-sm text-primary ml-auto">{formatNPR(t.amount)}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeTender(i)}
-                        className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                        aria-label="Remove package"
-                      >
-                        <Icon name="Trash2" size={16} />
-                      </button>
-                    </div>
-                  );
-                }
-
+                const overVoucherWallet = isVoucherWallet && t.voucherId && (voucherWalletCommittedByVoucher.get(t.voucherId) || 0) > t.voucherRemainingBalance;
+                const over = overWallet || overReferralWallet || overVoucherPool || overVoucherWallet;
+                let hint = '';
+                if (isMembership) hint = overWallet ? `Exceeds wallet balance (${fmt(membership?.balance || 0)})` : `${fmt(walletRemaining)} remains after this`;
+                else if (isReferralWallet) hint = overReferralWallet ? `Exceeds balance (${fmt(referralReward?.walletBalance || 0)})` : `${fmt(referralWalletRemaining)} remains after this`;
+                else if (isVoucherPoolRow) hint = overVoucherPool ? `Exceeds voucher balance (${fmt(voucherPoolBalance)})` : `${fmt(Math.max(0, round2(voucherPoolBalance - voucherPoolCommitted)))} voucher balance left`;
+                else if (isVoucherWallet && t.voucherId) hint = overVoucherWallet ? `Exceeds this voucher (${fmt(t.voucherRemainingBalance)})` : `${fmt(Math.max(0, round2(t.voucherRemainingBalance - (voucherWalletCommittedByVoucher.get(t.voucherId) || 0))))} remains on voucher`;
+                else if (isSessionPackage) hint = 'One session, covers this booking';
+                else if (t.paymentMode === 'ReferralVoucher') hint = 'Referral voucher';
+                const change = isCash(t) ? computeChange(t.received, t.amount) : null;
+                const isActive = i === activeTenderIdx && !credit;
+                const isRest = i === restIdx;
+                const label = tenderLabel(t);
+                const usedElsewhere = new Set(tenders.filter((x, xi) => xi !== i && x.paymentMode).map((x) => String(x.paymentMode)));
                 return (
-                  <div key={i} className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="w-36 flex-shrink-0">
-                        <PaymentMethodSelector
-                          paymentMethods={paymentMethods}
-                          extraLeaf={[membershipLeaf, referralWalletLeaf, voucherLeaf]}
-                          value={t.paymentMode}
-                          onChange={(v) => updateTender(i, { paymentMode: v })}
-                          size="md"
-                        />
-                      </div>
-                      <div className="relative flex-1">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={t.amount}
-                          onChange={(e) => updateTender(i, { amount: e.target.value })}
-                          placeholder="0"
-                          className={`w-full rounded-spa border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 spa-transition-fast ${overWallet || overReferralWallet ? 'border-error focus:border-error' : 'border-border focus:border-primary'}`}
-                        />
-                      </div>
-                      {tenders.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeTender(i)}
-                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                          aria-label="Remove method"
-                        >
-                          <Icon name="Trash2" size={16} />
+                  <div key={i} data-row={i} className={i > 0 ? 'border-t border-[#F1F1EF]' : ''}>
+                    <div className="flex items-center gap-2.5 px-3 py-2.5" onFocusCapture={() => !credit && setActiveIdx(i)}>
+                      {credit || singleMode ? (
+                        <>
+                          <span className="text-[#515152] flex-none"><Icon name={methodIcon(t.paymentMode)} size={16} strokeWidth={1.6} /></span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block font-medium truncate">{label}</span>
+                            {hint && <span className={`block text-[12px] truncate tabular-nums ${over ? 'text-error' : 'text-[#8A8A90]'}`}>{hint}</span>}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" data-method-trigger aria-haspopup="listbox" aria-expanded={menu?.idx === i} aria-label={`Method for row ${i + 1}: ${t.paymentMode ? label : 'not chosen'}`}
+                            ref={(el) => { methodBtnRefs.current[i] = el; }}
+                            onClick={() => (menu?.idx === i ? closeMenu() : openMenu(i))}
+                            className={`h-8 w-[168px] flex-none rounded-[7px] border bg-white px-2.5 inline-flex items-center gap-2 text-left ${menu?.idx === i ? 'border-[#B9C7B6] ring-[3px] ring-primary/10' : 'border-[#E7E8E6] hover:bg-[#F7F7F5]'}`}>
+                            <span className="text-[#515152] flex-none"><Icon name={t.paymentMode ? methodIcon(t.paymentMode) : 'CircleDollarSign'} size={15} strokeWidth={1.6} /></span>
+                            <span className={`flex-1 min-w-0 truncate whitespace-nowrap ${t.paymentMode ? 'font-medium' : 'text-[#8A8A90]'}`}>{t.paymentMode ? label : 'Choose method'}</span>
+                            <Icon name="ChevronDown" size={13} className="flex-none opacity-60" />
+                          </button>
+                          <span className="flex-1" />
+                        </>
+                      )}
+                      {isCash(t) && !t.calc && (
+                        <button type="button" onClick={() => updateTender(i, { calc: true })} aria-label="Work out change" title="Work out change"
+                          className="inline-flex items-center gap-1.5 text-[12px] text-[#8A8A90] hover:text-[#0E0D0C] whitespace-nowrap flex-none">
+                          <Icon name="Calculator" size={13} strokeWidth={1.6} />{singleMode && 'Work out change'}
                         </button>
                       )}
+                      {(isSessionPackage || t.paymentMode === 'ReferralVoucher' ? (
+                        <span className="w-[120px] text-right font-medium tabular-nums pr-2.5">{fmt(t.amount)}</span>
+                      ) : isRest ? (
+                        <button type="button" aria-label={`${label} amount, rest of the bill: ${fmt(t.amount)}. Click to set it yourself`} onClick={() => overrideRest(i)} onFocus={() => overrideRest(i)}
+                          className="h-8 w-[120px] flex-none rounded-[7px] bg-[#EEF3EC] px-2.5 inline-flex items-center justify-between text-primary">
+                          <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold tracking-[.04em]"><Icon name="Link2" size={11} strokeWidth={2.2} />REST</span>
+                          <span className="text-[13px] font-medium tabular-nums">{fmt(t.amount)}</span>
+                        </button>
+                      ) : (
+                        <AmountInput
+                          ref={(el) => { amountRefs.current[i] = el; if (i === 0) firstAmountRef.current = el; }}
+                          value={t.amount} placeholder="0" aria-label={`${label} amount`} disabled={!t.paymentMode}
+                          onChange={(v) => updateTender(i, { amount: v })}
+                          onBlur={(e) => { if (tenders.length > 1 && !(Number(t.amount) > 0) && !e.currentTarget.closest('[data-row]')?.contains(e.relatedTarget)) removeTender(i); }}
+                          className={`${inputBase} ${over ? 'border-error' : isActive && tenders.length > 1 ? 'border-[#B9C7B6]' : 'border-[#E7E8E6]'} disabled:bg-[#FAFAF9]`} />
+                      ))}
+                      {(tenders.length > 1 || isSessionPackage) && (
+                        <button type="button" aria-label={`Remove ${label}`} onClick={() => { if (isSessionPackage) { setTouched(true); undoPackage(); } else if (credit) { setTouched(true); removeCredit((x) => x === t); if (tenders.length - 1 <= 1) setRestOn(true); } else dropRow(i); }}
+                          className="w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none"><Icon name="X" size={14} /></button>
+                      )}
                     </div>
-                    {isMembership && (
-                      <p className={`text-[11px] font-caption ml-[8.5rem] ${overWallet ? 'text-error' : 'text-text-tertiary'}`}>
-                        {overWallet
-                          ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).`
-                          : `Wallet available: ${formatNPR(walletRemaining)}`}
-                      </p>
-                    )}
-                    {isReferralWallet && (
-                      <p className={`text-[11px] font-caption ml-[8.5rem] ${overReferralWallet ? 'text-error' : 'text-text-tertiary'}`}>
-                        {overReferralWallet
-                          ? `Exceeds referral wallet balance (${formatNPR(referralReward?.walletBalance || 0)}).`
-                          : `Referral wallet available: ${formatNPR(referralWalletRemaining)}`}
-                      </p>
+                    {isCash(t) && t.calc && (
+                      <div className="flex items-center gap-2.5 pl-[38px] pr-3 py-2.5 bg-[#FAFAF9] text-[#515152] rounded-b-[10px]">
+                        <span>Guest handed over</span>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#B4B4BA]">NPR</span>
+                          <AmountInput value={t.received || ''} aria-label="Cash received" autoFocus
+                            onChange={(v) => updateTender(i, { received: v })}
+                            className="h-7 w-[110px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
+                        </div>
+                        {change != null && <span className="ml-auto">Give back <b className="font-semibold text-[#0E0D0C] tabular-nums">NPR {fmt(change)}</b></span>}
+                        <button type="button" aria-label="Close change calculator" onClick={() => updateTender(i, { calc: false, received: '' })}
+                          className={`${change != null ? '' : 'ml-auto '}w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none`}><Icon name="X" size={14} /></button>
+                      </div>
                     )}
                   </div>
                 );
               })}
+            </div>
+          )}
 
-              {/* Entered / leftover */}
-              <div className="flex items-center justify-between text-sm pt-1">
-                <span className="text-text-secondary">Entered</span>
-                <span className="font-data text-text-primary">{formatNPR(entered)}</span>
-              </div>
-              {leftover > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-warning font-body-medium">Leave as due</span>
-                  <span className="font-data text-warning font-body-medium">{formatNPR(leftover)}</span>
-                </div>
-              )}
+          {restIdx >= 0 && (
+            <p className="mt-2 text-[12px] text-[#8A8A90] inline-flex items-start gap-1.5"><Icon name="Link2" size={12} className="mt-0.5 flex-none text-primary" /><span><b className="font-medium text-primary">Rest</b> = whatever the other rows don't cover. Type in it to set it yourself.</span></p>
+          )}
 
-              {/* Due holder (required when leaving a balance) */}
-              {leftover > 0 && (
-                <div className="space-y-1 relative">
-                  <label className="block font-body font-body-medium text-sm text-text-primary">
-                    Due under <span className="text-error">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={dueHolderName}
+          <div>
+            <button type="button" onClick={addSplit} className="mt-2.5 text-primary font-medium text-[12.5px] inline-flex items-center gap-1.5 hover:underline">
+              <Icon name={singleMode ? 'Split' : 'Plus'} size={13} strokeWidth={2} />{singleMode ? 'Split across methods' : 'Add another method'}
+            </button>
+          </div>
+
+          {leftover > 0.001 && (
+            <div className="mt-3 relative rounded-[10px] border border-dashed border-[#E6C46F] bg-[#FEF7E8] px-3 py-2.5" data-testid="checkout-gap">
+              {!leaveDue ? (
+                <>
+                  <div className="flex items-center gap-2 text-[#92600A]"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(leftover)}</b> not covered yet</span></div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button type="button" onClick={addSplit} className="h-8 px-3 rounded-[7px] border border-[#E6C46F] bg-white text-[12.5px] font-medium text-[#0E0D0C] inline-flex items-center gap-1.5 hover:bg-[#FFFDF7]"><Icon name="Plus" size={13} strokeWidth={2} />Pay it with another method</button>
+                    <button type="button" onClick={startLeaveDue} className="h-8 px-3 rounded-[7px] text-[12.5px] font-medium text-[#92600A] hover:bg-[#FBEFD0]">Leave as due</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-[#92600A]">
+                    <span className="inline-flex items-center gap-2"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(leftover)}</b> stays due</span></span>
+                    <button type="button" onClick={() => setLeaveDue(false)} className="text-[12.5px] font-medium hover:underline">Undo</button>
+                  </div>
+                  <label htmlFor="due-holder" className="block text-[12px] text-[#515152] mt-2 mb-1">Who is responsible for it? <span className="text-error">*</span></label>
+                  <input id="due-holder" type="text" value={dueHolderName} autoComplete="off"
                     onChange={(e) => { setDueHolderName(e.target.value); setShowSuggestions(true); }}
                     onFocus={() => setShowSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                    placeholder="Type the responsible person's name..."
-                    className="w-full rounded-spa border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
-                  />
+                    placeholder="Responsible person's name"
+                    className="w-full h-9 px-3 rounded-[7px] border border-[#E7E8E6] bg-white text-[13px] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
                   {showSuggestions && filteredSuggestions.length > 0 && (
-                    <div className="absolute z-dropdown left-0 right-0 mt-1 bg-surface border border-border rounded-spa shadow-spa-elevated max-h-44 overflow-y-auto">
+                    <div className="absolute z-dropdown left-3 right-3 mt-1 bg-white border border-[#E7E8E6] rounded-lg shadow-spa-elevated max-h-44 overflow-y-auto">
                       {filteredSuggestions.map((name) => (
-                        <button
-                          key={name}
-                          type="button"
-                          onMouseDown={() => { setDueHolderName(name); setShowSuggestions(false); }}
-                          className="w-full text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
-                        >
-                          {name}
-                        </button>
+                        <button key={name} type="button" onMouseDown={() => { setDueHolderName(name); setShowSuggestions(false); }}
+                          className="w-full text-left px-3 py-2 text-[13px] hover:bg-[#F7F7F5]">{name}</button>
                       ))}
                     </div>
                   )}
-                </div>
+                </>
               )}
             </div>
-
-          {/* Tip — not part of the amount-due math, doesn't interact with the
-              OVERPAYMENT guard above. A tip is logged in a separate, independent
-              table (booking_tips, migration-240) with no FK/trigger relationship to
-              `payments`, so it's safe to record even on a bundled/previous-due
-              payment that otherwise goes through the atomic recordGroupPayment RPC —
-              the tip write itself stays a second, best-effort call either way,
-              attributed to the primary booking only (see BookingActionModal's
-              handlePaymentConfirm). */}
-          {showTip ? (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label className="block font-body font-body-medium text-sm text-text-primary">
-                  Tip <span className="text-text-secondary font-body-normal">(optional, goes to staff — not revenue)</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => { setShowTip(false); setTip(''); setTipRecipients([{ key: nextTipRecipientKey(), receivedBy: '', amount: '' }]); }}
-                  className="p-1 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                  aria-label="Remove tip"
-                >
-                  <Icon name="Trash2" size={14} />
-                </button>
-              </div>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">NPR</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={tip}
-                  onChange={(e) => setTip(e.target.value)}
-                  placeholder="e.g. 200"
-                  autoFocus
-                  className="w-full rounded-spa border border-border bg-surface pl-11 pr-3 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
-                />
-              </div>
-              {Number(tip) > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block font-body font-body-medium text-xs text-text-secondary">
-                      Received by <span className="text-error">*</span>
-                    </label>
-                    {tipRecipients.length > 1 && (
-                      <span className="font-caption text-[11px] text-text-tertiary">
-                        {formatNPR(tipRecipientsTotal)} / {formatNPR(round2(Number(tip)))}
-                      </span>
-                    )}
-                  </div>
-                  {tipRecipients.map((r) => (
-                    <div key={r.key} className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <CustomSelect
-                          value={r.receivedBy}
-                          onChange={(v) => updateTipRecipient(r.key, { receivedBy: v })}
-                          options={branchStaffOptions.map(s => ({ value: s.id, label: s.name }))}
-                          placeholder="Who got this tip?"
-                          searchable
-                          size="sm"
-                        />
-                      </div>
-                      {tipRecipients.length > 1 && (
-                        <div className="relative w-28 flex-shrink-0">
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-text-secondary">NPR</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={r.amount}
-                            onChange={(e) => updateTipRecipient(r.key, { amount: e.target.value })}
-                            placeholder="0"
-                            className="w-full rounded-spa border border-border bg-surface pl-9 pr-2 py-2 font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast"
-                          />
-                        </div>
-                      )}
-                      {tipRecipients.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeTipRecipient(r.key)}
-                          className="p-2 rounded-spa hover:bg-error/10 text-error spa-transition-fast"
-                          aria-label="Remove recipient"
-                        >
-                          <Icon name="Trash2" size={14} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={addTipRecipient}
-                    className="flex items-center gap-1 text-xs text-primary hover:underline"
-                  >
-                    <Icon name="Plus" size={12} /> Add recipient
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowTip(true)}
-              className="flex items-center gap-1 text-sm text-primary hover:underline"
-            >
-              <Icon name="Plus" size={14} /> Add Tip
-            </button>
           )}
 
-          {/* Notes */}
-          <div className="space-y-1">
-            <label className="block font-body font-body-medium text-sm text-text-primary">
-              Notes <span className="text-text-secondary font-body-normal">(optional)</span>
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Any notes about this payment..."
-              rows={2}
-              className="w-full rounded-spa border border-border bg-surface px-3 py-2 font-body font-body-normal text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary spa-transition-fast resize-none"
-            />
+          <div className="mt-4">
+            {showNotes ? (
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Note about this payment" aria-label="Payment note" autoFocus
+                className="w-full rounded-[7px] border border-[#E7E8E6] bg-white px-3 py-2 text-[13px] placeholder:text-[#B4B4BA] focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10 resize-none" />
+            ) : (
+              <button type="button" onClick={() => setShowNotes(true)} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="StickyNote" size={13} strokeWidth={1.6} />Add a note</button>
+            )}
           </div>
 
-          {/* Error */}
-          {error && (
-            <div className="flex items-start space-x-2 p-3 bg-error/5 border border-error/20 rounded-spa">
-              <Icon name="AlertCircle" size={16} className="text-error mt-0.5 shrink-0" />
-              <p className="font-body font-body-normal text-sm text-error">{error}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end space-x-3 p-5 border-t border-border">
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button
-            variant="success"
-            onClick={handleSubmit}
-            loading={isSubmitting}
-            disabled={(entered <= 0 && leftover <= 0) || referralRewardBlocksPayment}
-            iconName="Check"
-            iconPosition="left"
-          >
-            {leftover > 0 ? 'Record & Leave Due' : 'Confirm Payment'}
-          </Button>
+          </div>
+          {fade.top && <div aria-hidden className="pointer-events-none absolute left-0 right-0 top-0 h-6 bg-gradient-to-b from-white to-transparent" />}
+          {fade.bottom && <div aria-hidden className="pointer-events-none absolute left-0 right-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent" />}
+         </div>
         </div>
       </div>
+
+      {/* Footer */}
+      <div className="min-h-[64px] pl-6 pr-5 py-2 flex items-center gap-3 border-t border-[#E7E8E6] flex-none flex-wrap">
+        <span className="text-[#8A8A90] flex gap-4 tabular-nums">
+          <span>Total <b className="font-medium text-[#0E0D0C]">{fmt(grandTotal)}</b></span>
+          <span>Entered <b className="font-medium text-[#0E0D0C]">{fmt(entered)}</b></span>
+          <span>Left <b className="font-medium text-[#0E0D0C]">{fmt(leftover)}</b></span>
+        </span>
+        {blockReason && <span className="ml-auto text-[12px] text-[#B45309] text-right" data-testid="checkout-reason">{blockReason}</span>}
+        <div className={`${blockReason ? '' : 'ml-auto'} flex items-center gap-2.5`}>
+          <button type="button" onClick={requestClose} disabled={busy} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Cancel</button>
+          <button type="button" onClick={doSubmit} disabled={!canSubmit} title={blockReason || undefined}
+            className="h-9 pl-4 pr-3 rounded-[7px] bg-primary border border-primary text-white font-medium inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(45,90,39,.25),inset_0_1px_0_rgba(255,255,255,.15)] disabled:opacity-45 disabled:cursor-not-allowed">
+            {busy ? 'Recording…' : primaryLabel}
+            {!busy && <kbd className="text-[10.5px] px-1.5 rounded border border-white/25 bg-white/10 font-sans">↵</kbd>}
+          </button>
+        </div>
+      </div>
+
+      {confirmDiscard && (
+        <div className="absolute inset-0 z-10 rounded-[14px] bg-white/70 backdrop-blur-[2px] grid place-items-center">
+          <div role="alertdialog" aria-label="Discard payment" className="bg-white rounded-xl border border-[#E7E8E6] shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] p-5 w-[340px]">
+            <div className="font-semibold text-[14px]">Discard this payment?</div>
+            <p className="text-[#515152] mt-1">What you entered here hasn't been recorded.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" autoFocus onClick={() => setConfirmDiscard(false)} className="h-9 px-3.5 rounded-[7px] border border-[#E7E8E6] bg-white font-medium hover:bg-[#F7F7F5]">Keep editing</button>
+              <button type="button" onClick={() => onClose?.()} className="h-9 px-3.5 rounded-[7px] bg-error text-white font-medium">Discard</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // Backdrop: frosted, and a click outside does NOT close (a half-entered payment is too easy to lose).
+  return createPortal(
+    <div className="fixed inset-0 z-modal-overlay modal-backdrop-frost flex items-center justify-center p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) e.preventDefault(); /* a click outside neither closes nor steals focus */ }}>
+      {dialog}
+      {popoverEl}
+      {menuEl}
+    </div>,
+    document.body
+  );
+};
+
+// Popover list used by the method picker (sub-methods of a group, or the "More" overflow).
+// Portalled to <body> with fixed positioning so the dialog's scroll areas can't clip it.
+const PopoverList = ({ rect, groups, activeValue, onPick, onClose }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const first = ref.current?.querySelector('button');
+    first?.focus();
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [onClose]);
+  const width = Math.max(rect.width, 200);
+  const left = Math.min(rect.left, window.innerWidth - width - 12);
+  const flipUp = rect.bottom + 260 > window.innerHeight;
+  return (
+    <div ref={ref} role="menu"
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const btns = Array.from(ref.current.querySelectorAll('button'));
+          const i = btns.indexOf(document.activeElement);
+          btns[(i + (e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length]?.focus();
+        }
+      }}
+      style={{ position: 'fixed', left, width, ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }}
+      className="z-notification bg-white border border-[#E7E8E6] rounded-[10px] p-1 shadow-[0_12px_32px_-8px_rgba(14,13,12,.25)] max-h-64 overflow-y-auto text-[13px]">
+      {groups.map((g, gi) => (
+        <div key={gi}>
+          {g.title && <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-[#8A8A90]">{g.title}</div>}
+          {g.items.map((it) => (
+            <button key={it.value} type="button" role="menuitem" onClick={() => onPick(it.value)}
+              className={`w-full flex items-center gap-2 px-2.5 h-9 rounded-md text-left hover:bg-[#F4F4F2] focus:bg-[#F4F4F2] focus:outline-none ${String(activeValue) === String(it.value) ? 'font-medium text-primary' : 'text-[#0E0D0C]'}`}>
+              <Icon name={methodIcon(it.value)} size={14} strokeWidth={1.6} className="text-[#515152]" />
+              <span className="flex-1 truncate">{it.label}</span>
+              {String(activeValue) === String(it.value) && <Icon name="Check" size={13} strokeWidth={2.4} />}
+            </button>
+          ))}
+        </div>
+      ))}
     </div>
   );
 };
