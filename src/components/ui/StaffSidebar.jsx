@@ -10,7 +10,7 @@ import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from 'lib/featureFlags';
 
-const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
+const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange, collapsed }) => {
   const location = useLocation();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
@@ -18,6 +18,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // Lets a parent (e.g. Calendar's auto-collapse-for-width effect) push a collapsed
+  // state in, while the toggle button below still owns it day-to-day — undefined
+  // `collapsed` (every other call site) means this never fires, so manual-toggle-only
+  // behavior is unchanged everywhere else.
+  useEffect(() => {
+    if (collapsed !== undefined) setIsCollapsed(collapsed);
+  }, [collapsed]);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimeoutRef = useRef(null);
@@ -244,6 +251,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           icon: 'AlertCircle',
           path: `${basePath}?view=outstanding`,
           roles: ['manager', 'admin', 'admin_viewer']
+        },
+        {
+          id: 'due-report',
+          label: 'Due Report',
+          icon: 'ReceiptText',
+          path: `${basePath}?view=due-report`,
+          roles: ['admin']
         },
         {
           id: 'referrals',

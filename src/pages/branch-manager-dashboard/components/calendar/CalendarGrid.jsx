@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard, { canDragBooking, BookingHoverPreview } from './CalendarBookingCard';
-import { to12h } from '../../../../services/bookingTransformers';
+import { formatClockTime, formatHourLabel } from './timeFormat';
 
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
@@ -111,15 +111,22 @@ export const HOUR_HEIGHT = SLOT_HEIGHT * 2; // 120px per hour
 const TIME_COL_WIDTH = 64;
 
 // Pinch-to-zoom bounds (mobile/touch only) — effective hour height 40px–320px
-const MIN_ZOOM = 40 / HOUR_HEIGHT;
-const MAX_ZOOM = 320 / HOUR_HEIGHT;
-const clampZoom = (v) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
+export const MIN_ZOOM = 40 / HOUR_HEIGHT;
+export const MAX_ZOOM = 320 / HOUR_HEIGHT;
+export const clampZoom = (v) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
 const touchDistance = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
 
 function addDaysToStr(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
   return d.toISOString().split('T')[0];
+}
+
+// Sunday-first week start — must match calendar/index.jsx's own startOfWeek
+// so the fetched range (there) and the rendered columns (here) agree.
+function startOfWeekStr(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return addDaysToStr(dateStr, -d.getDay());
 }
 
 function formatShortDate(dateStr) {
@@ -144,15 +151,6 @@ function toKathmanduParts(isoString) {
 const MAX_VISIBLE_OVERLAP = 2;
 const OVERLAP_GAP = 2;       // px between side-by-side cards
 const OVERLAP_PADDING = 4;   // px from column edges
-
-// Convert "HH:MM" or "HH:MM:SS" to 12h format (used in the overflow popover)
-function toTime12h(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const period = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')}${period}`;
-}
 
 /**
  * Group overlapping bookings into clusters.
@@ -340,7 +338,7 @@ const DroppableColumn = ({ id, data, height, isActive }) => {
 // without first opening it. Reports its dragging state up so the popover can
 // fade out (not unmount — unmounting mid-drag would tear down dnd-kit's
 // active drag) while it's in flight, then close once the drag ends.
-const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
+const OverflowPopoverRow = ({ booking, onClick, onDragChange, use24h }) => {
   const isDraggable = canDragBooking(booking);
   const dragId = booking._colTherapistId
     ? `${booking.bookingId || booking.id}__${booking._colTherapistId}`
@@ -419,10 +417,10 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
       >
         <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
         <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
-        <div className="text-[10px] font-data text-text-secondary/80">{toTime12h(booking.startTime)} – {toTime12h(booking.endTime)}</div>
+        <div className="text-[10px] font-data text-text-secondary/80">{formatClockTime(booking.startTime, use24h)} – {formatClockTime(booking.endTime, use24h)}</div>
       </button>
       {showPreview && !isDragging && previewPos && (
-        <BookingHoverPreview booking={booking} position={previewPos} draggable={isDraggable} />
+        <BookingHoverPreview booking={booking} position={previewPos} draggable={isDraggable} use24h={use24h} />
       )}
     </>
   );
@@ -439,7 +437,7 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
 // NOT the 2 already-visible ones too: they're already rendered as their own
 // draggable CalendarBookingCard, and dnd-kit doesn't allow two draggable
 // elements sharing the same id in one DndContext.
-const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, onAdd }) => {
+const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, onAdd, use24h }) => {
   const [expanded, setExpanded] = useState(false);
   const [rowDragging, setRowDragging] = useState(false);
   const wrapRef = useRef(null);
@@ -485,6 +483,7 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
             <OverflowPopoverRow
               key={booking.id}
               booking={booking}
+              use24h={use24h}
               onClick={(b) => {
                 setExpanded(false);
                 onBookingClick?.(b);
@@ -543,7 +542,7 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
 // `pointerdown` specifically — stopping only `mousedown`/`click` propagation (a different
 // event type) would not have prevented the ancestor's drag listener from also firing.
 // Needs its own component (not inline in a .map()) because useDraggable is a hook.
-function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick }) {
+function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick, use24h }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     // colId disambiguates a whole-location block, which renders one instance per column (all
     // sharing the same blockId/day) — without it, dnd-kit's shared id registry can't tell
@@ -581,7 +580,7 @@ function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onRes
     >
       <span className="flex flex-col items-center gap-0.5 text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider bg-amber-700 border border-amber-800/60 px-1.5 py-0.5 rounded-spa shadow-spa-resting text-center">
         <span>{range.description || 'Not bookable'}</span>
-        <span className="normal-case font-caption-normal opacity-90">{to12h(range.fromTime)}–{to12h(range.toTime)}</span>
+        <span className="normal-case font-caption-normal opacity-90">{formatClockTime(range.fromTime, use24h)}–{formatClockTime(range.toTime, use24h)}</span>
       </span>
 
       {/* Remove — only if the block has an id (belt-and-suspenders; all blocks fetched via
@@ -663,6 +662,14 @@ const CalendarGrid = ({
   onToggleFreezeUnassigned,
   onTherapistReorder,
   onRoomReorder,
+  hideSensitive = false,
+  startHour,
+  endHour,
+  showFullDay = false,
+  intervalMinutes = 30,
+  use24h = false,
+  zoomScale: zoomScaleProp,
+  onZoomScaleChange,
 }) => {
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
@@ -680,13 +687,19 @@ const CalendarGrid = ({
   // Relayouts the grid at a scaled HOUR_HEIGHT/column width rather than a CSS
   // transform, so drag/tap hit-testing (which reads real DOM pixel positions)
   // stays correct at any zoom level.
-  const [zoomScale, setZoomScaleState] = useState(1);
-  const zoomScaleRef = useRef(1);
+  // Controlled by the parent toolbar's zoom in/out/reset buttons when onZoomScaleChange
+  // is passed (the normal case — see calendar/index.jsx); falls back to local state so
+  // this component still works standalone/in tests.
+  const [zoomScaleState, setZoomScaleState] = useState(1);
+  const zoomScale = zoomScaleProp != null ? zoomScaleProp : zoomScaleState;
+  const zoomScaleRef = useRef(zoomScale);
+  useEffect(() => { zoomScaleRef.current = zoomScale; }, [zoomScale]);
   const setZoomScale = useCallback((v) => {
     const clamped = clampZoom(v);
     zoomScaleRef.current = clamped;
-    setZoomScaleState(clamped);
-  }, []);
+    if (onZoomScaleChange) onZoomScaleChange(clamped);
+    else setZoomScaleState(clamped);
+  }, [onZoomScaleChange]);
   const pinchStateRef = useRef(null); // { startDist, startScale }
   const pinchAnchorRef = useRef(null); // { viewportX, viewportY, contentX, contentY }
   const pinchRAFRef = useRef(null);
@@ -802,9 +815,22 @@ const CalendarGrid = ({
     }
   }, [gridRef]);
 
-  const openHour = 9;  // 9am
+  // The configured business hours — used for the closed-hours shading below and,
+  // when showFullDay is off, doubles as the grid's own rendered bounds (today's
+  // only behavior, unchanged).
+  const businessStartHour = Number.isInteger(startHour) ? startHour : 9;  // 9am default, overridable via Calendar settings
+  // 11pm default, overridable via Calendar settings — must stay after businessStartHour
+  // or the grid would render zero/negative hours.
+  const businessEndHour = Number.isInteger(endHour) && endHour > businessStartHour ? endHour : 23;
 
-  const closeHour = 23;  // last label 10pm (22), grid ends at 11pm
+  // openHour/closeHour are the grid's actual rendered pixel bounds — every position
+  // calculation below (timeToTop, click/drag hour math, droppable data, etc.) is
+  // written in terms of these two, not the business-hours pair above, so toggling
+  // showFullDay just moves the pixel origin to midnight without touching any of that
+  // math. The closed hours (outside business hours) still render, shaded — see
+  // renderClosedHoursShading.
+  const openHour = showFullDay ? 0 : businessStartHour;
+  const closeHour = showFullDay ? 24 : businessEndHour;
 
   const TOP_PAD = 12;  // breathing room above the first (9am) line
 
@@ -818,6 +844,10 @@ const CalendarGrid = ({
 
   const days = useMemo(() => {
     if (viewMode === '4day') return [0, 1, 2, 3].map(i => addDaysToStr(currentDate, i));
+    if (viewMode === 'week') {
+      const start = startOfWeekStr(currentDate);
+      return Array.from({ length: 7 }, (_, i) => addDaysToStr(start, i));
+    }
     return [currentDate];
   }, [currentDate, viewMode]);
 
@@ -876,17 +906,24 @@ const CalendarGrid = ({
 
       const startTime = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
       const endTime = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
-      const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
+      // Combo service: booking_combo_items carries one row per bundled service, each
+      // with its own therapist/time slice. Takes priority over isShared — a combo
+      // booking's primary therapist_id/booking_therapists aren't meant to render as
+      // a second, overlapping card.
+      const isCombo = b.booking_combo_items?.length > 0;
+      const isShared = !isCombo && columnMode === 'therapist' && b.booking_therapists?.length > 1;
       // Couple in separate rooms: each therapist's effective room is their own
       // booking_therapists.room_id override, falling back to the booking's primary
       // room. >1 distinct effective room means this booking needs a card in each.
-      const effectiveRoomIds = columnMode === 'room' && b.booking_therapists?.length > 0
+      const effectiveRoomIds = !isCombo && columnMode === 'room' && b.booking_therapists?.length > 0
         ? [...new Set(b.booking_therapists.map(bt => bt.room_id || b.room_id).filter(Boolean))]
         : [];
-      const isRoomShared = columnMode === 'room' && effectiveRoomIds.length > 1;
+      const isRoomShared = !isCombo && columnMode === 'room' && effectiveRoomIds.length > 1;
       const { id: visibleTherapistId, name: therapistName } = isShared
         ? { id: null, name: b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ') }
-        : resolveSingleTherapist(b, therapistMap);
+        : isCombo
+          ? { id: null, name: b.booking_combo_items.map(ci => therapistMap[ci.therapist_id] || ci.therapist?.name).filter(Boolean).join(', ') }
+          : resolveSingleTherapist(b, therapistMap);
 
       const baseEntry = {
         id: b.id,
@@ -919,9 +956,49 @@ const CalendarGrid = ({
         isOnline: !b.created_by,
         isShared,
         sharedCount: isShared ? b.booking_therapists.length : 0,
+        isCombo,
+        comboCount: isCombo ? b.booking_combo_items.length : 0,
       };
 
-      if (isShared) {
+      if (isCombo) {
+        // One card per component, each in its own therapist's column at the
+        // component's own start/end time — mirrors the isShared split below, but
+        // each card also carries its own serviceName/duration (a combo's components
+        // are different services, not the same service at different times).
+        const columnOrder = columns.map(c => c.id);
+        const orderedItems = [...b.booking_combo_items].sort((a, c) => (a.display_order ?? 0) - (c.display_order ?? 0));
+        // Unassigned component (no therapist/room picked, same as any other
+        // unstaffed booking) lands in the 'unassigned' column rather than being
+        // dropped — staff/room assignment is optional for combo components same
+        // as single bookings.
+        const resolvedColIds = orderedItems.map(ci => {
+          if (columnMode === 'room') {
+            return (ci.room_id || b.room_id) || 'unassigned';
+          }
+          return ci.therapist_id && isTherapistVisible(ci.therapist_id, therapistMap) ? ci.therapist_id : 'unassigned';
+        });
+        const leftmostId = columnOrder.find(cid => resolvedColIds.includes(cid)) ?? 'unassigned';
+
+        orderedItems.forEach((ci, index) => {
+          const colId = resolvedColIds[index];
+          if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
+          map[bookingDate][colId].push({
+            ...baseEntry,
+            serviceName: ci.service?.name || baseEntry.serviceName,
+            serviceDuration: ci.service?.duration_minutes || null,
+            roomId: ci.room_id || b.room_id,
+            roomName: roomMap[ci.room_id] || baseEntry.roomName,
+            _colTherapistId: columnMode === 'room' ? baseEntry.therapistId : colId,
+            _colRoomId: columnMode === 'room' ? colId : undefined,
+            _isFaded: colId !== leftmostId,
+            _comboIndex: index,
+            startTime: ci.start_time || startTime,
+            endTime: ci.end_time || endTime,
+            _bookingStartTime: startTime,
+            _bookingEndTime: endTime,
+          });
+        });
+      } else if (isShared) {
         // Place booking in each assigned therapist's column with per-therapist times
         // Leftmost column in current visual order = primary (unfaded), rest = faded
         const columnOrder = columns.map(c => c.id);
@@ -1019,7 +1096,15 @@ const CalendarGrid = ({
     const [sh, sm] = startStr.split(':').map(Number);
     const [eh, em] = endStr.split(':').map(Number);
     let rawMinutes = (eh * 60 + em) - (sh * 60 + sm);
-    if (rawMinutes < 0) rawMinutes += 1440; // end time wrapped past midnight
+    // <= 0, not < 0: a manual block spanning exactly 1440 minutes (e.g. a
+    // whole-day holiday block starting at 00:00) computes an end clock-time
+    // identical to its start ("00:00" both ends) — rawMinutes lands on exactly
+    // 0, not negative, so a strict "< 0" wrap check misses it and renders the
+    // block as a sliver instead of the full day. No caller ever has a genuine
+    // zero-duration block/booking (duration_minutes/price>0 is enforced at the
+    // DB level), so treating exactly-0 the same as negative (both mean "wrapped
+    // past midnight") is always correct here.
+    if (rawMinutes <= 0) rawMinutes += 1440;
     return Math.max(rawMinutes / 60 * eHH, 24);
   };
 
@@ -1263,7 +1348,7 @@ const CalendarGrid = ({
     // which reads exactly like "did this even save?" (see the apply_due_staff_transfers
     // cron comment in migration-148 for why it's correctly NOT applied yet).
     const scheduledLabel = col.scheduledTransfer
-      ? `Scheduled — transfer to ${col.scheduledTransfer.toBranch || 'another branch'} at ${to12h(col.scheduledTransfer.startTime)}`
+      ? `Scheduled — transfer to ${col.scheduledTransfer.toBranch || 'another branch'} at ${formatClockTime(col.scheduledTransfer.startTime, use24h)}`
       : null;
     // Online-unassigned count only ever applies to the synthetic Unassigned/No
     // Room column, and only overrides the plain name when there's actually
@@ -1277,7 +1362,7 @@ const CalendarGrid = ({
     const headerTooltip = transferReason
       ? `${col.name} — ${transferReason}`
       : todayBlock
-        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''} (${to12h(todayBlock.fromTime)}–${to12h(todayBlock.toTime)})`
+        ? `${col.name} — Blocked${todayBlock.description ? `: ${todayBlock.description}` : ''} (${formatClockTime(todayBlock.fromTime, use24h)}–${formatClockTime(todayBlock.toTime, use24h)})`
         : scheduledLabel
           ? `${col.name} — ${scheduledLabel}`
           : onlineUnassignedTooltip || col.name;
@@ -1357,7 +1442,7 @@ const CalendarGrid = ({
             title="Click to cancel this scheduled transfer"
             className="text-[9px] font-caption text-amber-600 font-bold uppercase tracking-wider mt-0.5 hover:underline hover:text-amber-800"
           >
-            Transfer at {to12h(col.scheduledTransfer.startTime)} · Cancel
+            Transfer at {formatClockTime(col.scheduledTransfer.startTime, use24h)} · Cancel
           </button>
         )}
       </div>
@@ -1370,12 +1455,17 @@ const CalendarGrid = ({
       {hours.map((hour) => (
         <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * eHH + TOP_PAD }}>
           <span className="absolute -top-2.5 right-2 font-data text-[13px] text-text-secondary">
-            {hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`}
+            {formatHourLabel(hour, use24h)}
           </span>
         </div>
       ))}
     </div>
   );
+
+  // Light sub-hour lines, purely visual — doesn't touch timeToTop/timeToHeight
+  // or the hour-granularity click/drag math below, so this is safe to vary
+  // independently via the "Calendar interval" setting.
+  const subLineFractions = intervalMinutes >= 60 ? [] : intervalMinutes <= 15 ? [0.25, 0.5, 0.75] : [0.5];
 
   // Solid lines only — rendered once per container, spans all columns
   const renderGridLines = () => (
@@ -1385,20 +1475,45 @@ const CalendarGrid = ({
         return (
           <React.Fragment key={`lines-${hour}`}>
             <div className="absolute left-0 right-0 border-t-2 border-text-secondary/70" style={{ top }} />
-            <div className="absolute left-0 right-0 border-t border-border/40" style={{ top: top + eSlot }} />
+            {subLineFractions.map((frac) => (
+              <div key={frac} className="absolute left-0 right-0 border-t border-border/40" style={{ top: top + eHH * frac }} />
+            ))}
           </React.Fragment>
         );
       })}
     </>
   );
 
+  // Diagonal-hatched shading over the hours outside business hours (before
+  // businessStartHour, after businessEndHour) — only ever non-empty when
+  // showFullDay is on, since otherwise openHour/closeHour already equal the
+  // business-hours pair and the grid never renders those hours at all.
+  // Purely visual: it does not block clicking/dragging into a shaded slot.
+  const renderClosedHoursShading = () => {
+    const beforeHeight = Math.max(0, businessStartHour - openHour) * eHH;
+    const afterTop = (Math.max(businessEndHour, openHour) - openHour) * eHH + TOP_PAD;
+    const afterHeight = Math.max(0, closeHour - businessEndHour) * eHH;
+    const stripeStyle = {
+      backgroundImage: 'repeating-linear-gradient(45deg, var(--color-border) 0, var(--color-border) 1px, transparent 1px, transparent 9px)',
+      backgroundColor: 'var(--color-background)',
+    };
+    return (
+      <>
+        {beforeHeight > 0 && (
+          <div className="absolute left-0 right-0 pointer-events-none" style={{ top: TOP_PAD, height: beforeHeight, ...stripeStyle }} />
+        )}
+        {afterHeight > 0 && (
+          <div className="absolute left-0 right-0 pointer-events-none" style={{ top: afterTop, height: afterHeight, ...stripeStyle }} />
+        )}
+      </>
+    );
+  };
+
   // Dashed interval lines with hover tooltips — rendered per-column
   const renderIntervalLines = () => {
     const TEN_MIN = eHH / 6;
     const renderIntervalLine = (hour, minuteOffset, topPos) => {
-      const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-      const ampm = hour < 12 ? 'am' : 'pm';
-      const label = `${h12}:${String(minuteOffset).padStart(2, '0')}${ampm}`;
+      const label = formatClockTime(`${String(hour).padStart(2, '0')}:${String(minuteOffset).padStart(2, '0')}`, use24h);
       return (
         <div key={`${hour}-${minuteOffset}`} className="absolute left-0 right-0 group/line" style={{ top: topPos }}>
           <div className="absolute inset-x-0 top-0" style={{ borderTop: '1px dashed rgba(180, 180, 180, 0.35)' }} />
@@ -1594,6 +1709,7 @@ const CalendarGrid = ({
               blockHeight={blockHeight}
               onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
               onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
+              use24h={use24h}
               onClick={() => onEditManualBlock?.(range)}
             />
           );
@@ -1623,6 +1739,8 @@ const CalendarGrid = ({
                       key={cardKey}
                       booking={booking}
                       columnMode={columnMode}
+                      hideSensitive={hideSensitive}
+                      use24h={use24h}
                       style={{
                         top: timeToTop(booking.startTime) - clusterTop,
                         height: timeToHeight(booking.startTime, booking.endTime),
@@ -1649,6 +1767,7 @@ const CalendarGrid = ({
                     key={`badge-${cluster[0].id}`}
                     count={layout.badge.count}
                     bookings={hidden}
+                    use24h={use24h}
                     onBookingClick={onBookingClick}
                     onAdd={onEmptySlotClick ? (e) => {
                       if (activeDragId) return;
@@ -1807,6 +1926,7 @@ const CalendarGrid = ({
                 data-cal-column="true"
                 onClick={(e) => handleColumnClick(e, currentDate, unassignedCol)}
               >
+                {renderClosedHoursShading()}
                 {renderGridLines()}
                 {renderIntervalLines()}
                 {renderNowIndicator(currentDate)}
@@ -1839,6 +1959,8 @@ const CalendarGrid = ({
                               key={booking.id}
                               booking={booking}
                               columnMode={columnMode}
+                              hideSensitive={hideSensitive}
+                              use24h={use24h}
                               style={{
                                 top: timeToTop(booking.startTime) - clusterTop,
                                 height: timeToHeight(booking.startTime, booking.endTime),
@@ -1911,6 +2033,7 @@ const CalendarGrid = ({
             );
           })()}
           <div className="flex flex-1 relative overflow-hidden" style={{ minWidth: regularMinWidth }}>
+            {renderClosedHoursShading()}
             {renderGridLines()}
             {renderNowIndicator(currentDate)}
             {regularColumns.map(col => renderColumn(col, currentDate))}
@@ -1969,6 +2092,7 @@ const CalendarGrid = ({
         >
           {renderTimeLabels()}
           <div className="flex flex-1 relative" style={{ minWidth: daysMinWidth }}>
+            {renderClosedHoursShading()}
             {renderGridLines()}
             {days.map((day, di) => {
               const isCurrentDay = day === todayStr;
@@ -2016,6 +2140,8 @@ const CalendarGrid = ({
                       key={booking.id}
                       booking={booking}
                       columnMode={columnMode}
+                      hideSensitive={hideSensitive}
+                      use24h={use24h}
                       style={{
                         top: timeToTop(booking.startTime),
                         height: timeToHeight(booking.startTime, booking.endTime),

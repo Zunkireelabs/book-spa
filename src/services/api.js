@@ -198,7 +198,7 @@ export async function fetchServices(branchId) {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, effective_price_npr, is_on_offer, original_price_npr')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, requires_therapist, effective_price_npr, is_on_offer, original_price_npr')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -1203,6 +1203,61 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     return { data: result, error: null };
   } catch (error) {
     console.error('[API] getOutstandingByStaff error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Org-wide outstanding (unpaid + partial) balances, grouped by branch — admin-only
+// report. Relies on RLS: role='admin' already bypasses the branch_id check on
+// "bookings" (migration-224), so an unfiltered query here returns every branch
+// in the admin's org without needing branchId/withBranch. from/to are ISO dates
+// (inclusive); omit for all-time.
+export async function getDueReportByBranch({ from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select(
+        'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)'
+      )
+      .in('payment_status', ['unpaid', 'partial'])
+      .not('status', 'in', '("Cancelled","No Show")');
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const groups = {};
+    for (const b of bookings || []) {
+      const collected = (b.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
+      if (due <= 0) continue;
+      const branchId = b.branch_id;
+      if (!groups[branchId]) {
+        groups[branchId] = { branchId, branchName: b.branches?.name || 'Unknown Branch', totalDue: 0, bookingCount: 0, bookings: [] };
+      }
+      groups[branchId].totalDue = Math.round((groups[branchId].totalDue + due) * 100) / 100;
+      groups[branchId].bookingCount += 1;
+      groups[branchId].bookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        date: b.date,
+        status: b.status,
+        paymentStatus: b.payment_status,
+        customerName: b.customer_name,
+        customerPhone: b.customer_phone,
+        therapistName: b.therapist_name_snapshot || null,
+        createdByName: b.creator?.full_name || null,
+        isOnlineBooking: !b.created_by && Boolean(b.client_request_id),
+        finalAmount: Number(b.final_amount),
+        amountPaid: collected,
+        amountDue: due,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalDue - a.totalDue);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getDueReportByBranch error:', error.message);
     return { data: null, error };
   }
 }
@@ -5093,6 +5148,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         room:rooms(id, name),
         creator:users!created_by(full_name),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name)),
+        booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name)),
         payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
@@ -6787,6 +6843,131 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
   }
 }
 
+// All therapists' recurring weekly hours for a branch in one query (therapist_working_hours.
+// branch_id is denormalized — see migration-275), for the Roster grid's per-day defaults.
+// Returns { data: Map<therapistId, Array<{dayOfWeek, startTime, endTime, isDayOff}>>, error }
+export async function fetchBranchWorkingHours(branchId) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .select('therapist_id, day_of_week, start_time, end_time, is_day_off')
+      .eq('branch_id', branchId);
+
+    if (error) throw error;
+
+    const byTherapist = new Map();
+    (data || []).forEach(row => {
+      if (!byTherapist.has(row.therapist_id)) byTherapist.set(row.therapist_id, []);
+      byTherapist.get(row.therapist_id).push({
+        dayOfWeek: row.day_of_week,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        isDayOff: row.is_day_off,
+      });
+    });
+
+    return { data: byTherapist, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchWorkingHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Per-date overrides (migration-287) for every therapist in a branch across [startDate, endDate]
+// (inclusive, "YYYY-MM-DD"), for the Roster grid. A date with no row here falls back to that
+// therapist's normal weekly hours for its day-of-week (see fetchBranchWorkingHours above).
+export async function fetchRosterOverrides({ branchId, startDate, endDate }) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    if (!startDate || !endDate) return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Date range is required.' } };
+
+    const { data, error } = await supabase
+      .from('staff_roster_overrides')
+      .select('therapist_id, override_date, start_time, end_time, is_day_off')
+      .eq('branch_id', branchId)
+      .gte('override_date', startDate)
+      .lte('override_date', endDate);
+
+    if (error) throw error;
+
+    const byKey = new Map();
+    (data || []).forEach(row => {
+      byKey.set(`${row.therapist_id}_${row.override_date}`, {
+        therapistId: row.therapist_id,
+        date: row.override_date,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        isDayOff: row.is_day_off,
+      });
+    });
+
+    return { data: byKey, error: null };
+  } catch (error) {
+    console.error('[API] fetchRosterOverrides error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// overrides: [{ therapistId, date: 'YYYY-MM-DD', isDayOff, startTime, endTime }, ...] — bulk
+// upsert for the Roster grid's "Save roster" button. Same manager/admin + branch-ownership
+// gating and start<end validation as upsertTherapistWorkingHours.
+export async function upsertRosterOverrides(overrides) {
+  try {
+    if (!overrides || overrides.length === 0) return { data: [], error: null };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const therapistIds = [...new Set(overrides.map(o => o.therapistId))];
+    const { data: therapistRows, error: fetchError } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .in('id', therapistIds);
+    if (fetchError) throw fetchError;
+
+    const branchById = new Map((therapistRows || []).map(t => [t.id, t.branch_id]));
+    for (const id of therapistIds) {
+      const branchId = branchById.get(id);
+      if (!branchId) return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      if (profile.role === 'manager' && branchId !== profile.branch_id) {
+        return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+      }
+    }
+
+    for (const o of overrides) {
+      if (!o.isDayOff && (!o.startTime || !o.endTime || o.startTime >= o.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${o.date}: start time must be before end time.` } };
+      }
+    }
+
+    const payload = overrides.map(o => ({
+      therapist_id: o.therapistId,
+      branch_id: branchById.get(o.therapistId),
+      override_date: o.date,
+      start_time: o.isDayOff ? null : o.startTime,
+      end_time: o.isDayOff ? null : o.endTime,
+      is_day_off: !!o.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('staff_roster_overrides')
+      .upsert(payload, { onConflict: 'therapist_id,override_date' })
+      .select('therapist_id, override_date, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertRosterOverrides error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function toggleTherapistActive({ therapistId, isActive }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -7112,6 +7293,86 @@ export async function fetchBlocksForRange(branchId, startDate, endDate) {
     console.error('[API] fetchBlocksForRange error:', error.message);
     return { data: null, error };
   }
+}
+
+// ============================================================
+// Closed Dates (Setup → "Closed dates" page) — a dedicated, Timely-style business-
+// closure list built on the existing manual_blocks primitive rather than a new table.
+// A "closed date" is recognized as a whole-location (no therapist/room), all-day
+// (start_time 00:00, duration 1440) block — the exact shape AddBlockModal's "Whole
+// location" + "Closed all day" options already produce. A multi-day range is just
+// that block set to repeat daily through recurrence_end_date, reusing manual_blocks'
+// existing recurrence machinery instead of inventing a start/end-date column.
+// ============================================================
+
+const CLOSED_DATE_START_TIME = '00:00:00';
+const CLOSED_DATE_DURATION_MINUTES = 1440;
+
+function daysBetweenInclusive(startDate, endDate) {
+  const start = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+export async function fetchClosedDateRanges(branchId) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .select('id, block_date, recurrence_end_date, recurrence_freq, description')
+      .eq('branch_id', resolvedBranchId)
+      .eq('is_cancelled', false)
+      .is('therapist_id', null)
+      .is('room_id', null)
+      .eq('start_time', CLOSED_DATE_START_TIME)
+      .eq('duration_minutes', CLOSED_DATE_DURATION_MINUTES)
+      .order('block_date', { ascending: true });
+    if (error) throw error;
+
+    const ranges = (data || []).map(row => {
+      const endDate = row.recurrence_freq ? (row.recurrence_end_date || row.block_date) : row.block_date;
+      return {
+        blockId: row.id,
+        startDate: row.block_date,
+        endDate,
+        days: daysBetweenInclusive(row.block_date, endDate),
+        description: row.description,
+      };
+    });
+    return { data: ranges, error: null };
+  } catch (error) {
+    console.error('[API] fetchClosedDateRanges error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createClosedDateRange({ orgId, branchId, startDate, endDate, description }) {
+  if (!startDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'Start date is required.' } };
+  const resolvedEnd = endDate || startDate;
+  if (resolvedEnd < startDate) {
+    return { data: null, error: { code: 'INVALID_INPUT', message: 'End date must be on or after the start date.' } };
+  }
+  const isRange = resolvedEnd !== startDate;
+
+  return createBlock({
+    orgId,
+    branchId,
+    blockDate: startDate,
+    startTime: CLOSED_DATE_START_TIME,
+    durationMinutes: CLOSED_DATE_DURATION_MINUTES,
+    description,
+    preventOnlineBooking: true,
+    recurrenceFreq: isRange ? 'daily' : null,
+    recurrenceInterval: 1,
+    recurrenceEndDate: isRange ? resolvedEnd : null,
+  });
+}
+
+// No edit-in-place — manual_blocks' recurrence_end_date isn't one of updateBlock's
+// patchable fields, so "editing" a range is delete-then-recreate (see
+// ClosedDatesPanel.jsx's handleSave).
+export async function deleteClosedDateRange(blockId) {
+  return deleteBlock({ blockId, scope: 'series' });
 }
 
 // scope: 'this' (cancel just this occurrence), 'following' (split the series — this row's
@@ -7642,7 +7903,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -7701,6 +7962,48 @@ export async function uploadServiceImage(file) {
     return { url: publicUrl, error: null };
   } catch (error) {
     console.error('[API] uploadServiceImage error:', error.message);
+    return { url: null, error };
+  }
+}
+
+// Admin-only org branding image upload (Provider Profile's Logo/Hero), same bucket +
+// validation as uploadStaffPhoto, path-prefixed per org since the bucket is shared
+// across tenants. kind: 'logo' | 'hero' — only used for the storage path, not stored
+// anywhere; callers persist the returned URL via updateOrgBranding.
+export async function uploadOrgBrandingImage(kind, file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can upload branding images.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${kind}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `branding/${profile.org_id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadOrgBrandingImage error:', error.message);
     return { url: null, error };
   }
 }
@@ -7909,7 +8212,174 @@ export async function deleteCustomerDocument(documentId) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
+// Combo bundle membership (migration-288/289) — which services make up a combo
+// service, plus the per-component defaults (default_timing: does this component
+// start alongside the previous one or only after it ends; default_same_staff:
+// prefill the booking's primary therapist for this component, or require picking
+// a separate one) the booking flow uses to prefill `booking_combo_items` rows.
+export async function fetchServiceComboComponents(serviceId) {
+  try {
+    if (!serviceId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('combo_package_components')
+      .select('id, service_id, display_order, default_timing, default_same_staff, default_same_room, service:services!combo_package_components_service_id_fkey ( id, name, duration_minutes, price_npr )')
+      .eq('combo_service_id', serviceId)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        componentId: r.id,
+        serviceId: r.service_id,
+        displayOrder: r.display_order,
+        defaultTiming: r.default_timing,
+        defaultSameStaff: r.default_same_staff,
+        defaultSameRoom: r.default_same_room,
+        service: r.service ? { id: r.service.id, name: r.service.name, durationMinutes: r.service.duration_minutes, priceNpr: Number(r.service.price_npr) } : null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchServiceComboComponents error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Creates the per-component booking_combo_items rows for a combo booking, once the
+// parent `bookings` row already exists (createBooking is used unmodified for that —
+// the combo service's own flat duration_minutes/price still covers the whole slot;
+// this just records which staff/time each bundled service actually gets, matching
+// migration-288's schema). Computes each component's start offset anchored at the
+// booking's own startTime, using the identical "concurrent starts alongside the
+// previous component, sequential starts once everything so far has finished" rule
+// the Service Detail page previews (see service-detail/index.jsx's schedule calc) —
+// keep both in sync if that algorithm ever changes.
+// components: [{ serviceId, componentId, defaultTiming, therapistId }] — therapistId
+// already resolved by the caller (same as the booking's primary therapist, or a
+// staff-picked override for a "different staff" component).
+export async function createComboBookingItems({ bookingId, branchId, date, startTime, roomId, components }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!bookingId) return { data: null, error: { code: 'INVALID_INPUT', message: 'bookingId is required.' } };
+    if (!components || components.length === 0) return { data: [], error: null };
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    // Need each component service's duration to compute offsets.
+    const serviceIds = components.map((c) => c.serviceId);
+    const { data: serviceRows, error: serviceError } = await supabase
+      .from('services')
+      .select('id, duration_minutes')
+      .in('id', serviceIds);
+    if (serviceError) throw serviceError;
+    const durationById = {};
+    (serviceRows || []).forEach((s) => { durationById[s.id] = s.duration_minutes; });
+
+    const [startH, startM] = startTime.split(':').map(Number);
+    let cursor = 0;
+    let previousStart = 0;
+    const rows = components.map((c, index) => {
+      const duration = durationById[c.serviceId] || 0;
+      const offset = c.defaultTiming === 'concurrent' ? previousStart : cursor;
+      const end = offset + duration;
+      cursor = Math.max(cursor, end);
+      previousStart = offset;
+
+      const totalMinutes = startH * 60 + startM + offset;
+      const compStartTime = `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}:00`;
+
+      return {
+        booking_id: bookingId,
+        component_id: c.componentId || null,
+        service_id: c.serviceId,
+        therapist_id: c.therapistId || null,
+        room_id: c.roomId || roomId || null,
+        display_order: index,
+        date,
+        start_time: compStartTime,
+        commission_weight: 1,
+        base_share_amount: 0,
+      };
+    });
+
+    const { data, error } = await supabase
+      .from('booking_combo_items')
+      .insert(rows)
+      .select('id, service_id, therapist_id, room_id, start_time, end_time');
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createComboBookingItems error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Atomic replace of a combo service's component list. Delegates to
+// set_service_combo_components (migration-289), mirroring setServiceTherapists.
+// components: [{ serviceId, displayOrder, defaultTiming, defaultSameStaff, defaultSameRoom }]
+export async function setServiceComboComponents(comboServiceId, components) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const payload = (components || []).map((c, index) => ({
+      service_id: c.serviceId,
+      display_order: c.displayOrder != null ? c.displayOrder : index,
+      default_timing: c.defaultTiming || 'sequential',
+      default_same_staff: c.defaultSameStaff !== false,
+      default_same_room: c.defaultSameRoom !== false,
+    }));
+
+    const { data, error } = await supabase.rpc('set_service_combo_components', {
+      p_combo_service_id: comboServiceId,
+      p_components: payload,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setServiceComboComponents error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Which other services are offered as add-ons alongside this one (migration-291/292).
+// Only services flagged is_addon=true are valid candidates — enforced by the UI's
+// candidate list, not by this read.
+export async function fetchServiceAddons(serviceId) {
+  try {
+    if (!serviceId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('service_addons')
+      .select('addon_service_id, display_order')
+      .eq('service_id', serviceId)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return { data: (data || []).map((r) => r.addon_service_id), error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceAddons error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function setServiceAddons(serviceId, addonServiceIds) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('set_service_addons', {
+      p_service_id: serviceId,
+      p_addon_service_ids: addonServiceIds || [],
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setServiceAddons error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -7945,13 +8415,20 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         image_url: imageUrl || null,
         category: category || 'Spa',
         is_couple: !!isCouple,
+        is_combo: !!isCombo,
         is_active: true,
         org_id: profile.org_id,
         offer_enabled: isOfferEnabled,
         offer_type: isOfferEnabled ? offerType : null,
         offer_value: isOfferEnabled ? offerValue : null,
+        bookable_online: bookableOnline !== undefined ? !!bookableOnline : true,
+        is_addon: !!isAddon,
+        padding_before_minutes: paddingBeforeMinutes || 0,
+        padding_after_minutes: paddingAfterMinutes || 0,
+        padding_after_type: paddingAfterType || 'padding',
+        requires_therapist: requiresTherapist !== undefined ? !!requiresTherapist : true,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) throw error;
@@ -7962,7 +8439,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
+export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -7984,12 +8461,19 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
     if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
+    if (isCombo !== undefined) updatePayload.is_combo = !!isCombo;
     if (offerEnabled !== undefined) {
       const isOfferEnabled = !!offerEnabled;
       updatePayload.offer_enabled = isOfferEnabled;
       updatePayload.offer_type = isOfferEnabled ? offerType : null;
       updatePayload.offer_value = isOfferEnabled ? offerValue : null;
     }
+    if (bookableOnline !== undefined) updatePayload.bookable_online = !!bookableOnline;
+    if (isAddon !== undefined) updatePayload.is_addon = !!isAddon;
+    if (paddingBeforeMinutes !== undefined) updatePayload.padding_before_minutes = paddingBeforeMinutes || 0;
+    if (paddingAfterMinutes !== undefined) updatePayload.padding_after_minutes = paddingAfterMinutes || 0;
+    if (paddingAfterType !== undefined) updatePayload.padding_after_type = paddingAfterType || 'padding';
+    if (requiresTherapist !== undefined) updatePayload.requires_therapist = !!requiresTherapist;
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -8000,7 +8484,7 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) {
@@ -8623,6 +9107,39 @@ export async function fetchCustomersLightweight(branchId) {
     return { data: enriched, error: null };
   } catch (error) {
     console.error('[API] fetchCustomersLightweight error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Change-history for the customer-detail Log tab. Reads audit_logs rows written
+// by the trg_audit_customer_changes trigger (migration-297) — UPDATE/DELETE on
+// customers (profile edits, block/unblock via is_active, merge coalesce) plus
+// the explicit MERGE marker merge_customers() inserts. RLS already scopes this
+// to manager/admin/admin_viewer within their own org (audit_logs' existing
+// policies) — a staff viewer gets an empty result, not an error.
+export async function fetchCustomerLog(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('id, action_type, old_data, new_data, changed_at, changed_by, actor:users!changed_by(full_name)')
+      .eq('table_name', 'customers')
+      .eq('record_id', customerId)
+      .order('changed_at', { ascending: false });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        id: r.id,
+        actionType: r.action_type,
+        oldData: r.old_data,
+        newData: r.new_data,
+        changedAt: r.changed_at,
+        actorName: r.actor?.full_name || null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchCustomerLog error:', error.message);
     return { data: null, error };
   }
 }
@@ -15024,6 +15541,40 @@ export async function correctPaymentMode({ paymentId, newMode, reason }) {
     return { data: { auditLogId: data }, error: null };
   } catch (error) {
     console.error('[API] correctPaymentMode error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only correction of a recorded payment's amount (migration-283). Same
+// shape/guards as correctPaymentMode above — payments has no UPDATE RLS
+// policy at all, so this is the only path past that immutability.
+export async function correctPaymentAmount({ paymentId, newAmount, reason }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can correct a payment amount.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+    const parsed = Number(newAmount);
+    if (newAmount === '' || newAmount === null || Number.isNaN(parsed) || parsed < 0) {
+      return { data: null, error: { code: 'AMOUNT_REQUIRED', message: 'A valid new amount is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('admin_correct_payment_amount', {
+      p_payment_id: paymentId,
+      p_new_amount: parsed,
+      p_reason: reason.trim(),
+    });
+    if (error) throw error;
+
+    capture('admin_payment_amount_corrected', { payment_id: paymentId, new_amount: parsed });
+    return { data: { auditLogId: data }, error: null };
+  } catch (error) {
+    console.error('[API] correctPaymentAmount error:', error.message);
     return { data: null, error };
   }
 }

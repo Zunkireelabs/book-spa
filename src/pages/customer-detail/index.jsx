@@ -5,6 +5,7 @@ import Button from '../../components/ui/Button';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import StaffSidebar from '../../components/ui/StaffSidebar';
 import CustomerSummaryTab from './components/CustomerSummaryTab';
+import CustomerVisitHistoryTab from './components/CustomerVisitHistoryTab';
 import CustomerAppointmentsTab from './components/CustomerAppointmentsTab';
 import CustomerSalesTab from './components/CustomerSalesTab';
 import CustomerNotesTab from './components/CustomerNotesTab';
@@ -117,6 +118,7 @@ const CustomerDetailPage = () => {
 
   const TABS = data ? [
     { key: 'summary', label: 'Summary' },
+    { key: 'visitHistory', label: 'Visit History' },
     { key: 'appointments', label: `Appointments (${data.history.length})` },
     { key: 'sales', label: `Sales (${data.history.filter(b => b.paymentStatus === 'paid').length})` },
     { key: 'notes', label: `Notes (${data.customer.notes ? 1 : 0})` },
@@ -125,11 +127,11 @@ const CustomerDetailPage = () => {
     { key: 'photos', label: 'Photos' },
     { key: 'documents', label: 'Documents' },
     { key: 'vouchers', label: 'Gift Vouchers' },
-    { key: 'log', label: 'Log (0)' },
+    { key: 'log', label: 'Log' },
   ] : [];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-surface">
       <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
@@ -171,7 +173,7 @@ const CustomerDetailPage = () => {
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+        <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
           {loading ? (
             <div className="text-center py-20">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
@@ -187,7 +189,7 @@ const CustomerDetailPage = () => {
             <>
               <h1 className="font-accent text-5xl text-text-primary">{data.customer.fullName}</h1>
 
-              <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
+              <div className="flex items-center gap-1 border-b border-border overflow-x-auto scrollbar-hide">
                 {TABS.map(tab => (
                   <button
                     key={tab.key}
@@ -204,6 +206,7 @@ const CustomerDetailPage = () => {
               </div>
 
               {activeTab === 'summary' && <CustomerSummaryTab data={data} onNavigateTab={setActiveTab} />}
+              {activeTab === 'visitHistory' && <CustomerVisitHistoryTab data={data} />}
               {activeTab === 'appointments' && <CustomerAppointmentsTab data={data} />}
               {activeTab === 'sales' && <CustomerSalesTab data={data} />}
               {activeTab === 'notes' && <CustomerNotesTab customer={data.customer} onSaved={loadProfile} />}
@@ -212,7 +215,7 @@ const CustomerDetailPage = () => {
               {activeTab === 'photos' && <CustomerPhotosTab customerId={data.customer.id} branchId={data.customer.branchId} />}
               {activeTab === 'documents' && <CustomerDocumentsTab customerId={data.customer.id} branchId={data.customer.branchId} />}
               {activeTab === 'vouchers' && <CustomerVouchersTab customerId={data.customer.id} />}
-              {activeTab === 'log' && <CustomerLogTab />}
+              {activeTab === 'log' && <CustomerLogTab customerId={data.customer.id} />}
             </>
           )}
         </div>
