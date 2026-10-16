@@ -11,6 +11,7 @@ import StaffLoginAuthentication from "pages/login";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
 import StaffDetailPage from "pages/staff-detail";
+import ServiceDetailPage from "pages/service-detail";
 import CustomerDetailPage from "pages/customer-detail";
 import CustomerSentMessagesPage from "pages/customer-sent-messages";
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
@@ -159,6 +160,24 @@ const AppRoutes = () => {
           <TenantWrapper>
             <ProtectedRoute allowedRoles={['manager', 'admin', 'admin_viewer']}>
               <StaffDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped service detail (add/edit) — same one-page-handles-both-flows
+            pattern as staff detail above: :serviceId present = edit, absent
+            (/services/new) = create. */}
+        <Route path="/:orgSlug/services/new" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+              <ServiceDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+        <Route path="/:orgSlug/services/:serviceId" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+              <ServiceDetailPage />
             </ProtectedRoute>
           </TenantWrapper>
         } />

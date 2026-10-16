@@ -1,6 +1,7 @@
 import React from 'react';
 import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
+import CountryCodeSelect from '../../../components/ui/CountryCodeSelect';
 
 const GENDER_OPTIONS = [
   { value: 'Male', label: 'Male' },
@@ -16,7 +17,7 @@ const PRONOUN_OPTIONS = [
 
 const StaffDetailsFields = ({ formData, setFormData }) => {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
       <div className="space-y-1">
         <label className="block font-body font-body-medium text-sm text-text-primary">Name</label>
         <Input
@@ -36,11 +37,19 @@ const StaffDetailsFields = ({ formData, setFormData }) => {
 
       <div className="space-y-1">
         <label className="block font-body font-body-medium text-sm text-text-primary">Phone Number</label>
-        <Input
-          value={formData.phone}
-          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-          placeholder="e.g. 98XXXXXXXX"
-        />
+        <div className="flex">
+          <CountryCodeSelect
+            value={formData.countryCode || '+977'}
+            onChange={(dial) => setFormData({ ...formData, countryCode: dial })}
+          />
+          <input
+            type="tel"
+            value={formData.phone}
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            placeholder="98XXXXXXXX"
+            className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+          />
+        </div>
       </div>
 
       <div className="space-y-1">

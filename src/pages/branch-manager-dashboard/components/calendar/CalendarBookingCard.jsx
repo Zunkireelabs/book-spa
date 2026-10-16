@@ -4,6 +4,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
 import { isNoShow } from '../../../../services/bookingTransformers';
+import { formatClockTime } from './timeFormat';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
@@ -14,15 +15,6 @@ const STATUS_COLORS = {
 };
 
 const UNPAID_BORDER = '#facc15';
-
-// Convert "HH:MM" or "HH:MM:SS" to 12h format
-function to12h(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const period = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')}${period}`;
-}
 
 // Statuses that cannot be dragged (terminal states)
 const NON_DRAGGABLE_STATUSES = ['Completed', 'Cancelled', 'No Show'];
@@ -58,6 +50,10 @@ export function canDragBooking(booking) {
   // only, desyncing it from the companion's booking_therapists.room_id
   // override. Reassign rooms via BookingActionModal instead.
   if (booking.isRoomShared) return false;
+  // Combo components are time-offset from each other (sequential/concurrent) and
+  // conflict-checked by compute_combo_item_datetimes — no per-component drag
+  // target exists yet, same reasoning as isRoomShared above.
+  if (booking.isCombo) return false;
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
   // Cannot drag paid bookings
@@ -71,7 +67,7 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, hideSensitive = false, use24h = false }) => {
   const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
   const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
@@ -154,7 +150,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   })();
 
   const timeLabel = booking.startTime && booking.endTime
-    ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
+    ? `${formatClockTime(booking.startTime, use24h)} – ${formatClockTime(booking.endTime, use24h)}`
     : '';
 
   const handleMouseEnter = useCallback(() => {
@@ -205,8 +201,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       className={`absolute left-1 right-1 rounded-md overflow-visible transition-all duration-150 ease-out hover:shadow-lg hover:z-dropdown ${
         isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${isSelected ? 'ring-2 ring-violet-500 ring-offset-1' : ''}`}
-      data-booking-id={(booking.isShared || booking.isRoomShared) ? booking.bookingId : undefined}
-      data-shared={(booking.isShared || booking.isRoomShared) ? 'true' : undefined}
+      data-booking-id={(booking.isShared || booking.isRoomShared || booking.isCombo) ? booking.bookingId : undefined}
+      data-shared={(booking.isShared || booking.isRoomShared || booking.isCombo) ? 'true' : undefined}
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
@@ -246,7 +242,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           </div>
         )}
         <div className="font-body font-semibold text-xs text-text-primary leading-tight truncate flex-shrink-0">
-          {booking.customerName}
+          {hideSensitive ? '•••••' : booking.customerName}
         </div>
         <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
           {booking.serviceName}
@@ -313,7 +309,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
 
       {/* Rich hover popover — rendered via portal to escape overflow clipping */}
       {showPopover && !isDragging && popoverPos && (
-        <BookingHoverPreview booking={booking} position={popoverPos} draggable={isDraggable} />
+        <BookingHoverPreview booking={booking} position={popoverPos} draggable={isDraggable} hideSensitive={hideSensitive} use24h={use24h} />
       )}
     </div>
   );
@@ -323,7 +319,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
 // amount, notes) shown via portal on hover — shared by CalendarBookingCard
 // itself and by OverflowPopoverRow (the "+N" hidden-bookings list) so both
 // give the same detail preview instead of just a native title tooltip.
-export const BookingHoverPreview = ({ booking, position, draggable }) => {
+export const BookingHoverPreview = ({ booking, position, draggable, hideSensitive = false, use24h = false }) => {
   const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
   const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
@@ -336,7 +332,7 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
   })();
 
   const timeLabel = booking.startTime && booking.endTime
-    ? `${to12h(booking.startTime)} – ${to12h(booking.endTime)}`
+    ? `${formatClockTime(booking.startTime, use24h)} – ${formatClockTime(booking.endTime, use24h)}`
     : '';
 
   const cardRef = useRef(null);
@@ -384,7 +380,7 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-1">
               <div className="font-body font-semibold text-sm text-text-primary">
-                {booking.customerName}
+                {hideSensitive ? '•••••' : booking.customerName}
               </div>
               {booking.isNewCustomer && (
                 <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-red-600 text-white flex-shrink-0">
@@ -398,7 +394,7 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
               </span>
             )}
           </div>
-          {booking.customerPhone && (
+          {booking.customerPhone && !hideSensitive && (
             <div className="font-caption text-xs text-text-secondary mt-0.5">
               📞 {booking.customerPhone}
             </div>
@@ -426,7 +422,9 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-1">
               <span className="font-caption text-[10px] text-text-secondary uppercase tracking-wider">Amount</span>
-              {booking.finalAmount != null ? (
+              {hideSensitive ? (
+                <span className="font-data text-sm text-text-primary font-semibold">NPR •••</span>
+              ) : booking.finalAmount != null ? (
                 <span className="font-data text-sm text-text-primary font-semibold">
                   NPR {formatAmount(booking.finalAmount)}
                 </span>
@@ -448,7 +446,7 @@ export const BookingHoverPreview = ({ booking, position, draggable }) => {
               {isUnpaid ? 'Unpaid' : 'Paid'}
             </span>
           </div>
-          {booking.discountAmount > 0 && (
+          {booking.discountAmount > 0 && !hideSensitive && (
             <div className="font-caption text-[10px] text-text-secondary mt-0.5">
               Discount: NPR {formatAmount(booking.discountAmount)}
             </div>
