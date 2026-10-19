@@ -18,7 +18,7 @@ import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
 import { useOrg } from '../../contexts/OrgContext';
 import { useBranch } from '../../contexts/BranchContext';
-import { computeChange, buildReceiptText, buildReceiptHtml, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
+import { computeChange, quickCashOptions, buildReceiptText, buildReceiptHtml, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 
@@ -814,6 +814,15 @@ const PaymentModal = ({
   };
   const isCash = (t) => /^cash$/i.test(String(t.paymentMode));
 
+  // Change helper: at most one Cash row exists, and its calc/received state lives on that row (the receipt
+  // reads it from there). Once that row stops being Cash or its amount drops to 0, close and clear it.
+  const cashIdx = tenders.findIndex(isCash);
+  const cashAmount = cashIdx >= 0 ? Number(tenders[cashIdx].amount) || 0 : 0;
+  useEffect(() => {
+    const stale = (t) => (t.calc || t.received) && !(isCash(t) && Number(t.amount) > 0);
+    if (tenders.some(stale)) setTenders((cur) => cur.map((t) => (stale(t) ? { ...t, calc: false, received: '' } : t)));
+  }, [tenders]);
+
   // The tender the method picker edits: the one last touched, else the last non-credit row.
   const lastNonCreditIdx = (() => {
     for (let i = tenders.length - 1; i >= 0; i--) if (!isCreditMode(tenders[i].paymentMode)) return i;
@@ -1469,7 +1478,6 @@ const PaymentModal = ({
                 else if (isVoucherWallet && t.voucherId) hint = overVoucherWallet ? `Exceeds this voucher (${fmt(t.voucherRemainingBalance)})` : `${fmt(Math.max(0, round2(t.voucherRemainingBalance - (voucherWalletCommittedByVoucher.get(t.voucherId) || 0))))} remains on voucher`;
                 else if (isSessionPackage) hint = 'One session, covers this booking';
                 else if (t.paymentMode === 'ReferralVoucher') hint = 'Referral voucher';
-                const change = isCash(t) ? computeChange(t.received, t.amount) : null;
                 const isActive = i === activeTenderIdx && !credit;
                 const isRest = i === restIdx;
                 const label = tenderLabel(t);
@@ -1498,12 +1506,6 @@ const PaymentModal = ({
                           <span className="flex-1" />
                         </>
                       )}
-                      {isCash(t) && !t.calc && (
-                        <button type="button" onClick={() => updateTender(i, { calc: true })} aria-label="Work out change" title="Work out change"
-                          className="inline-flex items-center gap-1.5 text-[12px] text-[#8A8A90] hover:text-[#0E0D0C] whitespace-nowrap flex-none">
-                          <Icon name="Calculator" size={13} strokeWidth={1.6} />{singleMode && 'Work out change'}
-                        </button>
-                      )}
                       {(isSessionPackage || t.paymentMode === 'ReferralVoucher' ? (
                         <span className="w-[120px] text-right font-medium tabular-nums pr-2.5">{fmt(t.amount)}</span>
                       ) : isRest ? (
@@ -1515,7 +1517,7 @@ const PaymentModal = ({
                       ) : (
                         <AmountInput
                           ref={(el) => { amountRefs.current[i] = el; if (i === 0) firstAmountRef.current = el; }}
-                          value={t.amount} placeholder="0" aria-label={`${label} amount`} disabled={!t.paymentMode}
+                          value={t.amount} aria-label={`${label} amount`} disabled={!t.paymentMode}
                           onChange={(v) => updateTender(i, { amount: v })}
                           onBlur={(e) => { if (tenders.length > 1 && !(Number(t.amount) > 0) && !e.currentTarget.closest('[data-row]')?.contains(e.relatedTarget)) removeTender(i); }}
                           className={`${inputBase} ${over ? 'border-error' : isActive && tenders.length > 1 ? 'border-[#B9C7B6]' : 'border-[#E7E8E6]'} disabled:bg-[#FAFAF9]`} />
@@ -1525,20 +1527,6 @@ const PaymentModal = ({
                           className="w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none"><Icon name="X" size={14} /></button>
                       )}
                     </div>
-                    {isCash(t) && t.calc && (
-                      <div className="flex items-center gap-2.5 pl-[38px] pr-3 py-2.5 bg-[#FAFAF9] text-[#515152] rounded-b-[10px]">
-                        <span>Guest handed over</span>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#B4B4BA]">NPR</span>
-                          <AmountInput value={t.received || ''} aria-label="Cash received" autoFocus
-                            onChange={(v) => updateTender(i, { received: v })}
-                            className="h-7 w-[110px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
-                        </div>
-                        {change != null && <span className="ml-auto">Give back <b className="font-semibold text-[#0E0D0C] tabular-nums">NPR {fmt(change)}</b></span>}
-                        <button type="button" aria-label="Close change calculator" onClick={() => updateTender(i, { calc: false, received: '' })}
-                          className={`${change != null ? '' : 'ml-auto '}w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none`}><Icon name="X" size={14} /></button>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -1599,6 +1587,52 @@ const PaymentModal = ({
               <button type="button" onClick={() => setShowNotes(true)} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="StickyNote" size={13} strokeWidth={1.6} />Add a note</button>
             )}
           </div>
+
+          {cashAmount > 0 && (() => {
+            const cash = tenders[cashIdx];
+            if (!cash.calc) {
+              return (
+                <div className="mt-2.5">
+                  <button type="button" onClick={() => updateTender(cashIdx, { calc: true })} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="Calculator" size={13} strokeWidth={1.6} />Work out change</button>
+                </div>
+              );
+            }
+            const received = Number(cash.received) || 0;
+            const diff = round2(received - cashAmount);
+            return (
+              <div className="mt-2.5 relative rounded-[10px] border border-[#E7E8E6] bg-[#FAFAF9] px-3 py-2.5" data-testid="change-calc">
+                <button type="button" aria-label="Close change calculator" onClick={() => updateTender(cashIdx, { calc: false, received: '' })}
+                  className="absolute top-2 right-2 w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F1F1EF]"><Icon name="X" size={14} /></button>
+                <div className="text-[12px] text-[#8A8A90] pr-7">Cash to collect <b className="font-medium text-[#0E0D0C] tabular-nums">NPR {fmt(cashAmount)}</b></div>
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <span className="text-[#515152]">Guest handed over</span>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#B4B4BA]">NPR</span>
+                    <AmountInput value={cash.received || ''} aria-label="Cash received" autoFocus
+                      onChange={(v) => updateTender(cashIdx, { received: v })}
+                      className="h-8 w-[120px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
+                  </div>
+                  {quickCashOptions(cashAmount).map((v) => (
+                    <button key={v} type="button" onClick={() => updateTender(cashIdx, { received: String(v) })} aria-pressed={received === v}
+                      className={`h-7 px-2.5 rounded-[7px] border text-[12px] font-medium tabular-nums ${received === v ? 'border-[#B9C7B6] bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] bg-white text-[#515152] hover:bg-[#F7F7F5] hover:text-[#0E0D0C]'}`}>
+                      {fmt(v)}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 min-h-[22px] flex items-center" aria-live="polite" data-testid="change-result">
+                  {!(received > 0) ? (
+                    <span className="text-[12px] text-[#8A8A90]">Tap a note or type what the guest handed over</span>
+                  ) : diff > 0.001 ? (
+                    <span className="text-[#515152]">Give back <b className="text-[15px] font-semibold text-primary tabular-nums">NPR {fmt(diff)}</b></span>
+                  ) : diff < -0.001 ? (
+                    <span className="text-warning tabular-nums">NPR {fmt(-diff)} short of the cash amount</span>
+                  ) : (
+                    <span className="text-[#515152]">Exact amount · no change</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           </div>
           {fade.top && <div aria-hidden className="pointer-events-none absolute left-0 right-0 top-0 h-6 bg-gradient-to-b from-white to-transparent" />}

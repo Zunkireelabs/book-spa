@@ -19,6 +19,18 @@ export function computeChange(received, cashAmount) {
   return round2(r - c);
 }
 
+/**
+ * Quick-cash buttons for the change helper: the next convenient note amounts
+ * strictly above the cash amount (the next multiple of 500, 1,000, 5,000 and
+ * 10,000), deduped, ascending, at most 3. Empty when there is no cash to collect.
+ */
+export function quickCashOptions(cashAmount) {
+  const c = Number(cashAmount);
+  if (!(c > 0)) return [];
+  const next = [500, 1000, 5000, 10000].map((step) => (Math.floor(c / step) + 1) * step);
+  return [...new Set(next)].filter((v) => v > c).sort((a, b) => a - b).slice(0, 3);
+}
+
 /** Plain-text receipt summary — used as the WhatsApp message body. */
 export function buildReceiptText(r) {
   const lines = [];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeChange, buildReceiptText, buildWhatsAppUrl, buildReceiptHtml } from './checkoutReceipt';
+import { computeChange, quickCashOptions, buildReceiptText, buildWhatsAppUrl, buildReceiptHtml } from './checkoutReceipt';
 
 describe('computeChange', () => {
   it('returns the difference when received exceeds the cash amount', () => {
@@ -11,6 +11,23 @@ describe('computeChange', () => {
     expect(computeChange('900', 1000)).toBeNull();
     expect(computeChange('1000', 1000)).toBeNull();
     expect(computeChange('abc', 1000)).toBeNull();
+  });
+});
+
+describe('quickCashOptions', () => {
+  it('offers the next convenient notes strictly above the cash amount', () => {
+    expect(quickCashOptions(4200)).toEqual([4500, 5000, 10000]);
+    expect(quickCashOptions(5000)).toEqual([5500, 6000, 10000]);
+    expect(quickCashOptions(1800)).toEqual([2000, 5000, 10000]);
+    expect(quickCashOptions(12300)).toEqual([12500, 13000, 15000]);
+  });
+  it('accepts string and fractional amounts', () => {
+    expect(quickCashOptions('4999.5')).toEqual([5000, 10000]);
+  });
+  it('is empty when there is no cash to collect', () => {
+    expect(quickCashOptions(0)).toEqual([]);
+    expect(quickCashOptions('')).toEqual([]);
+    expect(quickCashOptions(-100)).toEqual([]);
   });
 });
 
