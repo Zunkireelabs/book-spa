@@ -2,36 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import { FilterChip, Menu } from '../../../../components/ui/ListToolbarKit';
+import { useMinWidth, useSlashFocus, SearchBox, RowSwitch, MiniButton, npr, csvDownload, ErrorBlock } from '../Area/listKit';
 import { updatePackageType } from '../../../../services/api';
 import { perSession, typeUsage, validityLabel } from '../../../../services/packagesView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import PackageTypePanel from './PackageTypePanel';
-import { MiniButton, npr, csvDownload } from './packageBits';
 
 const SHOW = { all: 'All', on: 'On sale', hidden: 'Hidden' };
-const isTyping = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
-const useMinWidth = (px) => {
-  const q = `(min-width: ${px}px)`;
-  const [on, setOn] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(q).matches : true));
-  useEffect(() => {
-    const m = window.matchMedia(q);
-    const f = () => setOn(m.matches);
-    m.addEventListener('change', f);
-    return () => m.removeEventListener('change', f);
-  }, [q]);
-  return on;
-};
 const typeTitle = (t) => t.name;
 const serviceLine = (t) => [t.service?.name, t.service?.duration_minutes ? `${t.service.duration_minutes} min` : null].filter(Boolean).join(' · ');
-
-// Small on/off switch for a table row (the panel kit's SwitchRow is a full-width settings row).
-const RowSwitch = ({ checked, onChange, label, busy }) => (
-  <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={busy}
-    onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
-    className={`relative inline-flex w-[30px] h-[18px] rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-60 ${checked ? 'bg-primary' : 'bg-[#D6D3D1]'}`}>
-    <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-all ${checked ? 'left-[14px]' : 'left-[2px]'}`} />
-  </button>
-);
 
 // Package types (V20): the packages on offer, what one session costs against a single visit, how many guests hold each, and an
 // admin On sale switch. Turning a type off only hides it from Sell package; packages already sold are untouched.
@@ -59,13 +38,7 @@ const PackageOverviewPanel = ({ packages, types, today, error, onRetry, onChange
     const t = setTimeout(() => { if (searchText !== query) patch({ q: searchText }); }, 200);
     return () => clearTimeout(t);
   }, [searchText]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === '/' && !isTyping(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); searchRef.current?.focus(); }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  useSlashFocus(searchRef);
 
   // Optimistic On sale: the switch flips at once and reverts (with a toast) if the save fails.
   const [overrides, setOverrides] = useState({});
@@ -217,12 +190,7 @@ const PackageOverviewPanel = ({ packages, types, today, error, onRetry, onChange
     <div>
       <div ref={blockRef} className="sticky z-sticky-filter bg-white" style={{ top: stickyTop }}>
         <div className="flex items-center gap-2 pt-[18px] pb-2 flex-wrap">
-          <div className="relative w-full sm:w-[300px]">
-            <Icon name="Search" size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8A8A90]" />
-            <input ref={searchRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search package or service" aria-label="Search package types"
-              className="w-full h-[34px] pl-8 pr-8 border border-border rounded-[7px] text-[13px] bg-white placeholder:text-[#8A8A90] focus:outline-none focus:border-[#cfd2cc] focus:shadow-[0_0_0_3px_rgba(45,90,39,.08)]" />
-            <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] font-medium text-[#8A8A90] border border-border rounded px-[5px] py-px bg-white">/</kbd>
-          </div>
+          <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search package or service" ariaLabel="Search package types" />
           <FilterChip label="Service" value={service} options={serviceOptions} onChange={(v) => patch({ sv: v })} selectedLabel={serviceOptions.find((o) => o.id === service)?.label} />
           <div className="ml-auto flex items-center gap-2">
             {showMenu}
@@ -236,10 +204,7 @@ const PackageOverviewPanel = ({ packages, types, today, error, onRetry, onChange
       </div>
 
       {error ? (
-        <div className="border border-error/20 bg-error/5 rounded-lg p-4 mt-2 flex items-center gap-3 text-[13px] text-error">
-          <Icon name="AlertCircle" size={16} />{error}
-          <button type="button" onClick={onRetry} className="ml-auto underline font-medium">Retry</button>
-        </div>
+        <ErrorBlock error={error} onRetry={onRetry} />
       ) : (
         <table className="w-full border-collapse table-fixed">
           <colgroup>

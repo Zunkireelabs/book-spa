@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
-import { FilterChip, Menu } from '../../../../components/ui/ListToolbarKit';
+import { FilterChip } from '../../../../components/ui/ListToolbarKit';
 import { useOrg } from '../../../../contexts/OrgContext';
 import {
   SEGMENTS, SORTS, DISPLAY_STATUS, segmentById, displayStatus, stripStats, needsItems, sortPackages, matchesPackageSearch, reminderText, daysUntil, ENDS_SOON_DAYS,
@@ -9,20 +9,12 @@ import {
 import { buildWhatsAppUrl } from '../../../../utils/checkoutReceipt';
 import NeedsYouNow from '../Bookings/NeedsYouNow';
 import PackageDetailPanel from './PackageDetailPanel';
-import { Avatar, StatusPill, SessionMeter, MiniButton, longDate, shortDate, relativeUntil, npr, phoneOf, phoneLabel, csvDownload } from './packageBits';
+import { StatusPill, SessionMeter, relativeUntil, phoneOf, phoneLabel } from './packageBits';
+import {
+  useMinWidth, useSlashFocus, isTyping, useStickyBlock, thClass, LifecycleStrip, SearchBox, SortMenu, ClearableChip, Avatar, MiniButton, MiniLink,
+  longDate, shortDate, npr, csvDownload, EmptyBlock, ErrorBlock,
+} from '../Area/listKit';
 
-const isTyping = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
-const useMinWidth = (px) => {
-  const q = `(min-width: ${px}px)`;
-  const [on, setOn] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(q).matches : true));
-  useEffect(() => {
-    const m = window.matchMedia(q);
-    const f = () => setOn(m.matches);
-    m.addEventListener('change', f);
-    return () => m.removeEventListener('change', f);
-  }, [q]);
-  return on;
-};
 const uniqueOptions = (list, idOf, labelOf) => {
   const seen = new Map();
   list.forEach((p) => { const id = idOf(p); if (id && !seen.has(id)) seen.set(id, labelOf(p)); });
@@ -63,13 +55,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
     return () => clearTimeout(t);
   }, [searchText]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setSearchText(query); }, [query]);
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === '/' && !isTyping(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); searchRef.current?.focus(); }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  useSlashFocus(searchRef);
 
   // ── Derived ──────────────────────────────────────────────────────────────────────────────────────
   const all = useMemo(() => packages || [], [packages]);
@@ -136,37 +122,13 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
   useEffect(() => () => registerExport(null), [registerExport]);
 
   // ── Sticky toolbar + headings ────────────────────────────────────────────────────────────────────
-  const blockRef = useRef(null);
-  const sentinelRef = useRef(null);
-  const [blockH, setBlockH] = useState(58);
-  const [stuck, setStuck] = useState(false);
-  useEffect(() => {
-    const el = blockRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return undefined;
-    const ro = new ResizeObserver(() => setBlockH(Math.ceil(el.getBoundingClientRect().height)));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
-    const root = el.closest('.content-scroll');
-    const io = new IntersectionObserver(([entry]) => {
-      const rootTop = entry.rootBounds ? entry.rootBounds.top : 0;
-      setStuck(!entry.isIntersecting && entry.boundingClientRect.top < rootTop + stickyTop + 1);
-    }, { root, rootMargin: `-${stickyTop}px 0px 0px 0px`, threshold: 0 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [stickyTop]);
+  const { blockRef, sentinelRef, blockH, stuck, scrollToListTop } = useStickyBlock(stickyTop);
   // Changing the segment / a filter / the sort while scrolled down → back to the top of the list.
   const listKey = `${seg}|${hasDue}|${query}|${sort}|${filters.type}|${filters.service}|${filters.seller}|${filters.branch}`;
   const firstKey = useRef(true);
   useEffect(() => {
     if (firstKey.current) { firstKey.current = false; return; }
-    const el = sentinelRef.current;
-    const sc = el?.closest('.content-scroll');
-    if (!el || !sc || !stuck) return;
-    sc.scrollTo({ top: sc.scrollTop + el.getBoundingClientRect().top - sc.getBoundingClientRect().top - stickyTop });
+    if (stuck) scrollToListTop();
   }, [listKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ↑/↓ moves the open panel between rows (Esc is the panel's).
@@ -191,24 +153,8 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
   // ── Render ───────────────────────────────────────────────────────────────────────────────────────
   const loading = !packages && !error;
   const strip = (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 border border-border rounded-[10px] mt-4 overflow-hidden" role="group" aria-label="Package lifecycle">
-      {SEGMENTS.map((s) => {
-        const st = stats[s.id];
-        const on = seg === s.id;
-        return (
-          <button key={s.id} type="button" aria-pressed={on} data-seg={s.id} onClick={() => patch({ seg: on ? 'all' : (s.id === 'active' ? '' : s.id) }, { push: true })}
-            className={`text-left px-4 pt-[11px] pb-3 relative shadow-[1px_0_0_0_#E7E8E6,0_1px_0_0_#E7E8E6] ${on ? 'bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9]'}`}>
-            <span className={`flex items-center gap-1.5 text-[12px] font-medium ${on ? 'text-text-primary' : 'text-[#8A8A90]'}`}><i className="w-2 h-2 rounded-[2px]" style={{ background: s.color }} />{s.label}</span>
-            <span className="flex items-baseline gap-2 mt-1">
-              <b className="text-[20px] font-semibold tracking-[-0.4px] tabular-nums" data-seg-count>{loading ? '—' : st.count}</b>
-              {!loading && st.sub && <span className="text-[12px] text-[#8A8A90] tabular-nums truncate">{st.sub}</span>}
-            </span>
-            <span className="block text-[11.5px] text-[#8A8A90] mt-0.5 lg:truncate min-h-[16px]">{loading ? '' : st.hint}</span>
-            {on && <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-primary" />}
-          </button>
-        );
-      })}
-    </div>
+    <LifecycleStrip segments={SEGMENTS} stats={stats} selected={seg} loading={loading} ariaLabel="Package lifecycle"
+      onPick={(id, on) => patch({ seg: on ? 'all' : (id === 'active' ? '' : id) }, { push: true })} />
   );
 
   const chipValue = (k) => options[k].find((o) => o.id === filters[k])?.label;
@@ -218,33 +164,11 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
       <FilterChip label="Service" value={filters.service} options={options.service} onChange={(v) => patch({ sv: v })} selectedLabel={chipValue('service')} />
       <FilterChip label="Sold by" value={filters.seller} options={options.seller} onChange={(v) => patch({ by: v })} selectedLabel={chipValue('seller')} />
       {isOverall && <FilterChip label="Branch" value={filters.branch} options={options.branch} onChange={(v) => patch({ br: v })} selectedLabel={chipValue('branch')} />}
-      {hasDue && (
-        <span className="h-7 rounded-full inline-flex items-center text-[12.5px] font-medium border border-border bg-[#FAFAF9] text-text-primary">
-          <span className="pl-2.5 pr-2">Has due</span>
-          <button type="button" onClick={() => patch({ due: '' })} aria-label="Clear Has due" className="h-full pr-2 -ml-1 text-[#8A8A90] hover:text-text-primary"><Icon name="X" size={12} /></button>
-        </span>
-      )}
+      {hasDue && <ClearableChip label="Has due" onClear={() => patch({ due: '' })} />}
     </>
   );
-  const sortMenu = (
-    <Menu trigger={(open, toggle) => (
-      <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className="h-7 px-2 rounded-md text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:bg-[#FAFAF9] whitespace-nowrap">
-        Sort <b className="text-text-primary font-medium">{SORTS[sort].label}</b><Icon name="ChevronDown" size={13} />
-      </button>)}>
-      {(close) => Object.entries(SORTS).map(([id, s]) => (
-        <button key={id} type="button" onClick={() => { patch({ sort: id === 'ends' ? '' : id }); close(); }} className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] flex justify-between ${sort === id ? 'font-medium' : ''}`}>
-          {s.label}{sort === id && <Icon name="Check" size={13} />}
-        </button>))}
-    </Menu>
-  );
-  const searchBox = (
-    <div className="relative w-full sm:w-[300px]">
-      <Icon name="Search" size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8A8A90]" />
-      <input ref={searchRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search guest, phone or package" aria-label="Search packages"
-        className="w-full h-[34px] pl-8 pr-8 border border-border rounded-[7px] text-[13px] bg-white placeholder:text-[#8A8A90] focus:outline-none focus:border-[#cfd2cc] focus:shadow-[0_0_0_3px_rgba(45,90,39,.08)]" />
-      <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] font-medium text-[#8A8A90] border border-border rounded px-[5px] py-px bg-white">/</kbd>
-    </div>
-  );
+  const sortMenu = <SortMenu sorts={SORTS} value={sort} onChange={(id) => patch({ sort: id === 'ends' ? '' : id })} />;
+  const searchBox = <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search guest, phone or package" ariaLabel="Search packages" />;
   // Below sm only the search sticks; the chips and sort scroll with the page so the pinned block stays small.
   const toolbar = isSm
     ? <div className="flex items-center gap-2 pt-3.5 pb-2 flex-wrap">{searchBox}{chips}<div className="ml-auto">{sortMenu}</div></div>
@@ -256,7 +180,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
   const showBranch = isLg && isOverall;
   const showActions = isLg;
   const colCount = 3 + (showPackage ? 1 : 0) + (showValid ? 1 : 0) + (showBranch ? 1 : 0) + (showPaid ? 1 : 0) + (isSm ? 1 : 0);
-  const th = `h-[34px] text-[12px] font-medium whitespace-nowrap border-b border-border bg-white text-[#8A8A90] sticky z-[5] ${stuck ? 'shadow-[0_8px_8px_-8px_rgba(14,13,12,.14)]' : ''}`;
+  const th = thClass(stuck);
   const thTop = { top: stickyTop + blockH };
 
   const anyFilter = !!(query || filters.type || filters.service || filters.seller || filters.branch || hasDue);
@@ -338,10 +262,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
               {action && (
                 <span className={`${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}>
                   {action.href ? (
-                    <a href={action.href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} data-row-action={action.label}
-                      className="h-[26px] px-[9px] rounded-md border border-border bg-white text-[12px] font-medium inline-flex items-center gap-[5px] text-text-primary hover:bg-[#FAFAF9]">
-                      <Icon name={action.icon} size={13} />{action.label}
-                    </a>
+                    <MiniLink href={action.href} icon={action.icon} data-row-action={action.label}>{action.label}</MiniLink>
                   ) : (
                     <MiniButton primary={action.primary} data-row-action={action.label} onClick={(e) => { e.stopPropagation(); action.run(); }}>{action.label}</MiniButton>
                   )}
@@ -366,10 +287,7 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
       {!isSm && <div className="flex items-center gap-2 pb-2 flex-wrap">{chips}<div className="ml-auto">{sortMenu}</div></div>}
 
       {error ? (
-        <div className="border border-error/20 bg-error/5 rounded-lg p-4 mt-2 flex items-center gap-3 text-[13px] text-error">
-          <Icon name="AlertCircle" size={16} />{error}
-          <button type="button" onClick={onRetry} className="ml-auto underline font-medium">Retry</button>
-        </div>
+        <ErrorBlock error={error} onRetry={onRetry} />
       ) : (
         <table className="w-full border-collapse table-fixed">
           <colgroup>
@@ -398,24 +316,9 @@ const PackageListPanel = ({ packages, today, error, onRetry, onChanged, readOnly
         </table>
       )}
 
-      {!loading && !error && filtered.length === 0 && (
-        <div className="text-center py-16">
-          <Icon name="Layers" size={28} className="text-[#B4B4BA] mx-auto mb-3" />
-          {all.length === 0 ? (
-            <>
-              <p className="text-[14px] font-medium text-text-primary">No packages sold yet</p>
-              <p className="text-[13px] text-[#8A8A90] mt-1">Packages you sell to guests appear here.</p>
-              {!readOnly && <button type="button" onClick={() => onSell()} className="mt-3 text-[13px] font-medium text-primary hover:underline">Sell package</button>}
-            </>
-          ) : (
-            <>
-              <p className="text-[14px] font-medium text-text-primary">No packages match</p>
-              <p className="text-[13px] text-[#8A8A90] mt-1">{anyFilter ? 'Try a different search or clear a filter.' : `Nothing is in “${segmentById(seg)?.label}” right now.`}</p>
-              <button type="button" onClick={clearAll} className="mt-3 text-[13px] font-medium text-primary hover:underline">Clear filters</button>
-            </>
-          )}
-        </div>
-      )}
+      {!loading && !error && filtered.length === 0 && (all.length === 0
+        ? <EmptyBlock title="No packages sold yet" hint="Packages you sell to guests appear here." action={readOnly ? null : { label: 'Sell package', run: () => onSell() }} />
+        : <EmptyBlock title="No packages match" hint={anyFilter ? 'Try a different search or clear a filter.' : `Nothing is in “${segmentById(seg)?.label}” right now.`} action={{ label: 'Clear filters', run: clearAll }} />)}
       {!loading && !error && filtered.length > 0 && (
         <div className="flex items-center h-[52px] text-[12.5px] text-[#8A8A90] tabular-nums">{filtered.length} package{filtered.length === 1 ? '' : 's'}</div>
       )}

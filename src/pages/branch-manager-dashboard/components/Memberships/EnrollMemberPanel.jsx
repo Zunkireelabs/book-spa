@@ -43,7 +43,8 @@ const MEMBERSHIP_STATE_COPY = {
 
 // "New membership": the right-hand panel (same shell, fields and footer as New booking). Callbacks are unchanged:
 // onEnrolled(newMembershipId, { message }), onRenewExisting(membershipId), onClose().
-const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting }) => {
+// `initialTierId` (Memberships > Tiers > Enroll) preselects that tier when it is on sale.
+const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting, initialTierId = null }) => {
   const { profile } = useAuth();
   const { branchId } = useBranch();
   const { paymentMethods } = useOrg();
@@ -89,7 +90,7 @@ const EnrollMemberPanel = ({ onClose, onEnrolled, onRenewExisting }) => {
       if (tRes.error) { setServerError(friendlyError(tRes.error, 'Failed to load membership plans.')); setTiers([]); }
       else {
         setTiers(tRes.data || []);
-        if (tRes.data?.length) setTierId(tRes.data[0].id);
+        if (tRes.data?.length) setTierId((tRes.data.find((t) => t.id === initialTierId) || tRes.data[0]).id);
       }
       setCustomers(cRes.error ? [] : (cRes.data || []));
     })();

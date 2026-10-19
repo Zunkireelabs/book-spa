@@ -12281,7 +12281,9 @@ export async function fetchMembershipTransactions(membershipId) {
       .select(`
         id, kind, amount, payment_mode, booking_id, payment_id,
         performed_by, notes, created_at,
-        performer:users!performed_by ( id, full_name )
+        performer:users!performed_by ( id, full_name ),
+        branch:branches ( id, name ),
+        booking:bookings ( id, booking_number, service_name_snapshot, therapist:therapists ( id, name ) )
       `)
       .eq('membership_id', membershipId)
       .order('created_at', { ascending: false });
@@ -12370,6 +12372,55 @@ export async function fetchMembershipLedgerReport() {
     return { data: { usage, cycleDeposited }, error: null };
   } catch (error) {
     console.error('[API] fetchMembershipLedgerReport error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Org-wide wallet activity feed (Memberships > Wallet activity, V21): every ledger row between two Nepal dates (inclusive), newest
+// first, with the member, tier, booking (number, service, therapist), who recorded it and the payment mode. RLS decides what the
+// caller can see; the date bounds keep the read small.
+export async function fetchMembershipActivity({ from, to }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!from || !to) return { data: null, error: { code: 'INVALID_INPUT', message: 'from and to are required.' } };
+    const nextDay = (d) => { const [y, m, dd] = d.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1, dd + 1)); return t.toISOString().slice(0, 10); };
+    const { data, error } = await supabase
+      .from('membership_transactions')
+      .select(`
+        id, membership_id, kind, amount, payment_mode, notes, created_at, booking_id, voucher_payment_id,
+        performer:users!performed_by ( id, full_name ),
+        branch:branches ( id, name ),
+        booking:bookings ( id, booking_number, service_name_snapshot, therapist:therapists ( id, name ) ),
+        membership:memberships ( id, membership_number, tier_id, customer:customers ( id, full_name ), tier:membership_tiers ( id, name ) )
+      `)
+      .gte('created_at', `${from}T00:00:00+05:45`)
+      .lt('created_at', `${nextDay(to)}T00:00:00+05:45`)
+      .order('created_at', { ascending: false })
+      .limit(2000);
+    if (error) throw error;
+    const rows = (data || []).map((r) => ({
+      id: r.id,
+      membershipId: r.membership_id,
+      kind: r.kind,
+      amount: Number(r.amount || 0),
+      paymentMode: r.payment_mode || null,
+      notes: r.notes || null,
+      createdAt: r.created_at,
+      bookingNumber: r.booking?.booking_number || null,
+      service: r.voucher_payment_id ? 'Voucher purchase' : (r.booking?.service_name_snapshot || null),
+      therapistName: r.booking?.therapist?.name || null,
+      performerId: r.performer?.id || null,
+      performerName: r.performer?.full_name || null,
+      branchName: r.branch?.name || null,
+      memberName: r.membership?.customer?.full_name || '—',
+      cardNo: r.membership?.membership_number || null,
+      tierId: r.membership?.tier_id || null,
+      tierName: r.membership?.tier?.name || null,
+    }));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchMembershipActivity error:', error.message);
     return { data: null, error };
   }
 }

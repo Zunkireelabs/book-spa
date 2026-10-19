@@ -60,12 +60,10 @@ import RewardCatalogPanel from './components/Referrals/RewardCatalogPanel';
 import ServiceRevenueReportPanel from './components/ServiceRevenueReportPanel';
 import CategoryRevenueReportPanel from './components/CategoryRevenueReportPanel';
 import PayrollPanel from './components/Payroll/PayrollPanel';
-import MembershipsPanel from './components/Memberships/MembershipsPanel';
+import MembershipsPage from './components/Memberships/MembershipsPage';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from '../../lib/featureFlags';
 import ProductsPanel from './components/Products/ProductsPanel';
 import CampaignsPanel from './components/Campaigns/CampaignsPanel';
-import MembershipCollectionPanel from './components/Memberships/MembershipCollectionPanel';
-import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import VoucherListPanel from './components/Vouchers/VoucherListPanel';
 import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
 import PackagesPage from './components/Packages/PackagesPage';
@@ -459,9 +457,9 @@ const BranchManagerDashboard = () => {
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'package-overview':
       case 'packages': return salesViewer ? <PackagesPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
-      case 'memberships': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPanel branchId={branchId} readOnly={salesReadOnly} /> : null;
-      case 'membership-collection': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipCollectionPanel /> : null;
-      case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <WalletUsagePanel /> : null;
+      case 'memberships':
+      case 'membership-collection':
+      case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
       case 'outreach-rules': return outreachAdmin ? <RulesEditorPanel /> : null;
       case 'outreach-templates': return outreachAdmin ? <TemplateEditorPanel /> : null;
       case 'outreach-review': return outreachAdmin ? <ReviewQueuePanel /> : null;

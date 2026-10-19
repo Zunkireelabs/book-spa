@@ -55,10 +55,11 @@ export const AREAS = [
     id: 'memberships',
     title: 'Memberships',
     description: () => 'Prepaid memberships, what has been collected and how wallets are used.',
+    selfHeader: true, // Memberships (V21) draws its own header, like Packages
     tabs: [
-      { view: 'memberships', label: 'All memberships', roles: MGR_ADMIN_VIEWER },
-      { view: 'membership-collection', label: 'Collection', roles: MGR_ADMIN_VIEWER },
-      { view: 'wallet-usage', label: 'Wallet usage', roles: MGR_ADMIN_VIEWER },
+      { view: 'memberships', label: 'Members', roles: MGR_ADMIN_VIEWER },
+      { view: 'membership-collection', label: 'Tiers', roles: MGR_ADMIN_VIEWER },
+      { view: 'wallet-usage', label: 'Wallet activity', roles: MGR_ADMIN_VIEWER },
     ],
   }] : []),
   ...(VOUCHER_ENABLED ? [{
