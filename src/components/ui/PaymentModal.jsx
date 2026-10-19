@@ -815,11 +815,15 @@ const PaymentModal = ({
   const isCash = (t) => /^cash$/i.test(String(t.paymentMode));
 
   // Change helper: at most one Cash row exists, and its calc/received state lives on that row (the receipt
-  // reads it from there). Once that row stops being Cash or its amount drops to 0, close and clear it.
+  // reads it from there). While the Cash amount is 0/empty the helper is only hidden, so retyping the amount
+  // keeps it; once the row stops being Cash it is cleared (a removed row takes its state with it).
   const cashIdx = tenders.findIndex(isCash);
   const cashAmount = cashIdx >= 0 ? Number(tenders[cashIdx].amount) || 0 : 0;
+  // Focus "Guest handed over" only when the helper is opened from its link, not when it reappears after the
+  // Cash amount is retyped (that would steal the keystrokes still going into the Cash box).
+  const focusReceivedRef = useRef(false);
   useEffect(() => {
-    const stale = (t) => (t.calc || t.received) && !(isCash(t) && Number(t.amount) > 0);
+    const stale = (t) => (t.calc || t.received) && !isCash(t);
     if (tenders.some(stale)) setTenders((cur) => cur.map((t) => (stale(t) ? { ...t, calc: false, received: '' } : t)));
   }, [tenders]);
 
@@ -1593,7 +1597,7 @@ const PaymentModal = ({
             if (!cash.calc) {
               return (
                 <div className="mt-2.5">
-                  <button type="button" onClick={() => updateTender(cashIdx, { calc: true })} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="Calculator" size={13} strokeWidth={1.6} />Work out change</button>
+                  <button type="button" onClick={() => { focusReceivedRef.current = true; updateTender(cashIdx, { calc: true }); }} className="text-[12.5px] text-[#515152] inline-flex items-center gap-1.5 hover:text-[#0E0D0C]"><Icon name="Calculator" size={13} strokeWidth={1.6} />Work out change</button>
                 </div>
               );
             }
@@ -1608,7 +1612,8 @@ const PaymentModal = ({
                   <span className="text-[#515152]">Guest handed over</span>
                   <div className="relative">
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#B4B4BA]">NPR</span>
-                    <AmountInput value={cash.received || ''} aria-label="Cash received" autoFocus
+                    <AmountInput value={cash.received || ''} aria-label="Cash received"
+                      ref={(el) => { if (el && focusReceivedRef.current) { focusReceivedRef.current = false; el.focus(); } }}
                       onChange={(v) => updateTender(cashIdx, { received: v })}
                       className="h-8 w-[120px] rounded-[7px] border border-[#E7E8E6] bg-white pl-9 pr-2.5 text-right text-[13px] font-medium tabular-nums focus:outline-none focus:border-[#B9C7B6] focus:ring-[3px] focus:ring-primary/10" />
                   </div>
