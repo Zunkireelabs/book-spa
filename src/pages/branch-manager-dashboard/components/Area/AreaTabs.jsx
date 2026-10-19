@@ -23,6 +23,17 @@ const AreaTabs = ({ area, view, children }) => {
 
   const areaTitle = typeof area.title === 'function' ? area.title(ctx) : area.title;
 
+  // The page draws its own header and tabs inside the one scroller (Packages).
+  if (area.selfHeader) {
+    return (
+      <div className="h-full flex flex-col min-h-0">
+        <div className="content-scroll flex-1 min-h-0 overflow-y-auto">
+          <div className="px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-5">{children}</div>
+        </div>
+      </div>
+    );
+  }
+
   // Arrow keys / Home / End move focus between tabs; Enter or Space opens the focused one (it is a link).
   const onKeyDown = (e) => {
     const items = Array.from(listRef.current?.querySelectorAll('[role="tab"]') || []);

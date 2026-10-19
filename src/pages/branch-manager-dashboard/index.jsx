@@ -68,8 +68,7 @@ import MembershipCollectionPanel from './components/Memberships/MembershipCollec
 import WalletUsagePanel from './components/Memberships/WalletUsagePanel';
 import VoucherListPanel from './components/Vouchers/VoucherListPanel';
 import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
-import PackageListPanel from './components/Packages/PackageListPanel';
-import PackageOverviewPanel from './components/Packages/PackageOverviewPanel';
+import PackagesPage from './components/Packages/PackagesPage';
 import RulesEditorPanel from './components/Outreach/RulesEditorPanel';
 import TemplateEditorPanel from './components/Outreach/TemplateEditorPanel';
 import ReviewQueuePanel from './components/Outreach/ReviewQueuePanel';
@@ -458,8 +457,8 @@ const BranchManagerDashboard = () => {
       case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall || salesReadOnly} />;
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
-      case 'package-overview': return salesViewer ? <PackageOverviewPanel readOnly={salesReadOnly} /> : null;
-      case 'packages': return salesViewer ? <PackageListPanel readOnly={salesReadOnly} /> : null;
+      case 'package-overview':
+      case 'packages': return salesViewer ? <PackagesPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
       case 'memberships': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipsPanel branchId={branchId} readOnly={salesReadOnly} /> : null;
       case 'membership-collection': return MEMBERSHIP_ENABLED && salesViewer ? <MembershipCollectionPanel /> : null;
       case 'wallet-usage': return MEMBERSHIP_ENABLED && salesViewer ? <WalletUsagePanel /> : null;

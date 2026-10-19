@@ -33,7 +33,7 @@ export const NAV_SECTIONS = [
     { id: 'customers', label: 'Customers', icon: 'Users', view: 'customers', keywords: 'clients guests', roles: STAFF_UP },
   ] },
   { id: 'sales', label: 'Sales', items: [
-    { id: 'packages', label: 'Packages', icon: 'Layers', view: 'package-overview', keywords: 'sessions bundles', roles: MGR_ADMIN_VIEWER, activeViews: ['package-overview', 'packages'] },
+    { id: 'packages', label: 'Packages', icon: 'Layers', view: 'packages', keywords: 'sessions bundles', roles: MGR_ADMIN_VIEWER, activeViews: ['package-overview', 'packages'] },
     ...flagged(MEMBERSHIP_ENABLED, [
       { id: 'memberships', label: 'Memberships', icon: 'CreditCard', view: 'memberships', keywords: 'wallet tiers', roles: MGR_ADMIN_VIEWER, activeViews: ['memberships', 'membership-collection', 'wallet-usage'] },
     ]),

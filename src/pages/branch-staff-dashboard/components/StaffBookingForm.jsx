@@ -178,6 +178,14 @@ const StaffBookingForm = ({ onBookingCreated }) => {
       getCustomerOutstandingBalance({ customerPhone: e164, branchId }).then(({ data }) => setPreviousDue(data && data.totalDue > 0 ? data : null));
     }
   }, [prefill, handleCustomerSelect, branchId]);
+  // "Book session" from Packages also passes the package's service: pick it and go straight to the date step.
+  const servicePrefilled = useRef(false);
+  useEffect(() => {
+    if (!prefill?.serviceId || servicePrefilled.current || !services.length) return;
+    servicePrefilled.current = true;
+    const svc = services.find((s) => s.id === prefill.serviceId);
+    if (svc) { setSelectedService(svc); setStep(2); }
+  }, [prefill, services]);
 
   const handleReferringPhoneChange = useCallback((v) => {
     setReferringCustomerPhone(v.replace(/\D/g, '').slice(0, 15));

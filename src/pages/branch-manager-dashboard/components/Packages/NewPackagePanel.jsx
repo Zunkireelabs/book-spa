@@ -33,7 +33,8 @@ const intOnly = (v) => String(v).replace(/\D/g, '').slice(0, 4);
 // "New package": the right-hand panel (same shell, fields and footer as New voucher). Issues via issue_package() (migration-141).
 // There is no manual code (package_code stays NULL) and no tender rows: the package records paid_amount as one number.
 // Callbacks are unchanged: onClose(), onIssued(issuedPackage).
-const NewPackagePanel = ({ userRole, onClose, onIssued }) => {
+// Optional prefill (Packages page): `initialCustomer` ({ id?, full_name, phone }) for Renew, `initialPackageTypeId` for Renew / Sell.
+const NewPackagePanel = ({ userRole, onClose, onIssued, initialCustomer = null, initialPackageTypeId = null }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
   const { orgId, paymentMethods } = useOrg();
@@ -94,10 +95,14 @@ const NewPackagePanel = ({ userRole, onClose, onIssued }) => {
     const { data, error } = await fetchPackageTypes();
     if (error) { setLoadError(friendlyError(error, 'Failed to load package types.')); setTypes([]); return; }
     setTypes(data || []);
-    const pick = selectId ? data?.find((t) => t.id === selectId) : data?.[0];
+    const pick = (selectId && data?.find((t) => t.id === selectId)) || data?.[0];
     if (pick) applyType(pick, issuedDate, { keepExpiryTouched: selectId ? false : expiryTouched });
   };
-  useEffect(() => { loadTypes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    loadTypes(initialPackageTypeId ? { selectId: initialPackageTypeId } : undefined);
+    if (initialCustomer?.full_name) onGuestSelect(initialCustomer);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return undefined;

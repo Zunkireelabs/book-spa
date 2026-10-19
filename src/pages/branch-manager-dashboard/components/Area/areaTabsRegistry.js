@@ -39,13 +39,15 @@ export const AREAS = [
     description: () => 'Monthly pay runs for your team.',
     tabs: [{ view: 'payroll', label: 'Payroll', roles: ['admin', 'admin_viewer'] }],
   },
+  // Packages (V20) draws its own header (lead sentence + counted tabs), so `selfHeader` skips the shared one.
   {
     id: 'packages',
     title: 'Packages',
     description: () => 'Packages you sell and the ones customers hold.',
+    selfHeader: true,
     tabs: [
-      { view: 'package-overview', label: 'All packages', roles: MGR_ADMIN_VIEWER },
-      { view: 'packages', label: 'Issued', roles: MGR_ADMIN_VIEWER },
+      { view: 'packages', label: 'Guest packages', roles: MGR_ADMIN_VIEWER },
+      { view: 'package-overview', label: 'Package types', roles: MGR_ADMIN_VIEWER },
     ],
   },
   // Flagged areas: only present when the feature is on.

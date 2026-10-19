@@ -13468,19 +13468,40 @@ export async function fetchVouchersForCustomer(customerId) {
 // exactly one service_id and tracks *sessions*, not a monetary balance.
 // ============================================================
 
-export async function fetchPackageTypes() {
+// Active types only by default (the Sell package dropdown); the Package types tab passes includeInactive to list hidden ones too.
+const PACKAGE_TYPE_SELECT = 'id, name, service_id, default_sessions, standard_price, validity_days, is_active, display_order, service:services ( id, name, duration_minutes, price_npr )';
+
+export async function fetchPackageTypes({ includeInactive = false } = {}) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('package_types')
-      .select('id, name, service_id, default_sessions, standard_price, validity_days, is_active, display_order, service:services ( id, name, duration_minutes )')
-      .eq('is_active', true)
-      .order('display_order', { ascending: true });
+      .select(PACKAGE_TYPE_SELECT)
+      .order('display_order', { ascending: true })
+      .order('name', { ascending: true });
+    if (!includeInactive) query = query.eq('is_active', true);
+    const { data, error } = await query;
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchPackageTypes error:', error.message);
     return { data: null, error };
   }
+}
+
+// Empty sessions = open (set when selling); empty price = set at sale. Validity defaults to a year.
+const blank = (v) => v == null || String(v).trim() === '';
+function checkPackageTypeNumbers({ defaultSessions, standardPrice, validityDays }) {
+  const sessions = blank(defaultSessions) ? null : Number(defaultSessions);
+  if (sessions != null && (!Number.isInteger(sessions) || sessions <= 0)) {
+    return { error: { code: 'INVALID_INPUT', message: 'Sessions must be a whole number greater than zero, or left empty.' } };
+  }
+  const price = blank(standardPrice) ? null : Number(standardPrice);
+  if (price != null && !(price >= 0)) return { error: { code: 'INVALID_INPUT', message: 'Price must be zero or greater, or left empty.' } };
+  const validity = blank(validityDays) ? 365 : Number(validityDays);
+  if (!Number.isInteger(validity) || validity <= 0) {
+    return { error: { code: 'INVALID_INPUT', message: 'Valid for must be a whole number of days greater than zero.' } };
+  }
+  return { sessions, price, validity };
 }
 
 // Admin-only quick-add for package types, used inline from the package
@@ -13495,16 +13516,9 @@ export async function createPackageType({ orgId, name, serviceId, defaultSession
     if (!orgId)      return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
     if (!name?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Package type name is required.' } };
     if (!serviceId)  return { data: null, error: { code: 'INVALID_INPUT', message: 'A service is required.' } };
-    const sessions = Number(defaultSessions);
-    if (!Number.isFinite(sessions) || sessions <= 0) {
-      return { data: null, error: { code: 'INVALID_INPUT', message: 'Default sessions must be greater than zero.' } };
-    }
-    const price = Number(standardPrice);
-    if (!(price >= 0)) return { data: null, error: { code: 'INVALID_INPUT', message: 'Standard price must be zero or greater.' } };
-    const validity = validityDays != null && validityDays !== '' ? Number(validityDays) : 365;
-    if (!Number.isFinite(validity) || validity <= 0) {
-      return { data: null, error: { code: 'INVALID_INPUT', message: 'Validity days must be greater than zero.' } };
-    }
+    const checked = checkPackageTypeNumbers({ defaultSessions, standardPrice, validityDays });
+    if (checked.error) return { data: null, error: checked.error };
+    const { sessions, price, validity } = checked;
 
     const { data, error } = await supabase
       .from('package_types')
@@ -13517,12 +13531,55 @@ export async function createPackageType({ orgId, name, serviceId, defaultSession
         validity_days: validity,
         is_active: true,
       })
-      .select('id, name, service_id, default_sessions, standard_price, validity_days, is_active, display_order, service:services ( id, name, duration_minutes )')
+      .select(PACKAGE_TYPE_SELECT)
       .single();
     if (error) throw error;
     return { data, error: null };
   } catch (error) {
     console.error('[API] createPackageType error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only edit of a package type (the Package types tab). Only the fields passed are changed, so the On sale switch can send
+// just { id, isActive }. Packages already sold keep their own sessions / price / expiry (they are copied at sale).
+export async function updatePackageType({ id, name, serviceId, defaultSessions, standardPrice, validityDays, isActive }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!id) return { data: null, error: { code: 'INVALID_INPUT', message: 'id is required.' } };
+
+    const patch = {};
+    if (name !== undefined) {
+      if (!name?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Package type name is required.' } };
+      patch.name = name.trim();
+    }
+    if (serviceId !== undefined) {
+      if (!serviceId) return { data: null, error: { code: 'INVALID_INPUT', message: 'A service is required.' } };
+      patch.service_id = serviceId;
+    }
+    if (defaultSessions !== undefined || standardPrice !== undefined || validityDays !== undefined) {
+      const checked = checkPackageTypeNumbers({ defaultSessions, standardPrice, validityDays });
+      if (checked.error) return { data: null, error: checked.error };
+      if (defaultSessions !== undefined) patch.default_sessions = checked.sessions;
+      if (standardPrice !== undefined) patch.standard_price = checked.price;
+      if (validityDays !== undefined) patch.validity_days = checked.validity;
+    }
+    if (isActive !== undefined) patch.is_active = !!isActive;
+    if (!Object.keys(patch).length) return { data: null, error: { code: 'INVALID_INPUT', message: 'Nothing to update.' } };
+
+    const { data, error } = await supabase
+      .from('package_types')
+      .update(patch)
+      .eq('id', id)
+      .select(PACKAGE_TYPE_SELECT)
+      .maybeSingle();
+    if (error) throw error;
+    // RLS hides the row from non-admins, so an update that matched nothing comes back empty rather than as an error.
+    if (!data) return { data: null, error: { code: 'NOT_ALLOWED', message: 'Only an admin can change package types.' } };
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updatePackageType error:', error.message);
     return { data: null, error };
   }
 }
@@ -13628,7 +13685,7 @@ export async function fetchPackages(customerId) {
         package_type:package_types ( id, name ),
         service:services ( id, name, duration_minutes ),
         issuer:users!issued_by ( id, full_name ),
-        customer:customers ( id, full_name, phone )
+        customer:customers ( id, full_name, phone, email, gender )
       `)
       .order('guest_name', { ascending: true });
     if (customerId) packagesQuery = packagesQuery.eq('customer_id', customerId);
@@ -13657,11 +13714,18 @@ export async function fetchPackages(customerId) {
         branchName: p.branch?.name || '—',
         packageTypeId: p.package_type?.id || null,
         packageTypeName: p.package_type?.name || '—',
+        customerId: p.customer?.id || null,
+        customerPhone: p.customer?.phone || null,
+        customerEmail: p.customer?.email || null,
+        customerGender: p.customer?.gender || null,
+        serviceId: p.service?.id || null,
         serviceName: p.service?.name || '—',
         serviceDurationMinutes: p.service?.duration_minutes || null,
         paidAmount: Number(p.paid_amount || 0),
         sessionsTotal: p.sessions_total,
         remarks: p.remarks,
+        createdAt: p.created_at,
+        issuedById: p.issuer?.id || null,
         issuedByName: p.issuer?.full_name || '—',
         baseAmount: p.base_amount != null ? Number(p.base_amount) : null,
         discountType: p.discount_type,
@@ -13711,7 +13775,7 @@ export async function fetchPackage(packageId) {
           package_type:package_types ( id, name ),
           service:services ( id, name, duration_minutes ),
           issuer:users!issued_by ( id, full_name ),
-          customer:customers ( id, full_name, phone, email )
+          customer:customers ( id, full_name, phone, email, gender )
         `)
         .eq('id', packageId)
         .single(),
@@ -13740,6 +13804,8 @@ export async function fetchPackage(packageId) {
         customerId: p.customer?.id || null,
         customerPhone: p.customer?.phone || null,
         customerEmail: p.customer?.email || null,
+        customerGender: p.customer?.gender || null,
+        serviceId: p.service?.id || null,
         serviceName: p.service?.name || '—',
         serviceDurationMinutes: p.service?.duration_minutes || null,
         paidAmount: Number(p.paid_amount || 0),
@@ -13776,7 +13842,8 @@ export async function fetchPackageRedemptions(packageId) {
       .select(`
         id, redeemed_date, guest_name_used_by, notes, created_at, booking_id,
         branch:branches ( id, name ),
-        performer:users!performed_by ( id, full_name )
+        performer:users!performed_by ( id, full_name ),
+        booking:bookings ( id, booking_number, therapist:therapists ( id, name ) )
       `)
       .eq('package_id', packageId)
       .order('redeemed_date', { ascending: false });
