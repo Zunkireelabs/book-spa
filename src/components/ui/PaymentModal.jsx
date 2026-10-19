@@ -14,7 +14,11 @@ import {
   getActivePackagesForCustomer,
   fetchBranchStaffUsers,
   getPaymentMethodQrs,
+  fetchMemberDiscountContext,
+  applyMemberDiscount,
 } from '../../services/api';
+import { memberDiscountFor, effectOf, defaultOn } from '../../services/memberDiscount';
+import { nepalNow } from '../../utils/customerDirectory';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
 import { useOrg } from '../../contexts/OrgContext';
@@ -187,6 +191,54 @@ const MethodMenu = ({ rect, tree, usedValues, activeValue, onPick, onClose }) =>
   );
 };
 
+// Member discount line under a service (V22): on (gold, "Remove"), removed ("Add back"), a better member rate than the
+// booking's own discount ("Use N% instead"), or a quiet "no discount on these services" for an active member.
+const fmtN = (n) => Number(n || 0).toLocaleString('en-IN');
+const StarDot = ({ muted = false }) => (
+  <span className={`w-[18px] h-[18px] rounded-full grid place-items-center flex-none ${muted ? 'bg-[#F1F1EF] text-[#B4B4BA]' : 'bg-[#FBF3DF] text-[#C99A2E]'}`}>
+    <Icon name="Star" size={9} className="fill-current" strokeWidth={0} />
+  </span>
+);
+const MemberLine = ({ st, onToggle }) => {
+  if (!st?.md) return null;
+  const { md, on } = st;
+  if (md.kind === 'noRule') {
+    return (
+      <div className="flex items-center gap-2 min-h-[30px] pl-6 text-[12.5px] text-[#8A8A90]" data-member-line="none">
+        <StarDot muted />No {md.tierName} discount on {md.label} services
+      </div>
+    );
+  }
+  if (on && st.memberAmount > 0) {
+    return (
+      <div className="flex items-start gap-2 pl-6 py-1.5" data-member-line="on">
+        <span className="mt-0.5"><StarDot /></span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] text-[#9A6B0B] truncate">{md.tierName} · {md.pct}% off {md.label.toLowerCase()}</div>
+          <div className="text-[11.5px] text-[#8A8A90]">{md.capped ? `Capped at NPR ${fmtN(md.amount)} (already paid NPR ${fmtN(md.paid)})` : 'Added automatically'}</div>
+        </div>
+        <span className="text-[13px] text-[#9A6B0B] tabular-nums whitespace-nowrap">−{fmtN(st.memberAmount)}</span>
+        <button type="button" onClick={() => onToggle(false)} className="text-[11.5px] text-[#8A8A90] underline underline-offset-2 hover:text-[#0E0D0C]" data-member-remove>Remove</button>
+      </div>
+    );
+  }
+  if (md.kind === 'better') {
+    return (
+      <div className="ml-6 mt-1 mb-1.5 flex items-center gap-2.5 rounded-lg border border-dashed border-[#E7C766] bg-[#FFFBF0] px-3 py-2" data-member-line="better">
+        <Icon name="Star" size={11} className="fill-current text-[#C99A2E] flex-none" strokeWidth={0} />
+        <span className="flex-1 min-w-0 text-[12.5px] text-[#92600A]">{md.tierName} gets <b className="font-semibold">{md.pct}%</b> on {md.label.toLowerCase()}. Save the guest NPR {fmtN(md.extra)} more.</span>
+        <button type="button" onClick={() => onToggle(true)} className="h-7 px-2.5 rounded-md border border-[#E7C766] bg-white text-[12px] font-semibold text-[#92600A] whitespace-nowrap hover:bg-[#FFF6DD]" data-member-use>Use {md.pct}% instead</button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 min-h-[30px] pl-6 text-[12.5px] text-[#8A8A90]" data-member-line="off">
+      <StarDot muted /><span className="flex-1">Member discount removed</span>
+      <button type="button" onClick={() => onToggle(true)} className="text-[12.5px] font-medium text-primary hover:underline" data-member-addback>Add back {md.pct}%</button>
+    </div>
+  );
+};
+
 const CreditRow = ({ icon, title, sub, applied, onApply, onRemove, disabledText }) => (
   <div className="flex items-center gap-2.5 min-h-[44px] border-b border-[#F1F1EF] last:border-b-0 py-1.5">
     <span className="w-7 h-7 rounded-[7px] border border-[#E7E8E6] bg-white grid place-items-center text-[#515152] flex-none"><Icon name={icon} size={15} strokeWidth={1.6} /></span>
@@ -250,11 +302,48 @@ const PaymentModal = ({
     return Math.max(round2(final - already), 0);
   };
 
+  // ── Member discount (V22) ─────────────────────────────────────────────────────────────────────
+  // The tier's rate is previewed here for the main booking and every add-on (read fresh from the DB), and saved by
+  // apply_member_discount() only when staff press Collect. `memberOn` is the staff choice per booking (Remove / Add back /
+  // Use N% instead); `memberState[id].delta` is how much less that booking costs than its saved amounts.
+  const mainBookingId = booking.bookingId || booking.id;
+  const memberIds = useMemo(() => [mainBookingId, ...candidates.map((b) => b.bookingId)].filter(Boolean), [mainBookingId, candidates]);
+  const memberIdsKey = memberIds.join(',');
+  const [memberCtx, setMemberCtx] = useState(null);
+  const [memberOn, setMemberOn] = useState({});
+  const memberSavedRef = useRef(new Set()); // bookings whose member change was already saved in this checkout
+  const memberToday = useMemo(() => nepalNow().today, []);
+  useEffect(() => {
+    if (!MEMBERSHIP_ENABLED || !memberIds.length) return undefined;
+    let cancelled = false;
+    fetchMemberDiscountContext(memberIds).then(({ data }) => { if (!cancelled && data) setMemberCtx(data); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberIdsKey]);
+  const memberState = useMemo(() => {
+    const out = {};
+    memberIds.forEach((id) => {
+      const ctx = memberCtx?.[id];
+      const md = ctx ? memberDiscountFor({ booking: ctx.booking, membership: ctx.membership, today: memberToday }) : null;
+      const on = memberOn[id] ?? defaultOn(md);
+      out[id] = { md, on, ...effectOf(md, on) };
+    });
+    return out;
+  }, [memberIds, memberCtx, memberOn, memberToday]);
+  const memberDelta = (id) => memberState[id]?.delta || 0;
+  const setMemberChoice = (id, on) => setMemberOn((m) => ({ ...m, [id]: on }));
+  // What an add-on still owes after its member line.
+  const bookingDue = (b) => Math.max(0, round2(bookingRemaining(b) - memberDelta(b.bookingId)));
+
   const finalAmount = Number(booking.final_amount ?? booking.finalAmount ?? 0);
   const alreadyPaid = round2(booking.amountPaid || booking.amount_paid || 0);
-  const remaining = round2(Math.max(finalAmount - alreadyPaid, 0));
+  const remaining = round2(Math.max(finalAmount - alreadyPaid - memberDelta(mainBookingId), 0));
 
-  const additionalRemaining = round2(additionalBookings.reduce((s, b) => s + bookingRemaining(b), 0));
+  const additionalRemaining = round2(additionalBookings.reduce((s, b) => s + bookingDue(b), 0));
+  // "Member saves NPR X" and the struck-through amount: only the bookings in this payment.
+  const includedMemberIds = [mainBookingId, ...additionalBookings.map((b) => b.bookingId)];
+  const memberSavings = round2(includedMemberIds.reduce((s, id) => s + (memberState[id]?.memberAmount || 0), 0));
+  const memberDeltaIncluded = round2(includedMemberIds.reduce((s, id) => s + (memberState[id]?.on ? Math.max(0, memberDelta(id)) : 0), 0));
   const grandTotal = round2(remaining + additionalRemaining);
 
   const [notes, setNotes] = useState('');
@@ -647,7 +736,7 @@ const PaymentModal = ({
     // BK-20260913-0037, where a bundled Jacuzzi payment vanished unnoticed).
     const skippedBookings = [];
     for (const pb of additionalBookings) {
-      const need = bookingRemaining(pb);
+      const need = bookingDue(pb);
       if (poolRemaining() + 0.001 >= need) {
         additionalAllocations.push({ bookingId: pb.bookingId, bookingNumber: pb.bookingNumber, tenders: take(need) });
       } else {
@@ -672,7 +761,36 @@ const PaymentModal = ({
     [cleanedTendersPreview, remaining, additionalBookings]
   );
 
+  // Member discount (V22): the changes still to save at Collect, and saving them (then re-checking the amounts against what
+  // this screen shows). Returns an error message, or null when everything matches.
+  const memberPendingChanges = includedMemberIds
+    .map((id) => ({ id, action: memberState[id]?.action }))
+    .filter((c) => c.action && !memberSavedRef.current.has(c.id));
+  const memberOnly = grandTotal <= 0.001 && memberPendingChanges.length > 0; // the member discount leaves nothing to collect
+  const saveMemberChanges = async () => {
+    if (!memberPendingChanges.length) return null;
+    for (const c of memberPendingChanges) {
+      const { error: mdError } = await applyMemberDiscount({ bookingId: c.id, remove: c.action === 'remove' });
+      if (mdError) return `Member discount not saved: ${mdError.message}. Nothing was paid.`;
+      memberSavedRef.current.add(c.id);
+    }
+    const { data: fresh, error: freshError } = await fetchMemberDiscountContext(includedMemberIds);
+    if (freshError || !fresh) return 'Could not re-check the amounts after the member discount. Nothing was paid; close checkout and open it again.';
+    const expected = [[mainBookingId, remaining], ...additionalBookings.map((b) => [b.bookingId, bookingDue(b)])];
+    const off = expected.filter(([id, due]) => {
+      const f = fresh[id]?.booking;
+      return !f || Math.abs(Math.max(0, round2(f.finalAmount - f.amountPaid)) - due) > 0.01;
+    });
+    return off.length ? 'The amount due changed while saving the member discount. Nothing was paid; close checkout and open it again.' : null;
+  };
+
   const handleSubmit = async () => {
+    if (memberOnly) {
+      const memberError = await saveMemberChanges();
+      if (memberError) { setError(memberError); return; }
+      setReceipt({ ...buildReceipt([], 0, []), tenders: [], total: 0, leftover: 0, walletAfter: [], memberOnly: true });
+      return;
+    }
     if (referralRewardBlocksPayment) {
       setError('Apply this customer\'s referral wallet reward before completing payment.');
       return;
@@ -745,6 +863,12 @@ const PaymentModal = ({
     const tipSplits = tipAmount > 0
       ? tipRecipients.map(r => ({ receivedBy: r.receivedBy, amount: round2(Number(r.amount)) }))
       : [];
+
+    // Member discount (V22): save each booking's member change first, then re-read the amounts and make sure they are what
+    // this screen shows. If either step fails, nothing is paid.
+    const memberError = await saveMemberChanges();
+    if (memberError) { setError(memberError); return; }
+
     const result = await onConfirm({
       tenders: primaryTenders,
       additionalAllocations,
@@ -852,6 +976,11 @@ const PaymentModal = ({
       if (grandTotal > prev) {
         if (enteredNow + 0.001 < prev) return cur;
         const delta = round2(grandTotal - prev);
+        // V22: a lone wallet row that covered the old total keeps covering it (e.g. the member discount was removed),
+        // as long as the wallet has enough.
+        if (cur.length === 1 && cur[0].paymentMode === 'Membership' && membershipUsable && membership.balance + 0.001 >= grandTotal) {
+          return [{ ...cur[0], amount: String(grandTotal) }];
+        }
         let idx = -1;
         for (let i = cur.length - 1; i >= 0; i--) if (!isCreditMode(cur[i].paymentMode)) { idx = i; break; }
         if (idx < 0) return [...cur, defaultRow(delta)];
@@ -1041,6 +1170,7 @@ const PaymentModal = ({
     || appliedVoucherBalances.some((v) => (voucherWalletCommittedByVoucher.get(v.voucherId) || 0) > v.remainingBalance);
   const tipActive = showTip && Number(tip) > 0;
   const blockReason = (() => {
+    if (memberOnly) return '';
     if (referralRewardBlocksPayment) return 'Apply the referral reward first';
     if (tenders.some((t) => !t.paymentMode)) return 'Choose a method for the new row';
     if (entered <= 0 && leftover <= 0) return 'Enter an amount';
@@ -1055,7 +1185,7 @@ const PaymentModal = ({
     return '';
   })();
   const canSubmit = !blockReason && !busy;
-  const primaryLabel = qrSingle
+  const primaryLabel = memberOnly ? 'Save member discount' : qrSingle
     ? `Confirm NPR ${fmt(entered)} received${leftover > 0 ? ` · ${fmt(leftover)} due` : ''}`
     : entered > 0 ? (leftover > 0 ? `Collect ${fmt(entered)} · ${fmt(leftover)} due` : `Collect NPR ${fmt(entered)}`) : `Leave NPR ${fmt(leftover)} due`;
 
@@ -1076,11 +1206,19 @@ const PaymentModal = ({
   const buildReceipt = (cleaned, tipAmount, tipSplits) => {
     const staffName = (id) => branchStaffOptions.find((s) => s.id === id)?.name || 'staff';
     const gross = Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount;
-    const discount = round2(Number(booking.discount_amount ?? booking.discountAmount ?? 0));
+    const mainMember = memberState[mainBookingId];
+    const memberLine = (st) => ({ label: `★ ${st.md.tierName} ${st.md.pct}% off`, amount: -st.memberAmount, sub: true, member: true });
+    const discount = mainMember?.memberAmount > 0 ? 0 : round2(Number(booking.discount_amount ?? booking.discountAmount ?? 0) - (mainMember?.action === 'remove' ? mainMember.md.amount : 0));
     const lines = [{ label: svcName(booking), amount: gross }];
+    if (mainMember?.memberAmount > 0) lines.push(memberLine(mainMember));
     if (discount > 0) lines.push({ label: 'Discount', amount: -discount, sub: true });
     if (alreadyPaid > 0) lines.push({ label: 'Already paid', amount: -alreadyPaid, sub: true });
-    additionalBookings.forEach((b) => lines.push({ label: `${svcName(b)} · ${b.bookingNumber || ''}`.replace(/ · $/, ''), amount: bookingRemaining(b) }));
+    additionalBookings.forEach((b) => {
+      const st = memberState[b.bookingId];
+      const memberHere = st?.md?.kind === 'apply' && st.on; // add-on lines show what is still due, so only a fresh member discount gets its own line
+      lines.push({ label: `${svcName(b)} · ${b.bookingNumber || ''}`.replace(/ · $/, ''), amount: round2(bookingDue(b) + (memberHere ? st.delta : 0)) });
+      if (memberHere) lines.push({ ...memberLine(st), amount: -st.delta });
+    });
     const tenderRows = tenders
       .filter((t) => t.paymentMode && Number(t.amount) > 0 && (t.paymentMode !== 'SessionPackage' || t.packageId))
       .map((t) => {
@@ -1099,6 +1237,7 @@ const PaymentModal = ({
       orgName, branchName, guestName, guestPhone, bookingNumber,
       dateLabel: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       lines, tenders: tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
+      hasMember: lines.some((l) => l.member), lineTotal: grandTotal,
       tipTotal: tipAmount,
       tipLabel: tipAmount > 0 ? `Tip to ${tipSplits.map((s) => staffName(s.receivedBy)).join(', ')}` : '',
       walletAfter,
@@ -1280,7 +1419,7 @@ const PaymentModal = ({
       className="checkout-dialog bg-white rounded-[14px] w-[440px] max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in">
       <div className="px-7 py-7 text-center overflow-y-auto flex-1 min-h-0"><div className="min-h-full flex flex-col justify-center">
         <div className="w-10 h-10 rounded-full bg-[#EEF3EC] text-primary grid place-items-center mx-auto"><Icon name="Check" size={20} strokeWidth={2.2} /></div>
-        <div className="mt-3.5 text-[12.5px] text-[#8A8A90]">Payment collected</div>
+        <div className="mt-3.5 text-[12.5px] text-[#8A8A90]">{receipt.memberOnly ? 'Member discount saved · nothing left to pay' : 'Payment collected'}</div>
         <div className="text-[30px] font-semibold tracking-[-1px] mt-0.5 tabular-nums"><span className="text-[15px] font-medium text-[#8A8A90] mr-1.5 tracking-normal">NPR</span>{fmt(receipt.total)}</div>
         <div className="text-[13px] text-[#515152] mt-0.5">
           {receipt.guestName && <>{receipt.guestName} · </>}
@@ -1289,6 +1428,17 @@ const PaymentModal = ({
             : <>{receipt.bookingNumber}{receipt.extraCount > 0 ? ` + ${receipt.extraCount} more` : ''} {receipt.extraCount > 0 ? 'are' : 'is'} fully paid</>}
         </div>
         <div className="mt-5 border-t border-[#E7E8E6] text-left text-[13px] pb-1">
+          {receipt.hasMember && (
+            <div data-receipt-lines>
+              {receipt.lines.map((l, i) => (
+                <div key={`l${i}`} className={`flex justify-between items-center h-9 border-b border-[#F1F1EF] ${l.member ? 'text-[#9A6B0B]' : l.sub ? 'text-[#8A8A90]' : 'text-[#515152]'}`}>
+                  <span className="inline-flex items-center gap-1.5">{l.member && <Icon name="Star" size={11} className="fill-current" strokeWidth={0} />}{l.member ? l.label.replace(/^★ /, '') : l.label}</span>
+                  <span className="tabular-nums">{l.amount < 0 ? `−${fmt(-l.amount)}` : fmt(l.amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between items-center h-9 border-b border-[#F1F1EF] font-semibold"><span>Total</span><span className="tabular-nums">{fmt(receipt.lineTotal)}</span></div>
+            </div>
+          )}
           {receipt.tenders.map((t, i) => (
             <div key={i} className="flex justify-between items-center h-9 border-b border-[#F1F1EF]">
               <span className="text-[#515152]">{t.label}{t.detail && <span className="text-[#8A8A90]"> · {t.detail}</span>}</span>
@@ -1342,9 +1492,15 @@ const PaymentModal = ({
             <span className="flex-1 min-w-0 truncate">{svcName(booking)}{bookingRowInfo?.service?.duration_minutes ? ` · ${bookingRowInfo.service.duration_minutes} min` : ''}{bookingRowInfo?.therapist?.name && <small className="text-[#8A8A90] text-[12px]"> · {bookingRowInfo.therapist.name}</small>}</span>
             <span className="font-medium tabular-nums">{fmt(Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount)}</span>
           </div>
-          {Number(booking.discount_amount ?? booking.discountAmount ?? 0) > 0 && (
-            <div className="flex items-center h-[30px] text-[#8A8A90]"><span className="flex-1 pl-6">Discount</span><span className="tabular-nums">−{fmt(Number(booking.discount_amount ?? booking.discountAmount))}</span></div>
+          {Number(booking.discount_amount ?? booking.discountAmount ?? 0) > 0
+            && memberState[mainBookingId]?.md?.kind !== 'saved'
+            && !(memberState[mainBookingId]?.md?.kind === 'better' && memberState[mainBookingId]?.on) && (
+            <div className="flex items-center h-[30px] text-[#8A8A90]">
+              <span className="flex-1 pl-6 truncate">Discount{memberCtx?.[mainBookingId]?.booking?.discountReason ? ` · ${memberCtx[mainBookingId].booking.discountReason}` : ''}</span>
+              <span className="tabular-nums">−{fmt(Number(booking.discount_amount ?? booking.discountAmount))}</span>
+            </div>
           )}
+          <MemberLine st={memberState[mainBookingId]} onToggle={(v) => setMemberChoice(mainBookingId, v)} />
           {alreadyPaid > 0 && (
             <div className="flex items-center h-[30px] text-[#8A8A90]"><span className="flex-1 pl-6">Already paid</span><span className="tabular-nums">−{fmt(alreadyPaid)}</span></div>
           )}
@@ -1357,15 +1513,18 @@ const PaymentModal = ({
                 const earlier = b.amountDue !== undefined && b.amountDue !== null;
                 const d = b.date ? new Date(`${b.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
                 return (
-                  <button key={b.bookingId} type="button" role="checkbox" aria-checked={on} onClick={() => toggleAddOn(b.bookingId)}
+                  <React.Fragment key={b.bookingId}>
+                  <button type="button" role="checkbox" aria-checked={on} onClick={() => toggleAddOn(b.bookingId)}
                     className="w-full flex items-center gap-2.5 h-[38px] border-b border-[#F1F1EF] last:border-b-0 text-left">
                     <Check on={on} />
                     <span className="flex-1 min-w-0 truncate">
                       {earlier ? 'Earlier balance' : svcName(b)}
                       <small className="text-[#8A8A90] text-[12px]"> · {earlier ? `${svcName(b)} · ${b.bookingNumber || ''}${d ? `, ${d}` : ''}` : `${b.bookingNumber || ''} · same group`}</small>
                     </span>
-                    <span className={`tabular-nums font-medium ${on ? '' : 'text-[#515152]'}`}>{fmt(bookingRemaining(b))}</span>
+                    <span className={`tabular-nums font-medium ${on ? '' : 'text-[#515152]'}`}>{fmt(bookingDue(b))}</span>
                   </button>
+                  {on && <MemberLine st={memberState[b.bookingId]} onToggle={(v) => setMemberChoice(b.bookingId, v)} />}
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -1518,8 +1677,14 @@ const PaymentModal = ({
         {/* Right: amount due + tenders */}
         <div className="min-w-0 min-h-0 flex flex-col">
          <div className="px-6 pt-5 flex-none">
-          <div className="text-[12.5px] text-[#8A8A90]">Amount due</div>
-          <div className="text-[34px] leading-[1.1] font-semibold tracking-[-1.1px] mt-0.5 tabular-nums"><span className="text-[16px] font-medium text-[#8A8A90] tracking-normal mr-1.5">NPR</span>{fmt(grandTotal)}</div>
+          <div className="flex items-center justify-between gap-3 text-[12.5px] text-[#8A8A90]">
+            <span>Amount due</span>
+            {memberSavings > 0 && <span className="inline-flex items-center gap-1.5 text-[#9A6B0B]" data-member-saves><Icon name="Star" size={11} className="fill-current" strokeWidth={0} />Member saves NPR {fmt(memberSavings)}</span>}
+          </div>
+          <div className="text-[34px] leading-[1.1] font-semibold tracking-[-1.1px] mt-0.5 tabular-nums">
+            {memberDeltaIncluded > 0 && <s className="text-[13px] font-normal text-[#B4B4BA] tracking-normal mr-2 align-middle" data-was>{fmt(round2(grandTotal + memberDeltaIncluded))}</s>}
+            <span className="text-[16px] font-medium text-[#8A8A90] tracking-normal mr-1.5">NPR</span>{fmt(grandTotal)}
+          </div>
           <div className="h-[3px] rounded-sm bg-[#F1F1EF] mt-3.5 mb-1.5 overflow-hidden"><i className={`block h-full transition-all ${leftover > 0.001 && entered > 0 ? 'bg-[#C99A2E]' : 'bg-primary'}`} style={{ width: `${dueFraction * 100}%` }} /></div>
           <div className="flex justify-between text-[12px] text-[#8A8A90]">
             <span className="tabular-nums">{entered > 0 ? `${fmt(Math.min(entered, grandTotal))} of ${fmt(grandTotal)} covered` : 'Nothing entered yet'}</span>

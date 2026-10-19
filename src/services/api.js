@@ -3038,6 +3038,7 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       discount_approved_by: isWithinLimit ? user.id : null,
       discount_requested_by: isWithinLimit ? null : user.id,
       discount_requested_to: isWithinLimit ? null : requestedTo,
+      member_discount: null, // V22: a manual discount replaces any member discount (migration-290)
     };
 
     // A discount applied while already-collected — reflect the new balance
@@ -12424,6 +12425,90 @@ export async function fetchMembershipActivity({ from, to }) {
     return { data: null, error };
   }
 }
+
+// Member discount at checkout (V22): for each booking in a checkout, what the member-discount rule needs, read fresh from the
+// DB (callers pass booking objects in many shapes): amounts, discount, paid so far, status, the service's category, and the
+// customer's latest membership with its tier rules. Returns { [bookingId]: { booking, membership } }.
+export async function fetchMemberDiscountContext(bookingIds) {
+  try {
+    const ids = [...new Set((bookingIds || []).filter(Boolean))];
+    if (!ids.length) return { data: {}, error: null };
+    const [bRes, pRes] = await Promise.all([
+      supabase.from('bookings')
+        .select('id, customer_id, status, is_locked, payment_status, base_amount, discount_amount, discount_status, discount_reason, discount_approved_by, updated_at, member_discount, final_amount, approver:users!discount_approved_by ( id, full_name ), service:services ( id, name, category, duration_minutes )')
+        .in('id', ids),
+      supabase.from('payments').select('booking_id, amount').in('booking_id', ids),
+    ]);
+    if (bRes.error) throw bRes.error;
+    if (pRes.error) throw pRes.error;
+    const paid = new Map();
+    (pRes.data || []).forEach((p) => paid.set(p.booking_id, Math.round(((paid.get(p.booking_id) || 0) + Number(p.amount || 0)) * 100) / 100));
+    const customerIds = [...new Set((bRes.data || []).map((b) => b.customer_id).filter(Boolean))];
+    const latest = new Map();
+    if (customerIds.length) {
+      const { data: mRows, error: mErr } = await supabase
+        .from('memberships')
+        .select(`
+          id, org_id, customer_id, tier_id, membership_number, total_deposited, balance,
+          activation_date, expiry_date, birthday_perk_used_at, notes, created_by, created_at,
+          tier:membership_tiers ( id, name, code_prefix, advance_amount, validity_days, discount_rules )
+        `)
+        .in('customer_id', customerIds)
+        .order('created_at', { ascending: false });
+      if (mErr) throw mErr;
+      (mRows || []).forEach((m) => { if (!latest.has(m.customer_id)) latest.set(m.customer_id, transformMembership(m)); });
+    }
+    const out = {};
+    (bRes.data || []).forEach((b) => {
+      out[b.id] = {
+        booking: {
+          id: b.id,
+          status: b.status,
+          isLocked: !!b.is_locked,
+          paymentStatus: b.payment_status,
+          baseAmount: Number(b.base_amount || 0),
+          discountAmount: Number(b.discount_amount || 0),
+          discountStatus: b.discount_status,
+          discountReason: b.discount_reason,
+          memberDiscount: b.member_discount || null,
+          approvedByName: b.approver?.full_name || null,
+          updatedAt: b.updated_at || null,
+          finalAmount: Number(b.final_amount || 0),
+          amountPaid: paid.get(b.id) || 0,
+          serviceCategory: b.service?.category || null,
+          serviceName: b.service?.name || null,
+          serviceMinutes: b.service?.duration_minutes || null,
+        },
+        membership: b.customer_id ? latest.get(b.customer_id) || null : null,
+      };
+    });
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchMemberDiscountContext error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Save (or remove) the member discount on one booking — apply_member_discount() (migration-290) checks membership, tier rate,
+// branch access and the paid cap server-side; the rate never comes from the client.
+export async function applyMemberDiscount({ bookingId, remove = false }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('apply_member_discount', { p_booking_id: bookingId, p_remove: !!remove });
+    if (error) throw error;
+    capture(remove ? 'member_discount_removed' : 'member_discount_applied', { booking_id: bookingId, pct: data?.pct ?? null });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] applyMemberDiscount error:', error.message);
+    return { data: null, error: { ...error, message: friendlyMemberDiscountError(error.message) } };
+  }
+}
+const friendlyMemberDiscountError = (msg) => {
+  const m = String(msg || '');
+  const text = m.replace(/^[A-Z_]+:\s*/, '');
+  return text || 'Could not apply the member discount.';
+};
 
 // Fetch the most-recent membership for the customer attached to a booking.
 // Returns null in `data` if the booking has no customer (walk-in) or no

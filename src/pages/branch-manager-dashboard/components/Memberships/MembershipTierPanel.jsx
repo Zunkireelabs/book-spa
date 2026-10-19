@@ -4,8 +4,9 @@ import {
   PanelShell, FormBody, Field, SelectField, TextInput, MoneyInput, SwitchRow, InlineError, controlA11y,
 } from '../../../../components/ui/PanelFormKit';
 import { useOrg } from '../../../../contexts/OrgContext';
-import { createMembershipTier, updateMembershipTier } from '../../../../services/api';
-import { CATEGORY_LABELS } from '../../../../services/membershipsView';
+import { createMembershipTier, updateMembershipTier, fetchServicesForManagement } from '../../../../services/api';
+import { categoryLabel } from '../../../../services/membershipsView';
+import { categoryKey } from '../../../../services/memberDiscount';
 import { validityLabel } from '../../../../services/packagesView';
 import { friendlyError } from '../../../../utils/friendlyError';
 
@@ -31,6 +32,17 @@ const MembershipTierPanel = ({ tier = null, tiers = [], onClose, onSaved }) => {
   const [serverError, setServerError] = useState(null);
   const [saving, setSaving] = useState(false);
   const nameRef = useRef(null);
+  // The categories checkout matches on (V22): the org's own service categories, plus `package` for vouchers.
+  const [serviceCats, setServiceCats] = useState(null);
+  useEffect(() => {
+    let off = false;
+    fetchServicesForManagement().then(({ data }) => {
+      if (off) return;
+      const keys = [...new Set((data || []).map((sv) => categoryKey(sv.category)).filter((k) => k && k !== 'package'))].sort();
+      setServiceCats(keys);
+    });
+    return () => { off = true; };
+  }, []);
   useEffect(() => {
     const t = setTimeout(() => nameRef.current?.focus({ preventScroll: true }), 260);
     return () => clearTimeout(t);
@@ -38,8 +50,11 @@ const MembershipTierPanel = ({ tier = null, tiers = [], onClose, onSaved }) => {
 
   const set = (k) => (v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); setServerError(null); };
   const setRule = (i, patch) => setForm((f) => ({ ...f, rules: f.rules.map((r, j) => (j === i ? { ...r, ...patch } : r)) }));
+  const catLabel = (k) => (k === 'package' ? 'Packages (vouchers)' : categoryLabel(k));
+  const allCats = [...(serviceCats || []), 'package'];
+  const unknownCat = (k) => serviceCats !== null && k !== 'package' && !serviceCats.includes(k);
   const usedCats = form.rules.map((r) => r.category);
-  const freeCats = Object.keys(CATEGORY_LABELS).filter((c) => !usedCats.includes(c));
+  const freeCats = allCats.filter((c) => !usedCats.includes(c));
   const addRule = () => freeCats.length && setForm((f) => ({ ...f, rules: [...f.rules, { category: freeCats[0], pct: '' }] }));
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
@@ -115,16 +130,17 @@ const MembershipTierPanel = ({ tier = null, tiers = [], onClose, onSaved }) => {
           {form.rules.length === 0 && <p className="text-xs text-text-secondary mb-2">No discounts yet. Members still get a birthday gift each year.</p>}
           <div className="space-y-2" data-rule-rows>
             {form.rules.map((r, i) => (
-              <div key={r.category} className="flex items-center gap-2">
+              <div key={r.category} className="flex items-start gap-2">
                 <div className="flex-1 min-w-0">
                   <SelectField value={r.category} onChange={(v) => setRule(i, { category: v })}
-                    options={[r.category, ...freeCats].map((c) => ({ value: c, label: CATEGORY_LABELS[c] || c }))} />
+                    options={[r.category, ...freeCats].map((c) => ({ value: c, label: catLabel(c) }))} />
+                  {unknownCat(r.category) && <p className="mt-1 text-xs text-warning" data-unknown-cat>No services use this category</p>}
                 </div>
                 <div className="relative w-24">
-                  <TextInput inputMode="numeric" aria-label={`${CATEGORY_LABELS[r.category] || r.category} discount %`} value={r.pct} onChange={(e) => { setRule(i, { pct: digitsOnly(e.target.value, 3) }); setErrors((x) => ({ ...x, rules: undefined })); }} className="pr-7 text-right tabular-nums" />
+                  <TextInput inputMode="numeric" aria-label={`${catLabel(r.category)} discount %`} value={r.pct} onChange={(e) => { setRule(i, { pct: digitsOnly(e.target.value, 3) }); setErrors((x) => ({ ...x, rules: undefined })); }} className="pr-7 text-right tabular-nums" />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-text-tertiary pointer-events-none">%</span>
                 </div>
-                <button type="button" aria-label={`Remove ${CATEGORY_LABELS[r.category] || r.category} discount`} onClick={() => setForm((f) => ({ ...f, rules: f.rules.filter((_, j) => j !== i) }))}
+                <button type="button" aria-label={`Remove ${catLabel(r.category)} discount`} onClick={() => setForm((f) => ({ ...f, rules: f.rules.filter((_, j) => j !== i) }))}
                   className="w-9 h-9 grid place-items-center rounded-spa text-text-tertiary hover:bg-black/[0.05] hover:text-text-primary"><Icon name="X" size={15} /></button>
               </div>
             ))}
@@ -133,7 +149,7 @@ const MembershipTierPanel = ({ tier = null, tiers = [], onClose, onSaved }) => {
           {freeCats.length > 0 && (
             <button type="button" onClick={addRule} className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-primary hover:underline"><Icon name="Plus" size={14} />Add a discount</button>
           )}
-          <p className="mt-2 text-xs text-text-secondary">Filled in when you sell a voucher to a member of this tier.</p>
+          <p className="mt-2 text-xs text-text-secondary">Applied automatically at checkout to services in that category, and filled in when you sell a voucher.</p>
         </div>
 
         {editing && (

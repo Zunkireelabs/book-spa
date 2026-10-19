@@ -192,7 +192,7 @@ const MembershipCollectionPanel = ({ members, tiers, error, onRetry, onChanged, 
         : <EmptyBlock icon="CreditCard" title="No tiers match" hint="Try a different search." action={{ label: 'Clear search', run: () => setSearchText('') }} />)}
       {!loading && !error && visible.length > 0 && (
         <p className="text-[12.5px] text-[#8A8A90] mt-3.5" data-footnote>
-          Member discounts are filled in when you sell a voucher to a member, so a change applies to vouchers sold from then on. Turning a tier off stops new enrolments; current members keep their wallet and discounts.
+          Member discounts are applied automatically at checkout, and filled in when you sell a voucher. A change counts from the next checkout. Turning a tier off stops new enrolments; current members keep their wallet and discounts.
         </p>
       )}
 

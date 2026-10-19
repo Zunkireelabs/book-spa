@@ -8,7 +8,7 @@ import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import AdminCorrectionModal from './AdminCorrectionModal';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
+import { fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -19,6 +19,10 @@ import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/cal
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
 import { formatPhoneGrouped } from '../../utils/phone';
 import { useBlockOverlap } from '../../hooks/useBlockOverlap';
+import { Segmented } from './PanelFormKit';
+import { memberDiscountFor } from '../../services/memberDiscount';
+import { nepalNow } from '../../utils/customerDirectory';
+import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -56,6 +60,96 @@ function formatCreatedAt(iso) {
 // Status badge styles
 // Booking details panel width: 560 on wide screens, shrinking (never below 420) so the calendar isn't starved.
 const BOOKING_PANEL_WIDTH = 'min(560px, max(420px, 100vw - 720px))';
+
+// Discount tab, member part (V22 addendum A): the tier's discount for this booking. Undecided (applies itself at checkout,
+// "Apply now" / "Don't apply for this visit"), applied ("Remove"), declined ("Apply N%"), or a better rate than the booking's
+// own discount ("Apply N% instead"). The price box shows what the guest will pay.
+const fmtNpr = (n) => Number(n || 0).toLocaleString('en-IN');
+const whenShort = (ts) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const day = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
+  const t = d.toLocaleTimeString('en-US', { timeZone: 'Asia/Kathmandu', hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
+  return `${day === nepalNow().today ? 'today' : d.toLocaleDateString('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short' })} ${t}`;
+};
+const MemberDiscountCard = ({ md, ctx, serviceLabel, busy, onApply, onDecline }) => {
+  const b = ctx.booking;
+  const title = `${md.tierName} · ${md.pct}% off ${md.label.toLowerCase()}`;
+  const star = (muted) => (
+    <span className={`w-8 h-8 rounded-md grid place-items-center flex-none border ${muted ? 'bg-[#F7F7F5] border-[#E7E8E6] text-[#B4B4BA]' : 'bg-white border-[#F1E2B8] text-[#C99A2E]'}`}>
+      <Icon name="Star" size={13} className="fill-current" strokeWidth={0} />
+    </span>
+  );
+  const btn = 'h-8 px-3 rounded-md border text-[13px] font-medium whitespace-nowrap disabled:opacity-60';
+  let card;
+  if (md.kind === 'saved') {
+    card = (
+      <div className="rounded-[10px] border border-[#F1E2B8] bg-[#FFFBF0] p-3.5 flex gap-3" data-member-card="applied">
+        {star(false)}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start gap-2">
+            <p className="flex-1 text-[13.5px] font-semibold text-[#7A5608]">{title}</p>
+            <span className="inline-flex items-center gap-1 text-[12.5px] text-primary whitespace-nowrap"><Icon name="Check" size={13} />Applied</span>
+          </div>
+          <p className="text-[12.5px] text-[#92600A]">{b.approvedByName ? `Applied by ${b.approvedByName}${b.updatedAt ? ` · ${whenShort(b.updatedAt)}` : ''}` : 'Applied'}</p>
+          <button type="button" disabled={busy} onClick={onDecline} className="mt-2 text-[12px] text-[#8A8A90] underline underline-offset-2 hover:text-text-primary" data-member-remove>Remove</button>
+        </div>
+      </div>
+    );
+  } else if (md.kind === 'apply' && md.declined) {
+    card = (
+      <div className="rounded-[10px] border border-border bg-[#FAFAF9] p-3.5 flex items-center gap-3" data-member-card="declined">
+        {star(true)}
+        <div className="flex-1 min-w-0">
+          <p className="text-[13.5px] font-medium text-text-primary">Member discount not applied this visit</p>
+          <p className="text-[12.5px] text-[#8A8A90]">{title}</p>
+        </div>
+        <button type="button" disabled={busy} onClick={onApply} className={`${btn} border-[#E7C766] bg-white text-[#7A5608] hover:bg-[#FFF6DD]`} data-member-apply>Apply {md.pct}%</button>
+      </div>
+    );
+  } else {
+    const better = md.kind === 'better';
+    card = (
+      <div className="rounded-[10px] border border-[#F1E2B8] bg-[#FFFBF0] p-3.5 flex gap-3" data-member-card={better ? 'better' : 'undecided'}>
+        {star(false)}
+        <div className="flex-1 min-w-0">
+          <p className="text-[13.5px] font-semibold text-[#7A5608]">{title}</p>
+          <p className="text-[12.5px] text-[#92600A]">{better ? `Replaces the current discount and saves the guest NPR ${fmtNpr(md.extra)} more. They never add up.` : 'Comes off automatically when the guest pays.'}</p>
+          <div className="flex items-center gap-3 mt-3">
+            <button type="button" disabled={busy} onClick={onApply} className={`${btn} border-[#E7C766] bg-white text-[#7A5608] hover:bg-[#FFF6DD]`} data-member-apply>{better ? `Apply ${md.pct}% instead` : 'Apply now'}</button>
+            {!better && <button type="button" disabled={busy} onClick={onDecline} className="text-[12.5px] text-[#8A8A90] underline underline-offset-2 hover:text-text-primary" data-member-decline>Don&apos;t apply for this visit</button>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // Price box
+  const base = b.baseAmount;
+  const rows = [[serviceLabel, fmtNpr(base)]];
+  let totalLabel = 'Final amount';
+  let total = b.finalAmount;
+  if (md.kind === 'saved') rows.push([`★ ${md.tierName} ${md.pct}% off`, `−${fmtNpr(b.discountAmount)}`, true]);
+  else if (md.kind === 'apply' && !md.declined) { rows.push(['★ Member price at checkout', `−${fmtNpr(md.amount)}`, true]); totalLabel = 'Guest will pay'; total = Math.max(0, base - md.amount); }
+  else if (b.discountAmount > 0) rows.push([`Discount${b.discountReason ? ` · ${b.discountReason}` : ''}`, `−${fmtNpr(b.discountAmount)}`]);
+  return (
+    <>
+      {card}
+      <div>
+        <p className="text-[11.5px] text-[#8A8A90] font-medium uppercase tracking-[.05em] mb-2">Price</p>
+        <div className="border border-border rounded-lg text-[13px]" data-member-price>
+          {rows.map(([k, v, gold], i) => (
+            <div key={i} className={`flex items-center gap-3 px-3.5 py-2.5 ${i ? 'border-t border-[#F1F1EF]' : ''} ${gold ? 'text-[#9A6B0B]' : 'text-[#515152]'}`}>
+              <span className="flex-1 min-w-0 truncate">{k}</span><span className="tabular-nums">{v}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-3 px-3.5 py-2.5 border-t border-[#F1F1EF] font-semibold text-text-primary">
+            <span className="flex-1">{totalLabel}</span><span className="tabular-nums">NPR {fmtNpr(total)}</span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
 
 const STATUS_STYLES = {
   pending: 'bg-warning/10 text-warning',
@@ -142,6 +236,10 @@ const BookingActionModal = ({
   const [discountReason, setDiscountReason] = useState('');
   const [discountError, setDiscountError] = useState(null);
   const [discountSuccess, setDiscountSuccess] = useState(false);
+  // Member discount in the Discount tab (V22 addendum A)
+  const [memberCtx, setMemberCtx] = useState(null);
+  const [memberBusy, setMemberBusy] = useState(false);
+  const [showManualDiscount, setShowManualDiscount] = useState(false);
   // Approver routing when a discount exceeds the user's limit
   const [approvers, setApprovers] = useState([]);
   const [selectedApprover, setSelectedApprover] = useState('');
@@ -374,6 +472,18 @@ const BookingActionModal = ({
       setRewardSubmitting(false);
     }
   };
+
+  // Member discount for the Discount tab: re-read whenever the tab opens or the booking's amounts change.
+  const memberBookingId = booking?.bookingId;
+  const loadMemberCtx = useCallback(async () => {
+    if (!MEMBERSHIP_ENABLED || !memberBookingId) { setMemberCtx(null); return; }
+    const { data } = await fetchMemberDiscountContext([memberBookingId]);
+    setMemberCtx(data?.[memberBookingId] || null);
+  }, [memberBookingId]);
+  useEffect(() => {
+    if (isOpen && activeTab === 'discount') loadMemberCtx();
+  }, [isOpen, activeTab, loadMemberCtx, booking?.discountAmount, booking?.finalAmount, booking?.paymentStatus]);
+  useEffect(() => { setShowManualDiscount(false); }, [memberBookingId]);
 
   // Load eligible approvers the first time the discount tab is opened
   useEffect(() => {
@@ -865,6 +975,17 @@ const BookingActionModal = ({
   // against the still-owed remainder (e.g. after extending a booking that already had a payment).
   const canDiscount = !isViewer && booking.paymentStatus !== 'paid' && !isLocked
     && !['cancelled', 'no show'].includes(booking.status);
+  const memberMd = memberCtx ? memberDiscountFor({ booking: memberCtx.booking, membership: memberCtx.membership, today: nepalNow().today }) : null;
+  const memberCardOn = !!memberMd && ['apply', 'saved', 'better'].includes(memberMd.kind);
+  const runMember = async (remove) => {
+    setMemberBusy(true);
+    setDiscountError(null);
+    const { error } = await applyMemberDiscount({ bookingId: booking.bookingId, remove });
+    if (error) setDiscountError(error.message || 'Could not change the member discount.');
+    await loadMemberCtx();
+    await onRefreshBooking?.(booking.bookingId);
+    setMemberBusy(false);
+  };
   // TEMPORARY (2026-08-31): staff direct-apply limit raised from 15% to 50% to
   // match the hard cap below — see DISCOUNT_LIMITS in services/api.js for the
   // revert note.
@@ -1952,9 +2073,11 @@ const BookingActionModal = ({
             {/* Discount Tab */}
             {activeTab === 'discount' && (
               <div className="space-y-4 sm:space-y-6">
-                <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
-                  Apply Discount
-                </h3>
+                {!memberCardOn && (
+                  <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
+                    Apply Discount
+                  </h3>
+                )}
 
                 {!canDiscount ? (
                   <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-gray-50 border border-gray-200">
@@ -1969,8 +2092,35 @@ const BookingActionModal = ({
                   </div>
                 ) : (
                   <>
+                    {memberCardOn && (
+                      <>
+                        <MemberDiscountCard md={memberMd} ctx={memberCtx} busy={memberBusy}
+                          serviceLabel={[memberCtx.booking.serviceName || booking.service || 'Service', memberCtx.booking.serviceMinutes ? `${memberCtx.booking.serviceMinutes} min` : null].filter(Boolean).join(' · ')}
+                          onApply={() => runMember(false)} onDecline={() => runMember(true)} />
+                        {discountError && !showManualDiscount && (
+                          <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-error/10 border border-error/20">
+                            <Icon name="AlertTriangle" size={14} className="text-error flex-shrink-0" />
+                            <span className="font-body font-body-normal text-xs text-error">{discountError}</span>
+                          </div>
+                        )}
+                        <div className="border-t border-border pt-4">
+                          <button type="button" onClick={() => setShowManualDiscount((v) => !v)} className="w-full flex items-start gap-2.5 text-left group" aria-expanded={showManualDiscount} data-manual-toggle>
+                            <Icon name={showManualDiscount ? 'Minus' : 'Plus'} size={14} className="mt-0.5 text-[#8A8A90]" />
+                            <span>
+                              <span className="block text-[13px] text-text-primary group-hover:underline">Give a different discount instead</span>
+                              <span className="block text-[12px] text-[#8A8A90]">Replaces the member discount. They never add up.</span>
+                            </span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {memberMd?.kind === 'noRule' && (
+                      <p className="flex items-center gap-2 text-[12.5px] text-[#8A8A90]" data-member-card="none"><Icon name="Star" size={12} className="fill-current text-[#B4B4BA]" strokeWidth={0} />No {memberMd.tierName} discount on {memberMd.label} services</p>
+                    )}
+                    {(!memberCardOn || showManualDiscount) && (<>
                     {/* All bookings pricing summary */}
-                    <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
+                    <p className="text-[11.5px] text-[#8A8A90] font-medium uppercase tracking-[.05em] -mb-2 sm:-mb-4">Price</p>
+                    <div className="bg-surface border border-border rounded-lg p-3 sm:p-4 space-y-2">
                       {(() => {
                         const base = booking.baseAmount || 0;
                         const multiRow = relatedBookings.length > 0;
@@ -2196,37 +2346,8 @@ const BookingActionModal = ({
                       )}
                     </div>
 
-                    {/* Role limit info */}
-                    <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-accent/5 border border-accent/20">
-                      <Icon name="Info" size={14} className="text-accent flex-shrink-0" />
-                      <span className="font-caption font-caption-normal text-xs text-accent">
-                        Your role ({userRole}) allows up to {discountLimitLabel} discount.
-                      </span>
-                    </div>
-
                     {/* Discount type */}
-                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
-                      {['percentage', 'fixed'].map(type => (
-                        <label
-                          key={type}
-                          className={`flex items-center space-x-2 p-2.5 sm:p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[48px] ${
-                            discountType === type ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="discountType"
-                            value={type}
-                            checked={discountType === type}
-                            onChange={() => setDiscountType(type)}
-                            className="text-primary focus:ring-primary w-4 h-4"
-                          />
-                          <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
-                            {type === 'percentage' ? '% Percent' : 'NPR Fixed'}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+                    <Segmented options={[['percentage', '% Percent'], ['fixed', 'NPR Fixed']]} value={discountType} onChange={setDiscountType} />
 
                     {/* Discount value */}
                     <div className="space-y-1.5 sm:space-y-2">
@@ -2253,6 +2374,14 @@ const BookingActionModal = ({
                           discountExceedsCap ? 'border-error' : 'border-border'
                         }`}
                       />
+                      {discountType === 'percentage' && (
+                        <div className="flex flex-wrap gap-1.5" data-quick-chips>
+                          {[5, 10, 15, 20].map((n) => (
+                            <button key={n} type="button" onClick={() => { setDiscountValue(String(n)); setDiscountError(null); }}
+                              className={`h-7 px-2.5 rounded-full border text-[12.5px] font-medium ${String(discountValue) === String(n) ? 'border-primary bg-primary/5 text-primary' : 'border-border text-[#515152] hover:bg-[#FAFAF9]'}`}>{n}%</button>
+                          ))}
+                        </div>
+                      )}
                       {discountExceedsCap && (
                         <p className="text-xs text-error mt-1 flex items-center gap-1">
                           <Icon name="AlertTriangle" size={12} />
@@ -2280,6 +2409,12 @@ const BookingActionModal = ({
                         className="w-full px-3 py-2.5 border border-border rounded-spa bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary focus:border-primary spa-transition-fast resize-none"
                       />
                     </div>
+
+                    {/* Role limit */}
+                    <p className="flex items-start gap-2 text-[12px] text-[#8A8A90]" data-limit-note>
+                      <Icon name="Info" size={13} className="mt-0.5 flex-shrink-0" />
+                      <span>You ({userRole}) can give up to {discountLimitLabel}.{discountMaxPercent < 100 ? ' More than your limit goes to a manager for approval.' : ''}{memberCardOn ? ' This replaces the member discount.' : ''}</span>
+                    </p>
 
                     {/* Request routing — only when discount exceeds the user's limit */}
                     {discountExceedsLimit && (
@@ -2377,6 +2512,7 @@ const BookingActionModal = ({
                         ? 'Send Discount Request'
                         : (checkedRowIds.length > 1 ? `Apply Discount to ${checkedRowIds.length} Services` : 'Apply Discount')}
                     </Button>
+                    </>)}
                   </>
                 )}
               </div>
