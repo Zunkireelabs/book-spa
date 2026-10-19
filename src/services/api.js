@@ -8115,7 +8115,9 @@ export async function uploadServiceImage(file) {
     // Generate unique filename
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    const filePath = `services/${fileName}`;
+    // Org-prefixed so storage RLS (migration-285) only lets this org's admins/managers write it.
+    if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
+    const filePath = `${profile.org_id}/services/${fileName}`;
 
     // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
@@ -8163,7 +8165,9 @@ export async function uploadStaffPhoto(file) {
 
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    const filePath = `staff/${fileName}`;
+    // Org-prefixed so storage RLS (migration-285) only lets this org's admins/managers write it.
+    if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
+    const filePath = `${profile.org_id}/staff/${fileName}`;
 
     const { error: uploadError } = await supabase.storage
       .from('service-images')
@@ -8185,10 +8189,45 @@ export async function uploadStaffPhoto(file) {
   }
 }
 
-// Customer photo gallery (migration-280) — manager/admin upload/delete,
-// staff can read within their branch (or admin). Same storage bucket and
-// validation as uploadStaffPhoto, path-prefixed per customer instead of a
-// single replaced avatar, since a customer can have multiple photos.
+// Customer photos/documents live in the PRIVATE `customer-files` bucket (migration-286) at
+// {org_id}/{branch_id}/customers/{customer_id}/{photos|documents}/{uuid}.{ext}. Rows store that storage_path, and the read
+// functions put a short-lived signed URL into the same photo_url / file_url field the UI reads. Legacy rows (migration-280,
+// public URL in photo_url/file_url, storage_path NULL) are returned unchanged.
+const CUSTOMER_FILES_BUCKET = 'customer-files';
+const CUSTOMER_FILE_URL_TTL = 3600;
+
+const customerFilePath = (orgId, branchId, customerId, kind, file) => {
+  const ext = (String(file.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  return `${orgId}/${branchId}/customers/${customerId}/${kind}/${crypto.randomUUID()}.${ext}`;
+};
+
+// Swap each row's storage_path for a signed URL in `urlField` (one batch call). A signing failure leaves the URL null
+// rather than failing the whole list. storage_path is dropped so callers see the same row shape as before.
+async function withSignedCustomerFileUrls(rows, urlField) {
+  const list = rows || [];
+  const paths = list.map((r) => r.storage_path).filter(Boolean);
+  let byPath = new Map();
+  if (paths.length) {
+    try {
+      const { data, error } = await supabase.storage.from(CUSTOMER_FILES_BUCKET).createSignedUrls(paths, CUSTOMER_FILE_URL_TTL);
+      if (error) throw error;
+      byPath = new Map((data || []).filter((d) => d.signedUrl && !d.error).map((d) => [d.path, d.signedUrl]));
+    } catch (err) {
+      console.error('[API] customer file signing error:', err.message);
+    }
+  }
+  return list.map(({ storage_path: path, ...row }) => (path ? { ...row, [urlField]: byPath.get(path) || null } : row));
+}
+
+const removeCustomerFiles = async (paths) => {
+  const list = (paths || []).filter(Boolean);
+  if (!list.length) return;
+  const { error } = await supabase.storage.from(CUSTOMER_FILES_BUCKET).remove(list);
+  if (error) console.error('[API] customer file removal error:', error.message);
+};
+
+// Customer photo gallery (migration-280, storage moved by migration-286) — manager/admin upload/delete, staff can read
+// within their branch, admin within their org. Path-prefixed per customer, since a customer can have multiple photos.
 export async function uploadCustomerPhoto(customerId, branchId, file) {
   try {
     if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
@@ -8207,25 +8246,26 @@ export async function uploadCustomerPhoto(customerId, branchId, file) {
       return { data: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 2.0MB.' } };
     }
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    const filePath = `customers/${customerId}/${fileName}`;
+    if (!profile.org_id) return { data: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
+    const filePath = customerFilePath(profile.org_id, branchId, customerId, 'photos', file);
 
     const { error: uploadError } = await supabase.storage
-      .from('service-images')
-      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+      .from(CUSTOMER_FILES_BUCKET)
+      .upload(filePath, file, { contentType: file.type, cacheControl: '3600', upsert: false });
     if (uploadError) throw uploadError;
-
-    const { data: { publicUrl } } = supabase.storage.from('service-images').getPublicUrl(filePath);
 
     const { data, error } = await supabase
       .from('customer_photos')
-      .insert({ customer_id: customerId, branch_id: branchId, photo_url: publicUrl, uploaded_by: profile.id })
-      .select('id, customer_id, photo_url, uploaded_by, created_at')
+      .insert({ customer_id: customerId, branch_id: branchId, storage_path: filePath, uploaded_by: profile.id })
+      .select('id, customer_id, photo_url, storage_path, uploaded_by, created_at')
       .single();
-    if (error) throw error;
+    if (error) {
+      await removeCustomerFiles([filePath]);
+      throw error;
+    }
 
-    return { data, error: null };
+    const [row] = await withSignedCustomerFileUrls([data], 'photo_url');
+    return { data: row, error: null };
   } catch (error) {
     console.error('[API] uploadCustomerPhoto error:', error.message);
     return { data: null, error };
@@ -8237,11 +8277,11 @@ export async function fetchCustomerPhotos(customerId) {
     if (!customerId) return { data: [], error: null };
     const { data, error } = await supabase
       .from('customer_photos')
-      .select('id, customer_id, photo_url, uploaded_by, created_at')
+      .select('id, customer_id, photo_url, storage_path, uploaded_by, created_at')
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return { data: data || [], error: null };
+    return { data: await withSignedCustomerFileUrls(data, 'photo_url'), error: null };
   } catch (error) {
     console.error('[API] fetchCustomerPhotos error:', error.message);
     return { data: null, error };
@@ -8256,8 +8296,9 @@ export async function deleteCustomerPhoto(photoId) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customer photos.' } };
     }
 
-    const { error } = await supabase.from('customer_photos').delete().eq('id', photoId);
+    const { data: deleted, error } = await supabase.from('customer_photos').delete().eq('id', photoId).select('storage_path');
     if (error) throw error;
+    await removeCustomerFiles((deleted || []).map((r) => r.storage_path));
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] deleteCustomerPhoto error:', error.message);
@@ -8285,25 +8326,26 @@ export async function uploadCustomerDocument(customerId, branchId, file) {
       return { data: null, error: { code: 'FILE_TOO_LARGE', message: 'File must be less than 10MB.' } };
     }
 
-    const fileExt = file.name.split('.').pop();
-    const storedName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    const filePath = `customers/${customerId}/documents/${storedName}`;
+    if (!profile.org_id) return { data: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
+    const filePath = customerFilePath(profile.org_id, branchId, customerId, 'documents', file);
 
     const { error: uploadError } = await supabase.storage
-      .from('service-images')
-      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+      .from(CUSTOMER_FILES_BUCKET)
+      .upload(filePath, file, { contentType: file.type, cacheControl: '3600', upsert: false });
     if (uploadError) throw uploadError;
-
-    const { data: { publicUrl } } = supabase.storage.from('service-images').getPublicUrl(filePath);
 
     const { data, error } = await supabase
       .from('customer_documents')
-      .insert({ customer_id: customerId, branch_id: branchId, file_url: publicUrl, file_name: file.name, uploaded_by: profile.id })
-      .select('id, customer_id, file_url, file_name, uploaded_by, created_at')
+      .insert({ customer_id: customerId, branch_id: branchId, storage_path: filePath, file_name: file.name, uploaded_by: profile.id })
+      .select('id, customer_id, file_url, storage_path, file_name, uploaded_by, created_at')
       .single();
-    if (error) throw error;
+    if (error) {
+      await removeCustomerFiles([filePath]);
+      throw error;
+    }
 
-    return { data, error: null };
+    const [row] = await withSignedCustomerFileUrls([data], 'file_url');
+    return { data: row, error: null };
   } catch (error) {
     console.error('[API] uploadCustomerDocument error:', error.message);
     return { data: null, error };
@@ -8315,11 +8357,11 @@ export async function fetchCustomerDocuments(customerId) {
     if (!customerId) return { data: [], error: null };
     const { data, error } = await supabase
       .from('customer_documents')
-      .select('id, customer_id, file_url, file_name, uploaded_by, created_at')
+      .select('id, customer_id, file_url, storage_path, file_name, uploaded_by, created_at')
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return { data: data || [], error: null };
+    return { data: await withSignedCustomerFileUrls(data, 'file_url'), error: null };
   } catch (error) {
     console.error('[API] fetchCustomerDocuments error:', error.message);
     return { data: null, error };
@@ -8334,8 +8376,9 @@ export async function deleteCustomerDocument(documentId) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customer documents.' } };
     }
 
-    const { error } = await supabase.from('customer_documents').delete().eq('id', documentId);
+    const { data: deleted, error } = await supabase.from('customer_documents').delete().eq('id', documentId).select('storage_path');
     if (error) throw error;
+    await removeCustomerFiles((deleted || []).map((r) => r.storage_path));
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] deleteCustomerDocument error:', error.message);
@@ -9336,13 +9379,27 @@ export async function deleteCustomer(customerId) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customers.' } };
     }
 
-    const { error } = await supabase.from('customers').delete().eq('id', customerId);
+    // Their photo/document rows cascade with the customer, but the files don't: collect the paths first and remove them
+    // only after the delete succeeded. Best-effort — a failure here never fails the delete.
+    const filePaths = [];
+    try {
+      const [{ data: photos }, { data: docs }] = await Promise.all([
+        supabase.from('customer_photos').select('storage_path').eq('customer_id', customerId).not('storage_path', 'is', null),
+        supabase.from('customer_documents').select('storage_path').eq('customer_id', customerId).not('storage_path', 'is', null),
+      ]);
+      [...(photos || []), ...(docs || [])].forEach((r) => filePaths.push(r.storage_path));
+    } catch (err) {
+      console.error('[API] deleteCustomer file lookup error:', err.message);
+    }
+
+    const { data: deleted, error } = await supabase.from('customers').delete().eq('id', customerId).select('id');
     if (error) {
       if (error.code === '23503') {
         return { data: null, error: { code: 'HAS_HISTORY', message: "This customer has bookings or other records and can't be deleted. Use Block instead." } };
       }
       throw error;
     }
+    if (deleted?.length && filePaths.length) await removeCustomerFiles(filePaths).catch(() => {});
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] deleteCustomer error:', error.message);
@@ -14566,7 +14623,9 @@ export async function uploadProductImage(file) {
 
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    const filePath = `products/${fileName}`;
+    // Org-prefixed so storage RLS (migration-285) only lets this org's admins/managers write it.
+    if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
+    const filePath = `${profile.org_id}/products/${fileName}`;
 
     const { error: uploadError } = await supabase.storage
       .from('service-images')
@@ -15264,7 +15323,9 @@ export async function uploadCampaignBanner(file) {
 
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-    const filePath = `campaigns/${fileName}`;
+    // Org-prefixed so storage RLS (migration-285) only lets this org's admins/managers write it.
+    if (!profile.org_id) return { url: null, error: { code: 'NO_ORG', message: 'Your account is not linked to an organization.' } };
+    const filePath = `${profile.org_id}/campaigns/${fileName}`;
 
     const { error: uploadError } = await supabase.storage
       .from('service-images')
