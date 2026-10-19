@@ -5,6 +5,7 @@ import { capture } from '../lib/analytics';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../lib/featureFlags';
 import { toE164, samePhone } from '../utils/phone';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
+import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
@@ -622,6 +623,124 @@ export async function updateOrgPaymentMethods(methods) {
     return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update payment methods.' } };
   }
   return { data, error: null };
+}
+
+// --- Payment QR codes (migration-284) ---
+// One static merchant QR per leaf payment method for the whole org (branch_id NULL; per-branch rows are reserved for
+// later). The image lives in the private `payment-qr` bucket at {org_id}/org/{uuid}.{ext}; only an org admin can write
+// (RLS), every org user can read via short-lived signed URLs. A QR is optional: readers must never block a payment.
+const QR_BUCKET = 'payment-qr';
+const QR_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+// The org's QR codes as { [method]: { path, url } }. Never throws and never blocks a payment: if the rows can't be read
+// the map is empty (checkout behaves as if no QR were uploaded); if only the image URLs can't be signed, each method
+// keeps its entry with url null, so checkout can say "QR couldn't load" and take the payment as usual.
+export async function getPaymentMethodQrs() {
+  let rows;
+  try {
+    const { data, error } = await supabase
+      .from('payment_method_qr')
+      .select('method, storage_path')
+      .is('branch_id', null);
+    if (error) throw error;
+    rows = data || [];
+  } catch (err) {
+    return { data: {}, error: { code: err?.code || 'QR_LOAD_FAILED', message: err?.message || 'Could not load payment QR codes.' } };
+  }
+  if (!rows.length) return { data: {}, error: null };
+  let urlByPath = new Map();
+  let signError = null;
+  try {
+    const { data: signed, error } = await supabase.storage
+      .from(QR_BUCKET)
+      .createSignedUrls(rows.map((r) => r.storage_path), 3600);
+    if (error) throw error;
+    urlByPath = new Map((signed || []).filter((s) => s.signedUrl && !s.error).map((s) => [s.path, s.signedUrl]));
+  } catch (err) {
+    signError = { code: err?.code || 'QR_SIGN_FAILED', message: err?.message || 'Could not load the QR images.' };
+  }
+  const map = {};
+  rows.forEach((r) => { map[r.method] = { path: r.storage_path, url: urlByPath.get(r.storage_path) || null }; });
+  return { data: map, error: signError };
+}
+
+const removeQrObjects = async (paths) => {
+  const list = (paths || []).filter(Boolean);
+  if (list.length) await supabase.storage.from(QR_BUCKET).remove(list).catch(() => {});
+};
+
+// Upload (or replace) the org-wide QR for one leaf method. Writes a new object every time (never upsert) so a cached
+// old image can't linger, points the row at it, then deletes the previous object.
+export async function uploadPaymentMethodQr(orgId, method, file) {
+  const invalid = validateQrFile(file);
+  if (invalid) return { data: null, error: { code: 'INVALID_FILE', message: invalid } };
+  if (!orgId || !method) return { data: null, error: { code: 'INVALID_INPUT', message: 'Missing organization or method.' } };
+
+  const path = `${orgId}/org/${crypto.randomUUID()}.${QR_EXT[file.type]}`;
+  const { error: uploadError } = await supabase.storage
+    .from(QR_BUCKET)
+    .upload(path, file, { contentType: file.type, cacheControl: '3600', upsert: false });
+  if (uploadError) return { data: null, error: { code: 'UPLOAD_FAILED', message: uploadError.message || 'Could not upload the QR image.' } };
+
+  const { data: existing, error: findError } = await supabase
+    .from('payment_method_qr')
+    .select('id, storage_path')
+    .eq('org_id', orgId).is('branch_id', null).eq('method', method)
+    .maybeSingle();
+  const { data: userData } = await supabase.auth.getUser();
+  const stamp = { storage_path: path, updated_at: new Date().toISOString(), updated_by: userData?.user?.id || null };
+  const { error: rowError } = findError
+    ? { error: findError }
+    : existing
+      ? await supabase.from('payment_method_qr').update(stamp).eq('id', existing.id)
+      : await supabase.from('payment_method_qr').insert({ org_id: orgId, branch_id: null, method, ...stamp });
+  if (rowError) {
+    await removeQrObjects([path]);
+    return { data: null, error: { code: rowError.code || 'SAVE_FAILED', message: rowError.message || 'Could not save the QR.' } };
+  }
+  if (existing?.storage_path && existing.storage_path !== path) await removeQrObjects([existing.storage_path]);
+  return { data: { method, path }, error: null };
+}
+
+// Remove the org-wide QR of one leaf method: the row first, then its image.
+export async function removePaymentMethodQr(method) {
+  const { data: rows, error } = await supabase
+    .from('payment_method_qr')
+    .delete()
+    .is('branch_id', null).eq('method', method)
+    .select('storage_path');
+  if (error) return { data: null, error: { code: error.code || 'DELETE_FAILED', message: error.message || 'Could not remove the QR.' } };
+  await removeQrObjects((rows || []).map((r) => r.storage_path));
+  return { data: { method }, error: null };
+}
+
+// Keep QR rows in step with a payment-method save. Call AFTER updateOrgPaymentMethods succeeds, with the list before
+// and after the save and any in-place renames ({ oldLeaf: newLeaf }). Renamed leaves keep their QR; every leaf that
+// disappeared loses it (row + image). Best-effort: a failure here never undoes the method save.
+export async function syncPaymentMethodQrs(oldMethods, newMethods, renames = {}) {
+  const { renamed, removed } = qrMethodDiff(leafMethods(oldMethods), leafMethods(newMethods), renames);
+  if (!renamed.length && !removed.length) return { data: { renamed, removed }, error: null };
+  try {
+    // A stale row already sitting on a rename target would collide with the unique index: drop it with the removals.
+    const drop = [...removed, ...renamed.map(([, to]) => to)];
+    const { data: dropped, error: dropError } = await supabase
+      .from('payment_method_qr')
+      .delete()
+      .is('branch_id', null).in('method', drop)
+      .select('storage_path');
+    if (dropError) throw dropError;
+    await removeQrObjects((dropped || []).map((r) => r.storage_path));
+    for (const [from, to] of renamed) {
+      const { error } = await supabase
+        .from('payment_method_qr')
+        .update({ method: to, updated_at: new Date().toISOString() })
+        .is('branch_id', null).eq('method', from);
+      if (error) throw error;
+    }
+    return { data: { renamed, removed }, error: null };
+  } catch (err) {
+    return { data: null, error: { code: err?.code || 'QR_SYNC_FAILED', message: err?.message || 'Could not update the payment QR codes.' } };
+  }
 }
 
 // Admin-only org booking-setting toggles (settings.show_staff_selection, settings.enable_staff_ratings).

@@ -13,11 +13,13 @@ import {
   fetchBookingById,
   getActivePackagesForCustomer,
   fetchBranchStaffUsers,
+  getPaymentMethodQrs,
 } from '../../services/api';
 import { buildPaymentMethodTree } from '../../services/paymentMethods';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../utils/tenderRows';
 import { useOrg } from '../../contexts/OrgContext';
 import { useBranch } from '../../contexts/BranchContext';
+import { pendingQrRows, qrSignature, isQrConfirmed } from '../../utils/paymentQr';
 import { computeChange, quickCashOptions, buildReceiptText, buildReceiptHtml, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
 import { useAuth } from '../../contexts/AuthContext';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
@@ -1000,6 +1002,38 @@ const PaymentModal = ({
     setCheckedAddOns((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   };
 
+  // ── Payment QR (migration-284): a static merchant QR per method. Optional and UI-only: a fetch or image failure
+  // just means the row behaves like any other method, and confirmation is a gate, never part of the payload. ──
+  const [qrMap, setQrMap] = useState({});
+  const [qrBroken, setQrBroken] = useState(() => new Set()); // methods whose QR image failed to load
+  const [qrOpenIdx, setQrOpenIdx] = useState(null); // split: the row whose QR card is open
+  const [presentIdx, setPresentIdx] = useState(null); // the row shown full screen to the guest
+  const presentConfirmRef = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    getPaymentMethodQrs().then(({ data }) => { if (!cancelled) setQrMap(data || {}); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const qrFor = (t) => (t && t.paymentMode && Number(t.amount) > 0 ? qrMap[t.paymentMode] || null : null);
+  const qrUsable = (t) => !!qrFor(t)?.url && !qrBroken.has(t.paymentMode);
+  const usableQrMap = useMemo(
+    () => Object.fromEntries(Object.entries(qrMap).filter(([m, q]) => q?.url && !qrBroken.has(m))),
+    [qrMap, qrBroken]
+  );
+  const pendingQr = pendingQrRows(tenders, usableQrMap);
+  // A lone QR row needs no separate confirm step: the primary itself reads "Confirm NPR X received".
+  const qrSingle = tenders.length === 1 && !isCreditMode(tenders[0].paymentMode) && qrUsable(tenders[0]);
+  const markQrBroken = (method) => setQrBroken((prev) => (prev.has(method) ? prev : new Set(prev).add(method)));
+  const confirmQrRow = (i) => {
+    setTouched(true);
+    updateTender(i, { qrConfirmed: qrSignature(tenders[i]) });
+    setQrOpenIdx(null);
+    setPresentIdx(null);
+  };
+  useEffect(() => { if (presentIdx != null) requestAnimationFrame(() => presentConfirmRef.current?.focus()); }, [presentIdx]);
+  // Row indexes shift when a row is added or removed, so close any open QR card / overlay rather than re-point it.
+  useEffect(() => { setQrOpenIdx(null); setPresentIdx(null); }, [tenders.length]);
+
   // ── validation shown as the primary button's reason (handleSubmit keeps its own guards as a safety net) ──
   const walletOver = (membershipUsable && membershipCommitted > membership.balance)
     || (referralWalletUsable && referralWalletCommitted > referralReward.walletBalance)
@@ -1014,12 +1048,16 @@ const PaymentModal = ({
     if (walletOver) return 'A wallet or voucher amount exceeds its balance';
     if (leftover > 0 && !leaveDue) return `${fmt(leftover)} not covered yet`;
     if (leftover > 0 && !dueHolderName.trim()) return 'Add who the remaining due is under';
+    if (!qrSingle && pendingQr.length === 1) return `Confirm the ${tenderLabel(tenders[pendingQr[0]])} payment`;
+    if (!qrSingle && pendingQr.length > 1) return `Confirm ${pendingQr.length} QR payments`;
     if (tipActive && tipRecipients.some((r) => !r.receivedBy || !(Number(r.amount) > 0))) return 'Choose who received the tip';
     if (tipActive && Math.abs(tipRecipientsTotal - round2(Number(tip))) > 0.001) return 'Tip split must add up to the tip';
     return '';
   })();
   const canSubmit = !blockReason && !busy;
-  const primaryLabel = entered > 0 ? (leftover > 0 ? `Collect ${fmt(entered)} · ${fmt(leftover)} due` : `Collect NPR ${fmt(entered)}`) : `Leave NPR ${fmt(leftover)} due`;
+  const primaryLabel = qrSingle
+    ? `Confirm NPR ${fmt(entered)} received${leftover > 0 ? ` · ${fmt(leftover)} due` : ''}`
+    : entered > 0 ? (leftover > 0 ? `Collect ${fmt(entered)} · ${fmt(leftover)} due` : `Collect NPR ${fmt(entered)}`) : `Leave NPR ${fmt(leftover)} due`;
 
   const doSubmit = async () => {
     if (!canSubmit || submittingRef.current) return;
@@ -1071,6 +1109,11 @@ const PaymentModal = ({
   // Registered on window (capture) so it keeps working when focus has left the dialog (e.g. after a
   // stray click on the backdrop) and so a page behind us never sees the same Esc/Enter.
   const onKeyDown = (e) => {
+    if (presentIdx != null) {
+      // The guest-facing QR overlay owns the keyboard: Esc closes only it; Enter activates its focused button natively.
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPresentIdx(null); }
+      return;
+    }
     if ((e.key === 'Escape' || e.key === 'Enter') && (dialogRef.current?.querySelector('[role="listbox"]') || document.querySelector('[data-checkout-menu]'))) return; // an open CustomSelect / method menu owns the key
     if (e.key === 'Escape') {
       e.stopPropagation();
@@ -1146,6 +1189,73 @@ const PaymentModal = ({
   const fullyCovered = grandTotal > 0 && leftover <= 0.001 && entered > 0;
 
   const singleMode = tenders.length === 1 && !isCreditMode(tenders[0].paymentMode);
+
+  // The QR card under a row: the code, what to collect, and (in a split) the row's own confirm button.
+  const qrWhere = [orgName, branchName].filter(Boolean).join(', ');
+  const renderQrCard = (t, i) => {
+    const usable = qrUsable(t);
+    const label = tenderLabel(t);
+    return (
+      <div className="border-t border-[#F1F1EF] px-3 py-3 flex gap-4" data-testid="qr-card">
+        <div className="w-[140px] h-[140px] flex-none rounded-[8px] border border-[#E7E8E6] bg-white p-2 grid place-items-center">
+          {usable
+            ? <img src={qrFor(t).url} alt={`${label} QR code`} onError={() => markQrBroken(t.paymentMode)} className="w-full h-full object-contain" />
+            : <Icon name="QrCode" size={28} strokeWidth={1.4} className="text-[#B4B4BA]" />}
+        </div>
+        <div className="min-w-0 flex-1 pt-1">
+          <div className="text-[14px] font-semibold">{label}</div>
+          <div className="text-[12.5px] text-[#515152] tabular-nums mt-0.5">NPR {fmt(t.amount)}{qrWhere ? ` · ${qrWhere}` : ''}</div>
+          {usable ? (
+            <>
+              <p className="text-[12.5px] text-[#8A8A90] mt-2 leading-[1.5]">Ask the guest to scan and pay. Once the payment shows in your {label} app, confirm it {singleMode ? 'below' : 'here'}.</p>
+              <div className="mt-2.5 flex items-center gap-3 flex-wrap">
+                {!singleMode && (
+                  <button type="button" onClick={() => confirmQrRow(i)}
+                    className="h-8 px-3 rounded-[7px] border border-[#E7E8E6] bg-white text-[12.5px] font-medium inline-flex items-center gap-1.5 hover:bg-[#F7F7F5]">
+                    <Icon name="Check" size={13} strokeWidth={2.2} className="text-primary" />Confirm NPR {fmt(t.amount)} received
+                  </button>
+                )}
+                <button type="button" onClick={() => setPresentIdx(i)} className="text-primary font-medium text-[12.5px] inline-flex items-center gap-1.5 hover:underline">
+                  <Icon name="Maximize2" size={13} strokeWidth={2} />Present to guest
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-[12.5px] text-[#8A8A90] mt-2 inline-flex items-center gap-1.5"><Icon name="AlertCircle" size={13} className="flex-none" />QR couldn't load. Take the payment as usual.</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // "Present to guest": the QR full screen over Checkout. Only what the guest needs (QR, amount, method, who is
+  // being paid); no booking or guest details. Esc / ✕ / a click outside close only this overlay.
+  const presentT = presentIdx != null ? tenders[presentIdx] : null;
+  const confirmFromOverlay = () => {
+    if (qrSingle) { setPresentIdx(null); doSubmit(); }
+    else confirmQrRow(presentIdx);
+  };
+  const presentEl = presentT && qrUsable(presentT) && (
+    <div className="fixed inset-0 z-notification flex items-center justify-center p-4 bg-[rgba(24,22,20,.86)] backdrop-blur-xl" data-testid="qr-present"
+      role="dialog" aria-modal="true" aria-label={`${tenderLabel(presentT)} QR for the guest`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); setPresentIdx(null); } }}>
+      <div className="relative bg-white rounded-[16px] px-8 pt-7 pb-6 flex flex-col items-center text-center max-w-[calc(100vw-32px)] shadow-[0_24px_64px_-12px_rgba(14,13,12,.45)]">
+        <button type="button" aria-label="Close QR" onClick={() => setPresentIdx(null)}
+          className="absolute top-3 right-3 w-8 h-8 rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2]"><Icon name="X" size={18} /></button>
+        {qrWhere && <div className="text-[13px] text-[#8A8A90]">{qrWhere}</div>}
+        <div className="mt-0.5 text-[15px] font-semibold">{tenderLabel(presentT)}</div>
+        <img src={qrFor(presentT).url} alt={`${tenderLabel(presentT)} QR code`} onError={() => { markQrBroken(presentT.paymentMode); setPresentIdx(null); }}
+          className="mt-5 object-contain w-[min(calc(100vh-280px),480px)] h-[min(calc(100vh-280px),480px)] max-w-full" />
+        <div className="mt-4 text-[30px] leading-none font-semibold tabular-nums"><span className="text-[15px] font-medium text-[#8A8A90] mr-1.5">NPR</span>{fmt(presentT.amount)}</div>
+        <p className="text-[13px] text-[#8A8A90] mt-2">Scan with your banking or wallet app to pay</p>
+        <button ref={presentConfirmRef} type="button" onClick={confirmFromOverlay} disabled={qrSingle && !canSubmit}
+          className="mt-5 h-10 px-5 rounded-[9px] bg-primary text-white text-[13.5px] font-medium inline-flex items-center gap-2 hover:bg-primary/90 disabled:opacity-50 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/25">
+          <Icon name="Check" size={15} strokeWidth={2.2} />Confirm NPR {fmt(presentT.amount)} received
+        </button>
+        {qrSingle && !canSubmit && blockReason && <p className="mt-2 text-[12px] text-[#B45309]">{blockReason}</p>}
+      </div>
+    </div>
+  );
   const menuEl = menu && tenders[menu.idx] && createPortal(
     <MethodMenu rect={menu.rect} tree={PAYMENT_TREE}
       usedValues={new Set(tenders.filter((x, xi) => xi !== menu.idx && x.paymentMode).map((x) => String(x.paymentMode)))}
@@ -1415,7 +1525,9 @@ const PaymentModal = ({
             <span className="tabular-nums">{entered > 0 ? `${fmt(Math.min(entered, grandTotal))} of ${fmt(grandTotal)} covered` : 'Nothing entered yet'}</span>
             {leftover > 0.001
               ? <span className="text-[#B45309] tabular-nums">{fmt(leftover)} left</span>
-              : fullyCovered && <span className="text-primary inline-flex items-center gap-1"><Icon name="Check" size={12} strokeWidth={2.4} />Fully covered</span>}
+              : fullyCovered && pendingQr.length > 0
+                ? <span className="text-[#B45309] inline-flex items-center gap-1.5" data-testid="qr-status"><i className="w-1.5 h-1.5 rounded-full bg-warning" />Not confirmed yet</span>
+                : fullyCovered && <span className="text-primary inline-flex items-center gap-1"><Icon name="Check" size={12} strokeWidth={2.4} />Fully covered</span>}
           </div>
 
           {singleMode ? (
@@ -1508,6 +1620,18 @@ const PaymentModal = ({
                             <Icon name="ChevronDown" size={13} className="flex-none opacity-60" />
                           </button>
                           <span className="flex-1" />
+                          {qrFor(t) && (isQrConfirmed(t) && qrUsable(t) ? (
+                            <span className="inline-flex items-center gap-1 flex-none text-[12px]" data-testid="qr-received">
+                              <span className="inline-flex items-center gap-1 text-primary font-medium"><Icon name="CheckCircle2" size={13} strokeWidth={2} />Received</span>
+                              <button type="button" aria-label={`Undo: ${label} not received yet`} title="Undo" onClick={() => updateTender(i, { qrConfirmed: null })}
+                                className="w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] hover:text-[#0E0D0C]"><Icon name="Undo2" size={13} strokeWidth={1.8} /></button>
+                            </span>
+                          ) : (
+                            <button type="button" aria-label={`Show ${label} QR`} aria-expanded={qrOpenIdx === i} onClick={() => setQrOpenIdx(qrOpenIdx === i ? null : i)}
+                              className={`h-8 px-2 rounded-[7px] border inline-flex items-center gap-1.5 text-[12px] font-medium flex-none ${qrOpenIdx === i ? 'border-[#B9C7B6] bg-[#EEF3EC] text-primary' : 'border-[#E7E8E6] text-[#515152] hover:bg-[#F7F7F5]'}`}>
+                              <Icon name="QrCode" size={14} strokeWidth={1.6} />QR
+                            </button>
+                          ))}
                         </>
                       )}
                       {(isSessionPackage || t.paymentMode === 'ReferralVoucher' ? (
@@ -1531,6 +1655,7 @@ const PaymentModal = ({
                           className="w-[22px] h-[22px] rounded-md grid place-items-center text-[#8A8A90] hover:bg-[#F4F4F2] flex-none"><Icon name="X" size={14} /></button>
                       )}
                     </div>
+                    {qrFor(t) && (singleMode || (qrOpenIdx === i && !(isQrConfirmed(t) && qrUsable(t)))) && renderQrCard(t, i)}
                   </div>
                 );
               })}
@@ -1686,6 +1811,7 @@ const PaymentModal = ({
       {dialog}
       {popoverEl}
       {menuEl}
+      {presentEl}
     </div>,
     document.body
   );

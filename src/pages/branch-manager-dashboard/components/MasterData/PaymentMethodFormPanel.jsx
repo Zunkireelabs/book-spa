@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { PanelShell, FormBody, Field, TextInput, InlineError, controlA11y, CONTROL, CONTROL_ERROR } from '../../../../components/ui/PanelFormKit';
-import { updateOrgPaymentMethods } from '../../../../services/api';
+import { updateOrgPaymentMethods, syncPaymentMethodQrs } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
 
 // A method entry is either a plain string (leaf) or { name, subMethods } (a group).
@@ -20,6 +20,8 @@ const PaymentMethodFormPanel = ({ methods, index, onClose, onSaved }) => {
   }), [editing, methods, index]);
   const [name, setName] = useState(original.name);
   const [subs, setSubs] = useState(original.subs);
+  // The saved name each sub-option row started as (null for rows added here), so an in-place rename keeps its QR.
+  const [subOrigins, setSubOrigins] = useState(original.subs);
   const [subInput, setSubInput] = useState('');
   const [errors, setErrors] = useState({});
   const [subErrors, setSubErrors] = useState({}); // row index -> message
@@ -37,6 +39,7 @@ const PaymentMethodFormPanel = ({ methods, index, onClose, onSaved }) => {
     if (t.length > MAX) { setErrors((e) => ({ ...e, newSub: `Sub-option name must be ${MAX} characters or fewer.` })); return false; }
     if (subs.some((s) => s.toLowerCase() === t.toLowerCase())) { setErrors((e) => ({ ...e, newSub: 'That sub-option is already added.' })); return false; }
     setSubs((p) => [...p, t]);
+    setSubOrigins((p) => [...p, null]);
     setSubInput('');
     setErrors((e) => ({ ...e, newSub: undefined }));
     return true;
@@ -83,6 +86,13 @@ const PaymentMethodFormPanel = ({ methods, index, onClose, onSaved }) => {
     savingRef.current = false;
     setSaving(false);
     if (result.error) { setServerError(friendlyError(result.error, 'Could not save the payment method.')); return; }
+    if (editing) {
+      // Carry QR codes across renames and drop the ones whose method disappeared (best-effort, never blocks the save).
+      const renames = {};
+      if (original.subs.length === 0 && cleanSubs.length === 0 && original.name !== trimmed) renames[original.name] = trimmed;
+      cleanSubs.forEach((s, i) => { const from = subOrigins[i]; if (from && from !== s) renames[from] = s; });
+      await syncPaymentMethodQrs(methods, next, renames);
+    }
     onSaved(trimmed, !editing);
   };
 
@@ -122,7 +132,7 @@ const PaymentMethodFormPanel = ({ methods, index, onClose, onSaved }) => {
                       onChange={(e) => { const v = e.target.value; setSubs((p) => p.map((x, j) => (j === i ? v : x))); clearSub(i); }}
                       className={`${CONTROL} h-9 ${subErrors[i] ? CONTROL_ERROR : ''}`}
                     />
-                    <button type="button" aria-label={`Remove ${s || 'sub-option'}`} onClick={() => { setSubs((p) => p.filter((_, j) => j !== i)); setSubErrors({}); }} className="w-8 h-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-error/10 hover:text-error flex-shrink-0">
+                    <button type="button" aria-label={`Remove ${s || 'sub-option'}`} onClick={() => { setSubs((p) => p.filter((_, j) => j !== i)); setSubOrigins((p) => p.filter((_, j) => j !== i)); setSubErrors({}); }} className="w-8 h-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-error/10 hover:text-error flex-shrink-0">
                       <Icon name="X" size={14} />
                     </button>
                   </div>
