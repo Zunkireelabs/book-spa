@@ -9375,8 +9375,9 @@ export async function deleteCustomer(customerId) {
 
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
-    if (!['manager', 'admin'].includes(profile.role)) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customers.' } };
+    // Admin-only, own org (migration-287's DELETE policy).
+    if (profile.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can delete customers.' } };
     }
 
     // Their photo/document rows cascade with the customer, but the files don't: collect the paths first and remove them
@@ -9395,11 +9396,15 @@ export async function deleteCustomer(customerId) {
     const { data: deleted, error } = await supabase.from('customers').delete().eq('id', customerId).select('id');
     if (error) {
       if (error.code === '23503') {
-        return { data: null, error: { code: 'HAS_HISTORY', message: "This customer has bookings or other records and can't be deleted. Use Block instead." } };
+        return { data: null, error: { code: 'HAS_HISTORY', message: "This customer has bookings or other history, so they can't be deleted. Use Block instead." } };
       }
       throw error;
     }
-    if (deleted?.length && filePaths.length) await removeCustomerFiles(filePaths).catch(() => {});
+    // RLS hides rows the caller may not delete, so a refused delete comes back as 0 rows, not an error.
+    if (!deleted?.length) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can delete customers.' } };
+    }
+    if (filePaths.length) await removeCustomerFiles(filePaths).catch(() => {});
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] deleteCustomer error:', error.message);

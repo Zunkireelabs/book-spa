@@ -163,7 +163,7 @@ const CustomerDetailPage = () => {
               <DropdownItem onClick={() => { setActionError(null); setConfirmAction(data?.customer?.isActive === false ? 'unblock' : 'block'); }}>
                 {data?.customer?.isActive === false ? 'Unblock' : 'Block'}
               </DropdownItem>
-              <DropdownItem danger onClick={() => { setActionError(null); setConfirmAction('delete'); }}>Delete</DropdownItem>
+              {userRole === 'admin' && <DropdownItem danger onClick={() => { setActionError(null); setConfirmAction('delete'); }}>Delete</DropdownItem>}
             </HeaderDropdown>
           </div>
         </div>
