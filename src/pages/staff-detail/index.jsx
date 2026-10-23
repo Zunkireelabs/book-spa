@@ -23,8 +23,9 @@ import {
   updateTherapist,
   uploadStaffPhoto,
 } from '../../services/api';
+import { parsePhone } from '../../components/ui/CountryCodeSelect';
 
-const EMPTY_FORM = { name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '', phone: '', address: '', city: '', email: '', pronouns: '' };
+const EMPTY_FORM = { name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '', phone: '', countryCode: '+977', address: '', city: '', email: '', pronouns: '' };
 
 const DEFAULT_WORKING_HOURS = Array.from({ length: 7 }, (_, dayOfWeek) => ({
   dayOfWeek,
@@ -86,17 +87,22 @@ const StaffDetailPage = () => {
     }
 
     const t = therapistResult.data;
+    const { dial, national } = parsePhone(t.phone);
     setFormData({
       name: t.name,
       gender: t.gender || 'Male',
-      positions: t.position ? t.position.split('/').map(p => p.trim()) : [],
+      // Position is single-select going forward; a legacy '/'-joined multi-value
+      // string (from when this was a checkbox multi-select) collapses to its
+      // first token on load — saving again writes it back as a clean single value.
+      positions: t.position ? [t.position.split('/')[0].trim()] : [],
       specialties: (t.specialties || []).join(', '),
       isServiceStaff: t.is_service_staff !== false,
       photoUrl: t.photo_url || '',
       bio: t.bio || '',
       experienceYears: t.experience_years != null ? String(t.experience_years) : '',
       rating: t.rating != null ? String(t.rating) : '',
-      phone: t.phone || '',
+      phone: national,
+      countryCode: dial,
       address: t.address || '',
       city: t.city || '',
       email: t.email || '',
@@ -110,6 +116,14 @@ const StaffDetailPage = () => {
   }, [isEdit, staffId]);
 
   useEffect(() => { loadTherapist(); }, [loadTherapist]);
+
+  // Deep-link from the Roster grid's "Set normal hours" link (#working-hours) — scroll
+  // once the real form has replaced the loading skeleton, or the target section isn't
+  // in the DOM yet.
+  useEffect(() => {
+    if (pageLoading || window.location.hash !== '#working-hours') return;
+    document.getElementById('working-hours')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [pageLoading]);
 
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0];
@@ -167,14 +181,14 @@ const StaffDetailPage = () => {
     const payload = {
       name: formData.name.trim(),
       gender: formData.gender,
-      position: formData.isServiceStaff && formData.positions.length > 0 ? formData.positions.join('/') : null,
+      position: formData.positions.length > 0 ? formData.positions[0] : null,
       specialties: formData.isServiceStaff ? specialtiesArr : [],
       isServiceStaff: formData.isServiceStaff,
       photoUrl,
       bio,
       experienceYears,
       rating: enableStaffRatings ? rating : undefined,
-      phone: formData.phone.trim(),
+      phone: formData.phone.trim() ? `${formData.countryCode}${formData.phone.trim().replace(/\D/g, '')}` : '',
       address: formData.address.trim(),
       city: formData.city.trim(),
       email: formData.email.trim(),
@@ -200,11 +214,21 @@ const StaffDetailPage = () => {
     }
 
     setSaving(false);
+
+    // Freshly-created Service Staff: Services (StaffServicesSection) needs a real
+    // DB id to write service_therapists rows against, so it can't render until
+    // this record exists — land on this same staff's edit page instead of back
+    // to the list, so service assignment is the very next thing admin sees
+    // rather than a separate "create, then go find it again" trip.
+    if (!isEdit && formData.isServiceStaff) {
+      navigate(`/${orgSlug}/staff/${targetId}`);
+      return;
+    }
     goBack();
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-surface">
       <StaffSidebar userRole={userRole} onCollapseChange={setSidebarCollapsed} />
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} lg:mb-0 mb-16 spa-transition-slow`}>
@@ -221,7 +245,7 @@ const StaffDetailPage = () => {
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto px-6 py-6 space-y-4">
+        <div className="max-w-7xl mx-auto px-6 py-6 space-y-4">
           {pageLoading ? (
             <div className="text-center py-20">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
@@ -241,7 +265,7 @@ const StaffDetailPage = () => {
                 </div>
               )}
 
-              <div className="bg-surface border border-border rounded-spa-lg px-6 py-4">
+              <div>
                 <SettingsRow title="Staff Type" description="Service staff deliver bookable services; support staff are not assigned to bookings.">
                   <StaffTypeToggle
                     isServiceStaff={formData.isServiceStaff}
@@ -253,21 +277,32 @@ const StaffDetailPage = () => {
                   <StaffDetailsFields formData={formData} setFormData={setFormData} />
                 </SettingsRow>
 
-                {formData.isServiceStaff && (
-                  <SettingsRow title="Position & Specialties" description="Shown to customers when booking and used to filter staff by role.">
-                    <PositionSpecialtiesFields formData={formData} setFormData={setFormData} allPositionNames={allPositionNames} />
-                  </SettingsRow>
-                )}
-
-                {isEdit && formData.isServiceStaff && (
-                  <SettingsRow title="Services" description="Which services this staff member can be assigned to. Services with no restriction are open to all staff — manage those from the Services page.">
-                    <StaffServicesSection therapistId={staffId} branchId={effectiveBranchId} />
-                  </SettingsRow>
-                )}
-
-                <SettingsRow title="Normal Working Hours" description="For reference only — not used to restrict bookings.">
-                  <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
+                <SettingsRow title="Position & Specialties" description="Position categorizes this staff member by role (service or support). Specialties are shown to customers when booking.">
+                  <PositionSpecialtiesFields
+                    formData={formData}
+                    setFormData={setFormData}
+                    allPositionNames={allPositionNames}
+                    showSpecialties={formData.isServiceStaff}
+                  />
                 </SettingsRow>
+
+                {formData.isServiceStaff && (
+                  <SettingsRow title="Services" description="Which services this staff member can be assigned to. Services with no restriction are open to all staff — manage those from the Services page.">
+                    {isEdit ? (
+                      <StaffServicesSection therapistId={staffId} branchId={effectiveBranchId} />
+                    ) : (
+                      <p className="font-caption text-xs text-text-secondary">
+                        Save this staff member first — service assignment opens right after.
+                      </p>
+                    )}
+                  </SettingsRow>
+                )}
+
+                <div id="working-hours">
+                  <SettingsRow title="Normal Working Hours" description="For reference only — not used to restrict bookings.">
+                    <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
+                  </SettingsRow>
+                </div>
 
                 <SettingsRow title="Personal Info" description="Photo, bio, and experience shown on the staff profile.">
                   <PersonalInfoFields

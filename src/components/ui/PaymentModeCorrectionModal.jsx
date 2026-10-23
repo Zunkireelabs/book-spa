@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../AppIcon';
 import PaymentMethodSelector from './PaymentMethodSelector';
-import { correctPaymentMode } from '../../services/api';
+import { correctPaymentMode, correctPaymentAmount } from '../../services/api';
 
 const REASON_MIN = 10;
 
-// Admin-only correction of a recorded payment's method (migration-237). Same
-// shape as AdjustmentModal.jsx — a single-purpose form over one RPC, with a
-// required reason. Closes on success; the parent re-fetches the booking (same
-// posture as AdminCorrectionModal, since this component doesn't own the
-// booking data it's rendering).
+// Admin-only correction of a recorded payment's method and/or amount
+// (migration-237, migration-283). Same shape as AdjustmentModal.jsx — a
+// single-purpose form, with a required reason, over whichever of the two
+// RPCs the changed field(s) need (payments has no UPDATE RLS policy at all,
+// so these are the only path past that immutability). Closes on success; the
+// parent re-fetches the booking (same posture as AdminCorrectionModal, since
+// this component doesn't own the booking data it's rendering).
 const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSuccess }) => {
   const [newMode, setNewMode] = useState(payment?.paymentMode || '');
+  const [newAmount, setNewAmount] = useState(String(payment?.amount ?? ''));
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -24,6 +27,8 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
 
   const reasonOk = reason.trim().length >= REASON_MIN;
   const modeChanged = newMode && newMode !== payment?.paymentMode;
+  const amountChanged = newAmount !== '' && Number(newAmount) !== Number(payment?.amount ?? 0);
+  const somethingChanged = modeChanged || amountChanged;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -33,22 +38,43 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
       setError(`A reason of at least ${REASON_MIN} characters is required.`);
       return;
     }
-    if (!modeChanged) {
-      setError('Pick a different payment mode than the current one.');
+    if (!somethingChanged) {
+      setError('Change the payment mode or the amount before applying.');
       return;
     }
 
     setSubmitting(true);
-    const { error: rpcError } = await correctPaymentMode({
-      paymentId: payment.id,
-      newMode,
-      reason: reason.trim(),
-    });
-    setSubmitting(false);
-    if (rpcError) {
-      setError(rpcError.message || 'Failed to correct payment method.');
-      return;
+    if (modeChanged) {
+      const { error: rpcError } = await correctPaymentMode({
+        paymentId: payment.id,
+        newMode,
+        reason: reason.trim(),
+      });
+      if (rpcError) {
+        setSubmitting(false);
+        setError(rpcError.message || 'Failed to correct payment method.');
+        return;
+      }
     }
+    if (amountChanged) {
+      const { error: rpcError } = await correctPaymentAmount({
+        paymentId: payment.id,
+        newAmount,
+        reason: reason.trim(),
+      });
+      if (rpcError) {
+        setSubmitting(false);
+        // Mode correction (if any) already committed — surface that so the
+        // admin doesn't re-submit it and hit "same as current mode".
+        setError(
+          (modeChanged ? 'Payment method corrected, but the ' : 'The ')
+          + 'amount correction failed: '
+          + (rpcError.message || 'please try again.')
+        );
+        return;
+      }
+    }
+    setSubmitting(false);
     onSuccess();
   };
 
@@ -64,7 +90,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
         <form onSubmit={handleSubmit} className="bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-sm">
           <div className="border-b border-border px-5 py-3 flex items-center justify-between">
             <h2 id="payment-mode-correction-title" className="font-heading font-heading-semibold text-base text-text-primary">
-              Correct payment method
+              Correct payment
             </h2>
             <button
               type="button"
@@ -99,6 +125,18 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
                 value={newMode}
                 onChange={setNewMode}
                 paymentMethods={paymentMethods}
+              />
+            </div>
+
+            <div>
+              <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">New amount (NPR)</label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={newAmount}
+                onChange={(e) => setNewAmount(e.target.value)}
+                className="w-full h-10 px-3 text-sm border border-border rounded-spa bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               />
             </div>
 
@@ -139,7 +177,7 @@ const PaymentModeCorrectionModal = ({ payment, paymentMethods, onClose, onSucces
             </button>
             <button
               type="submit"
-              disabled={submitting || !reasonOk || !modeChanged}
+              disabled={submitting || !reasonOk || !somethingChanged}
               className="px-3 py-2 rounded-spa bg-warning text-white text-sm font-body font-body-medium hover:bg-warning/90 disabled:opacity-50 spa-transition-fast inline-flex items-center space-x-1.5"
             >
               {submitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
