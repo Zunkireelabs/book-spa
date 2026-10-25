@@ -5,71 +5,84 @@ import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete
 import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelector';
 import MembershipWalletCard from '../../../../components/ui/MembershipWalletCard';
 import {
-  PanelShell, FormBody, Field, SelectField, TextInput, MoneyInput, DateField, InfoRows, InlineError,
-  CONTROL, CONTROL_ERROR, controlA11y,
+  PanelShell, FormBody, Field, SelectField, TextInput, MoneyInput, DateField, InlineError, CONTROL, CONTROL_ERROR, controlA11y,
 } from '../../../../components/ui/PanelFormKit';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useOrg } from '../../../../contexts/OrgContext';
-import { fetchVoucherTypes, issueVoucher, createVoucherType, fetchMembershipForCustomer } from '../../../../services/api';
+import { fetchVoucherTypes, issueVoucher, fetchMembershipForCustomer } from '../../../../services/api';
+import { FREE_REASONS, VALID_CHIPS, freeReasonLabel, longDate } from '../../../../services/vouchersView';
+import { categoryLabel } from '../../../../services/membershipsView';
 import { addTenderRow, removeTenderRow, updateTenderRow } from '../../../../utils/tenderRows';
 import { MEMBERSHIP_ENABLED } from '../../../../lib/featureFlags';
-import { toDateInputValue } from '../../../../utils/date';
+import { nepalNow } from '../../../../utils/customerDirectory';
 import { friendlyError } from '../../../../utils/friendlyError';
+import { KindTag } from './voucherBits';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 const formatNPR = (amount) => `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
 const digitsOf = (v) => String(v || '').replace(/\D/g, '');
-const DEFAULT_VALIDITY_DAYS = 90;
+const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 const SPLIT = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
-const EMPTY_NEW_TYPE = { name: '', codePrefix: '', standardPrice: '', category: 'spa' };
-const VOUCHER_TYPE_CATEGORIES = [
-  { value: 'spa', label: 'Spa' },
-  { value: 'salon', label: 'Salon' },
-  { value: 'body_scrub', label: 'Body scrub' },
-  { value: 'package', label: 'Package' },
-];
-const plusDays = (ymd, n) => { const d = new Date(`${ymd}T00:00:00`); d.setDate(d.getDate() + n); return toDateInputValue(d); };
-const plusYear = (ymd) => { const d = new Date(`${ymd}T00:00:00`); d.setFullYear(d.getFullYear() + 1); return toDateInputValue(d); };
-const longDate = (ymd) => new Date(`${ymd}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-const EXPIRY_CHIPS = [
-  { label: '+30', next: (from) => plusDays(from, 30) },
-  { label: '+90', next: (from) => plusDays(from, 90) },
-  { label: '+180', next: (from) => plusDays(from, 180) },
-  { label: '+1 year', next: plusYear },
-];
+const DEFAULT_CHIP = '90';
+const MAX_SOLD_DISCOUNT = 99; // a sale must collect something (migration-291); 100% off is "Given free"
+const chipCls = (on) => `h-8 px-3 rounded-full border text-[13px] font-medium tabular-nums ${on ? 'border-primary bg-[#EEF3EC] text-primary shadow-[0_0_0_2px_rgba(45,90,39,.10)]' : 'border-border bg-white text-text-primary hover:bg-[#FAFAF9]'}`;
+const isCouponType = (t) => t?.percent_off != null;
 
-// "New voucher": the right-hand panel (same shell, fields and footer as New booking). Voucher code is entered manually (the
-// physical booklet's code, migration-139). Callbacks are unchanged: onClose(), onIssued(issuedVoucher).
-const NewVoucherPanel = ({ userRole, onClose, onIssued }) => {
+const PhoneInput = ({ id, label, dial, setDial, value, onChange, error }) => (
+  <div className="flex">
+    <CountryCodeSelect value={dial} onChange={setDial} />
+    <input {...controlA11y(id, error)} type="tel" inputMode="numeric" aria-label={label} value={value} placeholder="9841234567"
+      onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 15))}
+      className={`flex-1 min-w-0 h-10 px-3 text-[13px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${error ? 'border-error' : 'border-border'}`} />
+  </div>
+);
+
+// "New voucher" (V23): the right-hand panel (same shell, footer and success receipt as before). Sold | Given free (manager/admin;
+// the type's "usually" preselects it until the user picks), type + booklet code, For (a profile link via the suggestions, phone
+// or a note), "It's a gift" → Bought by, worth (editable by manager/admin), then either the discount (the member rate follows
+// whoever pays) + tenders, or a reason for giving it free. Issued date (manager/admin; today for staff) and Valid until (90 days from it by default). Callbacks are unchanged:
+// onClose(), onIssued(issuedVoucher); `initialTypeId` / `initialKind` come from the Voucher types tab's Sell / Give.
+const NewVoucherPanel = ({ userRole, onClose, onIssued, initialTypeId = null, initialKind = null }) => {
   const { branchId, branchName, isOverall } = useBranch();
   const { profile } = useAuth();
-  const { orgId, paymentMethods } = useOrg();
-  const isAdmin = userRole === 'admin';
-  const today = toDateInputValue(new Date());
-  const defaultExpiry = () => plusDays(toDateInputValue(new Date()), DEFAULT_VALIDITY_DAYS);
+  const { paymentMethods } = useOrg();
+  const canGiveFree = userRole === 'manager' || userRole === 'admin';
+  const canEditWorth = canGiveFree;
+  const today = nepalNow().today;
+  const canBackdate = canGiveFree; // back-dating by staff is an open owner item (V-4): staff always issue today
+  const chipDate = (id, from = today) => VALID_CHIPS.find((c) => c.id === id).next(from);
 
   const [types, setTypes] = useState(null); // null while loading
   const [loadError, setLoadError] = useState(null);
-  const [voucherTypeId, setVoucherTypeId] = useState('');
-  const [voucherCode, setVoucherCode] = useState('');
+  const [typeId, setTypeId] = useState('');
+  const [kind, setKind] = useState(canGiveFree && initialKind === 'free' ? 'free' : 'sold');
+  const kindTouched = useRef(!!initialKind);
+  const [code, setCode] = useState('');
+  // For
   const [guestName, setGuestName] = useState('');
-  const [linkedCustomer, setLinkedCustomer] = useState(null); // the customer picked from the suggestions
-  const [guestCountryCode, setGuestCountryCode] = useState('+977');
-  const [guestPhone, setGuestPhone] = useState('');
-  const [guestOtherInfo, setGuestOtherInfo] = useState('');
-  const [actualPrice, setActualPrice] = useState('');
-  const [discountPercent, setDiscountPercent] = useState('0');
-  const [discountOutOfRange, setDiscountOutOfRange] = useState(false);
-  const [discountTouched, setDiscountTouched] = useState(false);
-  const [issuedDate, setIssuedDate] = useState(today);
-  const [expiryDate, setExpiryDate] = useState(defaultExpiry);
-  const [remarks, setRemarks] = useState('');
-  const [showRemarks, setShowRemarks] = useState(false);
-  const [membership, setMembership] = useState(null);
-  const [tenders, setTenders] = useState([{ amount: '', paymentMode: 'Cash' }]);
-  // Fields filled from the pick (and not typed since): cleared again when the pick is dropped.
+  const [linked, setLinked] = useState(null);
+  const [dial, setDial] = useState('+977');
+  const [phone, setPhone] = useState('');
+  const [note, setNote] = useState('');
   const phoneFromPick = useRef(false);
+  // Bought by
+  const [gift, setGift] = useState(false);
+  const [buyerName, setBuyerName] = useState('');
+  const [buyerLinked, setBuyerLinked] = useState(null);
+  const [buyerDial, setBuyerDial] = useState('+977');
+  const [buyerPhone, setBuyerPhone] = useState('');
+  // Money
+  const [worth, setWorth] = useState('');
+  const [discount, setDiscount] = useState('0');
+  const [discountTouched, setDiscountTouched] = useState(false);
+  const [reason, setReason] = useState('');
+  const [freeNote, setFreeNote] = useState('');
+  const [issuedDate, setIssuedDate] = useState(today);
+  const [chip, setChip] = useState(DEFAULT_CHIP);
+  const [expiry, setExpiry] = useState(() => chipDate(DEFAULT_CHIP));
+  const [tenders, setTenders] = useState([{ amount: '', paymentMode: 'Cash' }]);
+  const [memberships, setMemberships] = useState({}); // customerId → membership (or null)
 
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState(null);
@@ -79,20 +92,26 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued }) => {
   const [copied, setCopied] = useState(false);
   const codeRef = useRef(null);
 
-  const [showNewType, setShowNewType] = useState(false);
-  const [newType, setNewType] = useState(EMPTY_NEW_TYPE);
-  const [newTypeErrors, setNewTypeErrors] = useState({});
-  const [newTypeSubmitting, setNewTypeSubmitting] = useState(false);
-
   // ── Data ───────────────────────────────────────────────────────────────────────────────────────
-  const loadTypes = async ({ selectId } = {}) => {
-    const { data, error } = await fetchVoucherTypes();
-    if (error) { setLoadError(friendlyError(error, 'Failed to load voucher types.')); setTypes([]); return; }
-    setTypes(data || []);
-    const pick = selectId ? data?.find((t) => t.id === selectId) : data?.[0];
-    if (pick) { setVoucherTypeId(pick.id); setActualPrice(String(pick.standard_price)); }
+  // Staff only sell, so a % coupon type with no price (always given free) isn't offered to them.
+  const sellable = (t) => canGiveFree || !(isCouponType(t) && !(Number(t.standard_price) > 0));
+  const pickType = (t, { fromUser = false } = {}) => {
+    setTypeId(t?.id || '');
+    setWorth(t ? String(Number(t.standard_price)) : '');
+    if (t && canGiveFree && !kindTouched.current) setKind(t.default_issue_kind === 'free' ? 'free' : 'sold');
+    if (fromUser) setErrors((e) => ({ ...e, type: undefined }));
   };
-  useEffect(() => { loadTypes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    let off = false;
+    fetchVoucherTypes().then(({ data, error }) => {
+      if (off) return;
+      if (error) { setLoadError(friendlyError(error, 'Failed to load voucher types.')); setTypes([]); return; }
+      const list = (data || []).filter(sellable);
+      setTypes(list);
+      pickType(list.find((t) => t.id === initialTypeId) || list[0]);
+    });
+    return () => { off = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Focus the first field once the panel has slid in (never scroll an ancestor while it is still moving).
   useEffect(() => {
@@ -102,191 +121,154 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued }) => {
   }, [issued, isOverall]);
 
   // ── Derived ────────────────────────────────────────────────────────────────────────────────────
-  const selectedType = (types || []).find((t) => t.id === voucherTypeId) || null;
-  const activeMembership = membership?.status === 'active' ? membership : null;
-  const tierRateForType = (type, m = activeMembership) => (type && m ? m.tierDiscountRules?.[type.category] : undefined);
-  const tierName = linkedCustomer?.primaryMembership?.tierName || membership?.tierName || '';
-  const tierStatus = linkedCustomer?.primaryMembership?.status || membership?.status || '';
-  const tierRate = tierRateForType(selectedType);
+  const type = (types || []).find((t) => t.id === typeId) || null;
+  const coupon = isCouponType(type);
+  const free = kind === 'free';
+  // The member discount follows whoever pays: the Bought by profile for a gift, otherwise the For profile.
+  const payer = gift && buyerName.trim() ? buyerLinked : linked;
+  const payerName = gift && buyerName.trim() ? buyerName : guestName;
+  const payerMembership = payer ? memberships[payer.id] || null : null;
+  const activeMembership = payerMembership?.status === 'active' ? payerMembership : null;
+  const forMembership = linked ? memberships[linked.id] : null;
+  const tierRate = !free && type && activeMembership ? Number(activeMembership.tierDiscountRules?.[type.category]) || 0 : 0;
 
-  const applyTierDiscount = (type, m = activeMembership, touched = discountTouched) => {
-    if (touched) return;
-    const rate = tierRateForType(type, m);
-    setDiscountPercent(typeof rate === 'number' ? String(rate) : '0');
-  };
-
-  const handleTypeChange = (id) => {
-    setVoucherTypeId(id);
-    const t = (types || []).find((x) => x.id === id);
-    if (t) setActualPrice(String(t.standard_price));
-    applyTierDiscount(t);
-    clearError('type');
-  };
-
-  const actualPriceNum = Number(actualPrice) || 0;
-  const discountNum = Math.min(100, Math.max(0, Number(discountPercent) || 0));
-  const totalAmount = useMemo(() => round2(actualPriceNum - (actualPriceNum * discountNum) / 100), [actualPriceNum, discountNum]);
-  const discountAmount = round2(actualPriceNum - totalAmount);
-
-  const membershipUsable = !!(MEMBERSHIP_ENABLED && linkedCustomer && membership && membership.balance > 0 && membership.status !== 'depleted');
-  const membershipLeaf = membershipUsable ? { value: 'Membership', label: 'Membership' } : null;
-  const membershipCommitted = useMemo(() => {
-    if (!membershipUsable) return 0;
-    return round2(tenders.reduce((s, t) => s + (t.paymentMode === 'Membership' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0));
-  }, [tenders, membershipUsable]);
-  const walletRemaining = membershipUsable ? Math.max(0, round2(membership.balance - membershipCommitted)) : 0;
-  const membershipOverWallet = membershipUsable && membershipCommitted > membership.balance;
-
-  // Default the tender to Membership once the linked wallet can cover the total (only while the tender is untouched).
   useEffect(() => {
-    if (!membershipUsable || membership.balance < totalAmount || totalAmount <= 0) return;
+    if (payer && !(payer.id in memberships)) {
+      fetchMembershipForCustomer(payer.id).then(({ data }) => setMemberships((m) => ({ ...m, [payer.id]: data || null })));
+    }
+  }, [payer?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The member rate fills the discount until the user types one.
+  useEffect(() => { if (!discountTouched) setDiscount(String(tierRate || 0)); }, [tierRate, discountTouched]);
+
+  const worthNum = coupon ? 0 : Number(worth) || 0;
+  const priceNum = coupon ? Number(type?.standard_price) || 0 : worthNum; // what the sale is priced at
+  const discountNum = free ? 0 : Math.min(100, Math.max(0, Number(discount) || 0));
+  const pays = free ? 0 : round2(priceNum - (priceNum * discountNum) / 100);
+  const discountAmount = round2(priceNum - pays);
+
+  const membershipUsable = !!(MEMBERSHIP_ENABLED && !free && payer && payerMembership && payerMembership.balance > 0 && payerMembership.status !== 'depleted');
+  const membershipLeaf = membershipUsable ? { value: 'Membership', label: 'Membership' } : null;
+  const membershipCommitted = useMemo(() => (membershipUsable
+    ? round2(tenders.reduce((s, t) => s + (t.paymentMode === 'Membership' && Number(t.amount) > 0 ? Number(t.amount) : 0), 0)) : 0), [tenders, membershipUsable]);
+  const walletRemaining = membershipUsable ? Math.max(0, round2(payerMembership.balance - membershipCommitted)) : 0;
+  const membershipOverWallet = membershipUsable && membershipCommitted > payerMembership.balance;
+  const autoTender = useRef(false); // the tender was filled from the wallet automatically (see below)
+  // A wallet that no longer belongs to the payer falls back to Cash.
+  useEffect(() => {
+    if (membershipUsable) return;
+    autoTender.current = false;
+    setTenders((prev) => (prev.some((t) => t.paymentMode === 'Membership') ? prev.map((t) => (t.paymentMode === 'Membership' ? { ...t, paymentMode: 'Cash' } : t)) : prev));
+  }, [membershipUsable]);
+  // Default the tender to Membership once the payer's wallet can cover it (only while the tender is untouched). A tender filled
+  // this way keeps following what is due (the member rate lands a moment after the wallet) until the user edits a tender.
+  useEffect(() => {
+    if (!membershipUsable || payerMembership.balance < pays || pays <= 0) return;
     const pristine = tenders.length === 1 && tenders[0].paymentMode === 'Cash' && !(Number(tenders[0].amount) > 0);
-    if (pristine) setTenders([{ amount: String(totalAmount), paymentMode: 'Membership' }]);
+    if (pristine || autoTender.current) { autoTender.current = true; setTenders([{ amount: String(pays), paymentMode: 'Membership' }]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [membershipUsable, membership?.balance, totalAmount]);
+  }, [membershipUsable, payerMembership?.balance, pays]);
 
-  // Round each tender to 2dp before summing (matches the RPC's per-tender numeric(10,2) cast).
-  const tenderTotal = useMemo(() => tenders.reduce((s, t) => {
-    const amount = round2(Number(t.amount) || 0);
-    return s + (amount > 0 ? amount : 0);
-  }, 0), [tenders]);
-  const tenderRemaining = useMemo(() => round2(totalAmount - tenderTotal), [totalAmount, tenderTotal]);
+  const tenderTotal = useMemo(() => tenders.reduce((s, t) => { const a = round2(Number(t.amount) || 0); return s + (a > 0 ? a : 0); }, 0), [tenders]);
+  const tenderRemaining = round2(pays - tenderTotal);
 
-  const initialPrice = selectedType ? String(selectedType.standard_price) : '';
-  const dirty = !!(voucherCode || guestName || guestPhone || guestOtherInfo || remarks || tenderTotal > 0
-    || issuedDate !== today || expiryDate !== defaultExpiry() || (initialPrice && actualPrice !== initialPrice) || discountTouched);
+  const dirty = !!(code || guestName || phone || note || buyerName || buyerPhone || reason || freeNote || tenderTotal > 0 || discountTouched
+    || chip !== DEFAULT_CHIP || issuedDate !== today || (type && worth !== String(Number(type.standard_price))));
 
-  const reason = types === null ? 'Loading voucher types…'
-    : !voucherTypeId ? 'Pick a voucher type'
-    : !voucherCode.trim() ? 'Enter the code'
-    : !guestName.trim() ? 'Enter the guest name'
-    : membershipOverWallet ? 'Wallet balance too low'
-    : tenderRemaining > 0 ? `Collect ${formatNPR(tenderRemaining)} more`
-    : tenderRemaining < 0 ? `${formatNPR(-tenderRemaining)} over the total`
-    : '';
+  const why = types === null ? 'Loading voucher types…'
+    : !typeId ? 'Pick a voucher type'
+      : !code.trim() ? 'Enter the code'
+        : !guestName.trim() ? 'Enter who it is for'
+          : gift && !buyerName.trim() ? 'Enter who bought it'
+            : free && !reason ? 'Pick why it is free'
+              : !free && !coupon && !(worthNum > 0) ? 'Enter what it is worth'
+                : !free && discountNum >= 100 ? (canGiveFree ? 'Use Given free for a free voucher' : 'A manager can give it free')
+                  : !free && pays <= 0 ? (canGiveFree ? 'Nothing to collect: use Given free' : 'Nothing to collect: a manager can give it free')
+                    : membershipOverWallet ? 'Wallet balance too low'
+                      : !free && tenderRemaining > 0 ? `Collect ${formatNPR(tenderRemaining)} more`
+                        : !free && tenderRemaining < 0 ? `${formatNPR(-tenderRemaining)} over the total`
+                          : '';
 
   // ── Handlers ───────────────────────────────────────────────────────────────────────────────────
   const clearError = (key) => { setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e)); setServerError(null); };
-
-  useEffect(() => {
-    if (!discountOutOfRange) return undefined;
-    const t = setTimeout(() => setDiscountOutOfRange(false), 3000);
-    return () => clearTimeout(t);
-  }, [discountOutOfRange]);
-
-  // Editing the guest name drops the link and everything the pick supplied: the membership (and its tier discount, unless the
-  // user set the discount themselves) and the phone.
   const onGuestNameChange = (val) => {
     setGuestName(val);
     clearError('guest');
-    if (linkedCustomer) {
-      setLinkedCustomer(null);
-      setMembership(null);
-      applyTierDiscount(selectedType, null);
-      if (phoneFromPick.current) setGuestPhone('');
+    if (linked) {
+      setLinked(null);
+      if (phoneFromPick.current) setPhone('');
       phoneFromPick.current = false;
-      // The wallet belonged to the picked guest: a Membership tender falls back to Cash (same amount).
-      setTenders((prev) => prev.map((t) => (t.paymentMode === 'Membership' ? { ...t, paymentMode: 'Cash' } : t)));
+      if (!gift) setDiscountTouched(false);
     }
   };
-
-  const onGuestSelect = async (customer) => {
-    setGuestName(customer.full_name);
-    setLinkedCustomer(customer);
+  const onGuestSelect = (c) => {
+    setGuestName(c.full_name);
+    setLinked({ id: c.id, name: c.full_name, tierName: c.primaryMembership?.tierName || '' });
     clearError('guest');
-    if (customer.phone) {
-      const { dial, national } = parsePhone(customer.phone);
-      setGuestCountryCode(dial);
-      setGuestPhone(national);
-      phoneFromPick.current = true;
-    }
-    // A newly-selected guest is a fresh context: their tier discount applies even if a previous one was overridden.
-    setDiscountTouched(false);
-    const { data: m } = await fetchMembershipForCustomer(customer.id);
-    const active = m?.status === 'active' ? m : null;
-    setMembership(m);
-    applyTierDiscount(selectedType, active, false);
+    if (c.phone) { const p = parsePhone(c.phone); setDial(p.dial); setPhone(p.national); phoneFromPick.current = true; }
+    if (!gift) setDiscountTouched(false); // a fresh payer: their rate applies again
   };
-
+  const onBuyerSelect = (c) => {
+    setBuyerName(c.full_name);
+    setBuyerLinked({ id: c.id, name: c.full_name });
+    if (c.phone) { const p = parsePhone(c.phone); setBuyerDial(p.dial); setBuyerPhone(p.national); }
+    setDiscountTouched(false);
+  };
   const onDiscountChange = (raw) => {
     const cleaned = raw.replace(/[^\d.]/g, '');
-    const n = Number(cleaned);
-    const out = cleaned !== '' && n > 100;
-    setDiscountOutOfRange(out);
-    setDiscountPercent(out ? '100' : cleaned);
+    setDiscount(Number(cleaned) > 100 ? '100' : cleaned);
     setDiscountTouched(true);
   };
-
-  const handleCreateNewType = async () => {
-    const errs = {};
-    if (!newType.name.trim()) errs.name = 'Enter the type name.';
-    if (!newType.codePrefix.trim()) errs.codePrefix = 'Enter the code prefix.';
-    if (newType.standardPrice === '' || !(Number(newType.standardPrice) >= 0)) errs.standardPrice = 'Enter the standard price.';
-    setNewTypeErrors(errs);
-    if (Object.keys(errs).length) return;
-    setNewTypeSubmitting(true);
-    const { data, error } = await createVoucherType({
-      orgId, name: newType.name, codePrefix: newType.codePrefix, standardPrice: Number(newType.standardPrice), category: newType.category,
-    });
-    setNewTypeSubmitting(false);
-    if (error) { setNewTypeErrors({ form: friendlyError(error, 'Failed to create voucher type.') }); return; }
-    setNewType(EMPTY_NEW_TYPE);
-    setNewTypeErrors({});
-    setShowNewType(false);
-    await loadTypes({ selectId: data.id });
-  };
+  const setKindByUser = (k) => { kindTouched.current = true; setKind(k); setServerError(null); };
 
   const submit = async () => {
-    if (submittingRef.current || reason || isOverall) return;
+    if (submittingRef.current || why || isOverall) return;
     const next = {};
-    const code = voucherCode.trim();
-    const phoneDigits = digitsOf(guestPhone);
-    if (phoneDigits && (phoneDigits.length < 7 || phoneDigits.length > 15)) next.phone = 'Enter a valid phone number (7–15 digits).';
-    if (issuedDate > today) next.issued = "The issued date can't be in the future.";
-    if (!expiryDate || expiryDate < issuedDate) next.expiry = 'Expiry date cannot be before the issued date.';
-    const hasMembershipTender = tenders.some((t) => t.paymentMode === 'Membership' && Number(t.amount) > 0);
-    if (hasMembershipTender && !linkedCustomer) next.pay = 'Pick the guest from the suggestions to pay by Membership.';
+    const pd = digitsOf(phone);
+    const bd = digitsOf(buyerPhone);
+    if (pd && (pd.length < 7 || pd.length > 15)) next.phone = 'Enter a valid phone number (7–15 digits).';
+    if (gift && bd && (bd.length < 7 || bd.length > 15)) next.buyerPhone = 'Enter a valid phone number (7–15 digits).';
+    if (canBackdate && (!issuedDate || issuedDate > today)) next.issued = "The issued date can't be in the future.";
+    if (!expiry || expiry < today) next.expiry = 'Pick today or a later date.';
+    if (!free && tenders.some((t) => t.paymentMode === 'Membership' && Number(t.amount) > 0) && !payer) next.pay = 'Pick the payer from the suggestions to pay by Membership.';
     setErrors(next);
-    const first = ['phone', 'issued', 'expiry', 'pay'].find((k) => next[k]);
-    if (first) {
-      const el = document.getElementById(`vch-${first}`);
-      el?.focus({ preventScroll: true });
-      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      return;
-    }
+    const first = ['phone', 'buyerPhone', 'issued', 'expiry', 'pay'].find((k) => next[k]);
+    if (first) { const el = document.getElementById(`vch-${first}`); el?.focus({ preventScroll: true }); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
 
     submittingRef.current = true;
     setSubmitting(true);
     setServerError(null);
     // Guest Info is one column: a phone number takes priority (it makes the voucher searchable by phone at payment time,
-    // migration-085); the free-text company / club is used when there's no phone.
+    // migration-085); the company / note is used when there's no phone.
     const { data, error } = await issueVoucher({
       branchId,
-      voucherTypeId,
-      voucherCode: code,
+      voucherTypeId: typeId,
+      voucherCode: code.trim(),
       guestName: guestName.trim(),
-      guestInfo: phoneDigits ? `${guestCountryCode}${phoneDigits}` : (guestOtherInfo.trim() || null),
+      guestInfo: pd ? `${dial}${pd}` : (note.trim() || null),
+      customerId: linked?.id || null,
       discountPercent: discountNum,
-      actualPrice: actualPriceNum,
-      issuedDate,
-      expiryDate,
-      remarks: remarks.trim() || null,
-      customerId: linkedCustomer?.id || null,
-      tenders: tenders
-        .map((t) => ({ amount: round2(Number(t.amount) || 0), paymentMode: t.paymentMode }))
-        .filter((t) => t.amount > 0),
+      actualPrice: coupon ? priceNum : worthNum,
+      issuedDate: canBackdate ? issuedDate : null,
+      expiryDate: expiry,
+      issueKind: kind,
+      freeReason: free ? reason : null,
+      freeNote: free ? (freeNote.trim() || null) : null,
+      buyerName: gift ? buyerName.trim() : null,
+      buyerPhone: gift && bd ? `${buyerDial}${bd}` : null,
+      buyerCustomerId: gift ? (buyerLinked?.id || null) : null,
+      tenders: free ? [] : tenders.map((t) => ({ amount: round2(Number(t.amount) || 0), paymentMode: t.paymentMode })).filter((t) => t.amount > 0),
     });
     submittingRef.current = false;
     setSubmitting(false);
     if (error) {
       if (/already in use/i.test(error.message || '')) {
-        setErrors({ code: `${code} is already in use.` });
+        setErrors({ code: `${code.trim()} is already in use.` });
         const el = document.getElementById('vch-code');
         el?.focus({ preventScroll: true });
         el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         return;
       }
-      setServerError(friendlyError(error, 'Failed to issue voucher.'));
+      setServerError(friendlyError(error, free ? 'Failed to give the voucher.' : 'Failed to sell the voucher.'));
       return;
     }
     setIssued(data);
@@ -307,301 +289,253 @@ const NewVoucherPanel = ({ userRole, onClose, onIssued }) => {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // "Issue another": reset everything except the voucher type.
+  // "Issue another": reset everything except the voucher type and Sold / Given free.
   const issueAnother = () => {
-    const t = selectedType;
     setIssued(null);
-    setVoucherCode(''); setGuestName(''); setLinkedCustomer(null); setMembership(null); setGuestPhone(''); setGuestOtherInfo('');
-    setGuestCountryCode('+977'); setActualPrice(t ? String(t.standard_price) : ''); setDiscountPercent('0'); setDiscountTouched(false);
-    setIssuedDate(today); setExpiryDate(defaultExpiry()); setRemarks(''); setShowRemarks(false);
+    setCode(''); setGuestName(''); setLinked(null); setPhone(''); setNote(''); setDial('+977');
+    setGift(false); setBuyerName(''); setBuyerLinked(null); setBuyerPhone(''); setBuyerDial('+977');
+    setWorth(type ? String(Number(type.standard_price)) : ''); setDiscount('0'); setDiscountTouched(false);
+    setReason(''); setFreeNote(''); setIssuedDate(today); setChip(DEFAULT_CHIP); setExpiry(chipDate(DEFAULT_CHIP));
     setTenders([{ amount: '', paymentMode: 'Cash' }]); setErrors({}); setServerError(null);
     phoneFromPick.current = false;
+    autoTender.current = false;
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────────────────────────
-  const typeOptions = (types || []).map((t) => ({ value: t.id, label: `${t.name}${t.is_wallet ? ' (wallet)' : ''} — ${formatNPR(t.standard_price)}` }));
-  const guestInputClass = CONTROL;
-  const updateTender = (i, patch) => { updateTenderRow(setTenders, i, patch); clearError('pay'); };
+  const typeOptions = (types || []).map((t) => {
+    const tag = isCouponType(t) ? 'coupon' : t.default_issue_kind === 'free' ? 'usuallyFree' : null;
+    return {
+      value: t.id,
+      searchLabel: t.name,
+      label: <span className="inline-flex items-center gap-2 max-w-full"><span className="truncate">{t.name}</span>{tag && <KindTag kind={tag} />}</span>,
+    };
+  });
+  const updateTender = (i, patch) => { autoTender.current = false; updateTenderRow(setTenders, i, patch); clearError('pay'); };
+  const title = free ? 'Give a voucher' : 'New voucher';
 
-  // Success state: the panel body becomes the receipt.
   if (issued) {
+    const wasFree = issued.issue_kind === 'free';
+    const worthText = issued.percent_off != null ? `${Number(issued.percent_off)}% off one visit` : `Worth ${formatNPR(issued.total_amount_issued)}`;
     return (
-      <PanelShell
-        variant="panel"
-        title="New voucher"
-        onClose={() => onIssued(issued)}
+      <PanelShell variant="panel" title={title} onClose={() => onIssued(issued)}
         footerOverride={(
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={issueAnother} className="h-9 px-3 text-[13px] font-body font-body-medium text-text-secondary hover:text-text-primary hover:bg-black/[0.04] rounded-spa spa-transition-fast whitespace-nowrap">Issue another</button>
+            <button type="button" onClick={issueAnother} className="h-9 px-3 text-[13px] font-body font-body-medium text-text-secondary hover:text-text-primary hover:bg-black/[0.04] rounded-spa spa-transition-fast whitespace-nowrap">{wasFree ? 'Give another' : 'Sell another'}</button>
             <button type="button" onClick={() => onIssued(issued)} className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast whitespace-nowrap">Done</button>
           </div>
-        )}
-      >
+        )}>
         <div className="px-5 py-10 text-center" role="status" aria-live="polite">
-          <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-3">
-            <Icon name="Check" size={24} className="text-success" />
-          </div>
-          <h4 className="font-heading font-heading-semibold text-[15px] text-text-primary">Voucher issued</h4>
+          <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-3"><Icon name="Check" size={24} className="text-success" /></div>
+          <h4 className="font-heading font-heading-semibold text-[15px] text-text-primary">{wasFree ? 'Voucher given' : 'Voucher sold'}</h4>
           <p className="mt-3 font-data font-data-medium text-2xl text-primary tracking-wide break-all">{issued.voucher_code}</p>
           <button type="button" onClick={copyCode} className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-body-medium text-primary hover:underline">
-            <Icon name={copied ? 'Check' : 'Copy'} size={13} />
-            {copied ? 'Copied' : 'Copy'}
+            <Icon name={copied ? 'Check' : 'Copy'} size={13} />{copied ? 'Copied' : 'Copy'}
           </button>
           <p className="mt-4 text-[13px] text-text-secondary tabular-nums">
-            {formatNPR(issued.total_amount_issued)} · {guestName.trim()} · expires {longDate(expiryDate)}
+            {worthText}{wasFree ? ' · given free' : ` · paid ${formatNPR(issued.amount_paid)}`} · {issued.guest_name} · valid until {longDate(issued.expiry_date)}
           </p>
         </div>
       </PanelShell>
     );
   }
 
+  const primaryLabel = submitting ? (free ? 'Giving…' : 'Selling…')
+    : free ? (coupon ? `Give coupon · ${Number(type?.percent_off)}% off` : `Give voucher · worth ${formatNPR(worthNum)}`)
+      : pays > 0 ? `Sell · collect ${formatNPR(pays)}` : 'Sell';
+  const memberLine = (() => {
+    if (free || !type) return null;
+    if (activeMembership && tierRate > 0) {
+      return `${firstName(payerName)} is a ${activeMembership.tierName} member: ${tierRate}% off ${categoryLabel(type.category).toLowerCase()} is applied. The discount follows whoever pays.`;
+    }
+    if (gift && forMembership?.status === 'active' && payer?.id !== linked?.id) {
+      return `${firstName(buyerName) || 'The buyer'} is paying, so ${firstName(guestName)}'s ${forMembership.tierName} rate doesn't apply. The discount follows whoever pays.`;
+    }
+    return null;
+  })();
+
   return (
-    <PanelShell
-      variant="panel"
-      title="New voucher"
-      onClose={onClose}
-      dirty={dirty}
-      busy={submitting}
-      reason={reason}
-      primary={isOverall ? undefined : {
-        label: submitting ? 'Issuing…' : (totalAmount > 0 ? `Issue · ${formatNPR(totalAmount)}` : 'Issue'),
-        onClick: submit,
-        disabled: !!reason || types === null,
-        loading: submitting,
-      }}
-    >
+    <PanelShell variant="panel" width="460px" title={title} onClose={onClose} dirty={dirty} busy={submitting} reason={why}
+      primary={isOverall ? undefined : { label: primaryLabel, onClick: submit, disabled: !!why || types === null, loading: submitting }}>
       {isOverall ? (
         <FormBody>
           <div className="py-10 text-center">
             <Icon name="Ticket" size={28} className="text-text-tertiary mx-auto mb-3" />
-            <p className="text-[13px] text-text-secondary">Vouchers are issued from one branch. Switch branch in the header to continue.</p>
+            <p className="text-[13px] text-text-secondary">Vouchers are handed out from one branch. Switch branch in the header to continue.</p>
           </div>
         </FormBody>
       ) : (
         <FormBody>
-          <p className="-mt-1 text-xs text-text-secondary">
-            {branchName}{profile?.full_name ? ` · issued by ${profile.full_name}` : ''}
-          </p>
+          <p className="-mt-1 text-xs text-text-secondary">{branchName}{profile?.full_name ? ` · by ${profile.full_name}` : ''}</p>
           <InlineError message={serverError || loadError} />
 
-          <Field label="Voucher type" required id="vch-type" error={errors.type}>
-            <SelectField
-              value={voucherTypeId}
-              onChange={handleTypeChange}
-              options={typeOptions}
-              placeholder={types === null ? 'Loading…' : 'Select voucher type'}
-              disabled={types === null || (types || []).length === 0}
-            />
-            {selectedType?.is_wallet && (
-              <p className="mt-1.5 text-xs text-text-secondary">Stored-value voucher — the guest can redeem it across several visits until the balance runs out.</p>
-            )}
-            {isAdmin && !showNewType && (
-              <button type="button" onClick={() => setShowNewType(true)} className="mt-1.5 text-[13px] font-body-medium text-primary hover:underline">+ New type</button>
-            )}
-          </Field>
-
-          {isAdmin && showNewType && (
-            <div className="border border-border rounded-spa p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="font-heading font-heading-semibold text-[13px] text-text-primary">New voucher type</h4>
-                <button type="button" aria-label="Close new type" onClick={() => { setShowNewType(false); setNewType(EMPTY_NEW_TYPE); setNewTypeErrors({}); }} className="p-1 rounded-spa hover:bg-black/[0.05] text-text-secondary">
-                  <Icon name="X" size={14} />
+          {canGiveFree && (
+            <div className="grid grid-cols-2 gap-0.5 p-0.5 bg-background border border-border rounded-lg" role="group" aria-label="Sold or given free">
+              {[['sold', 'Banknote', 'Sold'], ['free', 'Gift', 'Given free']].map(([k, icon, label]) => (
+                <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKindByUser(k)} data-kind={k}
+                  className={`h-9 rounded-md text-[13px] font-medium inline-flex items-center justify-center gap-2 transition-colors ${kind === k ? 'bg-white text-text-primary shadow-[0_1px_2px_rgba(14,13,12,.08)] border border-border' : 'text-[#515152] hover:text-text-primary'}`}>
+                  <Icon name={icon} size={15} />{label}
                 </button>
-              </div>
-              <InlineError message={newTypeErrors.form} />
-              <div className={SPLIT}>
-                <Field label="Name" required id="vch-nt-name" error={newTypeErrors.name}>
-                  <TextInput {...controlA11y('vch-nt-name', newTypeErrors.name)} error={newTypeErrors.name} value={newType.name} onChange={(e) => { setNewType((p) => ({ ...p, name: e.target.value })); setNewTypeErrors((x) => ({ ...x, name: undefined })); }} />
-                </Field>
-                <Field label="Code prefix" required id="vch-nt-prefix" error={newTypeErrors.codePrefix}>
-                  <TextInput {...controlA11y('vch-nt-prefix', newTypeErrors.codePrefix)} error={newTypeErrors.codePrefix} className="font-data uppercase" placeholder="NT 4326" value={newType.codePrefix} onChange={(e) => { setNewType((p) => ({ ...p, codePrefix: e.target.value.toUpperCase() })); setNewTypeErrors((x) => ({ ...x, codePrefix: undefined })); }} />
-                </Field>
-              </div>
-              <div className={SPLIT}>
-                <Field label="Standard price" required id="vch-nt-price" error={newTypeErrors.standardPrice}>
-                  <MoneyInput {...controlA11y('vch-nt-price', newTypeErrors.standardPrice)} error={newTypeErrors.standardPrice} value={newType.standardPrice} onChange={(v) => { setNewType((p) => ({ ...p, standardPrice: v })); setNewTypeErrors((x) => ({ ...x, standardPrice: undefined })); }} />
-                </Field>
-                <Field label="Category">
-                  <SelectField value={newType.category} onChange={(v) => setNewType((p) => ({ ...p, category: v }))} options={VOUCHER_TYPE_CATEGORIES} />
-                </Field>
-              </div>
-              <div className="flex justify-end">
-                <button type="button" onClick={handleCreateNewType} disabled={newTypeSubmitting} className="h-9 px-3 text-[13px] font-body font-body-medium bg-text-primary text-white rounded-spa hover:opacity-90 disabled:opacity-60 inline-flex items-center gap-2">
-                  {newTypeSubmitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-                  Add type
-                </button>
-              </div>
+              ))}
             </div>
           )}
 
-          <Field label="Code" required id="vch-code" error={errors.code} hint="Type the code from the physical booklet. It must match exactly.">
-            <input
-              {...controlA11y('vch-code', errors.code)}
-              ref={codeRef}
-              type="text"
-              autoComplete="off"
-              autoCapitalize="characters"
-              value={voucherCode}
-              onChange={(e) => { setVoucherCode(e.target.value.toUpperCase()); clearError('code'); }}
-              onBlur={() => setVoucherCode((c) => c.trim())}
-              placeholder="NT 4326-0001"
-              className={`${CONTROL} font-data tracking-wide ${errors.code ? CONTROL_ERROR : ''}`}
-            />
-          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
+            <Field label="Voucher type" required id="vch-type" error={errors.type}>
+              <SelectField value={typeId} onChange={(id) => pickType((types || []).find((t) => t.id === id), { fromUser: true })} options={typeOptions}
+                placeholder={types === null ? 'Loading…' : 'Select voucher type'} disabled={types === null || (types || []).length === 0} />
+            </Field>
+            <Field label="Code" required id="vch-code" error={errors.code} labelExtra={<span className="text-xs text-text-secondary">from the booklet</span>}>
+              <input {...controlA11y('vch-code', errors.code)} ref={codeRef} type="text" autoComplete="off" autoCapitalize="characters" value={code}
+                onChange={(e) => { setCode(e.target.value.toUpperCase()); clearError('code'); }} onBlur={() => setCode((c) => c.trim())}
+                placeholder={type ? `${type.code_prefix}-0001` : 'NT 4326-0001'} className={`${CONTROL} font-data tracking-wide ${errors.code ? CONTROL_ERROR : ''}`} />
+            </Field>
+          </div>
+          {types !== null && types.length === 0 && <p className="-mt-2 text-xs text-text-secondary">No voucher types on sale. An admin can add one in Voucher types.</p>}
 
-          <Field
-            label="Guest name"
-            labelExtra={linkedCustomer && tierName ? (
-              <span className="inline-flex items-center gap-1.5 text-xs font-body text-text-secondary whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-primary" aria-hidden="true" />{tierName} member{tierStatus && tierStatus !== 'active' ? ` · ${tierStatus}` : ''}</span>
-            ) : null}
-            required
-            id="vch-guest"
-            error={errors.guest}
-          >
-            <CustomerAutocomplete
-              id="vch-guest"
-              value={guestName}
-              onChange={onGuestNameChange}
-              onSelect={onGuestSelect}
-              branchId={branchId}
-              searchBy="name"
-              placeholder="Full name"
-              inputClassName={guestInputClass}
-            />
-          </Field>
-
-          <Field label="Phone" id="vch-phone" error={errors.phone}>
-            <div className="flex">
-              <CountryCodeSelect value={guestCountryCode} onChange={setGuestCountryCode} />
-              <input
-                {...controlA11y('vch-phone', errors.phone)}
-                type="tel"
-                inputMode="numeric"
-                value={guestPhone}
-                onChange={(e) => { setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 15)); phoneFromPick.current = false; clearError('phone'); }}
-                placeholder="9841234567"
-                className={`flex-1 min-w-0 h-10 px-3 text-[13px] border rounded-r-spa rounded-l-none bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${errors.phone ? 'border-error' : 'border-border'}`}
-              />
+          <Field label="For" required id="vch-guest" error={errors.guest}
+            labelExtra={linked?.tierName ? <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-[#E7B93E]" />{linked.tierName}</span> : null}>
+            <CustomerAutocomplete id="vch-guest" value={guestName} onChange={onGuestNameChange} onSelect={onGuestSelect} branchId={branchId} searchBy="name" placeholder="Full name" inputClassName={CONTROL} />
+            <div className={`${SPLIT} mt-2`}>
+              <PhoneInput id="vch-phone" label="Phone" dial={dial} setDial={setDial} value={phone} onChange={(val) => { setPhone(val); phoneFromPick.current = false; clearError('phone'); }} error={errors.phone} />
+              <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Company or note (optional)" aria-label="Company or note" />
             </div>
+            {errors.phone && <p className="mt-1 text-xs text-error">{errors.phone}</p>}
+            {digitsOf(phone) && note.trim() && <p className="mt-1 text-xs text-text-secondary">Only the phone is saved when both are given.</p>}
           </Field>
 
-          <Field
-            label="Company or club"
-            id="vch-company"
-            hint={digitsOf(guestPhone) && guestOtherInfo.trim() ? 'Only the phone is saved when both are given.' : undefined}
-          >
-            <TextInput id="vch-company" value={guestOtherInfo} onChange={(e) => setGuestOtherInfo(e.target.value)} placeholder="Optional" />
-          </Field>
-
-          <div className={SPLIT}>
-            <Field label="Price" id="vch-price" error={errors.price}>
-              <MoneyInput {...controlA11y('vch-price', errors.price)} value={actualPrice} onChange={(v) => { setActualPrice(v); clearError('price'); }} />
-            </Field>
-            <Field label="Discount" id="vch-discount" error={discountOutOfRange ? 'Discount must be between 0 and 100%.' : undefined}>
-              <div className="relative">
-                <input
-                  {...controlA11y('vch-discount', discountOutOfRange)}
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  value={discountPercent}
-                  onChange={(e) => onDiscountChange(e.target.value)}
-                  onBlur={() => setDiscountOutOfRange(false)}
-                  className={`${CONTROL} pr-8 font-data tabular-nums ${discountOutOfRange ? CONTROL_ERROR : ''}`}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-text-tertiary pointer-events-none">%</span>
-              </div>
-              {typeof tierRate === 'number' && !discountOutOfRange && (
-                discountTouched && Number(discountPercent) !== tierRate ? (
-                  <button type="button" onClick={() => { setDiscountTouched(false); setDiscountPercent(String(tierRate)); }} className="mt-1.5 text-xs font-body-medium text-primary hover:underline">Reset to {tierName} rate</button>
-                ) : (
-                  <p className="mt-1.5 text-xs text-text-secondary">{tierName} rate {tierRate}%</p>
-                )
+          {!free && (
+            <div className="space-y-3">
+              <button type="button" role="switch" aria-checked={gift} onClick={() => { setGift((g) => !g); setDiscountTouched(false); }} className="flex items-start gap-3 text-left w-full" data-gift-toggle>
+                <span className={`relative inline-flex w-[34px] h-5 rounded-full transition-colors flex-shrink-0 mt-0.5 ${gift ? 'bg-primary' : 'bg-[#D6D3D1]'}`}>
+                  <span className={`absolute top-[2px] w-4 h-4 rounded-full bg-white shadow-sm transition-all ${gift ? 'left-4' : 'left-[2px]'}`} />
+                </span>
+                <span>
+                  <span className="block text-[13px] font-medium text-text-primary">It&apos;s a gift</span>
+                  <span className="block text-xs text-text-secondary">Someone else is paying? Add them, so we can remind them too</span>
+                </span>
+              </button>
+              {gift && (
+                <Field label="Bought by" required id="vch-buyer">
+                  <CustomerAutocomplete id="vch-buyer" value={buyerName} branchId={branchId} searchBy="name" placeholder="Who is paying" inputClassName={CONTROL}
+                    onChange={(val) => { setBuyerName(val); if (buyerLinked) { setBuyerLinked(null); setDiscountTouched(false); } }} onSelect={onBuyerSelect} />
+                  <div className="mt-2"><PhoneInput id="vch-buyerPhone" label="Buyer phone" dial={buyerDial} setDial={setBuyerDial} value={buyerPhone} onChange={setBuyerPhone} error={errors.buyerPhone} /></div>
+                  {errors.buyerPhone && <p className="mt-1 text-xs text-error">{errors.buyerPhone}</p>}
+                </Field>
               )}
-            </Field>
-          </div>
-
-          <div className={SPLIT}>
-            <DateField label="Issued" id="vch-issued" value={issuedDate} max={today} error={errors.issued} onChange={(d) => { setIssuedDate(d); clearError('issued'); }} />
-            <DateField label="Expires" id="vch-expiry" value={expiryDate} min={issuedDate} error={errors.expiry} onChange={(d) => { setExpiryDate(d); clearError('expiry'); }} />
-          </div>
-          <div className="-mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-            {EXPIRY_CHIPS.map((c) => (
-              <button key={c.label} type="button" onClick={() => { setExpiryDate(c.next(issuedDate)); clearError('expiry'); }} className="text-xs font-body-medium text-primary hover:underline tabular-nums">{c.label}</button>
-            ))}
-          </div>
-
-          <InfoRows rows={[
-            ['Price', formatNPR(actualPriceNum)],
-            discountNum > 0 && [`Discount ${discountNum}%`, `−${formatNPR(discountAmount)}`],
-            ['Total', formatNPR(totalAmount), 'total'],
-          ]} />
-
-          <div className="space-y-2">
-            <p className="font-body font-body-medium text-[13px] text-text-primary">Payment</p>
-            {tenders.map((t, i) => {
-              const isMembership = t.paymentMode === 'Membership';
-              const overWallet = isMembership && Number(t.amount) > (membership?.balance || 0);
-              return (
-                <div key={i}>
-                  <div className="flex items-start gap-2">
-                    <div className="w-36 flex-shrink-0">
-                      <PaymentMethodSelector paymentMethods={paymentMethods} value={t.paymentMode} onChange={(v) => updateTender(i, { paymentMode: v })} extraLeaf={membershipLeaf} size="md" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <MoneyInput id={`vch-pay-${i}`} aria-label={`Amount ${i + 1}`} value={t.amount} onChange={(v) => updateTender(i, { amount: v })} />
-                    </div>
-                    {tenders.length > 1 && (
-                      <button type="button" onClick={() => removeTenderRow(setTenders, i)} aria-label="Remove method" className="h-10 w-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05]">
-                        <Icon name="X" size={14} />
-                      </button>
-                    )}
-                  </div>
-                  {isMembership && (
-                    <p className={`mt-1 text-xs ${overWallet ? 'text-error' : 'text-text-secondary'}`}>
-                      {overWallet ? `Exceeds wallet balance (${formatNPR(membership?.balance || 0)}).` : `Wallet available: ${formatNPR(walletRemaining)}`}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-            {errors.pay && <p id="vch-pay-error" role="alert" className="text-xs text-error">{errors.pay}</p>}
-            <div className="flex items-center justify-between gap-3">
-              <button type="button" onClick={() => addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' })} className="text-[13px] font-body-medium text-primary hover:underline">+ Add method</button>
-              {tenderRemaining === 0 ? (
-                <p className="flex items-center gap-1.5 text-[13px] text-success" aria-live="polite"><Icon name="Check" size={13} />Fully collected</p>
-              ) : (
-                <p className="text-[13px] text-warning tabular-nums" aria-live="polite">
-                  {tenderRemaining > 0 ? `${formatNPR(tenderRemaining)} left to collect · ` : `${formatNPR(-tenderRemaining)} over · `}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const last = tenders.length - 1;
-                      const cur = round2(Number(tenders[last].amount) || 0);
-                      updateTender(last, { amount: String(Math.max(0, round2(cur + tenderRemaining))) });
-                    }}
-                    className="font-body-medium text-primary hover:underline"
-                  >Fill</button>
+              {memberLine && (
+                <p className="flex items-start gap-2 text-[12.5px] text-[#515152]" data-member-line>
+                  <Icon name="CreditCard" size={14} className="text-[#9A6B0B] mt-0.5 flex-shrink-0" /><span>{memberLine}</span>
                 </p>
               )}
             </div>
+          )}
+
+          {free && (
+            <Field label="Why is it free?" required id="vch-reason">
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Why is it free">
+                {FREE_REASONS.map((r) => (
+                  <button key={r.id} type="button" role="radio" aria-checked={reason === r.id} onClick={() => setReason(r.id)} className={chipCls(reason === r.id)} data-reason={r.id}>{r.label}</button>
+                ))}
+              </div>
+              <TextInput className="mt-2" value={freeNote} onChange={(e) => setFreeNote(e.target.value)} placeholder="Note (optional), e.g. Dashain walk-in promo" aria-label="Note" />
+            </Field>
+          )}
+
+          {coupon ? (
+            <div className="rounded-spa border border-[#C7D2FE] bg-[#EEF2FF]/60 px-3 py-2.5 text-[13px] flex items-center justify-between gap-3" data-coupon-line>
+              <span className="text-[#3730A3] font-medium">{Number(type.percent_off)}% off one visit</span>
+              <span className="text-xs text-text-secondary">{free ? 'Guest pays nothing' : `Guest pays ${formatNPR(pays)}`}</span>
+            </div>
+          ) : (
+            <div className={SPLIT}>
+              <Field label="Worth" required id="vch-worth" hint={canEditWorth ? undefined : 'Set by the voucher type'}>
+                {canEditWorth
+                  ? <MoneyInput id="vch-worth" value={worth} onChange={(val) => setWorth(val)} />
+                  : <p className="h-10 px-3 flex items-center rounded-spa border border-border bg-background text-[13px] tabular-nums">{formatNPR(worthNum)}</p>}
+              </Field>
+              {free ? (
+                <Field label="Guest pays">
+                  <p className="h-10 px-3 flex items-center rounded-spa border border-border bg-background text-[13px] text-text-secondary">Nothing · free</p>
+                </Field>
+              ) : (
+                <Field label="Discount" id="vch-discount" labelExtra={tierRate > 0 && !discountTouched ? <span className="text-xs text-text-secondary">member rate</span> : null}
+                  error={discountNum >= 100 ? (canGiveFree ? 'Use Given free for a free voucher.' : 'Up to 99%. A manager can give it free.') : undefined}>
+                  <div className="relative">
+                    <input {...controlA11y('vch-discount', discountNum >= 100)} type="text" inputMode="decimal" autoComplete="off" value={discount} onChange={(e) => onDiscountChange(e.target.value)}
+                      className={`${CONTROL} pr-24 font-data tabular-nums ${discountNum >= 100 ? CONTROL_ERROR : ''}`} />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-text-tertiary pointer-events-none tabular-nums">% {discountAmount > 0 ? `· − ${formatNPR(discountAmount)}` : ''}</span>
+                  </div>
+                  {tierRate > 0 && discountTouched && discountNum !== tierRate && (
+                    <button type="button" onClick={() => setDiscountTouched(false)} className="mt-1.5 text-xs font-body-medium text-primary hover:underline">Reset to member rate ({tierRate}%)</button>
+                  )}
+                </Field>
+              )}
+            </div>
+          )}
+          {!free && discountNum >= 100 && canGiveFree && (
+            <button type="button" onClick={() => { setKindByUser('free'); setDiscount('0'); setDiscountTouched(false); }} className="-mt-2 text-[13px] font-medium text-primary hover:underline">Switch to Given free</button>
+          )}
+
+          {canBackdate && (
+            <DateField label="Issued date" id="vch-issued" value={issuedDate} max={today} error={errors.issued} hint={issuedDate && issuedDate < today ? 'Back-dated: the validity chips count from this date.' : undefined}
+              onChange={(d) => { setIssuedDate(d); clearError('issued'); if (chip && d && d <= today) { setExpiry(chipDate(chip, d)); clearError('expiry'); } }} />
+          )}
+          <div>
+            <DateField label="Valid until" id="vch-expiry" value={expiry} min={today} error={errors.expiry} onChange={(d) => { setExpiry(d); setChip(''); clearError('expiry'); }} />
+            <div className="flex flex-wrap gap-2 mt-2" role="group" aria-label="Valid for">
+              {VALID_CHIPS.map((c) => (
+                <button key={c.id} type="button" aria-pressed={chip === c.id} onClick={() => { setChip(c.id); setExpiry(chipDate(c.id, canBackdate && issuedDate && issuedDate <= today ? issuedDate : today)); clearError('expiry'); }} className={chipCls(chip === c.id)} data-valid-chip={c.id}>{c.label}</button>
+              ))}
+            </div>
           </div>
 
-          {membership && <MembershipWalletCard membership={membership} pendingDeduction={membershipCommitted} hairline />}
-
-          {showRemarks ? (
-            <Field label="Remarks">
-              <textarea
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                rows={3}
-                placeholder="Anything to remember for this voucher…"
-                className="w-full px-3 py-2 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-y"
-              />
-            </Field>
-          ) : (
-            <button type="button" onClick={() => setShowRemarks(true)} className="block text-[13px] font-body-medium text-primary hover:underline">+ Add remarks</button>
+          {!free && pays > 0 && (
+            <div className="space-y-2">
+              <p className="font-body font-body-medium text-[13px] text-text-primary">Payment</p>
+              {tenders.map((t, i) => {
+                const isMembership = t.paymentMode === 'Membership';
+                const overWallet = isMembership && Number(t.amount) > (payerMembership?.balance || 0);
+                return (
+                  <div key={i}>
+                    <div className="flex items-start gap-2">
+                      <div className="w-36 flex-shrink-0">
+                        <PaymentMethodSelector paymentMethods={paymentMethods} value={t.paymentMode} onChange={(val) => updateTender(i, { paymentMode: val })} extraLeaf={membershipLeaf} size="md" />
+                      </div>
+                      <div className="flex-1 min-w-0"><MoneyInput id={`vch-pay-${i}`} aria-label={`Amount ${i + 1}`} value={t.amount} onChange={(val) => updateTender(i, { amount: val })} /></div>
+                      {tenders.length > 1 && (
+                        <button type="button" onClick={() => { autoTender.current = false; removeTenderRow(setTenders, i); }} aria-label="Remove method" className="h-10 w-8 flex items-center justify-center rounded-spa text-text-secondary hover:bg-black/[0.05]"><Icon name="X" size={14} /></button>
+                      )}
+                    </div>
+                    {isMembership && (
+                      <p className={`mt-1 text-xs ${overWallet ? 'text-error' : 'text-text-secondary'}`}>
+                        {overWallet ? `Exceeds ${firstName(payerName)}'s wallet (${formatNPR(payerMembership?.balance || 0)}).` : `${firstName(payerName)}'s wallet: ${formatNPR(walletRemaining)} left`}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+              {errors.pay && <p id="vch-pay-error" role="alert" className="text-xs text-error">{errors.pay}</p>}
+              <div className="flex items-center justify-between gap-3">
+                <button type="button" onClick={() => { autoTender.current = false; addTenderRow(setTenders, { amount: '', paymentMode: 'Cash' }); }} className="text-[13px] font-body-medium text-primary hover:underline">+ Add method</button>
+                {tenderRemaining === 0 ? (
+                  <p className="flex items-center gap-1.5 text-[13px] text-success" aria-live="polite"><Icon name="Check" size={13} />Fully collected</p>
+                ) : (
+                  <p className="text-[13px] text-warning tabular-nums" aria-live="polite">
+                    {tenderRemaining > 0 ? `${formatNPR(tenderRemaining)} left to collect · ` : `${formatNPR(-tenderRemaining)} over · `}
+                    <button type="button" onClick={() => { const last = tenders.length - 1; const cur = round2(Number(tenders[last].amount) || 0); updateTender(last, { amount: String(Math.max(0, round2(cur + tenderRemaining))) }); }}
+                      className="font-body-medium text-primary hover:underline">Fill</button>
+                  </p>
+                )}
+              </div>
+              {payerMembership && <MembershipWalletCard membership={payerMembership} pendingDeduction={membershipCommitted} hairline />}
+            </div>
           )}
+
+          <div className="rounded-spa border border-border bg-background px-4 py-3 flex items-center justify-between gap-3 text-[13px] tabular-nums" data-summary>
+            <span className="text-[#515152]">{coupon ? <b className="font-semibold text-text-primary">{Number(type.percent_off)}% off one visit</b> : <>Worth <b className="text-[15px] font-semibold text-text-primary">{formatNPR(worthNum)}</b></>}</span>
+            <span className="text-[#515152] text-right">{free ? `Given free${reason ? ` · ${freeReasonLabel(reason)}` : ''}` : <>Guest pays <b className="text-[15px] font-semibold text-text-primary">{formatNPR(pays)}</b></>}</span>
+          </div>
+          {free && <p className="text-xs text-text-secondary">Free vouchers bring in no money, show as &quot;Given free&quot; in reports, and record who gave them. Only managers and admins can give them.</p>}
         </FormBody>
       )}
     </PanelShell>

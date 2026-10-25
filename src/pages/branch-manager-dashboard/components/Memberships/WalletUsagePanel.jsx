@@ -1,53 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
-import { FilterChip, Menu } from '../../../../components/ui/ListToolbarKit';
+import { FilterChip } from '../../../../components/ui/ListToolbarKit';
 import { fetchMembershipActivity } from '../../../../services/api';
 import {
-  KINDS, RANGES, extensionNote, rangeFor, rangeLabel, rangeLead, activityTotals, whenLabel, kindLabel, shortName, npr,
+  KINDS, RANGES, extensionNote, rangeFor, rangeLead, activityTotals, whenLabel, kindLabel, shortName, npr,
 } from '../../../../services/membershipsView';
 import { friendlyError } from '../../../../utils/friendlyError';
-import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, ClearableChip, csvDownload, EmptyBlock, ErrorBlock, leadNodes } from '../Area/listKit';
+import { useMinWidth, useSlashFocus, useStickyBlock, thClass, SearchBox, ClearableChip, csvDownload, EmptyBlock, ErrorBlock, leadNodes, RangeMenu, isDate } from '../Area/listKit';
 
-const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
 const detailOf = (r) => {
   if (r.kind === 'deduction') return [r.service, r.bookingNumber].filter(Boolean).join(' · ') || r.notes || '';
   if (r.kind === 'deposit') return [r.paymentMode, r.notes].filter(Boolean).join(' · ');
   if (r.kind === 'extension') return extensionNote(r.notes);
   return r.notes || '';
-};
-
-// Date range button: presets plus a custom from/to.
-const RangeMenu = ({ id, from, to, today, onPick }) => {
-  const [cf, setCf] = useState(from);
-  const [ct, setCt] = useState(to);
-  useEffect(() => { setCf(from); setCt(to); }, [from, to]);
-  return (
-    <Menu trigger={(open, toggle) => (
-      <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-range
-        className="h-[34px] px-3 rounded-[7px] border border-border bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#FAFAF9] whitespace-nowrap">
-        <Icon name="Calendar" size={14} className="text-[#8A8A90]" />{rangeLabel(id, from, to)}<Icon name="ChevronDown" size={13} className="text-[#8A8A90]" />
-      </button>)}>
-      {(close) => (
-        <div className="min-w-[230px]">
-          {RANGES.map((r) => (
-            <button key={r.id} type="button" onClick={() => { onPick(r.id); close(); }} className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] flex justify-between ${id === r.id ? 'font-medium' : ''}`}>
-              {r.label}{id === r.id && <Icon name="Check" size={13} />}
-            </button>
-          ))}
-          <div className="border-t border-border mt-1 pt-2 px-3 pb-2.5 space-y-2">
-            <p className="text-[11.5px] font-medium text-[#8A8A90] uppercase tracking-[.05em]">Custom</p>
-            <div className="grid grid-cols-2 gap-2">
-              <input type="date" aria-label="From" value={cf} max={today} onChange={(e) => setCf(e.target.value)} className="h-8 px-2 border border-border rounded-md text-[12.5px]" />
-              <input type="date" aria-label="To" value={ct} max={today} onChange={(e) => setCt(e.target.value)} className="h-8 px-2 border border-border rounded-md text-[12.5px]" />
-            </div>
-            <button type="button" disabled={!isDate(cf) || !isDate(ct) || cf > ct} onClick={() => { onPick('custom', cf, ct); close(); }}
-              className="w-full h-8 rounded-md bg-primary text-white text-[12.5px] font-medium disabled:opacity-50">Apply</button>
-          </div>
-        </div>
-      )}
-    </Menu>
-  );
 };
 
 // Wallet activity (V21): every wallet movement in a date range (This month by default): money added, spent, birthday gifts,

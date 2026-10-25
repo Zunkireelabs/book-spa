@@ -38,7 +38,7 @@ export const NAV_SECTIONS = [
       { id: 'memberships', label: 'Memberships', icon: 'CreditCard', view: 'memberships', keywords: 'wallet tiers', roles: MGR_ADMIN_VIEWER, activeViews: ['memberships', 'membership-collection', 'wallet-usage'] },
     ]),
     ...flagged(VOUCHER_ENABLED, [
-      { id: 'vouchers', label: 'Vouchers', icon: 'Ticket', view: 'voucher-overview', keywords: 'gift', roles: MGR_ADMIN_VIEWER, activeViews: ['voucher-overview', 'vouchers'] },
+      { id: 'vouchers', label: 'Vouchers', icon: 'Ticket', view: 'vouchers', keywords: 'gift coupon', roles: MGR_ADMIN_VIEWER, activeViews: ['vouchers', 'voucher-types', 'voucher-activity', 'voucher-overview'] },
     ]),
     ...flagged(PRODUCTS_ENABLED, [
       { id: 'products', label: 'Products', icon: 'ShoppingBag', view: 'products', keywords: 'retail stock', roles: ['staff', 'manager', 'admin'] },

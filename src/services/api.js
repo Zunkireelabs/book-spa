@@ -3984,10 +3984,13 @@ export async function getTodayInsights(branchId, from, to) {
       }
     }
 
-    // 3. Gift vouchers claimed in range (redemption ledger)
+    // 3. Gift vouchers claimed in range (redemption ledger). is_legacy claims
+    // (migration-291's review closing an old voucher "used before the app
+    // tracked it") aren't a redemption in this range, so they're left out.
     let claimsQuery = supabase
       .from('voucher_claims')
       .select('amount_claimed')
+      .eq('is_legacy', false)
       .gte('redeemed_date', rangeStart)
       .lte('redeemed_date', rangeEnd);
     claimsQuery = withBranch(claimsQuery, branchId, 'branch_claimed_id');
@@ -4001,7 +4004,7 @@ export async function getTodayInsights(branchId, from, to) {
     // 4. Gift vouchers distributed (issued) in range
     let issuedQuery = supabase
       .from('vouchers')
-      .select('total_amount_issued')
+      .select('total_amount_issued, issue_kind')
       .gte('issued_date', rangeStart)
       .lte('issued_date', rangeEnd);
     issuedQuery = withBranch(issuedQuery, branchId, 'branch_id');
@@ -4009,7 +4012,9 @@ export async function getTodayInsights(branchId, from, to) {
     if (issuedError) throw issuedError;
     const voucherDistributed = {
       count: (issued || []).length,
+      // total_amount_issued is the voucher's value since migration-291.
       value: (issued || []).reduce((sum, v) => sum + Number(v.total_amount_issued), 0),
+      freeCount: (issued || []).filter((v) => v.issue_kind === 'free').length,
     };
 
     // 5. Memberships sold (deposits) in range, branch-scoped (migration-156).
@@ -12864,13 +12869,95 @@ export async function adjustMembership({ membershipId, amount, notes, branchId =
 // VOUCHERS (migration-071) — manager/admin only, RLS-enforced.
 // ============================================================
 
-export async function fetchVoucherTypes() {
+// One voucher as the Vouchers page uses it (V23). Since migration-291 total_amount_issued is the VALUE and amount_paid what
+// was collected. vouchers has two FKs to customers (For and Bought by), so each embed names its FK.
+const VOUCHER_ROW_SELECT = `
+  id, voucher_code, issued_date, expiry_date, guest_name, guest_info, customer_id,
+  actual_price, discount_percent, total_amount_issued, amount_paid, issue_kind, free_reason, free_note,
+  buyer_name, buyer_phone, buyer_customer_id, percent_off, needs_check, last_reminded_at, remarks, created_at, issued_by,
+  branch:branches ( id, name ),
+  voucher_type:voucher_types ( id, name, is_wallet ),
+  issuer:users!issued_by ( id, full_name ),
+  customer:customers!vouchers_customer_id_fkey ( id, full_name, phone ),
+  buyer:customers!vouchers_buyer_customer_id_fkey ( id, full_name, phone )
+`;
+const toVoucherRow = (v, balance = {}, couponUsed = false) => ({
+  id: v.id,
+  voucherCode: v.voucher_code,
+  issuedDate: v.issued_date,
+  expiryDate: v.expiry_date,
+  createdAt: v.created_at,
+  guestName: v.guest_name,
+  guestInfo: v.guest_info,
+  customerId: v.customer?.id || v.customer_id || null,
+  customerName: v.customer?.full_name || null,
+  customerPhone: v.customer?.phone || null,
+  buyerName: v.buyer_name || v.buyer?.full_name || null,
+  buyerPhone: v.buyer_phone || null,
+  buyerCustomerId: v.buyer?.id || v.buyer_customer_id || null,
+  buyerCustomerPhone: v.buyer?.phone || null,
+  branchId: v.branch?.id || null,
+  branchName: v.branch?.name || '—',
+  voucherTypeId: v.voucher_type?.id || null,
+  voucherTypeName: v.voucher_type?.name || '—',
+  isWallet: !!v.voucher_type?.is_wallet,
+  actualPrice: Number(v.actual_price || 0),
+  discountPercent: Number(v.discount_percent || 0),
+  totalAmountIssued: Number(v.total_amount_issued || 0),
+  amountPaid: Number(v.amount_paid || 0),
+  issueKind: v.issue_kind || 'sold',
+  freeReason: v.free_reason || null,
+  freeNote: v.free_note || null,
+  percentOff: v.percent_off != null ? Number(v.percent_off) : null,
+  couponUsed,
+  needsCheck: !!v.needs_check,
+  lastRemindedAt: v.last_reminded_at || null,
+  remarks: v.remarks,
+  issuedById: v.issuer?.id || v.issued_by || null,
+  issuedByName: v.issuer?.full_name || '—',
+  totalClaimed: Number(balance?.total_claimed || 0),
+  remainingBalance: balance?.remaining_balance != null ? Number(balance.remaining_balance) : Number(v.total_amount_issued || 0),
+  status: balance?.status || 'unused',
+  lastClaimDate: balance?.last_claim_date || null,
+});
+
+const voucherTypeInputError = ({ name, codePrefix, standardPrice, category, percentOff, defaultIssueKind }) => {
+  if (!name?.trim()) return { code: 'INVALID_INPUT', message: 'Voucher type name is required.' };
+  if (!codePrefix?.trim()) return { code: 'INVALID_INPUT', message: 'Code prefix is required.' };
+  if (percentOff != null && percentOff !== '' && !(Number(percentOff) >= 1 && Number(percentOff) <= 100)) {
+    return { code: 'INVALID_INPUT', message: 'The % off must be between 1 and 100.' };
+  }
+  if (!percentOff && !(Number(standardPrice) >= 0)) return { code: 'INVALID_INPUT', message: 'Standard price must be zero or greater.' };
+  if (!['spa', 'salon', 'body_scrub', 'package'].includes(category)) {
+    return { code: 'INVALID_INPUT', message: 'Category must be one of spa, salon, body_scrub, package.' };
+  }
+  if (!['sold', 'free'].includes(defaultIssueKind)) return { code: 'INVALID_INPUT', message: 'Usually must be sold or free.' };
+  return null;
+};
+
+const voucherRpc = async (fn, params, event) => {
   try {
-    const { data, error } = await supabase
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc(fn, params);
+    if (error) throw error;
+    capture(event, { voucher_id: params.p_voucher_id });
+    return { data, error: null };
+  } catch (error) {
+    console.error(`[API] ${fn} error:`, error.message);
+    return { data: null, error };
+  }
+};
+
+export async function fetchVoucherTypes({ includeInactive = false } = {}) {
+  try {
+    let query = supabase
       .from('voucher_types')
-      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category')
-      .eq('is_active', true)
-      .order('display_order', { ascending: true });
+      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category, default_issue_kind, percent_off')
+      .order('display_order', { ascending: true })
+      .order('name', { ascending: true });
+    if (!includeInactive) query = query.eq('is_active', true);
+    const { data, error } = await query;
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
@@ -12889,54 +12976,24 @@ export async function fetchVouchers(customerId) {
 
     let vouchersQuery = supabase
       .from('vouchers')
-      .select(`
-          id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
-          actual_price, discount_percent, total_amount_issued, remarks, created_at,
-          branch:branches ( id, name ),
-          voucher_type:voucher_types ( id, name, is_wallet ),
-          issuer:users!issued_by ( id, full_name )
-        `)
+      .select(VOUCHER_ROW_SELECT)
       .order('guest_name', { ascending: true });
     if (customerId) vouchersQuery = vouchersQuery.eq('customer_id', customerId); // optional: one customer's vouchers (Customers side panel)
 
-    const [vouchersRes, balancesRes] = await Promise.all([
+    const [vouchersRes, balancesRes, couponsRes] = await Promise.all([
       vouchersQuery,
       supabase
         .from('voucher_balances')
         .select('voucher_id, total_claimed, remaining_balance, status, last_claim_date'),
+      supabase.from('voucher_events').select('voucher_id').eq('kind', 'coupon_used'),
     ]);
     if (vouchersRes.error) throw vouchersRes.error;
     if (balancesRes.error) throw balancesRes.error;
+    if (couponsRes.error) throw couponsRes.error;
 
     const balanceByVoucher = new Map((balancesRes.data || []).map((b) => [b.voucher_id, b]));
-
-    const rows = (vouchersRes.data || []).map((v) => {
-      const balance = balanceByVoucher.get(v.id) || {};
-      return {
-        id: v.id,
-        voucherCode: v.voucher_code,
-        issuedDate: v.issued_date,
-        expiryDate: v.expiry_date,
-        guestName: v.guest_name,
-        guestInfo: v.guest_info,
-        branchId: v.branch?.id || null,
-        branchName: v.branch?.name || '—',
-        voucherTypeId: v.voucher_type?.id || null,
-        voucherTypeName: v.voucher_type?.name || '—',
-        isWallet: !!v.voucher_type?.is_wallet,
-        actualPrice: Number(v.actual_price || 0),
-        discountPercent: Number(v.discount_percent || 0),
-        totalAmountIssued: Number(v.total_amount_issued || 0),
-        remarks: v.remarks,
-        issuedByName: v.issuer?.full_name || '—',
-        totalClaimed: Number(balance.total_claimed || 0),
-        remainingBalance: balance.remaining_balance != null
-          ? Number(balance.remaining_balance)
-          : Number(v.total_amount_issued || 0),
-        status: balance.status || 'unused',
-        lastClaimDate: balance.last_claim_date || null,
-      };
-    });
+    const couponUsed = new Set((couponsRes.data || []).map((e) => e.voucher_id));
+    const rows = (vouchersRes.data || []).map((v) => toVoucherRow(v, balanceByVoucher.get(v.id), couponUsed.has(v.id)));
 
     return { data: rows, error: null };
   } catch (error) {
@@ -12949,16 +13006,17 @@ export async function issueVoucher({
   branchId, voucherTypeId, guestName, guestInfo = null, discountPercent = 0,
   actualPrice = null, issuedDate = null, expiryDate = null, remarks = null,
   customerId = null, tenders = [], voucherCode = null,
+  issueKind = 'sold', freeReason = null, freeNote = null, buyerName = null, buyerPhone = null, buyerCustomerId = null,
 }) {
   try {
     guestName = toTitleCase(guestName);
+    buyerName = buyerName ? toTitleCase(buyerName) : null;
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    // Whether an empty tenders array is valid depends on the voucher's actual
-    // total (actualPrice minus discount) — a 100%-discounted voucher has
-    // nothing to collect, so [] is correct there. That's the RPC's call to
-    // make (issue_voucher, migration-170): it knows the resolved total,
+    // Whether an empty tenders array is valid depends on what is paid (value
+    // minus discount; nothing for a free voucher). That's the RPC's call to
+    // make (issue_voucher, migration-291): it knows the resolved price,
     // this wrapper doesn't (actualPrice can be null here, falling back to
     // the voucher type's standard_price server-side). Don't duplicate/guess
     // that check here — let the RPC be the single source of truth.
@@ -12971,21 +13029,27 @@ export async function issueVoucher({
       p_voucher_type_id: voucherTypeId,
       p_guest_name: guestName,
       p_guest_info: guestInfo,
-      p_discount_percent: discountPercent,
+      p_discount_percent: issueKind === 'free' ? 0 : discountPercent,
       p_actual_price: actualPrice,
       p_issued_date: issuedDate,
       p_expiry_date: expiryDate,
       p_remarks: remarks,
       p_customer_id: customerId,
-      p_tenders: cleanedTenders,
+      p_tenders: issueKind === 'free' ? [] : cleanedTenders,
       // Temporary — manual entry to match pre-printed voucher booklets.
       // See migration-139-voucher-manual-code.sql.
       p_voucher_code: voucherCode,
+      p_issue_kind: issueKind,
+      p_free_reason: issueKind === 'free' ? freeReason : null,
+      p_free_note: issueKind === 'free' ? freeNote : null,
+      p_buyer_name: buyerName,
+      p_buyer_phone: buyerPhone,
+      p_buyer_customer_id: buyerCustomerId,
     });
     if (error) {
-      // Cosmetic only — the RPC (issue_voucher, migration-170) is still the
+      // Cosmetic only — the RPC (issue_voucher, migration-291) is still the
       // sole authority on whether tenders are actually required (depends on
-      // the resolved total); this just swaps its raw "issue_voucher: ..."
+      // the resolved price); this just swaps its raw "issue_voucher: ..."
       // exception text for the friendlier client-facing wording that used to
       // come from this wrapper's own (now-removed) redundant check.
       if (error.message?.includes('at least one payment tender is required')) {
@@ -12993,7 +13057,7 @@ export async function issueVoucher({
       }
       throw error;
     }
-    capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId });
+    capture('voucher_issued', { voucher_type_id: voucherTypeId, branch_id: branchId, linked_to_customer: !!customerId, issue_kind: issueKind, gift: !!buyerName });
     return { data, error: null };
   } catch (error) {
     console.error('[API] issueVoucher error:', error.message);
@@ -13004,19 +13068,14 @@ export async function issueVoucher({
 // Admin-only quick-add for voucher types, used inline from the voucher issuance
 // flow (NewVoucherModal) — no RPC needed, voucher_types RLS ("Admin can manage
 // voucher types") already restricts writes to admin.
-export async function createVoucherType({ orgId, name, codePrefix, standardPrice, category }) {
+export async function createVoucherType({ orgId, name, codePrefix, standardPrice, category, percentOff = null, defaultIssueKind = 'sold', displayOrder = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
     if (!orgId)              return { data: null, error: { code: 'INVALID_INPUT', message: 'orgId is required.' } };
-    if (!name?.trim())       return { data: null, error: { code: 'INVALID_INPUT', message: 'Voucher type name is required.' } };
-    if (!codePrefix?.trim()) return { data: null, error: { code: 'INVALID_INPUT', message: 'Code prefix is required.' } };
-    const price = Number(standardPrice);
-    if (!(price >= 0)) return { data: null, error: { code: 'INVALID_INPUT', message: 'Standard price must be zero or greater.' } };
-    if (!['spa', 'salon', 'body_scrub', 'package'].includes(category)) {
-      return { data: null, error: { code: 'INVALID_INPUT', message: 'Category must be one of spa, salon, body_scrub, package.' } };
-    }
+    const invalid = voucherTypeInputError({ name, codePrefix, standardPrice, category, percentOff, defaultIssueKind });
+    if (invalid) return { data: null, error: invalid };
 
     const { data, error } = await supabase
       .from('voucher_types')
@@ -13024,11 +13083,14 @@ export async function createVoucherType({ orgId, name, codePrefix, standardPrice
         org_id: orgId,
         name: name.trim(),
         code_prefix: codePrefix.trim().toUpperCase(),
-        standard_price: price,
+        standard_price: percentOff ? 0 : Number(standardPrice),
         category,
+        percent_off: percentOff ? Number(percentOff) : null,
+        default_issue_kind: defaultIssueKind,
         is_active: true,
+        ...(displayOrder != null ? { display_order: displayOrder } : {}),
       })
-      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category')
+      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category, default_issue_kind, percent_off')
       .single();
     if (error) throw error;
     return { data, error: null };
@@ -13276,17 +13338,10 @@ export async function fetchVoucher(voucherId) {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const [voucherRes, balanceRes] = await Promise.all([
+    const [voucherRes, balanceRes, couponRes] = await Promise.all([
       supabase
         .from('vouchers')
-        .select(`
-          id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
-          actual_price, discount_percent, total_amount_issued, remarks, created_at,
-          branch:branches ( id, name ),
-          voucher_type:voucher_types ( id, name, is_wallet ),
-          issuer:users!issued_by ( id, full_name ),
-          customer:customers ( id, full_name, phone, email )
-        `)
+        .select(`${VOUCHER_ROW_SELECT}, customer_email:customers!vouchers_customer_id_fkey ( email )`)
         .eq('id', voucherId)
         .single(),
       supabase
@@ -13294,39 +13349,13 @@ export async function fetchVoucher(voucherId) {
         .select('total_claimed, remaining_balance, status, last_claim_date')
         .eq('voucher_id', voucherId)
         .maybeSingle(),
+      supabase.from('voucher_events').select('id').eq('voucher_id', voucherId).eq('kind', 'coupon_used').limit(1),
     ]);
     if (voucherRes.error) throw voucherRes.error;
 
     const v = voucherRes.data;
-    const balance = balanceRes.data || {};
     return {
-      data: {
-        id: v.id,
-        voucherCode: v.voucher_code,
-        issuedDate: v.issued_date,
-        expiryDate: v.expiry_date,
-        guestName: v.guest_name,
-        guestInfo: v.guest_info,
-        branchId: v.branch?.id || null,
-        branchName: v.branch?.name || '—',
-        voucherTypeId: v.voucher_type?.id || null,
-        voucherTypeName: v.voucher_type?.name || '—',
-        isWallet: !!v.voucher_type?.is_wallet,
-        customerId: v.customer?.id || null,
-        customerPhone: v.customer?.phone || null,
-        customerEmail: v.customer?.email || null,
-        actualPrice: Number(v.actual_price || 0),
-        discountPercent: Number(v.discount_percent || 0),
-        totalAmountIssued: Number(v.total_amount_issued || 0),
-        remarks: v.remarks,
-        issuedByName: v.issuer?.full_name || '—',
-        totalClaimed: Number(balance.total_claimed || 0),
-        remainingBalance: balance.remaining_balance != null
-          ? Number(balance.remaining_balance)
-          : Number(v.total_amount_issued || 0),
-        status: balance.status || 'unused',
-        lastClaimDate: balance.last_claim_date || null,
-      },
+      data: { ...toVoucherRow(v, balanceRes.data, (couponRes.data || []).length > 0), customerEmail: v.customer_email?.email || null },
       error: null,
     };
   } catch (error) {
@@ -13340,12 +13369,14 @@ export async function fetchVoucherClaims(voucherId) {
     const { data, error } = await supabase
       .from('voucher_claims')
       .select(`
-        id, redeemed_date, guest_name_used_by, service_claimed, amount_claimed, notes, created_at,
+        id, redeemed_date, guest_name_used_by, service_claimed, amount_claimed, notes, created_at, is_legacy, payment_id,
         branch:branches ( id, name ),
+        booking:bookings ( id, booking_number ),
         performer:users!performed_by ( id, full_name )
       `)
       .eq('voucher_id', voucherId)
-      .order('redeemed_date', { ascending: false });
+      .order('redeemed_date', { ascending: false })
+      .order('created_at', { ascending: false });
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
@@ -13354,103 +13385,238 @@ export async function fetchVoucherClaims(voucherId) {
   }
 }
 
-// "All Voucher" dashboard: org-wide totals, status breakdown, wallet summary,
-// and a per-branch table (vouchers given to each branch, and that branch's
-// outstanding liability — the value still unredeemed out of what IT issued).
-// Unlike the old Excel Dashboard, "amount claimed" here is never silently
-// dropped by a blank branch cell — voucher_claims.branch_claimed_id is
-// NOT NULL at the DB level (see migration-071), and outstanding is read
-// straight off voucher_balances (computed from ALL claims against a voucher,
-// regardless of which branch claimed it).
-export async function fetchVoucherOverview() {
+// The rest of one voucher's story for its panel: what was paid (voucher_payments), its events (extended, reminded, linked,
+// coupon used, review checks) and admin balance corrections (audit_logs, written by admin_correct_voucher_balance).
+export async function fetchVoucherHistory(voucherId) {
+  try {
+    const [paymentsRes, eventsRes, auditRes] = await Promise.all([
+      supabase.from('voucher_payments').select('id, amount, payment_mode, created_at').eq('voucher_id', voucherId).order('created_at'),
+      supabase
+        .from('voucher_events')
+        .select('id, kind, old_expiry, new_expiry, note, created_at, booking:bookings ( id, booking_number ), performer:users!performed_by ( id, full_name )')
+        .eq('voucher_id', voucherId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('audit_logs')
+        .select('id, old_data, new_data, reason, changed_at, changer:users!changed_by ( id, full_name )')
+        .eq('table_name', 'vouchers')
+        .eq('action_type', 'ADMIN_CORRECTION')
+        .eq('record_id', voucherId)
+        .order('changed_at', { ascending: false }),
+    ]);
+    if (paymentsRes.error) throw paymentsRes.error;
+    if (eventsRes.error) throw eventsRes.error;
+    return {
+      data: {
+        payments: paymentsRes.data || [],
+        events: eventsRes.data || [],
+        // A manager can't read every branch's audit rows; corrections are a nice-to-have in the panel, so don't fail on them.
+        corrections: auditRes.error ? [] : (auditRes.data || []),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchVoucherHistory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Activity tab (V23): everything that happened to vouchers in a Nepal date range, as four raw lists for
+// vouchersView.buildActivity(): vouchers handed out (with what was paid and how), claims (legacy ones flagged), events, and
+// admin balance corrections. Amounts are voucher value; money taken is only on a sale's `paid`.
+export async function fetchVoucherActivity({ from, to }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+    const fromTs = `${from}T00:00:00+05:45`;
+    const toNext = new Date(Date.UTC(...to.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n)))) + 86400000).toISOString().slice(0, 10);
+    const toTs = `${toNext}T00:00:00+05:45`;
+    const VOUCHER_BITS = 'id, voucher_code, guest_name, branch_id, percent_off, branch:branches ( id, name )';
 
-    const [vouchersRes, balancesRes, claimsRes, branchesRes] = await Promise.all([
-      supabase.from('vouchers').select(`
-        id, branch_id, total_amount_issued,
-        voucher_type:voucher_types ( is_wallet )
-      `),
-      supabase.from('voucher_balances').select('voucher_id, total_claimed, remaining_balance, status'),
-      supabase.from('voucher_claims').select('branch_claimed_id, amount_claimed'),
-      supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
+    const [vouchersRes, claimsRes, eventsRes, auditRes] = await Promise.all([
+      supabase
+        .from('vouchers')
+        .select(`id, voucher_code, guest_name, issued_date, created_at, total_amount_issued, amount_paid, issue_kind, free_reason, free_note, percent_off,
+          discount_percent, issued_by, branch:branches ( id, name ), issuer:users!issued_by ( id, full_name ), payments:voucher_payments ( payment_mode )`)
+        .gte('issued_date', from)
+        .lte('issued_date', to),
+      supabase
+        .from('voucher_claims')
+        .select(`id, voucher_id, redeemed_date, created_at, amount_claimed, service_claimed, is_legacy, booking_id, payment_id,
+          branch:branches ( id, name ), booking:bookings ( booking_number ), performer:users!performed_by ( id, full_name ),
+          voucher:vouchers ( voucher_code, guest_name )`)
+        .gte('redeemed_date', from)
+        .lte('redeemed_date', to),
+      supabase
+        .from('voucher_events')
+        .select(`id, voucher_id, kind, old_expiry, new_expiry, note, created_at, booking:bookings ( booking_number ),
+          performer:users!performed_by ( id, full_name ), voucher:vouchers ( ${VOUCHER_BITS} )`)
+        .in('kind', ['extended', 'coupon_used', 'legacy_checked_used', 'legacy_checked_valid', 'legacy_check_undone'])
+        .gte('created_at', fromTs)
+        .lt('created_at', toTs),
+      supabase
+        .from('audit_logs')
+        .select('id, record_id, old_data, new_data, reason, changed_at, changer:users!changed_by ( id, full_name )')
+        .eq('table_name', 'vouchers')
+        .eq('action_type', 'ADMIN_CORRECTION')
+        .gte('changed_at', fromTs)
+        .lt('changed_at', toTs),
     ]);
     if (vouchersRes.error) throw vouchersRes.error;
-    if (balancesRes.error) throw balancesRes.error;
     if (claimsRes.error) throw claimsRes.error;
-    if (branchesRes.error) throw branchesRes.error;
+    if (eventsRes.error) throw eventsRes.error;
 
-    const balanceByVoucher = new Map((balancesRes.data || []).map((b) => [b.voucher_id, b]));
-    const vouchers = (vouchersRes.data || []).map((v) => {
-      const balance = balanceByVoucher.get(v.id) || {};
-      return {
-        id: v.id,
-        branchId: v.branch_id,
-        isWallet: !!v.voucher_type?.is_wallet,
-        totalAmountIssued: Number(v.total_amount_issued || 0),
-        totalClaimed: Number(balance.total_claimed || 0),
-        remainingBalance: balance.remaining_balance != null
-          ? Number(balance.remaining_balance)
-          : Number(v.total_amount_issued || 0),
-        status: balance.status || 'unused',
-      };
-    });
+    // audit_logs has no FK to vouchers, so a correction outlives a deleted voucher: keep only those whose voucher still exists.
+    const audits = auditRes.error ? [] : (auditRes.data || []);
+    const auditIds = [...new Set(audits.map((a) => a.record_id).filter(Boolean))];
+    let liveIds = new Set();
+    if (auditIds.length) {
+      const { data: live, error: liveError } = await supabase.from('vouchers').select('id').in('id', auditIds);
+      if (!liveError) liveIds = new Set((live || []).map((v) => v.id));
+    }
 
-    const totals = vouchers.reduce((acc, v) => ({
-      totalVouchers: acc.totalVouchers + 1,
-      totalIssuedAmount: acc.totalIssuedAmount + v.totalAmountIssued,
-      totalClaimedAmount: acc.totalClaimedAmount + v.totalClaimed,
-      totalRemaining: acc.totalRemaining + v.remainingBalance,
-    }), { totalVouchers: 0, totalIssuedAmount: 0, totalClaimedAmount: 0, totalRemaining: 0 });
+    // Corrections carry the voucher as JSON (old_data/new_data); its branch name comes from the branches we already know.
+    const branchNames = new Map();
+    (vouchersRes.data || []).forEach((v) => v.branch && branchNames.set(v.branch.id, v.branch.name));
+    (claimsRes.data || []).forEach((c) => c.branch && branchNames.set(c.branch.id, c.branch.name));
+    (eventsRes.data || []).forEach((e) => e.voucher?.branch && branchNames.set(e.voucher.branch.id, e.voucher.branch.name));
 
-    const statusCounts = vouchers.reduce((acc, v) => {
-      acc[v.status] = (acc[v.status] || 0) + 1;
-      return acc;
-    }, { unused: 0, partially_used: 0, fully_redeemed: 0 });
-
-    const walletVouchers = vouchers.filter((v) => v.isWallet);
-    const walletSummary = walletVouchers.reduce((acc, v) => ({
-      count: acc.count + 1,
-      issuedAmount: acc.issuedAmount + v.totalAmountIssued,
-      claimedAmount: acc.claimedAmount + v.totalClaimed,
-      remainingAmount: acc.remainingAmount + v.remainingBalance,
-    }), { count: 0, issuedAmount: 0, claimedAmount: 0, remainingAmount: 0 });
-
-    const claimsByBranch = new Map();
-    (claimsRes.data || []).forEach((c) => {
-      const row = claimsByBranch.get(c.branch_claimed_id) || { count: 0, amount: 0 };
-      row.count += 1;
-      row.amount += Number(c.amount_claimed || 0);
-      claimsByBranch.set(c.branch_claimed_id, row);
-    });
-
-    const issuedByBranch = new Map();
-    vouchers.forEach((v) => {
-      const row = issuedByBranch.get(v.branchId) || { count: 0, amount: 0, outstanding: 0 };
-      row.count += 1;
-      row.amount += v.totalAmountIssued;
-      row.outstanding += v.remainingBalance;
-      issuedByBranch.set(v.branchId, row);
-    });
-
-    const branches = (branchesRes.data || []).map((b) => {
-      const issued = issuedByBranch.get(b.id) || { count: 0, amount: 0, outstanding: 0 };
-      const claimed = claimsByBranch.get(b.id) || { count: 0, amount: 0 };
-      return {
-        branchId: b.id,
-        branchName: b.name,
-        issuedCount: issued.count,
-        issuedAmount: issued.amount,
-        claimedCount: claimed.count,
-        claimedAmount: claimed.amount,
-        outstanding: issued.outstanding,
-      };
-    });
-
-    return { data: { totals, statusCounts, walletSummary, branches }, error: null };
+    return {
+      data: {
+        vouchers: (vouchersRes.data || []).map((v) => ({
+          id: v.id, voucherCode: v.voucher_code, guestName: v.guest_name, issuedDate: v.issued_date, createdAt: v.created_at,
+          totalAmountIssued: Number(v.total_amount_issued || 0), amountPaid: Number(v.amount_paid || 0), issueKind: v.issue_kind,
+          freeReason: v.free_reason, freeNote: v.free_note, percentOff: v.percent_off != null ? Number(v.percent_off) : null,
+          discountPercent: Number(v.discount_percent || 0), branchId: v.branch?.id || null, branchName: v.branch?.name || '—',
+          issuedById: v.issuer?.id || v.issued_by || null, issuedByName: v.issuer?.full_name || '—',
+          paymentModes: (v.payments || []).map((p) => p.payment_mode),
+        })),
+        claims: (claimsRes.data || []).map((c) => ({
+          id: c.id, voucherId: c.voucher_id, guestName: c.voucher?.guest_name || '—', code: c.voucher?.voucher_code || '',
+          redeemedDate: c.redeemed_date, createdAt: c.created_at, amountClaimed: Number(c.amount_claimed || 0), service: c.service_claimed,
+          bookingNumber: c.booking?.booking_number || null, atCheckout: !!(c.payment_id || c.booking_id), isLegacy: !!c.is_legacy,
+          branchId: c.branch?.id || null, branchName: c.branch?.name || '—', performerId: c.performer?.id || null, performerName: c.performer?.full_name || '',
+        })),
+        events: (eventsRes.data || []).map((e) => ({
+          id: e.id, voucherId: e.voucher_id, kind: e.kind, oldExpiry: e.old_expiry, newExpiry: e.new_expiry, note: e.note, createdAt: e.created_at,
+          bookingNumber: e.booking?.booking_number || null, guestName: e.voucher?.guest_name || '—', code: e.voucher?.voucher_code || '',
+          percentOff: e.voucher?.percent_off != null ? Number(e.voucher.percent_off) : null,
+          branchId: e.voucher?.branch?.id || null, branchName: e.voucher?.branch?.name || '—',
+          performerId: e.performer?.id || null, performerName: e.performer?.full_name || '',
+        })),
+        // A manager only reads their own branches' audit rows; the feed still loads without the rest.
+        corrections: audits.filter((a) => liveIds.has(a.record_id)).map((a) => ({
+          id: a.id, voucherId: a.record_id, changedAt: a.changed_at, reason: a.reason,
+          oldTotal: Number(a.old_data?.total_amount_issued || 0), newTotal: Number(a.new_data?.total_amount_issued || 0),
+          guestName: a.new_data?.guest_name || '—', code: a.new_data?.voucher_code || '',
+          branchId: a.new_data?.branch_id || null, branchName: branchNames.get(a.new_data?.branch_id) || '—',
+          performerId: a.changer?.id || null, performerName: a.changer?.full_name || '',
+        })),
+      },
+      error: null,
+    };
   } catch (error) {
-    console.error('[API] fetchVoucherOverview error:', error.message);
+    console.error('[API] fetchVoucherActivity error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin edit of a voucher type (V23 Voucher types tab). Direct update: voucher_types RLS ("Admin can manage voucher types")
+// already limits writes to admins of the org. Changes only affect vouchers handed out from now on.
+export async function updateVoucherType({ id, name, codePrefix, standardPrice, category, percentOff = null, defaultIssueKind = 'sold', isActive }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!id) return { data: null, error: { code: 'INVALID_INPUT', message: 'id is required.' } };
+    const invalid = voucherTypeInputError({ name, codePrefix, standardPrice, category, percentOff, defaultIssueKind });
+    if (invalid) return { data: null, error: invalid };
+
+    const { data, error } = await supabase
+      .from('voucher_types')
+      .update({
+        name: name.trim(),
+        code_prefix: codePrefix.trim().toUpperCase(),
+        standard_price: percentOff ? 0 : Number(standardPrice),
+        category,
+        percent_off: percentOff ? Number(percentOff) : null,
+        default_issue_kind: defaultIssueKind,
+        ...(isActive != null ? { is_active: !!isActive } : {}),
+      })
+      .eq('id', id)
+      .select('id, name, code_prefix, standard_price, is_wallet, is_active, display_order, category, default_issue_kind, percent_off')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateVoucherType error:', error.message);
+    if (error.code === '23505') return { data: null, error: { code: 'DUPLICATE_NAME', message: `A voucher type named "${name.trim()}" already exists.` } };
+    return { data: null, error };
+  }
+}
+
+export async function setVoucherTypeActive({ id, isActive }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.from('voucher_types').update({ is_active: !!isActive }).eq('id', id).select('id, is_active').single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setVoucherTypeActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// migration-291 RPCs. Each checks the role and org itself; these wrappers only map arguments.
+export async function extendVoucher({ voucherId, newExpiry, reason }) {
+  return voucherRpc('extend_voucher', { p_voucher_id: voucherId, p_new_expiry: newExpiry, p_reason: reason }, 'voucher_extended');
+}
+
+export async function updateVoucherContact({ voucherId, guestName, guestInfo = null, customerId = null, buyerName = null, buyerPhone = null, buyerCustomerId = null }) {
+  return voucherRpc('update_voucher_contact', {
+    p_voucher_id: voucherId, p_guest_name: toTitleCase(guestName), p_guest_info: guestInfo, p_customer_id: customerId,
+    p_buyer_name: buyerName ? toTitleCase(buyerName) : null, p_buyer_phone: buyerPhone, p_buyer_customer_id: buyerCustomerId,
+  }, 'voucher_contact_updated');
+}
+
+export async function logVoucherReminder({ voucherId, note = null }) {
+  return voucherRpc('log_voucher_reminder', { p_voucher_id: voucherId, p_note: note }, 'voucher_reminded');
+}
+
+export async function markCouponUsed({ voucherId, bookingId = null, note = null }) {
+  return voucherRpc('mark_coupon_used', { p_voucher_id: voucherId, p_booking_id: bookingId, p_note: note }, 'voucher_coupon_used');
+}
+
+export async function checkLegacyVoucher({ voucherId, used }) {
+  return voucherRpc('check_legacy_voucher', { p_voucher_id: voucherId, p_used: !!used }, 'voucher_legacy_checked');
+}
+
+export async function undoLegacyCheck({ voucherId }) {
+  return voucherRpc('undo_legacy_check', { p_voucher_id: voucherId }, 'voucher_legacy_check_undone');
+}
+
+// Unlinked vouchers whose phone equals exactly one customer's (migration-291): Map voucherId → { customerId, customerName }.
+export async function fetchVoucherCustomerMatches() {
+  try {
+    const { data, error } = await supabase.rpc('voucher_customer_matches');
+    if (error) throw error;
+    return { data: new Map((data || []).map((r) => [r.voucher_id, { customerId: r.customer_id, customerName: r.customer_name }])), error: null };
+  } catch (error) {
+    console.error('[API] fetchVoucherCustomerMatches error:', error.message);
+    return { data: new Map(), error };
+  }
+}
+
+// Booking id for a booking number (the coupon "Mark used" field), within what the caller can read.
+export async function findBookingIdByNumber(bookingNumber) {
+  try {
+    const n = String(bookingNumber || '').trim().toUpperCase();
+    if (!n) return { data: null, error: null };
+    const { data, error } = await supabase.from('bookings').select('id, booking_number').eq('booking_number', n).maybeSingle();
+    if (error) throw error;
+    return { data: data || null, error: null };
+  } catch (error) {
+    console.error('[API] findBookingIdByNumber error:', error.message);
     return { data: null, error };
   }
 }
@@ -13993,7 +14159,7 @@ export async function fetchPackageRedemptions(packageId) {
 
 // "All Packages" dashboard: org-wide totals (packages issued, sessions
 // issued/used/remaining, amount collected) and a per-branch breakdown —
-// same shape as fetchVoucherOverview but tracking sessions instead of a
+// the same idea as the old voucher overview (removed in V23), tracking sessions instead of a
 // monetary balance.
 export async function fetchPackageOverview() {
   try {

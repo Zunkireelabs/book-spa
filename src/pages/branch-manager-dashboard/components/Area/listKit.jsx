@@ -6,6 +6,7 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { useBranch } from '../../../../contexts/BranchContext';
 import { getAreaForView, getVisibleTabs } from './areaTabsRegistry';
 import { daysUntil } from '../../../../services/packagesView';
+import { RANGES, rangeLabel } from '../../../../services/membershipsView';
 
 // Shared pieces of the "sales" list pages (Packages V20, Memberships V21): one header with a lead sentence and counted tabs, a
 // lifecycle strip, a sticky toolbar + column headings inside the one `.content-scroll` scroller, and the small row bits.
@@ -150,6 +151,41 @@ export const LifecycleStrip = ({ segments, stats, selected, onPick, loading, ari
     })}
   </div>
 );
+
+export const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
+
+// Date range button for the activity tabs (Wallet activity V21, Vouchers activity V23): presets plus a custom from/to.
+export const RangeMenu = ({ id, from, to, today, onPick }) => {
+  const [cf, setCf] = useState(from);
+  const [ct, setCt] = useState(to);
+  useEffect(() => { setCf(from); setCt(to); }, [from, to]);
+  return (
+    <Menu trigger={(open, toggle) => (
+      <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} data-range
+        className="h-[34px] px-3 rounded-[7px] border border-border bg-white text-[13px] font-medium inline-flex items-center gap-2 hover:bg-[#FAFAF9] whitespace-nowrap">
+        <Icon name="Calendar" size={14} className="text-[#8A8A90]" />{rangeLabel(id, from, to)}<Icon name="ChevronDown" size={13} className="text-[#8A8A90]" />
+      </button>)}>
+      {(close) => (
+        <div className="min-w-[230px]">
+          {RANGES.map((r) => (
+            <button key={r.id} type="button" onClick={() => { onPick(r.id); close(); }} className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#FAFAF9] flex justify-between ${id === r.id ? 'font-medium' : ''}`}>
+              {r.label}{id === r.id && <Icon name="Check" size={13} />}
+            </button>
+          ))}
+          <div className="border-t border-border mt-1 pt-2 px-3 pb-2.5 space-y-2">
+            <p className="text-[11.5px] font-medium text-[#8A8A90] uppercase tracking-[.05em]">Custom</p>
+            <div className="grid grid-cols-2 gap-2">
+              <input type="date" aria-label="From" value={cf} max={today} onChange={(e) => setCf(e.target.value)} className="h-8 px-2 border border-border rounded-md text-[12.5px]" />
+              <input type="date" aria-label="To" value={ct} max={today} onChange={(e) => setCt(e.target.value)} className="h-8 px-2 border border-border rounded-md text-[12.5px]" />
+            </div>
+            <button type="button" disabled={!isDate(cf) || !isDate(ct) || cf > ct} onClick={() => { onPick('custom', cf, ct); close(); }}
+              className="w-full h-8 rounded-md bg-primary text-white text-[12.5px] font-medium disabled:opacity-50">Apply</button>
+          </div>
+        </div>
+      )}
+    </Menu>
+  );
+};
 
 export const SearchBox = React.forwardRef(({ value, onChange, placeholder, ariaLabel, className = 'w-full sm:w-[300px]' }, ref) => (
   <div className={`relative ${className}`}>

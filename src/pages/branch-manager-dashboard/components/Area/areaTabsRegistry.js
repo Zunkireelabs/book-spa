@@ -65,10 +65,12 @@ export const AREAS = [
   ...(VOUCHER_ENABLED ? [{
     id: 'vouchers',
     title: 'Vouchers',
-    description: () => 'Gift vouchers you sell and the ones that have been issued.',
+    description: () => 'Gift vouchers you sell or give away, and what they are still worth.',
+    selfHeader: true, // Vouchers (V23) draws its own header, like Packages and Memberships
     tabs: [
-      { view: 'voucher-overview', label: 'All vouchers', roles: MGR_ADMIN_VIEWER },
-      { view: 'vouchers', label: 'Issued', roles: MGR_ADMIN_VIEWER },
+      { view: 'vouchers', label: 'Vouchers', roles: MGR_ADMIN_VIEWER },
+      { view: 'voucher-types', label: 'Voucher types', roles: MGR_ADMIN_VIEWER },
+      { view: 'voucher-activity', label: 'Activity', roles: MGR_ADMIN_VIEWER },
     ],
   }] : []),
   ...(OUTREACH_ENABLED ? [{

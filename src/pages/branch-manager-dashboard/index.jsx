@@ -64,8 +64,7 @@ import MembershipsPage from './components/Memberships/MembershipsPage';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from '../../lib/featureFlags';
 import ProductsPanel from './components/Products/ProductsPanel';
 import CampaignsPanel from './components/Campaigns/CampaignsPanel';
-import VoucherListPanel from './components/Vouchers/VoucherListPanel';
-import VoucherOverviewPanel from './components/Vouchers/VoucherOverviewPanel';
+import VouchersPage from './components/Vouchers/VouchersPage';
 import PackagesPage from './components/Packages/PackagesPage';
 import RulesEditorPanel from './components/Outreach/RulesEditorPanel';
 import TemplateEditorPanel from './components/Outreach/TemplateEditorPanel';
@@ -233,6 +232,8 @@ const BranchManagerDashboard = () => {
   // The old single Outreach page: its tabs are now URL tabs, so old links land on Rules.
   useEffect(() => {
     if (viewMode === 'outreach') navigate('?view=outreach-rules', { replace: true });
+    // V23: the old "All vouchers" overview is now the Vouchers tab.
+    if (viewMode === 'voucher-overview') navigate('?view=vouchers', { replace: true });
   }, [viewMode, navigate]);
 
   // Overall is read-only: redirect away from booking-creation / per-branch write views.
@@ -465,8 +466,9 @@ const BranchManagerDashboard = () => {
       case 'outreach-review': return outreachAdmin ? <ReviewQueuePanel /> : null;
       case 'outreach-log': return outreachAdmin ? <MessageLogPanel /> : null;
       case 'outreach-settings': return outreachAdmin ? <ProviderSettingsPanel /> : null;
-      case 'voucher-overview': return VOUCHER_ENABLED && salesViewer ? <VoucherOverviewPanel readOnly={salesReadOnly} /> : null;
-      case 'vouchers': return VOUCHER_ENABLED && salesViewer ? <VoucherListPanel readOnly={salesReadOnly} /> : null;
+      case 'vouchers':
+      case 'voucher-types':
+      case 'voucher-activity': return VOUCHER_ENABLED && salesViewer ? <VouchersPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
       default: return null;
     }
   };

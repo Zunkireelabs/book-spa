@@ -208,6 +208,9 @@ const TodayInsightsPanel = ({ branchId, period, showVouchers = true, showProduct
               <span className="text-sm text-gray-700">Gift Vouchers</span>
               <span className="text-sm font-semibold text-gray-900">
                 {data.voucherDistributed.count} · {formatNPR(data.voucherDistributed.value)}
+                {data.voucherDistributed.freeCount > 0 && (
+                  <span className="font-normal text-gray-500"> ({data.voucherDistributed.freeCount} given free)</span>
+                )}
               </span>
             </div>
           )}
