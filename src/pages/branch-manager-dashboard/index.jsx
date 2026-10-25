@@ -62,7 +62,7 @@ import CategoryRevenueReportPanel from './components/CategoryRevenueReportPanel'
 import PayrollPanel from './components/Payroll/PayrollPanel';
 import MembershipsPage from './components/Memberships/MembershipsPage';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from '../../lib/featureFlags';
-import ProductsPanel from './components/Products/ProductsPanel';
+import ProductsPage from './components/Products/ProductsPage';
 import CampaignsPanel from './components/Campaigns/CampaignsPanel';
 import VouchersPage from './components/Vouchers/VouchersPage';
 import PackagesPage from './components/Packages/PackagesPage';
@@ -469,6 +469,10 @@ const BranchManagerDashboard = () => {
       case 'vouchers':
       case 'voucher-types':
       case 'voucher-activity': return VOUCHER_ENABLED && salesViewer ? <VouchersPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
+      case 'products':
+      case 'stock-history':
+      case 'suppliers':
+      case 'product-categories': return PRODUCTS_ENABLED ? <ProductsPage view={view} readOnly={salesReadOnly} /> : null;
       default: return null;
     }
   };
@@ -565,7 +569,6 @@ const BranchManagerDashboard = () => {
           {isSettingsViewActive && <SettingsLayout view={viewMode} renderSetting={renderSettingView} />}
           {areaForView && <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>}
           {viewMode === 'customers' && (branchLoading ? <BranchPending /> : <CustomersPanel branchId={branchId} readOnly={isOverall} />)}
-          {PRODUCTS_ENABLED && viewMode === 'products' && (profile?.role === 'admin_viewer' ? <Navigate to={{ search: '?view=dashboard' }} replace /> : <ProductsPanel />)}
           {CAMPAIGNS_ENABLED && viewMode === 'campaigns' && ['manager','admin'].includes(profile?.role) && <CampaignsPanel />}
       </AppShell>
     </>

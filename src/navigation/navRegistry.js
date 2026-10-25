@@ -10,7 +10,7 @@ import { isSettingsView } from 'pages/branch-manager-dashboard/components/Settin
  * (Pages that live inside an area — report pages, settings pages, tabs — are described by that area's own registry:
  * Reports/reportRegistry.js, Settings/settingsRegistry.js, Area/areaTabsRegistry.js.)
  *
- * item: { id, label (string | ({staffLabelPlural}) => string), icon, view, roles, overallHidden?,
+ * item: { id, label (string | ({staffLabelPlural, productLabel}) => string), icon, view, roles, overallHidden?,
  *         activeViews?: string[]   - the item is also active on these views (e.g. the other tabs of its area)
  *         isActiveView?: (view)=>bool - same, for areas that have their own registry (Reports, Settings) }
  */
@@ -41,7 +41,8 @@ export const NAV_SECTIONS = [
       { id: 'vouchers', label: 'Vouchers', icon: 'Ticket', view: 'vouchers', keywords: 'gift coupon', roles: MGR_ADMIN_VIEWER, activeViews: ['vouchers', 'voucher-types', 'voucher-activity', 'voucher-overview'] },
     ]),
     ...flagged(PRODUCTS_ENABLED, [
-      { id: 'products', label: 'Products', icon: 'ShoppingBag', view: 'products', keywords: 'retail stock', roles: ['staff', 'manager', 'admin'] },
+      { id: 'products', label: ({ productLabel }) => productLabel || 'Products', icon: 'ShoppingBag', view: 'products', keywords: 'retail stock inventory supplies suppliers', roles: ['staff', 'manager', 'admin', 'admin_viewer'],
+        activeViews: ['products', 'stock-history', 'suppliers', 'product-categories'] },
     ]),
   ] },
   { id: 'people', label: 'People', items: [ // the future HRMS module
@@ -77,9 +78,9 @@ export const isNavItemActive = (item, view) =>
  */
 export const MAX_UNLABELLED = 4;
 
-export const getNav = ({ role, isOverall, staffLabelPlural }) => {
+export const getNav = ({ role, isOverall, staffLabelPlural, productLabel }) => {
   const visible = (item) => item.roles.includes(role) && !(isOverall && item.overallHidden);
-  const resolve = (item) => ({ ...item, label: typeof item.label === 'function' ? item.label({ staffLabelPlural }) : item.label });
+  const resolve = (item) => ({ ...item, label: typeof item.label === 'function' ? item.label({ staffLabelPlural, productLabel }) : item.label });
 
   const sections = NAV_SECTIONS
     .map((s) => ({ ...s, items: s.items.filter(visible).map(resolve) }))

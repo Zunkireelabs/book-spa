@@ -11,10 +11,10 @@ import { getVisibleTabs } from './areaTabsRegistry';
 const AreaTabs = ({ area, view, children }) => {
   const { profile } = useAuth();
   const { branchName, isOverall } = useBranch();
-  const { staffLabelPlural } = useIndustry();
+  const { staffLabelPlural, productLabel } = useIndustry();
   const listRef = useRef(null);
 
-  const ctx = { role: profile?.role, isOverall, branchName, staffLabelPlural };
+  const ctx = { role: profile?.role, isOverall, branchName, staffLabelPlural, productLabel };
   const tabs = getVisibleTabs(area, ctx);
   // The role cannot open this view: send it to the area's first visible tab, or to the dashboard when it has none.
   if (!tabs.some((t) => t.view === view)) {

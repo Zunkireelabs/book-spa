@@ -14920,60 +14920,6 @@ export async function sendCustomerMessage({ customerId, bookingId = null, channe
 // ============================================================
 
 /**
- * Fetch the org's product catalog. Stock is branch-relative: pass
- * branchId (the currently selected branch, or null/undefined for
- * "Overall") to control what stock_quantity means on each returned row —
- * that specific branch's count, or the all-branches total
- * (products_with_stock's total_stock, migration-217) when no branch is
- * selected. total_stock is always included too, so the UI can show both
- * when useful.
- */
-export async function fetchProductsForManagement(branchId) {
-  try {
-    const { profile, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-
-    if (!profile.org_id) {
-      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
-    }
-
-    const { data: products, error } = await supabase
-      .from('products_with_stock')
-      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, total_stock, created_at')
-      .eq('org_id', profile.org_id)
-      .order('name');
-
-    if (error) throw error;
-
-    if (!branchId) {
-      return {
-        data: (products || []).map((p) => ({ ...p, stock_quantity: p.total_stock })),
-        error: null,
-      };
-    }
-
-    const { data: branchStock, error: branchStockError } = await supabase
-      .from('product_branch_stock')
-      .select('product_id, quantity')
-      .eq('branch_id', branchId);
-    if (branchStockError) throw branchStockError;
-
-    const stockByProduct = Object.fromEntries((branchStock || []).map((r) => [r.product_id, r.quantity]));
-
-    return {
-      data: (products || []).map((p) => ({
-        ...p,
-        stock_quantity: p.track_stock ? (stockByProduct[p.id] ?? 0) : null,
-      })),
-      error: null,
-    };
-  } catch (error) {
-    console.error('[API] fetchProductsForManagement error:', error.message);
-    return { data: null, error };
-  }
-}
-
-/**
  * Upload a product image to Supabase Storage.
  * Reuses the same bucket as service images, under a products/ prefix.
  */
@@ -15021,91 +14967,341 @@ export async function uploadProductImage(file) {
   }
 }
 
-export async function createProduct({ name, description, category, priceNpr, imageUrl, trackStock }) {
+// ── Products + inventory (V25, migration-292) ───────────────────────────────────────────────────
+// Stock is per size (variant) per branch. Every stock change goes through an RPC that also writes one append-only
+// product_stock_movements row; nothing here writes quantities directly. Cost lives in product_variant_costs, which only
+// managers / admins / viewers can read, so `includeCosts` is only sent for them.
+
+// PostgREST caps a response (1000 rows by default): read big tables page by page.
+async function pagedSelect(build, pageSize = 1000) {
+  const out = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build().range(from, from + pageSize - 1);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return out;
+}
+
+const rpcError = (code, message) => ({ data: null, error: { code, message } });
+const CAN_MANAGE = ['manager', 'admin'];
+const CAN_SEE_COST = ['manager', 'admin', 'admin_viewer'];
+
+/**
+ * Everything the Products page needs in one go: products, sizes, stock for every branch, suppliers and branches, plus the costs for
+ * the roles that may see them (`costs` is null otherwise). The page turns it into rows with productsView.buildRows().
+ */
+export async function fetchProductCatalog() {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+    if (!profile.org_id) return rpcError('NO_ORG', 'User is not associated with an organization.');
+    const seesCost = CAN_SEE_COST.includes(profile.role);
 
-    if (!['manager', 'admin'].includes(profile.role)) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create products.' } };
-    }
-
-    if (!name || !name.trim()) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Product name is required.' } };
-    }
-    if (!priceNpr || priceNpr <= 0) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
-    }
-
-    // Initial stock (if trackStock is on) is set per branch afterward via
-    // transferProductStock ("receive stock") — a new product has no
-    // meaningful org-wide starting quantity, only a per-branch one, and
-    // that needs a branch to exist as a target, which this create step
-    // doesn't ask for.
-    const { data, error } = await supabase
-      .from('products')
-      .insert({
-        name: name.trim(),
-        description: description || null,
-        category: category?.trim() || null,
-        price_npr: priceNpr,
-        image_url: imageUrl || null,
-        is_active: true,
-        org_id: profile.org_id,
-        track_stock: !!trackStock,
-      })
-      .select('id, name, description, category, price_npr, image_url, is_active, track_stock, created_at')
-      .single();
-
-    if (error) throw error;
-    return { data, error: null };
+    const [products, variants, stock, costs, suppliersRes, branchesRes] = await Promise.all([
+      pagedSelect(() => supabase.from('products')
+        .select('id, name, description, category, brand, supplier_id, image_url, option_label, pro_use, sell_at_checkout, notify_low, is_active, track_stock, created_at')
+        .eq('org_id', profile.org_id).order('name')),
+      pagedSelect(() => supabase.from('product_variants')
+        .select('id, product_id, name, sku, barcode, retail_price, low_stock_level, reorder_qty, sort_order, is_active, created_at')
+        .eq('org_id', profile.org_id).order('id')),
+      pagedSelect(() => supabase.from('product_branch_stock').select('variant_id, branch_id, quantity').order('variant_id').order('branch_id')),
+      seesCost
+        ? pagedSelect(() => supabase.from('product_variant_costs').select('variant_id, cost_price, avg_cost').eq('org_id', profile.org_id).order('variant_id'))
+        : Promise.resolve(null),
+      seesCost ? supabase.from('suppliers').select('id, name, contact_name, phone, email, notes, is_active, created_at').eq('org_id', profile.org_id).order('name') : Promise.resolve({ data: [], error: null }),
+      supabase.from('branches').select('id, name').eq('org_id', profile.org_id).order('name'),
+    ]);
+    if (suppliersRes.error) throw suppliersRes.error;
+    if (branchesRes.error) throw branchesRes.error;
+    return { data: { products, variants, stock, costs, suppliers: suppliersRes.data || [], branches: branchesRes.data || [] }, error: null };
   } catch (error) {
-    console.error('[API] createProduct error:', error.message);
+    console.error('[API] fetchProductCatalog error:', error.message);
     return { data: null, error };
   }
 }
 
-export async function updateProduct({ productId, name, description, category, priceNpr, imageUrl, trackStock }) {
+/** This Nepal month at a branch: units sold + amount (not refunded) and, for managers/admins, units used in sessions. */
+export async function fetchProductMonthSummary({ branchId, monthStart, nextMonthStart, includeUsed = false }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
-
-    if (!['manager', 'admin'].includes(profile.role)) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update products.' } };
+    const from = `${monthStart}T00:00:00+05:45`;
+    const to = `${nextMonthStart}T00:00:00+05:45`;
+    const sales = await pagedSelect(() => {
+      let q = supabase.from('product_sales').select('quantity, total_amount').eq('org_id', profile.org_id).is('refunded_at', null)
+        .gte('created_at', from).lt('created_at', to).order('created_at');
+      if (branchId) q = q.eq('branch_id', branchId);
+      return q;
+    });
+    let used = 0;
+    if (includeUsed) {
+      const moves = await pagedSelect(() => {
+        let q = supabase.from('product_stock_movements').select('delta').eq('org_id', profile.org_id).eq('reason', 'used_in_session')
+          .gte('created_at', from).lt('created_at', to).order('created_at');
+        if (branchId) q = q.eq('branch_id', branchId);
+        return q;
+      });
+      used = moves.reduce((n, m) => n - m.delta, 0);
     }
-    if (!profile.org_id) {
-      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
-    }
+    return {
+      data: { sold: sales.reduce((n, r) => n + r.quantity, 0), soldAmount: sales.reduce((n, r) => n + Number(r.total_amount), 0), used },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchProductMonthSummary error:', error.message);
+    return { data: null, error };
+  }
+}
 
-    const updatePayload = {};
-    if (name !== undefined) updatePayload.name = name.trim();
-    if (description !== undefined) updatePayload.description = description || null;
-    if (category !== undefined) updatePayload.category = category?.trim() || null;
-    if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
-    if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
-    if (trackStock !== undefined) updatePayload.track_stock = !!trackStock;
+const transformMovement = (m) => ({
+  id: m.id, branchId: m.branch_id, branchName: m.branches?.name || '', productId: m.product_id, productName: m.products?.name || '',
+  variantId: m.variant_id, variantName: m.product_variants?.name || '', sku: m.product_variants?.sku || '', delta: m.delta, qtyAfter: m.qty_after,
+  reason: m.reason, unitCost: m.unit_cost != null ? Number(m.unit_cost) : null, supplierId: m.supplier_id, supplierName: m.suppliers?.name || '',
+  saleId: m.sale_id, transferId: m.transfer_id, bookingId: m.booking_id, note: m.note || '', performedBy: m.performed_by,
+  byName: m.users?.full_name || '', createdAt: m.created_at,
+  customerName: m.product_sales?.customers?.full_name || '', paymentMode: m.product_sales?.payment_mode || '',
+  fromBranchId: m.product_stock_transfers?.from_branch_id || null, toBranchId: m.product_stock_transfers?.to_branch_id || null,
+});
 
-    if (Object.keys(updatePayload).length === 0) {
-      return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
-    }
-
-    const { data, error } = await supabase
-      .from('products')
-      .update(updatePayload)
-      .eq('id', productId)
+/**
+ * The stock ledger, newest first. `from` / `to` are Nepal dates (inclusive); `branchId` null = every branch. Managers / admins /
+ * viewers only (RLS returns nothing for staff).
+ */
+export async function fetchStockMovements({ branchId, from, to, productId, variantId, reason, limit = 1000 } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) return rpcError('NO_ORG', 'User is not associated with an organization.');
+    let q = supabase
+      .from('product_stock_movements')
+      .select(`id, branch_id, product_id, variant_id, delta, qty_after, reason, unit_cost, supplier_id, sale_id, transfer_id, booking_id, note, performed_by, created_at,
+        products(name), product_variants(name, sku), branches(name), suppliers(name),
+        users!product_stock_movements_performed_by_fkey(full_name),
+        product_sales(payment_mode, customers(full_name)),
+        product_stock_transfers(from_branch_id, to_branch_id)`)
       .eq('org_id', profile.org_id)
-      .select('id, name, description, category, price_npr, image_url, is_active, track_stock')
-      .single();
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+    if (branchId) q = q.eq('branch_id', branchId);
+    if (productId) q = q.eq('product_id', productId);
+    if (variantId) q = q.eq('variant_id', variantId);
+    if (reason) q = q.eq('reason', reason);
+    if (from) q = q.gte('created_at', `${from}T00:00:00+05:45`);
+    if (to) q = q.lte('created_at', `${to}T23:59:59.999+05:45`);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { data: (data || []).map(transformMovement), error: null };
+  } catch (error) {
+    console.error('[API] fetchStockMovements error:', error.message);
+    return { data: null, error };
+  }
+}
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return { data: null, error: { code: 'NOT_FOUND', message: 'Product not found.' } };
-      }
-      throw error;
-    }
+/** Create (no productId) or edit a product with its sizes in one transaction; `opening` = [{ idx, branchId, qty }] (create only). */
+export async function saveProduct({ productId = null, product, variants, opening = [] }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!CAN_MANAGE.includes(profile.role)) return rpcError('UNAUTHORIZED', 'Only managers and admins can save products.');
+    const { data, error } = await supabase.rpc('save_product', {
+      p_product_id: productId,
+      p_product: {
+        name: product.name, description: product.description ?? null, brand: product.brand ?? null, category: product.category ?? null,
+        supplier_id: product.supplierId || null, image_url: product.imageUrl ?? null, option_label: product.optionLabel || null,
+        pro_use: !!product.proUse, sell_at_checkout: !!product.sellAtCheckout, track_stock: !!product.trackStock, notify_low: !!product.notifyLow,
+        ...(product.isActive === undefined ? {} : { is_active: !!product.isActive }),
+      },
+      p_variants: variants.map((v) => ({
+        id: v.id || null, name: v.name || null, sku: v.sku || null, barcode: v.barcode || null, retail_price: v.price === '' ? 0 : Number(v.price),
+        ...(v.cost === undefined ? {} : { cost_price: v.cost === '' || v.cost == null ? null : Number(v.cost) }), low_stock_level: v.low === '' || v.low == null ? null : Number(v.low),
+        reorder_qty: v.reorder === '' || v.reorder == null ? null : Number(v.reorder), is_active: v.active !== false,
+      })),
+      p_opening: opening.map((o) => ({ idx: o.idx, branch_id: o.branchId, qty: Number(o.qty) })),
+    });
+    if (error) throw error;
     return { data, error: null };
   } catch (error) {
-    console.error('[API] updateProduct error:', error.message);
+    console.error('[API] saveProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Receive, remove or set the real count of one size at one branch (mode: 'receive' | 'remove' | 'set_count'). Returns the movement, or null when a count was already right. */
+export async function adjustProductStock({ variantId, branchId, mode, qty, reason, unitCost, supplierId, note }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!variantId || !branchId) return rpcError('VALIDATION', 'A size and a branch are required.');
+    const { data, error } = await supabase.rpc('adjust_product_stock', {
+      p_variant_id: variantId, p_branch_id: branchId, p_mode: mode, p_qty: Number(qty), p_reason: reason || null,
+      p_unit_cost: unitCost === '' || unitCost == null ? null : Number(unitCost), p_supplier_id: supplierId || null, p_note: note || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] adjustProductStock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Move stock of one size between two branches (immediate, recorded on both sides). For stock from outside use adjustProductStock('receive'). */
+export async function transferProductStock({ variantId, toBranchId, fromBranchId, quantity, note }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!variantId || !toBranchId || !fromBranchId) return rpcError('VALIDATION', 'A size, a source and a destination branch are required.');
+    if (!quantity || quantity <= 0) return rpcError('VALIDATION', 'Quantity must be a positive number.');
+    const { data, error } = await supabase.rpc('transfer_product_stock', {
+      p_variant_id: variantId, p_to_branch_id: toBranchId, p_quantity: Number(quantity), p_from_branch_id: fromBranchId, p_note: note || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] transferProductStock error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Sell one size (staff, manager, admin). The stock check is server-side. */
+export async function sellProduct({ variantId, quantity, paymentMode, branchId, customerId, notes }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!variantId || !quantity || quantity <= 0) return rpcError('VALIDATION', 'A product and a positive quantity are required.');
+    if (!paymentMode) return rpcError('VALIDATION', 'Payment method is required.');
+    if (!branchId) return rpcError('VALIDATION', 'Branch is required.');
+    const { data, error } = await supabase.rpc('sell_product', {
+      p_variant_id: variantId, p_quantity: quantity, p_payment_mode: paymentMode, p_branch_id: branchId,
+      p_customer_id: customerId || null, p_notes: notes || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] sellProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Cost-aware numbers per size at a branch (manager / admin): average cost, stock value, margin. */
+export async function fetchProductMoney({ productId, branchId }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('product_money', { p_product_id: productId, p_branch_id: branchId });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        variantId: r.variant_id, retailPrice: Number(r.retail_price), costPrice: r.cost_price != null ? Number(r.cost_price) : null,
+        avgCost: Number(r.avg_cost), stockHere: r.stock_here, stockValue: r.stock_value != null ? Number(r.stock_value) : null, marginPct: r.margin_pct != null ? Number(r.margin_pct) : null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchProductMoney error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Last 30 Nepal days for one product: { qty, amount, topSeller: { name, qty } | null, repeatBuyers, buyers }. branchId null = every branch. */
+export async function fetchProductSalesSummary({ productId, branchId = null }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.rpc('product_sales_summary', { p_product_id: productId, p_branch_id: branchId });
+    if (error) throw error;
+    return {
+      data: { qty: data.qty_30d, amount: Number(data.amount_30d), topSeller: data.top_seller ? { name: data.top_seller.name, qty: data.top_seller.qty } : null, repeatBuyers: data.repeat_buyers, buyers: data.buyers },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchProductSalesSummary error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Dry-run (default) or run a product import. rows = productsView.parseImportSheet().rows. Returns { dry_run, imported, new, updated, errors: [{ row, message, create? }], … }. */
+export async function importProducts({ rows, branchId = null, dryRun = true }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!CAN_MANAGE.includes(profile.role)) return rpcError('UNAUTHORIZED', 'Only managers and admins can import products.');
+    const { data, error } = await supabase.rpc('import_products', { p_rows: rows, p_branch_id: branchId, p_dry_run: dryRun });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] importProducts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ── Suppliers ──
+const transformSupplier = (s) => ({ id: s.id, name: s.name, contactName: s.contact_name || '', phone: s.phone || '', email: s.email || '', notes: s.notes || '', isActive: s.is_active !== false, createdAt: s.created_at });
+const supplierPayload = ({ name, contactName, phone, email, notes, isActive }) => ({
+  name: (name || '').trim(), contact_name: (contactName || '').trim() || null, phone: (phone || '').trim() || null, email: (email || '').trim() || null,
+  notes: (notes || '').trim() || null, ...(isActive === undefined ? {} : { is_active: !!isActive }),
+});
+
+/** Latest receive per supplier: { [supplierId]: ISO timestamp }. */
+export async function fetchSupplierLastReceived() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const rows = await pagedSelect(() => supabase.from('product_stock_movements').select('supplier_id, created_at').eq('org_id', profile.org_id)
+      .not('supplier_id', 'is', null).in('reason', ['received', 'import_opening']).order('created_at', { ascending: false }).order('id'));
+    const out = {};
+    rows.forEach((r) => { if (!out[r.supplier_id]) out[r.supplier_id] = r.created_at; });
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchSupplierLastReceived error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createSupplier(fields) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!CAN_MANAGE.includes(profile.role)) return rpcError('UNAUTHORIZED', 'Only managers and admins can add suppliers.');
+    const payload = supplierPayload(fields);
+    if (!payload.name) return rpcError('VALIDATION', 'Supplier name is required.');
+    const { data, error } = await supabase.from('suppliers').insert({ ...payload, org_id: profile.org_id }).select('*').single();
+    if (error) throw error;
+    return { data: transformSupplier(data), error: null };
+  } catch (error) {
+    console.error('[API] createSupplier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function updateSupplier({ id, ...fields }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!CAN_MANAGE.includes(profile.role)) return rpcError('UNAUTHORIZED', 'Only managers and admins can edit suppliers.');
+    const payload = supplierPayload(fields);
+    if (!payload.name) return rpcError('VALIDATION', 'Supplier name is required.');
+    const { data, error } = await supabase.from('suppliers').update(payload).eq('id', id).eq('org_id', profile.org_id).select('*').single();
+    if (error) throw error;
+    return { data: transformSupplier(data), error: null };
+  } catch (error) {
+    console.error('[API] updateSupplier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteSupplier({ id }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!CAN_MANAGE.includes(profile.role)) return rpcError('UNAUTHORIZED', 'Only managers and admins can delete suppliers.');
+    const { error } = await supabase.from('suppliers').delete().eq('id', id).eq('org_id', profile.org_id);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteSupplier error:', error.message);
     return { data: null, error };
   }
 }
@@ -15169,147 +15365,7 @@ export async function deleteProduct({ productId }) {
   }
 }
 
-export async function sellProduct({ productId, quantity, paymentMode, branchId, customerId, notes }) {
-  try {
-    const { error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-
-    if (!productId || !quantity || quantity <= 0) {
-      return { data: null, error: { code: 'VALIDATION', message: 'A product and a positive quantity are required.' } };
-    }
-    if (!paymentMode) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Payment method is required.' } };
-    }
-    if (!branchId) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Branch is required.' } };
-    }
-
-    const { data, error } = await supabase.rpc('sell_product', {
-      p_product_id: productId,
-      p_quantity: quantity,
-      p_payment_mode: paymentMode,
-      p_branch_id: branchId,
-      p_customer_id: customerId || null,
-      p_notes: notes || null,
-    });
-
-    if (error) throw error;
-    return { data, error: null };
-  } catch (error) {
-    console.error('[API] sellProduct error:', error.message);
-    return { data: null, error };
-  }
-}
-
-/**
- * Per-branch stock breakdown for one product — every branch the org has,
- * each with its own quantity (0 for a branch that's never received it).
- */
-export async function fetchProductBranchStock(productId) {
-  try {
-    const { profile, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-    if (!profile.org_id) {
-      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
-    }
-
-    const [{ data: branches, error: branchesError }, { data: stockRows, error: stockError }] = await Promise.all([
-      supabase.from('branches').select('id, name').eq('org_id', profile.org_id).order('name'),
-      supabase.from('product_branch_stock').select('branch_id, quantity, updated_at').eq('product_id', productId),
-    ]);
-    if (branchesError) throw branchesError;
-    if (stockError) throw stockError;
-
-    const stockByBranch = Object.fromEntries((stockRows || []).map((r) => [r.branch_id, r]));
-    const data = (branches || []).map((b) => ({
-      branchId: b.id,
-      branchName: b.name,
-      quantity: stockByBranch[b.id]?.quantity ?? 0,
-      updatedAt: stockByBranch[b.id]?.updated_at ?? null,
-    }));
-
-    return { data, error: null };
-  } catch (error) {
-    console.error('[API] fetchProductBranchStock error:', error.message);
-    return { data: null, error };
-  }
-}
-
-/**
- * Transfer/receive history for a product's stock (product_stock_transfers,
- * migration-213). branchId narrows to transfers where that branch was
- * either side (source or destination); omit for the full org history.
- */
-export async function fetchProductStockTransfers({ productId, branchId, from, to, limit = 50 } = {}) {
-  try {
-    const { profile, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-    if (!profile.org_id) {
-      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
-    }
-
-    let query = supabase
-      .from('product_stock_transfers')
-      .select(`
-        id, product_id, from_branch_id, to_branch_id, quantity, note, transferred_by, created_at,
-        products(name),
-        from_branch:branches!product_stock_transfers_from_branch_id_fkey(name),
-        to_branch:branches!product_stock_transfers_to_branch_id_fkey(name),
-        users!product_stock_transfers_transferred_by_fkey(full_name)
-      `)
-      .eq('org_id', profile.org_id)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (productId) query = query.eq('product_id', productId);
-    if (branchId) query = query.or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`);
-    if (from) query = query.gte('created_at', `${from}T00:00:00`);
-    if (to) query = query.lte('created_at', `${to}T23:59:59`);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return { data, error: null };
-  } catch (error) {
-    console.error('[API] fetchProductStockTransfers error:', error.message);
-    return { data: null, error };
-  }
-}
-
-/**
- * Move stock between two branches, or receive new stock into one branch
- * (omit fromBranchId — e.g. a supplier delivery). Always fully recorded
- * on both sides via transfer_product_stock (migration-214); no approval
- * step, the move is immediate.
- */
-export async function transferProductStock({ productId, toBranchId, quantity, fromBranchId, note }) {
-  try {
-    const { error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-
-    if (!productId || !toBranchId) {
-      return { data: null, error: { code: 'VALIDATION', message: 'A product and destination branch are required.' } };
-    }
-    if (!quantity || quantity <= 0) {
-      return { data: null, error: { code: 'VALIDATION', message: 'Quantity must be a positive number.' } };
-    }
-
-    const { data, error } = await supabase.rpc('transfer_product_stock', {
-      p_product_id: productId,
-      p_to_branch_id: toBranchId,
-      p_quantity: quantity,
-      p_from_branch_id: fromBranchId || null,
-      p_note: note || null,
-    });
-
-    if (error) throw error;
-    return { data, error: null };
-  } catch (error) {
-    console.error('[API] transferProductStock error:', error.message);
-    return { data: null, error };
-  }
-}
-
-export async function fetchProductSales({ limit = 50, productId, from, to } = {}) {
+export async function fetchProductSales({ limit = 50, productId, branchId, from, to } = {}) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -15320,12 +15376,13 @@ export async function fetchProductSales({ limit = 50, productId, from, to } = {}
 
     let query = supabase
       .from('product_sales')
-      .select('id, product_id, product_name, quantity, unit_price_npr, total_amount, payment_mode, customer_id, sold_by, created_at, refunded_at, refunded_by, refund_reason, customers(full_name), users!product_sales_sold_by_fkey(full_name)')
+      .select('id, product_id, variant_id, variant_name, branch_id, product_name, quantity, unit_price_npr, total_amount, payment_mode, customer_id, sold_by, created_at, refunded_at, refunded_by, refund_reason, customers(full_name), users!product_sales_sold_by_fkey(full_name)')
       .eq('org_id', profile.org_id)
       .order('created_at', { ascending: false })
       .limit(limit);
 
     if (productId) query = query.eq('product_id', productId);
+    if (branchId) query = query.eq('branch_id', branchId);
     if (from) query = query.gte('created_at', `${from}T00:00:00`);
     if (to) query = query.lte('created_at', `${to}T23:59:59`);
 

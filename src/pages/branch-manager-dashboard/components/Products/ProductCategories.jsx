@@ -10,7 +10,7 @@ import { friendlyError } from '../../../../utils/friendlyError';
 // The body of the "Product categories" panel: an add row on top, then one row per category with inline rename (Enter saves,
 // Esc cancels), an active switch and delete (through a ConfirmDialog; a category that still has products can't be deleted).
 // Used standalone and stacked inside the product form (the form's draft stays mounted underneath).
-const ProductCategories = ({ onCategoriesChanged }) => {
+const ProductCategories = ({ onCategoriesChanged, readOnly = false, starters = [] }) => {
   const [categories, setCategories] = useState(null);
   const [error, setError] = useState(null);
   const [newName, setNewName] = useState('');
@@ -48,6 +48,16 @@ const ProductCategories = ({ onCategoriesChanged }) => {
     addRef.current?.focus({ preventScroll: true });
   };
 
+  const addStarters = async () => {
+    setAdding(true);
+    for (const name of starters) { // eslint-disable-line no-restricted-syntax
+      // eslint-disable-next-line no-await-in-loop
+      await createProductCategory({ name, description: null });
+    }
+    setAdding(false);
+    await changed();
+  };
+
   const startEdit = (c) => { setEditingId(c.id); setEditName(c.name); setEditError(null); };
   const cancelEdit = () => { setEditingId(null); setEditError(null); };
   const saveEdit = async (c) => {
@@ -83,7 +93,7 @@ const ProductCategories = ({ onCategoriesChanged }) => {
     <div className="px-5 py-5 space-y-4">
       <InlineError message={error} />
 
-      <div>
+      {!readOnly && <div>
         <div className="flex gap-2">
           <input
             ref={addRef}
@@ -102,7 +112,7 @@ const ProductCategories = ({ onCategoriesChanged }) => {
           </button>
         </div>
         {addError && <p role="alert" className="mt-1.5 text-xs text-error">{addError}</p>}
-      </div>
+      </div>}
 
       {categories === null ? (
         <div className="space-y-2" aria-busy="true" aria-label="Loading categories">
@@ -111,7 +121,10 @@ const ProductCategories = ({ onCategoriesChanged }) => {
       ) : categories.length === 0 ? (
         <div className="py-10 text-center">
           <Icon name="Tags" size={26} className="text-text-tertiary mx-auto mb-2" />
-          <p className="text-[13px] text-text-secondary">No categories yet. Add the first one above.</p>
+          <p className="text-[13px] text-text-secondary">{readOnly ? 'No categories yet.' : 'No categories yet. Add the first one above.'}</p>
+          {!readOnly && starters.length > 0 && (
+            <button type="button" onClick={addStarters} disabled={adding} className="mt-3 text-[13px] font-medium text-primary hover:underline disabled:opacity-50" data-add-starters>Add the usual ones: {starters.slice(0, 3).join(', ')}{starters.length > 3 ? '…' : ''}</button>
+          )}
         </div>
       ) : (
         <ul className="border border-border rounded-spa divide-y divide-border">
@@ -137,7 +150,7 @@ const ProductCategories = ({ onCategoriesChanged }) => {
                     {editError && <p role="alert" className="mt-1 text-xs text-error">{editError}</p>}
                   </>
                 ) : (
-                  <button type="button" onClick={() => startEdit(c)} title="Click to rename" className={`block max-w-full truncate text-left text-[13px] hover:underline ${c.is_active ? 'text-text-primary' : 'text-text-tertiary'}`}>{c.name}</button>
+                  <button type="button" onClick={() => !readOnly && startEdit(c)} title={readOnly ? undefined : 'Click to rename'} disabled={readOnly} className={`block max-w-full truncate text-left text-[13px] hover:underline ${c.is_active ? 'text-text-primary' : 'text-text-tertiary'}`}>{c.name}</button>
                 )}
               </div>
               <span className="text-xs text-text-tertiary tabular-nums whitespace-nowrap">{c.product_count} product{c.product_count === 1 ? '' : 's'}</span>
@@ -145,6 +158,7 @@ const ProductCategories = ({ onCategoriesChanged }) => {
                 type="button"
                 role="switch"
                 aria-checked={c.is_active}
+                disabled={readOnly}
                 aria-label={`${c.is_active ? 'Deactivate' : 'Activate'} ${c.name}`}
                 onClick={() => handleToggle(c)}
                 className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${c.is_active ? 'bg-primary' : 'bg-border'}`}
@@ -156,6 +170,7 @@ const ProductCategories = ({ onCategoriesChanged }) => {
                 aria-label={`Delete ${c.name}`}
                 title={c.product_count > 0 ? 'Move its products to another category first' : 'Delete'}
                 disabled={c.product_count > 0}
+                hidden={readOnly}
                 onClick={() => setConfirmDelete(c)}
                 className="w-7 h-7 flex items-center justify-center rounded-spa text-text-secondary hover:bg-error/10 hover:text-error disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
               >

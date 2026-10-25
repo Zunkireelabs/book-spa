@@ -1,4 +1,4 @@
-import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED } from 'lib/featureFlags';
+import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED } from 'lib/featureFlags';
 
 // Small areas (2–4 pages) get tabs at the top of the page; each tab is an existing `?view=` URL, so every view URL keeps working.
 // Roles, flags and `overallHidden` mirror the sidebar entries these tabs replace.
@@ -71,6 +71,19 @@ export const AREAS = [
       { view: 'vouchers', label: 'Vouchers', roles: MGR_ADMIN_VIEWER },
       { view: 'voucher-types', label: 'Voucher types', roles: MGR_ADMIN_VIEWER },
       { view: 'voucher-activity', label: 'Activity', roles: MGR_ADMIN_VIEWER },
+    ],
+  }] : []),
+  // Products (V25) draws its own header (lead sentence + counted tabs). Staff see Products + Categories only (no cost, no ledger).
+  ...(PRODUCTS_ENABLED ? [{
+    id: 'products',
+    title: ({ productLabel }) => productLabel || 'Products',
+    description: () => 'What you stock and sell, how much is on the shelf, and every change to it.',
+    selfHeader: true,
+    tabs: [
+      { view: 'products', label: ({ productLabel }) => productLabel || 'Products', roles: ['staff', 'manager', 'admin', 'admin_viewer'] },
+      { view: 'stock-history', label: 'Stock history', roles: MGR_ADMIN_VIEWER },
+      { view: 'suppliers', label: 'Suppliers', roles: MGR_ADMIN_VIEWER },
+      { view: 'product-categories', label: 'Categories', roles: ['staff', 'manager', 'admin', 'admin_viewer'] },
     ],
   }] : []),
   ...(OUTREACH_ENABLED ? [{

@@ -17,7 +17,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const { profile, signOut } = useAuth();
   const { branchName: contextBranchName, branchId, isOverall } = useBranch();
   const [pendingApprovals, setPendingApprovals] = useState(0);
-  const { staffLabelPlural } = useIndustry();
+  const { staffLabelPlural, productLabel } = useIndustry();
   const palette = useOptionalCommandPalette();
   const openPalette = palette?.openPalette;
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -83,7 +83,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
 
   // The nav is generated from the module registry (src/navigation/navRegistry.js): flat items under section labels, Settings pinned
   // at the bottom. Labels are hidden when the role sees only a handful of items (staff).
-  const { sections, footer, showLabels } = getNav({ role: userRole, isOverall, staffLabelPlural });
+  const { sections, footer, showLabels } = getNav({ role: userRole, isOverall, staffLabelPlural, productLabel });
 
   // The current `?view=`; the bare dashboard URL is the landing view: the dashboard for managers/admins, the calendar for staff.
   const onDashboard = location.pathname === basePath;

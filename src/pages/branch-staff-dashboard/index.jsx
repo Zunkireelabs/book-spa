@@ -18,7 +18,7 @@ import NewVoucherPanel from '../branch-manager-dashboard/components/Vouchers/New
 import RevenueCards from '../branch-manager-dashboard/components/RevenueCards';
 import TipsSummaryCard from '../branch-manager-dashboard/components/TipsSummaryCard';
 import TodayInsightsPanel from '../branch-manager-dashboard/components/TodayInsightsPanel';
-import ProductsPanel from '../branch-manager-dashboard/components/Products/ProductsPanel';
+import ProductsPage from '../branch-manager-dashboard/components/Products/ProductsPage';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
@@ -463,8 +463,10 @@ const BranchStaffDashboard = () => {
   const userRole = profile?.role || 'staff';
 
   // Staff get one tabbed area, Bookings (All bookings, New booking, Check booking, Collect payment, ...).
+  // Staff also get the Products area (Products + Categories tabs) when the flag is on.
   const bookingsArea = getAreaForView('bookings');
-  const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : null;
+  const productsArea = PRODUCTS_ENABLED ? getAreaForView('products') : null;
+  const areaForView = bookingsArea.tabs.some((t) => t.view === viewMode) ? bookingsArea : (productsArea && productsArea.tabs.some((t) => t.view === viewMode) ? productsArea : null);
   // Bookings, "New membership" and "New voucher" share one tree: the bookings list keeps its key and the panel is the second
   // child, so switching between these tabs doesn't remount the list (which would refetch and flash).
   const withBookingsList = (overlay = null) => (
@@ -501,6 +503,8 @@ const BranchStaffDashboard = () => {
             }}
           />
         ) : null);
+      case 'products':
+      case 'product-categories': return <ProductsPage view={view} />;
       default: return null;
     }
   };
@@ -639,8 +643,6 @@ const BranchStaffDashboard = () => {
         </div>
       ) : viewMode === 'calendar' ? (
         <OperationalCalendar branchId={branchId} />
-      ) : viewMode === 'products' && PRODUCTS_ENABLED ? (
-        <ProductsPanel />
       ) : areaForView ? (
         <AreaTabs area={areaForView} view={viewMode}>{renderAreaView(viewMode)}</AreaTabs>
       ) : (

@@ -21,15 +21,15 @@ const CommandPalette = ({ onClose }) => {
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
   const { branchId, isOverall } = useBranch();
-  const { staffLabelPlural, enableRooms, locationLabelPlural } = useIndustry();
+  const { staffLabelPlural, productLabel, enableRooms, locationLabelPlural } = useIndustry();
 
   const role = profile?.role;
   const userId = profile?.id;
   const orgSlug = urlOrgSlug || profile?.organizations?.slug;
   const basePath = orgSlug ? `/${orgSlug}/dashboard` : '/dashboard';
   const ctx = useMemo(
-    () => ({ role, isOverall, staffLabelPlural, enableRooms, locationLabelPlural, basePath, branchId, orgSlug }),
-    [role, isOverall, staffLabelPlural, enableRooms, locationLabelPlural, basePath, branchId, orgSlug]
+    () => ({ role, isOverall, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath, branchId, orgSlug }),
+    [role, isOverall, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath, branchId, orgSlug]
   );
 
   const [query, setQuery] = useState('');

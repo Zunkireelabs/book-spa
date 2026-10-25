@@ -5,10 +5,10 @@ const DOT = { online: '#2D5A27', late: '#F59E0B', assign: '#B45309' };
 
 // "✦ Needs you now": the few things a person should act on right now (today only). Each item filters the list (or calls).
 // Items may bring their own `dot` colour and an external `href` (opened in a new tab, e.g. a WhatsApp reminder); Packages uses both.
-const NeedsYouNow = ({ items, active, onPick, quietTail = false }) => (
+const NeedsYouNow = ({ items, active, onPick, quietTail = false, tailText = 'Everything else is on track', emptyText = "Everything's on track" }) => (
   <div className="flex items-center gap-2 flex-wrap rounded-[10px] border border-[#DDE7DA] px-3 py-2.5 mb-3 mt-0.5" style={{ background: 'linear-gradient(90deg,#F4F8F3,#FBFBF8)' }} aria-label="Needs you now">
     <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-primary whitespace-nowrap mr-1"><Icon name="Sparkles" size={14} />Needs you now</span>
-    {items.length === 0 && <span className="text-[12.5px] text-[#515152]">Everything's on track</span>}
+    {items.length === 0 && <span className="text-[12.5px] text-[#515152]">{emptyText}</span>}
     {items.map((it) => {
       const on = active === it.id;
       const body = (
@@ -25,7 +25,7 @@ const NeedsYouNow = ({ items, active, onPick, quietTail = false }) => (
         : <button key={it.id} type="button" onClick={() => onPick(on ? '' : it.id)} aria-pressed={on} className={cls} data-need={it.id}>{body}</button>;
     })}
     {/* quietTail: only the "Show everything" reset, no "on track" line (Packages). */}
-    {items.length > 0 && (active || !quietTail) && <span className="ml-auto text-[12px] text-[#8A8A90] whitespace-nowrap">{active ? <button type="button" onClick={() => onPick('')} className="underline hover:text-text-primary">Show everything</button> : 'Everything else is on track'}</span>}
+    {items.length > 0 && (active || !quietTail) && <span className="ml-auto text-[12px] text-[#8A8A90] whitespace-nowrap">{active ? <button type="button" onClick={() => onPick('')} className="underline hover:text-text-primary">Show everything</button> : tailText}</span>}
   </div>
 );
 

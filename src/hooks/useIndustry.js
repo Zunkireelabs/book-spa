@@ -19,6 +19,9 @@ export const useIndustry = () => {
     enableSpecialties,
     enableCustomerGender,
     defaultCategories,
+    productLabel,
+    defaultProductCategories,
+    productsSoldByDefault,
   } = useOrg();
 
   return {
@@ -42,6 +45,11 @@ export const useIndustry = () => {
 
     // Default categories for this industry
     defaultCategories,
+
+    // Products wording and defaults (migration-292)
+    productLabel,
+    defaultProductCategories,
+    productsSoldByDefault,
 
     // Helper checks for industry type
     isSpa: industryType === 'spa',

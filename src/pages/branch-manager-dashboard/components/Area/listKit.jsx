@@ -7,6 +7,7 @@ import { useBranch } from '../../../../contexts/BranchContext';
 import { getAreaForView, getVisibleTabs } from './areaTabsRegistry';
 import { daysUntil } from '../../../../services/packagesView';
 import { RANGES, rangeLabel } from '../../../../services/membershipsView';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 // Shared pieces of the "sales" list pages (Packages V20, Memberships V21): one header with a lead sentence and counted tabs, a
 // lifecycle strip, a sticky toolbar + column headings inside the one `.content-scroll` scroller, and the small row bits.
@@ -83,6 +84,7 @@ export const leadNodes = (parts) => parts.map((part, i) => (part.strong ? <b key
 export const ListPageShell = ({ view, title, lead, actions, counts = {}, children }) => {
   const { profile } = useAuth();
   const { isOverall } = useBranch();
+  const { productLabel } = useIndustry();
   const rootRef = useRef(null);
   const tabsRef = useRef(null);
   const [tabsH, setTabsH] = useState(53);
@@ -100,7 +102,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
     if (sc) sc.scrollTop = 0;
   }, [view]);
   const area = getAreaForView(view);
-  const tabs = area ? getVisibleTabs(area, { role: profile?.role, isOverall }) : [];
+  const tabs = area ? getVisibleTabs(area, { role: profile?.role, isOverall, productLabel }) : [];
   return (
     <div ref={rootRef} className="pb-6">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -108,7 +110,7 @@ export const ListPageShell = ({ view, title, lead, actions, counts = {}, childre
           <h1 className="text-[20px] font-semibold tracking-[-0.45px] text-text-primary">{title}</h1>
           <p className="text-[13px] text-[#8A8A90] mt-[3px] tabular-nums" data-lead>{lead}</p>
         </div>
-        <div className="flex gap-2">{actions}</div>
+        <div className="flex gap-2 flex-wrap">{actions}</div>
       </div>
       <div ref={tabsRef} className="sticky top-0 z-sticky-filter bg-white pt-[14px]">
         <div role="tablist" aria-label={title} className="flex items-center gap-[22px] border-b border-border overflow-x-auto overflow-y-hidden">

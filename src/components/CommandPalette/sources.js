@@ -35,8 +35,8 @@ const rank = (items, query) => items
 const viewHref = (basePath, view, extra = '') => `${basePath}?view=${view}${extra}`;
 
 // ── Pages + Actions (from the registries, already role / flag / Overall filtered) ─────────────────────────────────────
-export const buildPages = ({ role, isOverall, staffLabelPlural, enableRooms, locationLabelPlural, basePath }) => {
-  const nav = getNav({ role, isOverall, staffLabelPlural });
+export const buildPages = ({ role, isOverall, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath }) => {
+  const nav = getNav({ role, isOverall, staffLabelPlural, productLabel });
   const pages = [];
   const seenViews = new Set();
   const add = (item) => { if (!seenViews.has(item.view)) { seenViews.add(item.view); pages.push(item); } };
@@ -50,7 +50,7 @@ export const buildPages = ({ role, isOverall, staffLabelPlural, enableRooms, loc
   getVisibleSettings({ role, isOverall, enableRooms }).forEach((s) =>
     add({ key: `page:${s.view}`, kind: 'page', label: s.location ? (locationLabelPlural || s.title) : s.title, secondary: 'Settings', icon: s.icon, view: s.view, href: viewHref(basePath, s.view), keywords: s.keywords }));
   AREAS.forEach((area) => {
-    const ctx = { role, isOverall, staffLabelPlural };
+    const ctx = { role, isOverall, staffLabelPlural, productLabel };
     const tabs = getVisibleTabs(area, ctx);
     if (tabs.length < 2) return;
     const title = typeof area.title === 'function' ? area.title(ctx) : area.title;
