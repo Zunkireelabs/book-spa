@@ -17,6 +17,14 @@ const CustomSelect = ({
   error = false,
   valueClassName = '',
   searchable = false,
+  // Optional explicit dropdown width + anchor side — lets a narrow trigger (e.g.
+  // an inline "Select staff" button) open a wider menu without the menu's width
+  // being locked to the trigger's own width (the w-full default below). Anchor
+  // 'right' grows the menu leftward from the trigger's right edge instead of
+  // rightward from its left edge, so a narrow trigger near a panel's right edge
+  // doesn't push the menu past the panel boundary.
+  menuWidth,
+  menuAlign = 'left',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -190,9 +198,12 @@ const CustomSelect = ({
 
       {isOpen && (
         <div
-          className={`absolute left-0 w-full min-w-[120px] bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 max-h-60 overflow-hidden flex flex-col ${
+          className={`absolute ${menuAlign === 'right' ? 'right-0' : 'left-0'} ${
+            menuWidth ? '' : 'w-full min-w-[120px]'
+          } bg-white border border-gray-200 rounded-md shadow-lg z-dropdown py-1 max-h-60 overflow-hidden flex flex-col ${
             openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
+          style={menuWidth ? { width: menuWidth } : undefined}
           role="listbox"
         >
           {/* Search input */}

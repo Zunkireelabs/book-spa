@@ -44,15 +44,36 @@ export function toKathmanduParts(isoString) {
 // Compact 12h ('2:00pm') to match the gutter and cards.
 export const to12h = (t) => to12hSpaced(t).replace(' ', '');
 
+// Sunday-first week start for a date, as a local-date string.
+export function startOfWeek(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return addDays(dateStr, -d.getDay());
+}
+
+// First/last of the month, padded out to full Sunday-start weeks so a month grid never shows a partial row.
+export function getMonthGridRange(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const firstOfMonth = toLocalISO(new Date(d.getFullYear(), d.getMonth(), 1));
+  const lastOfMonth = toLocalISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  return { start: startOfWeek(firstOfMonth), end: addDays(startOfWeek(lastOfMonth), 6) };
+}
+
 export function getDateRange(dateStr, viewMode) {
   if (viewMode === '4day') {
     return { start: dateStr, end: addDays(dateStr, 3) };
   }
+  if (viewMode === 'week') {
+    const start = startOfWeek(dateStr);
+    return { start, end: addDays(start, 6) };
+  }
+  if (viewMode === 'month') return getMonthGridRange(dateStr);
   return { start: dateStr, end: dateStr };
 }
 
 export function getStepDays(viewMode) {
-  return viewMode === '4day' ? 4 : 1;
+  if (viewMode === '4day') return 4;
+  if (viewMode === 'week') return 7;
+  return 1;
 }
 
 export function formatTimeFromSlot(hour, minute) {

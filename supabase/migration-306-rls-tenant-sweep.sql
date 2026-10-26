@@ -1,4 +1,4 @@
--- Migration 287: close cross-tenant RLS holes (legacy "branch OR admin" policies, role-only payroll, open junctions)
+-- Migration 306: close cross-tenant RLS holes (legacy "branch OR admin" policies, role-only payroll, open junctions)
 -- Idempotent: safe to re-run in either database.
 -- Applied: local only (feat/ui-port-from-clinicmd)
 --
@@ -6,7 +6,7 @@
 -- every DROP/ALTER POLICY is guarded by that table+policy existing (a NOTICE says what was skipped), the function changes
 -- are guarded by the exact signature existing, and service_categories (no tracked CREATE TABLE) also needs its org_id
 -- column. On prod, therapist_working_hours(+_breaks) don't exist yet (migrations 275/278), so those statements are
--- skipped; migration-288 re-applies them after 275/278 land at promotion.
+-- skipped; migration-307 re-applies them after 275/278 land at promotion.
 --
 -- WHAT WAS WRONG
 --   Every policy is PERMISSIVE, so the policies on a table are OR'd. migration-012 replaced the pre-multi-tenancy
@@ -39,7 +39,7 @@
 --   hours), 044/054 (payroll), 020/254 (booking_therapists); restore the service_categories write policies to
 --   USING/WITH CHECK (true); DROP POLICY "Admin can delete own org customers" ON public.customers;
 --   GRANT EXECUTE ON FUNCTION public.public_search_booking(uuid, text) TO anon, authenticated;
---   restore enqueue_notification from migration-032; DELETE FROM public.schema_migrations WHERE version = '287'.
+--   restore enqueue_notification from migration-032; DELETE FROM public.schema_migrations WHERE version = '306'.
 
 BEGIN;
 
@@ -48,10 +48,10 @@ CREATE OR REPLACE FUNCTION pg_temp.v287_apply(p_table text, p_policy text, p_sql
 RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = p_table AND policyname = p_policy) THEN
-    RAISE NOTICE 'migration-287: skipped "%" on public.% (policy not present)', p_policy, p_table;
+    RAISE NOTICE 'migration-306: skipped "%" on public.% (policy not present)', p_policy, p_table;
   ELSIF p_need_column IS NOT NULL AND NOT EXISTS (SELECT 1 FROM information_schema.columns
                                                   WHERE table_schema = 'public' AND table_name = p_table AND column_name = p_need_column) THEN
-    RAISE NOTICE 'migration-287: skipped "%" on public.% (column % not present)', p_policy, p_table, p_need_column;
+    RAISE NOTICE 'migration-306: skipped "%" on public.% (column % not present)', p_policy, p_table, p_need_column;
   ELSE
     EXECUTE p_sql;
   END IF;
@@ -62,9 +62,9 @@ CREATE OR REPLACE FUNCTION pg_temp.v287_drop_redundant(p_table text, p_legacy te
 RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = p_table AND policyname = p_legacy) THEN
-    RAISE NOTICE 'migration-287: "%" on public.% already gone', p_legacy, p_table;
+    RAISE NOTICE 'migration-306: "%" on public.% already gone', p_legacy, p_table;
   ELSIF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = p_table AND policyname = p_cover) THEN
-    RAISE WARNING 'migration-287: kept "%" on public.% because "%" is missing; review by hand', p_legacy, p_table, p_cover;
+    RAISE WARNING 'migration-306: kept "%" on public.% because "%" is missing; review by hand', p_legacy, p_table, p_cover;
   ELSE
     EXECUTE format('DROP POLICY %I ON public.%I', p_legacy, p_table);
   END IF;
@@ -168,7 +168,7 @@ SELECT pg_temp.v287_apply('therapist_attendance', 'Manager can update therapist 
                      OR ((SELECT get_user_role()) = 'admin' AND EXISTS (SELECT 1 FROM public.branches br WHERE br.id = therapist_attendance.branch_id AND br.org_id = (SELECT get_user_org_id())))))
 $p$);
 
--- therapist_working_hours + _breaks (migrations 275/278; absent on prod until promotion, re-applied by migration-288).
+-- therapist_working_hours + _breaks (migrations 275/278; absent on prod until promotion, re-applied by migration-307).
 -- These use the single primary branch (get_user_branch_id()), kept as is.
 SELECT pg_temp.v287_apply('therapist_working_hours', 'Staff can read branch therapist working hours', $p$
   ALTER POLICY "Staff can read branch therapist working hours" ON public.therapist_working_hours
@@ -333,7 +333,7 @@ BEGIN
   IF to_regprocedure('public.public_search_booking(uuid, text)') IS NOT NULL THEN
     REVOKE EXECUTE ON FUNCTION public.public_search_booking(uuid, text) FROM PUBLIC, anon, authenticated;
   ELSE
-    RAISE NOTICE 'migration-287: skipped REVOKE on public_search_booking(uuid, text) (function not present)';
+    RAISE NOTICE 'migration-306: skipped REVOKE on public_search_booking(uuid, text) (function not present)';
   END IF;
 
   IF to_regprocedure('public.enqueue_notification(uuid, text, text, text, uuid)') IS NOT NULL THEN
@@ -365,7 +365,7 @@ BEGIN
       $fn$
     $ddl$;
   ELSE
-    RAISE NOTICE 'migration-287: skipped enqueue_notification (function not present with that signature)';
+    RAISE NOTICE 'migration-306: skipped enqueue_notification (function not present with that signature)';
   END IF;
 END $$;
 
@@ -381,18 +381,18 @@ BEGIN
   LOOP
     e := r.q || ' ' || r.w;
     IF e ~ '''admin(_viewer)?''' AND e !~ '(org_id|get_user_org_id)' THEN
-      RAISE WARNING 'migration-287: %.% (%) grants on an admin role without an org check', r.tablename, r.policyname, r.cmd;
+      RAISE WARNING 'migration-306: %.% (%) grants on an admin role without an org check', r.tablename, r.policyname, r.cmd;
     ELSIF r.cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL') AND r.roles LIKE '%authenticated%' AND btrim(e) IN ('true', 'true true') THEN
-      RAISE WARNING 'migration-287: %.% (%) lets any signed-in user of any org write', r.tablename, r.policyname, r.cmd;
+      RAISE WARNING 'migration-306: %.% (%) lets any signed-in user of any org write', r.tablename, r.policyname, r.cmd;
     ELSIF r.cmd = 'SELECT' AND r.roles LIKE '%authenticated%' AND btrim(e) = 'true'
           AND r.tablename NOT IN ('industries', 'service_categories') THEN  -- intentionally public catalogs
-      RAISE WARNING 'migration-287: %.% (%) lets any signed-in user of any org read every row', r.tablename, r.policyname, r.cmd;
+      RAISE WARNING 'migration-306: %.% (%) lets any signed-in user of any org read every row', r.tablename, r.policyname, r.cmd;
     END IF;
   END LOOP;
 END $$;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('287', 'rls-tenant-sweep')
+VALUES ('306', 'rls-tenant-sweep')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

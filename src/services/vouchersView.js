@@ -1,6 +1,6 @@
 // Vouchers page (V23): pure logic for the Vouchers / Voucher types / Activity tabs — status, the lifecycle strip, the lead
 // sentence, Needs-you-now, sorting, search, reminders and the activity feed. No React, no Supabase: `today` is a Nepal
-// 'YYYY-MM-DD' passed in by the caller. Rows are fetchVouchers() rows. Since migration-291 `totalAmountIssued` is the voucher's
+// 'YYYY-MM-DD' passed in by the caller. Rows are fetchVouchers() rows. Since migration-310 `totalAmountIssued` is the voucher's
 // VALUE (what the holder can spend) and `amountPaid` what was collected; a coupon (`percentOff`) is worth 0 and is "X% off one
 // visit", used once (`couponUsed`).
 import { daysUntil, shortName, npr } from './packagesView';

@@ -1,4 +1,4 @@
--- Migration 284: per-method payment QR codes + private `payment-qr` storage bucket
+-- Migration 303: per-method payment QR codes + private `payment-qr` storage bucket
 -- Additive only. Idempotent: safe to re-run in either database.
 -- Applied: local only (feat/ui-port-from-clinicmd)
 --
@@ -22,7 +22,7 @@
 --     ON storage.objects;
 --   DELETE FROM storage.objects WHERE bucket_id = 'payment-qr'; DELETE FROM storage.buckets WHERE id = 'payment-qr';
 --   DROP TABLE public.payment_method_qr;
---   DELETE FROM public.schema_migrations WHERE version = '284';
+--   DELETE FROM public.schema_migrations WHERE version = '303';
 
 BEGIN;
 
@@ -99,7 +99,7 @@ CREATE POLICY "payment-qr admin delete" ON storage.objects FOR DELETE TO authent
          AND (SELECT get_user_role()) = 'admin');
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('284', 'payment-method-qr')
+VALUES ('303', 'payment-method-qr')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

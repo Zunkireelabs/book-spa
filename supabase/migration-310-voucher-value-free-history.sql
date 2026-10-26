@@ -1,5 +1,5 @@
--- Migration 291: vouchers keep their value; sold vs given free; buyer; % coupons; voucher history
--- Idempotent: safe to re-run in either database. (291 is the local number; check the next free one on origin/stage before the PR.)
+-- Migration 310: vouchers keep their value; sold vs given free; buyer; % coupons; voucher history
+-- Idempotent: safe to re-run in either database. (310 is the local number; check the next free one on origin/stage before the PR.)
 --
 -- WHY (prod, nuad-thai-spa, 2026-10-19)
 --   issue_voucher stored total_amount_issued = price after discount, so "what the guest paid" and "what the voucher is worth"
@@ -63,7 +63,7 @@
 --     public.extend_voucher(uuid, date, text);
 --   DROP TABLE IF EXISTS public.voucher_events; ALTER TABLE public.voucher_claims DROP COLUMN IF EXISTS is_legacy;
 --   then re-create the 12-arg issue_voucher from migration-174 and drop the new columns.
---   DELETE FROM public.schema_migrations WHERE version = '291';
+--   DELETE FROM public.schema_migrations WHERE version = '310';
 
 BEGIN;
 
@@ -792,7 +792,7 @@ DECLARE
   n       int;
 BEGIN
   IF current_setting('zenly.m291_first_run', true) IS DISTINCT FROM 'true' THEN
-    RAISE NOTICE '291 backfill: skipped (already applied)';
+    RAISE NOTICE '310 backfill: skipped (already applied)';
     RETURN;
   END IF;
 
@@ -802,13 +802,13 @@ BEGIN
   UPDATE public.vouchers v
      SET amount_paid = COALESCE((SELECT SUM(p.amount) FROM public.voucher_payments p WHERE p.voucher_id = v.id), v.total_amount_issued);
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 1a: amount_paid set on % vouchers (% from voucher_payments, % from the old total)', n,
+  RAISE NOTICE '310 step 1a: amount_paid set on % vouchers (% from voucher_payments, % from the old total)', n,
     (SELECT count(*) FROM public.vouchers v WHERE EXISTS (SELECT 1 FROM public.voucher_payments p WHERE p.voucher_id = v.id)),
     (SELECT count(*) FROM public.vouchers v WHERE NOT EXISTS (SELECT 1 FROM public.voucher_payments p WHERE p.voucher_id = v.id));
 
   UPDATE public.vouchers SET issue_kind = 'free' WHERE discount_percent = 100 OR total_amount_issued = 0;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 1b: % vouchers marked given free (100%% discount or nothing collected)', n;
+  RAISE NOTICE '310 step 1b: % vouchers marked given free (100%% discount or nothing collected)', n;
 
   -- 2. The % coupon types and their vouchers.
   UPDATE public.voucher_types
@@ -816,19 +816,19 @@ BEGIN
          default_issue_kind = 'free'
    WHERE name IN ('25% Discount Voucher', '40% Discount Voucher') AND standard_price = 0 AND percent_off IS NULL;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 2a: % voucher types made %% coupons', n;
+  RAISE NOTICE '310 step 2a: % voucher types made %% coupons', n;
 
   UPDATE public.vouchers v SET percent_off = t.percent_off
     FROM public.voucher_types t
    WHERE t.id = v.voucher_type_id AND t.percent_off IS NOT NULL AND v.percent_off IS NULL
      AND v.total_amount_issued = 0;  -- one sold with a real NPR total stays a value voucher
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 2b: % vouchers became coupons', n;
+  RAISE NOTICE '310 step 2b: % vouchers became coupons', n;
 
   UPDATE public.vouchers SET needs_check = true
    WHERE percent_off IS NOT NULL AND expiry_date >= v_today AND NOT needs_check;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 2c: % still-valid coupons need a check', n;
+  RAISE NOTICE '310 step 2c: % still-valid coupons need a check', n;
 
   -- 3. Free value vouchers stored at 0 get their value back.
   CREATE TEMP TABLE m291_free ON COMMIT DROP AS
@@ -839,13 +839,13 @@ BEGIN
   UPDATE public.vouchers v SET total_amount_issued = f.value
     FROM m291_free f WHERE f.id = v.id AND f.value > 0;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 3a: % free vouchers given back their value (NPR %)', n,
+  RAISE NOTICE '310 step 3a: % free vouchers given back their value (NPR %)', n,
     (SELECT COALESCE(SUM(value), 0) FROM m291_free WHERE value > 0);
 
   UPDATE public.vouchers v SET needs_check = true
     FROM m291_free f WHERE f.id = v.id AND f.value > 0 AND f.expiry_date >= v_today;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 3b: % of them are still valid and need a check', n;
+  RAISE NOTICE '310 step 3b: % of them are still valid and need a check', n;
 
   -- 4. Discounted vouchers with value left get their full value back (amount_paid already holds the old total).
   UPDATE public.vouchers v SET total_amount_issued = v.actual_price
@@ -853,7 +853,7 @@ BEGIN
      AND v.total_amount_issued < v.actual_price
      AND v.total_amount_issued - COALESCE((SELECT SUM(c.amount_claimed) FROM public.voucher_claims c WHERE c.voucher_id = v.id), 0) > 0;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 4: % discounted vouchers given back their full value', n;
+  RAISE NOTICE '310 step 4: % discounted vouchers given back their full value', n;
 
   -- 5. Types that are always given away.
   UPDATE public.voucher_types t SET default_issue_kind = 'free'
@@ -861,11 +861,11 @@ BEGIN
      AND (SELECT count(*) FROM public.vouchers v WHERE v.voucher_type_id = t.id) >= 3
      AND NOT EXISTS (SELECT 1 FROM public.vouchers v WHERE v.voucher_type_id = t.id AND v.issue_kind <> 'free');
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '291 step 5: % voucher types are usually given free', n;
+  RAISE NOTICE '310 step 5: % voucher types are usually given free', n;
 END $$;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('291', 'voucher-value-free-history')
+VALUES ('310', 'voucher-value-free-history')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

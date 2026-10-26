@@ -1,5 +1,5 @@
--- Migration 292: products + inventory (variants, one stock ledger, suppliers, import)
--- Idempotent: safe to re-run in either database. (292 is the local number; the lead renumbers it before the PR.)
+-- Migration 311: products + inventory (variants, one stock ledger, suppliers, import)
+-- Idempotent: safe to re-run in either database. (311 is the local number; the lead renumbers it before the PR.)
 --
 -- WHY
 --   Until now a product was name / price / category / track_stock. Stock moved through two tables (product_sales,
@@ -66,7 +66,7 @@
 --   Restore sell_product / transfer_product_stock / products_with_stock from migration-217/216/219 and
 --   DROP TABLE product_stock_movements, product_variant_costs, product_variants, suppliers CASCADE;
 --   ALTER TABLE product_branch_stock DROP COLUMN variant_id (then re-add the PK on (product_id, branch_id));
---   DELETE FROM public.schema_migrations WHERE version = '292'.
+--   DELETE FROM public.schema_migrations WHERE version = '311'.
 
 BEGIN;
 
@@ -134,7 +134,7 @@ ALTER TABLE public.products
   ADD COLUMN IF NOT EXISTS pro_use boolean NOT NULL DEFAULT false,         -- used in work, never sold
   ADD COLUMN IF NOT EXISTS sell_at_checkout boolean NOT NULL DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_low boolean NOT NULL DEFAULT true;
-COMMENT ON COLUMN public.products.price_npr IS 'LEGACY (migration-292): the real price is product_variants.retail_price. Kept = cheapest active size by save_product.';
+COMMENT ON COLUMN public.products.price_npr IS 'LEGACY (migration-311): the real price is product_variants.retail_price. Kept = cheapest active size by save_product.';
 CREATE INDEX IF NOT EXISTS idx_products_supplier ON public.products (supplier_id) WHERE supplier_id IS NOT NULL;
 
 -- A pro-use product has no retail price, so 0 must be allowed.
@@ -218,14 +218,14 @@ BEGIN
     FROM public.products p
    WHERE NOT EXISTS (SELECT 1 FROM public.product_variants v WHERE v.product_id = p.id);
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '292 backfill: % variants created for existing products', n;
+  RAISE NOTICE '311 backfill: % variants created for existing products', n;
 
   INSERT INTO public.product_variant_costs (variant_id, org_id, cost_price, avg_cost)
   SELECT v.id, v.org_id, NULL, 0
     FROM public.product_variants v
    WHERE NOT EXISTS (SELECT 1 FROM public.product_variant_costs c WHERE c.variant_id = v.id);
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '292 backfill: % cost rows created', n;
+  RAISE NOTICE '311 backfill: % cost rows created', n;
 END $$;
 
 -- ============================================================
@@ -330,7 +330,7 @@ DO $$
 DECLARE n_events integer; n_recount integer;
 BEGIN
   IF EXISTS (SELECT 1 FROM public.product_stock_movements) THEN
-    RAISE NOTICE '292 ledger backfill: skipped (ledger already has rows)';
+    RAISE NOTICE '311 ledger backfill: skipped (ledger already has rows)';
     RETURN;
   END IF;
 
@@ -380,7 +380,7 @@ BEGIN
            ON h.variant_id = s.variant_id AND h.branch_id = s.branch_id
    WHERE s.quantity <> COALESCE(h.total, 0);
   GET DIAGNOSTICS n_recount = ROW_COUNT;
-  RAISE NOTICE '292 ledger backfill: % movements from history, % reconciliation recounts added', n_events, n_recount;
+  RAISE NOTICE '311 ledger backfill: % movements from history, % reconciliation recounts added', n_events, n_recount;
 END $$;
 
 -- ============================================================
@@ -1039,7 +1039,7 @@ GRANT EXECUTE ON FUNCTION public.product_sales_summary(uuid, uuid) TO authentica
 DROP VIEW IF EXISTS public.products_with_stock;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('292', 'products-inventory')
+VALUES ('311', 'products-inventory')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

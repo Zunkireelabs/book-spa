@@ -3,6 +3,7 @@ import Icon from '../../../components/AppIcon';
 import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
 import Button from '../../../components/ui/Button';
+import CountryCodeSelect, { parsePhone } from '../../../components/ui/CountryCodeSelect';
 import CustomerPhotosTab from './CustomerPhotosTab';
 import { updateCustomerContact, updateCustomerProfileDetails } from '../../../services/api';
 
@@ -41,9 +42,11 @@ const SUB_TABS = [
 // every other gallery upload in this app.
 const CustomerEditModal = ({ customer, onClose, onSaved }) => {
   const [subTab, setSubTab] = useState('details');
+  const initialPhone = parsePhone(customer.phone);
   const [form, setForm] = useState({
     fullName: customer.fullName || '',
-    phone: customer.phone || '',
+    phone: initialPhone.national,
+    countryCode: initialPhone.dial,
     email: customer.email || '',
     clientSource: customer.clientSource || '',
     referredBy: customer.referredBy || '',
@@ -77,7 +80,7 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
     setError(null);
 
     const trimmedName = form.fullName.trim();
-    const trimmedPhone = form.phone.trim();
+    const trimmedPhone = form.phone.trim() ? `${form.countryCode}${form.phone.trim().replace(/\D/g, '')}` : '';
     const trimmedEmail = form.email.trim();
 
     const [contactResult, detailsResult] = await Promise.all([
@@ -157,7 +160,19 @@ const CustomerEditModal = ({ customer, onClose, onSaved }) => {
                 </div>
                 <div className="space-y-1">
                   <label className="block font-body font-body-medium text-sm text-text-primary">Telephone</label>
-                  <Input value={form.phone} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="98XXXXXXXX" />
+                  <div className="flex">
+                    <CountryCodeSelect
+                      value={form.countryCode}
+                      onChange={(dial) => setForm(f => ({ ...f, countryCode: dial }))}
+                    />
+                    <input
+                      type="tel"
+                      value={form.phone}
+                      onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+                      placeholder="98XXXXXXXX"
+                      className="flex-1 min-w-0 h-10 px-3 text-sm border border-border rounded-r-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="block font-body font-body-medium text-sm text-text-primary">Email</label>

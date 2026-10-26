@@ -8,7 +8,7 @@ import CountryCodeSelect, { parsePhone } from '../../../../components/ui/Country
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useDayBlocks } from '../../../../hooks/useBlockOverlap';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../utils/blockOverlap';
-import { getCustomerOutstandingBalance } from '../../../../services/api';
+import { getCustomerOutstandingBalance, fetchServiceComboComponents } from '../../../../services/api';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import { todayStr } from './calendarDates';
 
@@ -30,6 +30,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // the companion's name/phone. Not used by the Group flow.
   const [therapistRoomOverrides, setTherapistRoomOverrides] = useState({});
   const [companionName, setCompanionName] = useState('');
+  // Combo service: each component carries default_same_staff / default_same_room — true auto-uses the therapist/room picked
+  // below, false means staff pick a separate one for that component here.
+  const [comboComponents, setComboComponents] = useState([]);
+  const [comboComponentsLoading, setComboComponentsLoading] = useState(false);
+  const [comboTherapistOverrides, setComboTherapistOverrides] = useState({}); // serviceId -> therapistId
+  const [comboRoomOverrides, setComboRoomOverrides] = useState({}); // serviceId -> roomId
   const [companionPhone, setCompanionPhone] = useState('');
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
@@ -150,6 +156,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setTherapistRoomOverrides({});
     setCompanionName('');
     setCompanionPhone('');
+    setComboComponents([]);
+    setComboTherapistOverrides({});
+    setComboRoomOverrides({});
     setBookingDate(slotInfo?.day || '');
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
@@ -182,6 +191,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   const selectedService = (services || []).find((s) => s.id === serviceId);
   // Gate the section AND the submitted payload on the same condition, so switching away from a couple service never
   // ships hidden companion data.
+  const isComboService = !!selectedService?.is_combo;
+  // True once every component needs its own staff: the generic Therapist picker would go unused, so it is hidden.
+  const comboAllDifferentStaff = isComboService && comboComponents.length > 0 && comboComponents.every((c) => !c.defaultSameStaff);
+  // Self-service amenity (sauna/steam/locker): no therapist picker; staff just allocate a room if one applies.
+  const serviceRequiresTherapist = selectedService ? selectedService.requires_therapist !== false : true;
   const isCoupleBooking = bookingMode === 'individual' && selectedTherapistIds.length > 1 && !!selectedService?.is_couple;
   // Group booking creates one independent booking per person, so a couple service would bill the combined price to each.
   const groupServices = (services || []).filter((s) => !s.is_couple);
@@ -313,6 +327,20 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     return opts;
   }, [branchHours, bookingTime]);
 
+  // Load the selected combo's component list (Individual mode only: group/couple services can't be combos).
+  useEffect(() => {
+    if (!isComboService || !serviceId || bookingMode !== 'individual') { setComboComponents([]); return undefined; }
+    let cancelled = false;
+    setComboComponentsLoading(true);
+    (async () => {
+      const { data } = await fetchServiceComboComponents(serviceId);
+      if (cancelled) return;
+      setComboComponents(data || []);
+      setComboComponentsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [isComboService, serviceId, bookingMode]);
+
   const format12h = (time24) => {
     const [h, m] = time24.split(':').map(Number);
     const suffix = h >= 12 ? 'pm' : 'am';
@@ -439,6 +467,16 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             : undefined,
           companionName: isCoupleBooking ? (companionName.trim() || null) : undefined,
           companionPhone: isCoupleBooking ? (companionPhone.trim() || null) : undefined,
+          // Combo bundle: each component's own service/timing/staff, so the caller can insert booking_combo_items.
+          comboAssignments: isComboService && comboComponents.length > 0
+            ? comboComponents.map((c) => ({
+                serviceId: c.serviceId,
+                componentId: c.componentId,
+                defaultTiming: c.defaultTiming,
+                therapistId: c.defaultSameStaff ? (selectedTherapistIds[0] || null) : (comboTherapistOverrides[c.serviceId] || null),
+                roomId: c.defaultSameRoom !== false ? (roomId && roomId !== 'none' ? roomId : null) : (comboRoomOverrides[c.serviceId] || null),
+              }))
+            : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -780,7 +818,8 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             )}
 
-            {/* Therapist(s) */}
+            {/* Therapist(s): hidden for a combo whose every component needs its own staff, and for self-service amenities */}
+            {!comboAllDifferentStaff && serviceRequiresTherapist && (
             <div>
               <label className="block font-body font-body-medium text-[13px] text-text-primary mb-1.5">
                 Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
@@ -843,6 +882,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 </div>
               </div>
             </div>
+            )}
 
             {/* Couple — separate rooms & companion; only for a couple service with 2+ therapists */}
             {isCoupleBooking && (
@@ -872,6 +912,95 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
                   <input type="tel" value={companionPhone} onChange={(e) => setCompanionPhone(e.target.value)} placeholder="Companion's phone (optional)"
                     className="w-full h-10 px-3 text-[13px] border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                </div>
+              </div>
+            )}
+
+            {/* Combo schedule & staff: when each component runs (same offset algorithm as createComboBookingItems) and who does it */}
+            {isComboService && (
+              <div className="rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border">
+                  <div className="flex items-center gap-2">
+                    <Icon name="Layers" size={14} className="text-primary" />
+                    <span className="font-body font-body-medium text-[13px] text-text-primary">Combo schedule &amp; staff</span>
+                  </div>
+                  {comboComponents.length > 0 && (
+                    <span className="text-[11px] text-text-secondary bg-surface border border-border rounded-full px-2 py-0.5">{comboComponents.length} services</span>
+                  )}
+                </div>
+                <div className="px-3.5 py-3">
+                  {comboComponentsLoading ? (
+                    <p className="text-xs text-text-secondary py-1">Loading combo services...</p>
+                  ) : comboComponents.length === 0 ? (
+                    <p className="text-xs text-text-secondary py-1">No components configured for this combo.</p>
+                  ) : (() => {
+                    // "concurrent" starts alongside the previous component; "sequential" once the running total has finished.
+                    let cursor = 0;
+                    let previousStart = 0;
+                    const [bh, bm] = (bookingTime || '00:00').split(':').map(Number);
+                    const baseMinutes = (Number.isFinite(bh) ? bh : 0) * 60 + (Number.isFinite(bm) ? bm : 0);
+                    const toClock = (offsetMin) => {
+                      const total = ((baseMinutes + offsetMin) % 1440 + 1440) % 1440;
+                      return format12h(`${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`);
+                    };
+                    const schedule = comboComponents.map((c) => {
+                      const duration = c.service?.durationMinutes || 0;
+                      const start = c.defaultTiming === 'concurrent' ? previousStart : cursor;
+                      const end = start + duration;
+                      cursor = Math.max(cursor, end);
+                      previousStart = start;
+                      return { ...c, duration, start, end };
+                    });
+                    return (
+                      <div className="relative space-y-3.5">
+                        {schedule.map((c, index) => (
+                          <div key={c.componentId} className="flex items-start gap-3">
+                            <div className="flex flex-col items-center flex-shrink-0">
+                              <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center font-data text-[11px]">{index + 1}</div>
+                              {index < schedule.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border mt-1" />}
+                            </div>
+                            <div className="flex-1 min-w-0 flex items-start justify-between gap-3 pb-0.5">
+                              <div className="min-w-0">
+                                <p className="font-body font-body-medium text-[13px] text-text-primary leading-tight">{c.service?.name || 'Service'}</p>
+                                <p className="font-data text-xs text-text-secondary mt-0.5">{toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span></p>
+                              </div>
+                              <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+                                {c.defaultSameStaff ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] text-text-secondary bg-background border border-border rounded-full px-2 py-0.5">
+                                    <Icon name="Link" size={10} />
+                                    Same staff
+                                  </span>
+                                ) : (
+                                  <CustomSelect
+                                    value={comboTherapistOverrides[c.serviceId] || ''}
+                                    onChange={(val) => setComboTherapistOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
+                                    options={(therapists || []).map(t => ({ value: t.id, label: t.full_name || t.name }))}
+                                    placeholder="Select staff"
+                                    size="sm"
+                                    searchable
+                                    menuWidth="16rem"
+                                    menuAlign="right"
+                                  />
+                                )}
+                                {c.defaultSameRoom === false && (
+                                  <CustomSelect
+                                    value={comboRoomOverrides[c.serviceId] || ''}
+                                    onChange={(val) => setComboRoomOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
+                                    options={(rooms || []).map(r => ({ value: r.id, label: r.name }))}
+                                    placeholder="Select room"
+                                    size="sm"
+                                    searchable
+                                    menuWidth="16rem"
+                                    menuAlign="right"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

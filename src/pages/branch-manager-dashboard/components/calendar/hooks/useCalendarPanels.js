@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   fetchServices,
   createBooking,
+  createComboBookingItems,
   rescheduleBookingAsNewBooking,
   fetchBookingById,
   cancelScheduledTransfer,
@@ -473,6 +474,24 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
     }
+
+    if (formData.comboAssignments?.length > 0 && result.data?.id) {
+      const comboResult = await createComboBookingItems({
+        bookingId: result.data.id,
+        branchId,
+        date,
+        startTime,
+        roomId: formData.roomId && formData.roomId !== 'none' ? formData.roomId : null,
+        components: formData.comboAssignments,
+      });
+      if (comboResult.error) {
+        showToast(`Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, 'error');
+        setQuickCreateSlot(null);
+        refreshCalendar();
+        return null;
+      }
+    }
+
     if (result.data?._therapistAssignmentWarning) {
       showToast(`Booking created, but: ${result.data._therapistAssignmentWarning}`, 'error');
     } else {

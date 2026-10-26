@@ -25,7 +25,7 @@ const digitsOf = (v) => String(v || '').replace(/\D/g, '');
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 const SPLIT = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
 const DEFAULT_CHIP = '90';
-const MAX_SOLD_DISCOUNT = 99; // a sale must collect something (migration-291); 100% off is "Given free"
+const MAX_SOLD_DISCOUNT = 99; // a sale must collect something (migration-310); 100% off is "Given free"
 const chipCls = (on) => `h-8 px-3 rounded-full border text-[13px] font-medium tabular-nums ${on ? 'border-primary bg-[#EEF3EC] text-primary shadow-[0_0_0_2px_rgba(45,90,39,.10)]' : 'border-border bg-white text-text-primary hover:bg-[#FAFAF9]'}`;
 const isCouponType = (t) => t?.percent_off != null;
 

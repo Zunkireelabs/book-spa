@@ -5,9 +5,10 @@ import { addDays, addMonths } from './calendarDates';
 
 function formatDateTitle(dateStr, viewMode) {
   const d = new Date(dateStr + 'T00:00:00');
-  if (viewMode === '4day') {
+  if (viewMode === 'month') return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  if (viewMode === '4day' || viewMode === 'week') {
     const end = new Date(d);
-    end.setDate(end.getDate() + 3);
+    end.setDate(end.getDate() + (viewMode === 'week' ? 6 : 3));
     const startStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
     const endStr = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     return `${startStr} – ${endStr}`;
@@ -19,6 +20,15 @@ function formatDateTitle(dateStr, viewMode) {
     year: 'numeric',
   }).replace(',', '');
 }
+
+const STEP_NOUN = { day: 'day', '4day': '4 days', week: 'week', month: 'month' };
+
+const VIEW_MODE_OPTIONS = [
+  { key: 'day', label: 'Day' },
+  { key: '4day', label: '4 Day' },
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+];
 
 const JUMP_OPTIONS = [
   { label: '1 week', unit: 'week', amount: 1 },
@@ -44,7 +54,25 @@ const CalendarToolbar = ({
   tipOpen, setTipOpen,
   showServiceOnly, setShowServiceOnly, selectedPositions, setSelectedPositions, calendarPositionOptions,
   onNewBooking, branchId,
+  userRole, onPrint, onEditRoster, onBlockWholeCalendar, onCalendarSettings, onClosedDates,
+  zoomScale, onZoomChange, minZoom, maxZoom, use24h, setUse24h, hideSensitive, setHideSensitive,
 }) => {
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const settingsMenuRef = useRef(null);
+  useEffect(() => {
+    if (!settingsMenuOpen) return undefined;
+    const handle = (e) => { if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target)) setSettingsMenuOpen(false); };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [settingsMenuOpen]);
+  const ZOOM_STEP = 0.2;
+  const menuItem = (icon, label, onClick) => (
+    <button type="button" onClick={() => { setSettingsMenuOpen(false); onClick?.(); }}
+      className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast">
+      <Icon name={icon} size={14} className="text-text-secondary" />
+      <span>{label}</span>
+    </button>
+  );
   const [positionDropdownOpen, setPositionDropdownOpen] = useState(false);
   const positionDropdownRef = useRef(null);
   const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
@@ -190,7 +218,7 @@ const CalendarToolbar = ({
           onClick={goPrev}
           className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
           aria-label="Previous"
-          title={viewMode === '4day' ? 'Previous 4 days (J or ←)' : 'Previous day (J or ←)'}
+          title={`Previous ${STEP_NOUN[viewMode] || 'day'} (J or ←)`}
           aria-keyshortcuts="j ArrowLeft"
         >
           <Icon name="ChevronLeft" size={16} className="text-text-secondary" />
@@ -229,7 +257,7 @@ const CalendarToolbar = ({
           onClick={goNext}
           className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa hover:bg-background spa-transition-fast"
           aria-label="Next"
-          title={viewMode === '4day' ? 'Next 4 days (K or →)' : 'Next day (K or →)'}
+          title={`Next ${STEP_NOUN[viewMode] || 'day'} (K or →)`}
           aria-keyshortcuts="k ArrowRight"
         >
           <Icon name="ChevronRight" size={16} className="text-text-secondary" />
@@ -277,8 +305,8 @@ const CalendarToolbar = ({
               <dl className="space-y-1.5">
                 {[
                   ['T', 'Today'],
-                  ['J / ←', viewMode === '4day' ? 'Previous 4 days' : 'Previous day'],
-                  ['K / →', viewMode === '4day' ? 'Next 4 days' : 'Next day'],
+                  ['J / ←', `Previous ${STEP_NOUN[viewMode] || 'day'}`],
+                  ['K / →', `Next ${STEP_NOUN[viewMode] || 'day'}`],
                   ['D', 'Day view'],
                   ['F', '4-Day view'],
                   ['N', 'New booking'],
@@ -356,15 +384,12 @@ const CalendarToolbar = ({
           </div>
         )}
         <div className="flex items-center border border-border rounded-spa bg-background p-0.5 gap-0.5 h-[var(--control-h)]">
-          {[
-            { key: 'day', label: 'Day' },
-            { key: '4day', label: '4 Day' },
-          ].map(v => (
+          {VIEW_MODE_OPTIONS.map(v => (
             <button
               key={v.key}
               onClick={() => setViewMode(v.key)}
-              title={v.key === 'day' ? 'Day view (D)' : '4-Day view (F)'}
-              aria-keyshortcuts={v.key === 'day' ? 'd' : 'f'}
+              title={v.key === 'day' ? 'Day view (D)' : v.key === '4day' ? '4-Day view (F)' : `${v.label} view`}
+              aria-keyshortcuts={v.key === 'day' ? 'd' : v.key === '4day' ? 'f' : undefined}
               className={`px-3 h-full text-[13px] rounded-[4px] font-body font-body-medium spa-transition-fast whitespace-nowrap ${
                 viewMode === v.key
                   ? 'bg-primary text-white'
@@ -375,6 +400,64 @@ const CalendarToolbar = ({
             </button>
           ))}
         </div>
+        {setUse24h && (
+          <div className="relative" ref={settingsMenuRef}>
+            <button
+              type="button"
+              onClick={() => setSettingsMenuOpen(o => !o)}
+              title="Calendar options"
+              aria-label="Calendar options"
+              aria-expanded={settingsMenuOpen}
+              className="h-[var(--control-h)] w-[var(--control-h)] flex items-center justify-center border border-border rounded-spa bg-surface text-text-secondary hover:bg-background hover:text-text-primary spa-transition-fast"
+            >
+              <Icon name="MoreVertical" size={16} />
+            </button>
+            {settingsMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 w-60 bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown py-1">
+                {menuItem('Printer', 'Print this calendar view', onPrint)}
+                {['manager', 'admin'].includes(userRole) && onEditRoster && menuItem('Users', `Edit ${(staffLabel || 'staff').toLowerCase()} roster`, onEditRoster)}
+                {!!onBlockWholeCalendar && menuItem('Ban', 'Block time (whole calendar)', onBlockWholeCalendar)}
+                {userRole === 'admin' && menuItem('Settings', 'Calendar settings', onCalendarSettings)}
+                {userRole === 'admin' && menuItem('Lock', 'Closed dates', onClosedDates)}
+                <div className="my-1 border-t border-border" />
+                {viewMode !== 'month' && (
+                  <div className="w-full flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="text-sm text-text-primary">Zoom</span>
+                    <div className="flex items-center border border-border rounded-spa bg-background overflow-hidden">
+                      <button type="button" onClick={() => onZoomChange(zoomScale - ZOOM_STEP)} disabled={zoomScale <= minZoom} title="Zoom out"
+                        className="flex items-center justify-center w-7 h-7 text-text-secondary hover:bg-surface hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast">
+                        <Icon name="ZoomOut" size={13} />
+                      </button>
+                      <span className="px-1.5 h-7 flex items-center text-[11px] font-data text-text-secondary border-x border-border min-w-[38px] justify-center">{Math.round(zoomScale * 100)}%</span>
+                      <button type="button" onClick={() => onZoomChange(zoomScale + ZOOM_STEP)} disabled={zoomScale >= maxZoom} title="Zoom in"
+                        className="flex items-center justify-center w-7 h-7 text-text-secondary hover:bg-surface hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast">
+                        <Icon name="ZoomIn" size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="w-full flex items-center justify-between gap-2 px-3 py-2">
+                  <span className="text-sm text-text-primary">Time format</span>
+                  <div className="flex items-center p-0.5 bg-background border border-border rounded-spa">
+                    {['12h', '24h'].map(val => (
+                      <button key={val} type="button" onClick={() => setUse24h(val === '24h')}
+                        className={`px-2 py-0.5 text-xs font-body font-body-medium rounded spa-transition-fast ${(use24h ? '24h' : '12h') === val ? 'bg-surface text-primary shadow-spa-resting' : 'text-text-secondary hover:text-text-primary'}`}>
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="w-full flex items-center justify-between gap-2 px-3 py-2">
+                  <span className="text-sm text-text-primary">Hide client names and prices</span>
+                  <button type="button" role="switch" aria-checked={hideSensitive} onClick={() => setHideSensitive(v => !v)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full spa-transition-fast ${hideSensitive ? 'bg-success' : 'bg-border'}`}>
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white spa-transition-fast transform ${hideSensitive ? 'translate-x-4' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {onNewBooking && (
         <button
           type="button"

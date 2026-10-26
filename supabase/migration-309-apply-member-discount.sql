@@ -1,5 +1,5 @@
--- Migration 290: apply_member_discount(): a membership tier's discount, applied at checkout
--- Idempotent: safe to re-run in either database. (290 is the local number; check the next free one on origin/stage before the PR.)
+-- Migration 309: apply_member_discount(): a membership tier's discount, applied at checkout
+-- Idempotent: safe to re-run in either database. (309 is the local number; check the next free one on origin/stage before the PR.)
 --
 -- WHY
 --   membership_tiers.discount_rules (e.g. Premium Club {"spa":45,"salon":25,"body_scrub":30,"package":10}) were never applied
@@ -16,7 +16,7 @@
 --
 --   apply_member_discount(p_booking_id, p_remove DEFAULT false), SECURITY DEFINER, EXECUTE for authenticated only.
 --   Caller: staff / manager / admin of the booking's org, with access to its branch (same rule as the bookings UPDATE policy,
---   migration-287). Booking: not locked, not Cancelled / No Show, not paid.
+--   migration-306). Booking: not locked, not Cancelled / No Show, not paid.
 --   * apply (p_remove = false): the customer's latest membership must be active at Nepal today (money in the wallet, activated
 --     or fully deposited, not past its expiry); the service's category, normalised like the JS (lower, trim, spaces/dashes → _),
 --     must have a 1–100 rule ('package' is for vouchers and never matches). Sets discount_amount = round(base × pct / 100, 2),
@@ -36,7 +36,7 @@
 -- ROLLBACK
 --   DROP FUNCTION IF EXISTS public.apply_member_discount(uuid, boolean);
 --   ALTER TABLE public.bookings DROP COLUMN IF EXISTS member_discount;
---   DELETE FROM public.schema_migrations WHERE version = '290';
+--   DELETE FROM public.schema_migrations WHERE version = '309';
 
 BEGIN;
 
@@ -88,7 +88,7 @@ BEGIN
     RAISE EXCEPTION 'BOOKING_NOT_FOUND: booking % not found.', p_booking_id USING ERRCODE = 'P0002';
   END IF;
 
-  -- Same access as the bookings UPDATE policy (migration-287): the caller's org, and a branch they work at (admins: any branch of the org).
+  -- Same access as the bookings UPDATE policy (migration-306): the caller's org, and a branch they work at (admins: any branch of the org).
   IF v_b.org_id IS DISTINCT FROM v_org OR NOT (v_b.branch_id = ANY (v_branches) OR v_role = 'admin') THEN
     RAISE EXCEPTION 'MEMBER_DISCOUNT_FORBIDDEN: this booking is not in your branch.' USING ERRCODE = '42501';
   END IF;
@@ -206,7 +206,7 @@ REVOKE ALL ON FUNCTION public.apply_member_discount(uuid, boolean) FROM anon;
 GRANT EXECUTE ON FUNCTION public.apply_member_discount(uuid, boolean) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('290', 'apply-member-discount')
+VALUES ('309', 'apply-member-discount')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

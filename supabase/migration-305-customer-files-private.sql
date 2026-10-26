@@ -1,4 +1,4 @@
--- Migration 286: customer photos/documents move to a private org+branch-scoped bucket; 280's table policies org-scoped
+-- Migration 305: customer photos/documents move to a private org+branch-scoped bucket; 280's table policies org-scoped
 -- Idempotent: safe to re-run in either database. Must follow migration-280 (it alters 280's tables and supersedes its policies).
 -- Applied: local only (feat/ui-port-from-clinicmd)
 --
@@ -21,7 +21,7 @@
 --   empty the bucket through the Storage API, then DELETE FROM storage.buckets WHERE id = 'customer-files';
 --   DROP POLICY "<table> org read" / "<table> org insert" / "<table> org delete" on both tables and re-run 280's six CREATE POLICY;
 --   drop customer_photos_has_file / customer_documents_has_file; restore NOT NULL on photo_url / file_url only if no row has a
---   NULL url; drop the storage_path columns; DELETE FROM public.schema_migrations WHERE version = '286'.
+--   NULL url; drop the storage_path columns; DELETE FROM public.schema_migrations WHERE version = '305'.
 
 BEGIN;
 
@@ -104,7 +104,7 @@ CREATE POLICY "customer-files delete" ON storage.objects FOR DELETE TO authentic
        OR ((SELECT get_user_role()) = 'admin' AND EXISTS (SELECT 1 FROM public.branches b WHERE b.id::text = (storage.foldername(objects.name))[2] AND b.org_id = (SELECT get_user_org_id())))));
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('286', 'customer-files-private')
+VALUES ('305', 'customer-files-private')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

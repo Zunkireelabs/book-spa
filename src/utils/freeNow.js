@@ -176,7 +176,7 @@ export function suggestTherapist(booking, therapists, ctx, { eligibility = new M
 }
 
 // ── Highlight + "Needs you now" ─────────────────────────────────────────────────────────────────────────────────────────
-/** The ONE place that decides "nobody has opened this online booking yet" (team-level, migration-282): online (created_by IS NULL), not acknowledged, still live. */
+/** The ONE place that decides "nobody has opened this online booking yet" (team-level, migration-301): online (created_by IS NULL), not acknowledged, still live. */
 export const isNewOnline = (b) => b.createdBy == null && !b.acknowledgedAt && !['cancelled', 'no show', 'completed'].includes(dbStatus(b));
 /** Row highlight (dot, bold name, tint). Kept as a function of the booking alone — a personal unread notification is no longer a trigger. */
 export const isUnseen = (b) => isNewOnline(b);

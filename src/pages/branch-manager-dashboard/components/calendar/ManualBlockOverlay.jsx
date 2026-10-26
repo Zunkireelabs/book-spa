@@ -2,14 +2,14 @@ import React from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
-import { to12h } from './calendarDates';
+import { formatClockTime } from './timeFormat';
 
 // A manual-block occurrence's overlay: calm neutral fill with subtle diagonal stripes (NOT amber —
 // amber is the Pending status colour). Draggable to reschedule (same DndContext/sensors as bookings),
 // with a delete × and a bottom-edge resize handle layered on top. The inner controls stop
 // `pointerdown` propagation because dnd-kit's drag activation listens on it specifically.
 // Own component (not inline in a .map()) because useDraggable is a hook.
-function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick }) {
+function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onResizeStart, onClick, use24h = false }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     // colId disambiguates a whole-branch block, which renders one instance per column.
     id: `manual-block-${range.blockId}-${range.day}-${range.colId}`,
@@ -47,7 +47,7 @@ function ManualBlockOverlay({ range, blockTop, blockHeight, onDeleteClick, onRes
       </div>
       {showTime && (
         <div className="font-body text-[11px] leading-tight text-text-tertiary truncate">
-          {to12h(range.fromTime)}–{to12h(range.toTime)}
+          {formatClockTime(range.fromTime, use24h)}–{formatClockTime(range.toTime, use24h)}
         </div>
       )}
 

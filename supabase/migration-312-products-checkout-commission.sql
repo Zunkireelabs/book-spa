@@ -1,5 +1,5 @@
--- Migration 293: products in booking checkout + product commission
--- Idempotent: safe to re-run in either database. (293 is the local number; the lead renumbers it before the PR.)
+-- Migration 312: products in booking checkout + product commission
+-- Idempotent: safe to re-run in either database. (312 is the local number; the lead renumbers it before the PR.)
 --
 -- WHY
 --   Products could only be sold from the Products page as a stand-alone sale (V25), never on the bill, and nobody earned a
@@ -19,7 +19,7 @@
 --
 --   RPCs (SECURITY DEFINER, search_path public, EXECUTE for authenticated only; role / org / branch checked inside):
 --     sell_product v3                    adds p_sold_by_therapist_id, p_booking_id, p_payments (per-method split). Refuses a closed day.
---                                        The v2 signature is dropped (same deploy-together rule as 292).
+--                                        The v2 signature is dropped (same deploy-together rule as 311).
 --     checkout_booking_with_products     ONE transaction: the product sales (server prices, stock, ledger, per-method payments) AND the
 --                                        treatment payment. Why a wrapper and not a bigger record_group_payment: the treatment part
 --                                        is delegated to record_group_payment untouched (membership / voucher / package maths, due
@@ -48,9 +48,9 @@
 --   * A sale that was refunded stays in product_sale_payments (history), like the ledger.
 --
 -- ROLLBACK (loses the commission settings and the per-method rows)
---   Restore sell_product from migration-292; DROP FUNCTION checkout_booking_with_products, _sell_product_line, _checkout_membership_deduct,
+--   Restore sell_product from migration-311; DROP FUNCTION checkout_booking_with_products, _sell_product_line, _checkout_membership_deduct,
 --   _inv_day_locked, _is_treatment_only_mode; DROP TABLE product_sale_payments; drop the columns above;
---   DELETE FROM public.schema_migrations WHERE version = '293'.
+--   DELETE FROM public.schema_migrations WHERE version = '312'.
 
 BEGIN;
 
@@ -118,13 +118,13 @@ DO $$
 DECLARE n integer;
 BEGIN
   IF EXISTS (SELECT 1 FROM public.product_sale_payments) THEN
-    RAISE NOTICE '293 backfill: skipped (product_sale_payments already has rows)';
+    RAISE NOTICE '312 backfill: skipped (product_sale_payments already has rows)';
     RETURN;
   END IF;
   INSERT INTO public.product_sale_payments (sale_id, org_id, payment_mode, amount, created_at)
   SELECT s.id, s.org_id, s.payment_mode, s.total_amount, s.created_at FROM public.product_sales s WHERE s.total_amount > 0;
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '293 backfill: % product_sale_payments rows created for existing sales (% sales have no total and get none)', n,
+  RAISE NOTICE '312 backfill: % product_sale_payments rows created for existing sales (% sales have no total and get none)', n,
     (SELECT count(*) FROM public.product_sales WHERE total_amount <= 0);
 END $$;
 
@@ -690,7 +690,7 @@ BEGIN
     -- construction, never more), so tenderTotal is exactly npr + residual —
     -- any rounding remainder is folded into the LAST session-package
     -- tender's row (handled per-row below), not into this running total.
-    -- FIX (migration-293): the residual belongs to SessionPackage tenders only. It used to be added even with none, which made
+    -- FIX (migration-312): the residual belongs to SessionPackage tenders only. It used to be added even with none, which made
     -- v_tender_total = the whole remaining balance and v_leftover always 0 (so a part payment reported amount_due 0 /
     -- fully_paid true and the due-holder check below never fired).
     v_tender_total := CASE WHEN v_session_package_count > 0
@@ -836,7 +836,7 @@ GRANT EXECUTE ON FUNCTION public.checkout_booking_with_products(uuid, jsonb, jso
 GRANT EXECUTE ON FUNCTION public.save_product(uuid, jsonb, jsonb, jsonb) TO authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('293', 'products-checkout-commission')
+VALUES ('312', 'products-checkout-commission')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

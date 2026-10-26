@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { DndContext, pointerWithin } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import BookingActionModal from '../../../../components/ui/BookingActionModal';
@@ -8,7 +9,9 @@ import EditBlockModal from './EditBlockModal';
 import BlockScopeDialog from './BlockScopeDialog';
 import TransferFromCalendarModal from './TransferFromCalendarModal';
 import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
-import CalendarGrid from './CalendarGrid';
+import CalendarGrid, { MIN_ZOOM, MAX_ZOOM, clampZoom } from './CalendarGrid';
+import MonthGridView from './MonthGridView';
+import PrintReportModal from './PrintReportModal';
 import CalendarToolbar from './CalendarToolbar';
 import DragPreviewOverlay from './DragPreviewOverlay';
 import ReassignConfirmDialog from './ReassignConfirmDialog';
@@ -22,12 +25,27 @@ import { useBookingActions } from './hooks/useBookingActions';
 import { isOverallBranch } from '../../../../services/api';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
 import { useAuth } from '../../../../contexts/AuthContext';
-import { todayStr, addDays, getStepDays } from './calendarDates';
+import { useOrg } from '../../../../contexts/OrgContext';
+import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
   const { profile } = useAuth();
+  const { orgSettings } = useOrg();
+  const navigate = useNavigate();
+  const { orgSlug } = useParams();
+  const userRole = profile?.role || 'staff';
+  // Calendar settings (admin: ⋮ → Calendar settings): visible hours, interval, full-day view
+  const hourFromSetting = (t, min, max) => {
+    if (!t || typeof t !== 'string') return undefined;
+    const h = parseInt(t.split(':')[0], 10);
+    return Number.isInteger(h) && h >= min && h <= max ? h : undefined;
+  };
+  const calendarStartHour = hourFromSetting(orgSettings?.calendar_start_time, 0, 23);
+  const calendarEndHour = hourFromSetting(orgSettings?.calendar_end_time, 1, 24);
+  const calendarIntervalMinutes = [15, 30, 60].includes(orgSettings?.calendar_interval_minutes) ? orgSettings.calendar_interval_minutes : 30;
+  const calendarShowFullDay = orgSettings?.calendar_show_full_day === true;
   // Industry-specific labels from auth context
   const industry = profile?.organizations?.industries;
   const staffLabel = industry?.staff_label || 'Therapist';
@@ -38,7 +56,34 @@ const OperationalCalendar = ({ branchId }) => {
 
   // View state
   const [currentDate, setCurrentDate] = useState(todayStr());
-  const [viewMode, setViewMode] = useState('day'); // day | 4day
+  const [viewMode, setViewMode] = useState('day'); // day | 4day | week | month
+  const [printReportOpen, setPrintReportOpen] = useState(false);
+
+  // Per-org, per-user client-side display preferences (never sent to the server): hide names/prices, 12h/24h, grid zoom.
+  const prefKey = (name) => (profile ? `bookspa_calendar_${name}_${profile.org_id}_${profile.id}` : null);
+  const readPref = (name, fallback) => { try { const k = prefKey(name); return k ? localStorage.getItem(k) : fallback; } catch { return fallback; } };
+  const writePref = (name, value) => { try { const k = prefKey(name); if (k) localStorage.setItem(k, value); } catch { /* ignore */ } };
+  const [hideSensitive, setHideSensitiveState] = useState(() => readPref('hide_sensitive', null) === '1');
+  const setHideSensitive = (updater) => setHideSensitiveState((prev) => {
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    writePref('hide_sensitive', next ? '1' : '0');
+    return next;
+  });
+  const [use24h, setUse24hState] = useState(() => readPref('use24h', null) === '1');
+  const setUse24h = (updater) => setUse24hState((prev) => {
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    writePref('use24h', next ? '1' : '0');
+    return next;
+  });
+  const [zoomScale, setZoomScaleState] = useState(() => {
+    const raw = parseFloat(readPref('zoom', null));
+    return Number.isFinite(raw) ? clampZoom(raw) : 1;
+  });
+  const setZoomScale = (updater) => setZoomScaleState((prev) => {
+    const next = clampZoom(typeof updater === 'function' ? updater(prev) : updater);
+    writePref('zoom', String(next));
+    return next;
+  });
   // Default to staff view if rooms are disabled
   const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
@@ -132,8 +177,8 @@ const OperationalCalendar = ({ branchId }) => {
 
   const overlapOccurrences = useMemo(() => [...(calendarData?.blockOccurrences || []), ...(calendarData?.transferOccurrences || [])], [calendarData]);
   const goToday = () => setCurrentDate(todayStr());
-  const goPrev = () => setCurrentDate(addDays(currentDate, -getStepDays(viewMode)));
-  const goNext = () => setCurrentDate(addDays(currentDate, getStepDays(viewMode)));
+  const goPrev = () => setCurrentDate(viewMode === 'month' ? addMonths(currentDate, -1) : addDays(currentDate, -getStepDays(viewMode)));
+  const goNext = () => setCurrentDate(viewMode === 'month' ? addMonths(currentDate, 1) : addDays(currentDate, getStepDays(viewMode)));
 
   useGoTodaySignal(goToday);
   useCalendarShortcuts({ goToday, goPrev, goNext, setViewMode, handleNewBooking, setTipOpen });
@@ -218,6 +263,20 @@ const OperationalCalendar = ({ branchId }) => {
             calendarPositionOptions={calendarPositionOptions}
             onNewBooking={isOverallBranch(branchId) ? undefined : handleNewBooking}
             branchId={branchId}
+            userRole={userRole}
+            onPrint={() => setPrintReportOpen(true)}
+            onEditRoster={isOverallBranch(branchId) ? undefined : () => navigate(`/${orgSlug}/dashboard?view=roster`)}
+            onBlockWholeCalendar={isOverallBranch(branchId) ? undefined : () => setAddBlockSlot({ day: currentDate, colType: 'location', colId: null, colName: 'Whole location' })}
+            onCalendarSettings={() => navigate(`/${orgSlug}/dashboard?view=calendar-settings`)}
+            onClosedDates={() => navigate(`/${orgSlug}/dashboard?view=closed-dates`)}
+            zoomScale={zoomScale}
+            onZoomChange={setZoomScale}
+            minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
+            use24h={use24h}
+            setUse24h={setUse24h}
+            hideSensitive={hideSensitive}
+            setHideSensitive={setHideSensitive}
           />
 
           {/* Main content area: Grid */}
@@ -225,6 +284,17 @@ const OperationalCalendar = ({ branchId }) => {
             {/* Calendar grid */}
             <div className="flex-1 min-w-0 overflow-x-auto md:overflow-clip">
               {calendarData ? (
+                viewMode === 'month' ? (
+                  <MonthGridView
+                    currentDate={currentDate}
+                    bookings={calendarData.bookings}
+                    branchHours={calendarData.branchHours}
+                    hideSensitive={hideSensitive}
+                    use24h={use24h}
+                    onDayClick={(date) => { setCurrentDate(date); setViewMode('day'); }}
+                    onBookingClick={handleBookingClick}
+                  />
+                ) : (
                 <CalendarGrid
                   therapists={filteredTherapists}
                   rooms={calendarData.rooms || []}
@@ -256,7 +326,16 @@ const OperationalCalendar = ({ branchId }) => {
                   onEditTransfer={transfersAvailable ? (col) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingTransferTherapist({ id: col.id, name: col.name }))) : undefined}
                   onCancelScheduledTransfer={transfersAvailable ? (col) => setTransferCancelRequest({ kind: 'scheduled', col }) : undefined}
                   onCancelActiveTransfer={transfersAvailable ? (col) => setTransferCancelRequest({ kind: 'active', col }) : undefined}
+                  hideSensitive={hideSensitive}
+                  startHour={calendarStartHour}
+                  endHour={calendarEndHour}
+                  showFullDay={calendarShowFullDay}
+                  intervalMinutes={calendarIntervalMinutes}
+                  use24h={use24h}
+                  zoomScale={zoomScale}
+                  onZoomScaleChange={setZoomScale}
                 />
+                )
               ) : (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
@@ -319,6 +398,15 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {printReportOpen && (
+        <PrintReportModal
+          date={currentDate}
+          bookings={calendarData?.bookings || []}
+          onClose={() => setPrintReportOpen(false)}
+          use24h={use24h}
+        />
       )}
 
       {/* Booking Action Modal */}

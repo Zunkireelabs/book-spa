@@ -11,7 +11,7 @@ import { fetchPendingApprovalCount } from 'services/api';
 import { useOptionalCommandPalette, SHORTCUT_LABEL } from 'components/CommandPalette/useCommandPalette';
 import { getNav, navPath, isNavItemActive } from 'navigation/navRegistry';
 
-const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange }) => {
+const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange, collapsed }) => {
   const location = useLocation();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile, signOut } = useAuth();
@@ -21,6 +21,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const palette = useOptionalCommandPalette();
   const openPalette = palette?.openPalette;
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // Lets a parent (e.g. Calendar's auto-collapse-for-width effect) push a collapsed
+  // state in, while the toggle button below still owns it day-to-day — undefined
+  // `collapsed` (every other call site) means this never fires, so manual-toggle-only
+  // behavior is unchanged everywhere else.
+  useEffect(() => {
+    if (collapsed !== undefined) setIsCollapsed(collapsed);
+  }, [collapsed]);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimeoutRef = useRef(null);

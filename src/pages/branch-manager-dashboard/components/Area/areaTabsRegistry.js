@@ -25,7 +25,10 @@ export const AREAS = [
     id: 'therapists',
     title: ({ staffLabelPlural }) => staffLabelPlural || 'Staff',
     description: () => 'Everyone who serves customers, and their positions.',
-    tabs: [{ view: 'therapists', label: ({ staffLabelPlural }) => staffLabelPlural || 'Staff', roles: STAFF_UP }],
+    tabs: [
+      { view: 'therapists', label: ({ staffLabelPlural }) => staffLabelPlural || 'Staff', roles: STAFF_UP },
+      { view: 'roster', label: 'Roster', roles: ['manager', 'admin'], overallHidden: true }, // weekly roster + day overrides (opens from Calendar ⋮ too)
+    ],
   },
   {
     id: 'attendance',

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 import { useFlashRow, rowTone, rowBar } from '../../../../components/ui/PanelFormKit';
-import ServiceFormPanel from './ServiceFormPanel';
 import { friendlyError } from '../../../../utils/friendlyError';
 import FilterBar from '../../../../components/ui/FilterBar';
 import {
@@ -11,20 +11,15 @@ import {
   fetchActiveCategories,
   toggleServiceActive,
   deleteService,
-  fetchTherapistsForManagement,
 } from '../../../../services/api';
-import { useBranch } from '../../../../contexts/BranchContext';
-import { useIndustry } from '../../../../hooks/useIndustry';
 
 const ServiceManagementPanel = () => {
-  const { branchId } = useBranch();
-  const { isBeauty } = useIndustry();
+  const navigate = useNavigate();
+  const { orgSlug } = useParams();
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [allTherapists, setAllTherapists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [panel, setPanel] = useState(null); // { service? } while the New / Edit panel is open
   const [confirmToggle, setConfirmToggle] = useState(null);
   const [toggling, setToggling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -80,17 +75,13 @@ const ServiceManagementPanel = () => {
     setLoading(false);
   }, []);
 
-  const loadTherapists = useCallback(async () => {
-    if (!branchId) return;
-    const result = await fetchTherapistsForManagement(branchId);
-    if (!result.error) setAllTherapists(result.data || []);
-  }, [branchId]);
-
   useEffect(() => {
     loadCategories();
     loadServices();
-    loadTherapists();
-  }, [loadCategories, loadServices, loadTherapists]);
+  }, [loadCategories, loadServices]);
+
+  const handleOpenCreate = () => navigate(`/${orgSlug}/services/new`);
+  const handleOpenEdit = (service) => navigate(`/${orgSlug}/services/${service.id}`);
 
   const handleToggle = async (service) => {
     if (service.is_active) {
@@ -155,7 +146,7 @@ const ServiceManagementPanel = () => {
             {services.length} service{services.length !== 1 ? 's' : ''} configured — price changes affect future bookings only
           </p>
         </div>
-        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={() => setPanel({})}>
+        <Button variant="primary" size="sm" iconName="Plus" iconSize={16} onClick={() => handleOpenCreate()}>
           Add Service
         </Button>
       </div>
@@ -223,14 +214,14 @@ const ServiceManagementPanel = () => {
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-text-secondary font-body text-sm">
                   {services.length === 0 ? (
-                    <>No services yet. <button type="button" onClick={() => setPanel({})} className="text-primary font-body-medium hover:underline">Add the first service</button></>
+                    <>No services yet. <button type="button" onClick={() => handleOpenCreate()} className="text-primary font-body-medium hover:underline">Add the first service</button></>
                   ) : 'No services match your filters.'}
                 </td>
               </tr>
             ) : (
               filteredServices.map((s) => (
-                <tr key={s.id} aria-selected={panel?.service?.id === s.id || undefined} className={`border-b border-border last:border-b-0 ${rowTone(panel?.service?.id === s.id, flashId === s.id)}`}>
-                  <td className={`px-4 py-3 font-body font-body-medium text-sm text-text-primary ${rowBar(panel?.service?.id === s.id || flashId === s.id)}`}>{s.name}</td>
+                <tr key={s.id} className={`border-b border-border last:border-b-0 ${rowTone(false, flashId === s.id)}`}>
+                  <td className={`px-4 py-3 font-body font-body-medium text-sm text-text-primary ${rowBar(flashId === s.id)}`}>{s.name}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary hidden lg:table-cell">{s.category || 'Spa'}</td>
                   <td className="px-4 py-3 font-body text-sm text-text-secondary">{s.duration_minutes} min</td>
                   <td className="px-4 py-3 font-data text-sm text-text-primary">
@@ -267,7 +258,7 @@ const ServiceManagementPanel = () => {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
                       <button
-                        onClick={() => setPanel({ service: s })}
+                        onClick={() => handleOpenEdit(s)}
                         className="p-1.5 rounded hover:bg-background spa-transition-fast text-text-secondary hover:text-text-primary"
                         title="Edit"
                       >
@@ -300,7 +291,7 @@ const ServiceManagementPanel = () => {
         </table>
       </div>
 
-      {/* Deactivate / delete: small centred confirms (create / edit are panels) */}
+      {/* Deactivate / delete: small centred confirms (create / edit open the service detail page) */}
       {confirmToggle && (
         <ConfirmDialog
           title="Deactivate service?"
@@ -325,18 +316,6 @@ const ServiceManagementPanel = () => {
         />
       )}
 
-      {panel && (
-        <ServiceFormPanel
-          service={panel.service}
-          categories={categories}
-          allTherapists={allTherapists}
-          branchId={branchId}
-          isBeauty={isBeauty}
-          onClose={() => setPanel(null)}
-          onPartial={loadServices}
-          onSaved={(id, isNew) => { setPanel(null); loadServices(); if (isNew && id) flash(id); }}
-        />
-      )}
     </div>
   );
 };

@@ -5,22 +5,15 @@ import Icon from '../../../../components/AppIcon';
 
 import { getBookingStatusColors, UNPAID_DOT_COLOR } from '../../../../utils/bookingStatusColors';
 import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
+import { formatClockTime } from './timeFormat';
 
-// Convert "HH:MM" or "HH:MM:SS" to 12h format
-function to12h(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const period = h >= 12 ? 'pm' : 'am';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')}${period}`;
-}
-
-// Compact 12h range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs
-function compactRange12h(startStr, endStr) {
+// Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
+function compactRange12h(startStr, endStr, use24h = false) {
   if (!startStr) return '';
-  const start = to12h(startStr);
+  const start = formatClockTime(startStr, use24h);
   if (!endStr) return start;
-  const end = to12h(endStr);
+  const end = formatClockTime(endStr, use24h);
+  if (use24h) return `${start}–${end}`;
   const sp = start.slice(-2);
   return sp === end.slice(-2) ? `${start.slice(0, -2)}–${end}` : `${start}–${end}`;
 }
@@ -46,6 +39,9 @@ export function canDragBooking(booking) {
   // A couple booking split across two room columns (isRoomShared) has no per-companion drag target: a plain drag would move
   // bookings.room_id only and desync it from the companion's booking_therapists.room_id. Reassign rooms in the booking panel.
   if (booking.isRoomShared) return false;
+  // Combo components are time-offset from each other (sequential/concurrent) and conflict-checked server-side:
+  // no per-component drag target exists yet.
+  if (booking.isCombo) return false;
   // Cannot drag terminal statuses
   if (NON_DRAGGABLE_STATUSES.includes(booking.status)) return false;
   // Cannot drag paid bookings
@@ -59,7 +55,7 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false }) => {
   const colors = getBookingStatusColors(booking.status);
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
@@ -69,7 +65,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
   const isLocked = booking.isLocked || booking.status === 'In-Progress' || isTimeLocked(booking);
 
   // Hover card: one shared popover (see BookingHoverCard.jsx). Not shown for the booking already open in the side panel.
-  const { ref: cardRef, handlers: hoverHandlers, open: hoverOpen, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: isPanelSelected });
+  const { ref: cardRef, handlers: hoverHandlers, open: hoverOpen, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: isPanelSelected || hideSensitive });
   const [isResizing, setIsResizing] = useState(false);
   const [resizeDir, setResizeDir] = useState(null); // 'top' or 'bottom'
   const [resizeDelta, setResizeDelta] = useState(0);
@@ -115,7 +111,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     isDragging,
   } = useDraggable({
     id: (booking._colTherapistId || booking._colRoomId)
-      ? `${booking.bookingId || booking.id}__${booking._colTherapistId || booking._colRoomId}`
+      ? `${booking.bookingId || booking.id}__${booking._colTherapistId || booking._colRoomId}${booking._comboIndex != null ? `__c${booking._comboIndex}` : ''}` // combo parts can share a column
       : (booking.bookingId || booking.id),
     data: {
       booking,
@@ -138,7 +134,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
     return (eh * 60 + em) - (sh * 60 + sm);
   })();
 
-  const rangeLabel = compactRange12h(booking.startTime, booking.endTime);
+  const rangeLabel = compactRange12h(booking.startTime, booking.endTime, use24h);
   const cardHeight = typeof style?.height === 'number' ? style.height : parseFloat(style?.height) || 0;
   const isTall = cardHeight >= 56;
   const isShort = cardHeight > 0 && cardHeight < 40;
@@ -155,9 +151,9 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3]' : ''}`}
       data-booking-card="true"
       data-booking-key={booking.bookingId || booking.id}
-      data-booking-id={(booking.isShared || booking.isRoomShared) ? booking.bookingId : undefined}
-      data-shared={(booking.isShared || booking.isRoomShared) ? 'true' : undefined}
-      data-bar={(booking.isShared || booking.isRoomShared) ? colors.bar : undefined}
+      data-booking-id={(booking.isShared || booking.isRoomShared || booking.isCombo) ? booking.bookingId : undefined}
+      data-shared={(booking.isShared || booking.isRoomShared || booking.isCombo) ? 'true' : undefined}
+      data-bar={(booking.isShared || booking.isRoomShared || booking.isCombo) ? colors.bar : undefined}
       style={{
         ...style,
         ...(isResizing ? {} : dragStyle),
@@ -182,16 +178,16 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         }
       }}
       tabIndex={0}
-      aria-label={`${booking.customerName}, ${booking.status}, ${rangeLabel}${booking.serviceName ? `, ${booking.serviceName}` : ''}`}
+      aria-label={`${hideSensitive ? 'Booking' : booking.customerName}, ${booking.status}, ${rangeLabel}${booking.serviceName ? `, ${booking.serviceName}` : ''}`}
       aria-describedby={hoverOpen ? HOVER_CARD_ID : undefined}
       onKeyDown={(e) => {
         hoverHandlers.onKeyDown(e);
         if (!e.defaultPrevented && e.key === 'Enter' && e.target === e.currentTarget && !isResizing) { e.preventDefault(); hideNow(); onClick(booking); }
       }}
-      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); if (booking.isShared || booking.isRoomShared) onSharedActivate?.(booking.bookingId); }}
-      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); if (booking.isShared || booking.isRoomShared) onSharedDeactivate?.(); }}
-      onFocus={(e) => { hoverHandlers.onFocus?.(e); if (booking.isShared || booking.isRoomShared) onSharedActivate?.(booking.bookingId); }}
-      onBlur={(e) => { hoverHandlers.onBlur?.(e); if (booking.isShared || booking.isRoomShared) onSharedDeactivate?.(); }}
+      onPointerEnter={(e) => { hoverHandlers.onPointerEnter?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
+      onPointerLeave={(e) => { hoverHandlers.onPointerLeave?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
+      onFocus={(e) => { hoverHandlers.onFocus?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedActivate?.(booking.bookingId); }}
+      onBlur={(e) => { hoverHandlers.onBlur?.(e); if (booking.isShared || booking.isRoomShared || booking.isCombo) onSharedDeactivate?.(); }}
     >
       {/* Drag handle area — middle section of card, not edges */}
       <div
@@ -201,8 +197,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         {isShort ? (
           <div className="flex items-center gap-1 min-w-0 leading-tight">
             {isUnpaid && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: UNPAID_DOT_COLOR }} title="Unpaid" />}
-            <span className="font-body font-medium text-xs text-text-primary truncate">{booking.customerName}</span>
-            <span className="font-data text-[11px] text-text-secondary shrink-[1000] min-w-0 truncate">· {to12h(booking.startTime)}</span>
+            <span className="font-body font-medium text-xs text-text-primary truncate">{hideSensitive ? '•••••' : booking.customerName}</span>
+            <span className="font-data text-[11px] text-text-secondary shrink-[1000] min-w-0 truncate">· {formatClockTime(booking.startTime, use24h)}</span>
             {(sharedLabel || booking.specialRequests || booking.customerNotes) && (
               <span className="flex-shrink-0 ml-auto flex items-center gap-1">
                 {sharedLabel && <span title={sharedLabel} aria-label={sharedLabel} className="text-text-tertiary"><Icon name="Users" size={11} /></span>}
@@ -216,7 +212,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
           <>
             <div className="flex items-center gap-1 min-w-0 flex-shrink-0">
               {isUnpaid && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: UNPAID_DOT_COLOR }} title="Unpaid" />}
-              <span className="font-body font-medium text-xs text-text-primary leading-tight truncate">{booking.customerName}</span>
+              <span className="font-body font-medium text-xs text-text-primary leading-tight truncate">{hideSensitive ? '•••••' : booking.customerName}</span>
               <span className="ml-auto flex items-center gap-1 flex-shrink-0 text-text-tertiary">
                 {sharedLabel && (
                   <span title={sharedLabel} aria-label={sharedLabel} className="flex items-center gap-0.5">

@@ -16,6 +16,7 @@ export const REPORTS = [
   { id: 'category-revenue', view: 'category-revenue', title: 'Sales by Category', description: 'Revenue by service category.', icon: 'Tags', category: 'sales', roles: STAFF_UP, keywords: 'income sales group' },
   { id: 'discounts', view: 'discounts', title: 'Discounts', description: 'Discounts given, with who requested and who approved them.', icon: 'Percent', category: 'sales', roles: STAFF_UP, keywords: 'offers waiver' },
   { id: 'outstanding', view: 'outstanding', title: 'Outstanding', description: 'Unpaid and partially paid balances by customer.', icon: 'AlertCircle', category: 'sales', roles: STAFF_UP, keywords: 'dues unpaid balance owed receivable' },
+  { id: 'due-report', view: 'due-report', title: 'Due Report', description: 'Unpaid and partial balances across every branch, grouped by branch.', icon: 'ReceiptText', category: 'sales', roles: ['admin'], keywords: 'dues unpaid balance owed receivable branches org' },
 
   { id: 'performance', view: 'performance', title: 'Performance', description: 'Ranked performance score per therapist, with a full breakdown on click.', icon: 'TrendingUp', category: 'team', roles: STAFF_UP, keywords: 'ranking therapist productivity' },
   { id: 'attendance-report', view: 'attendance-report', title: 'Attendance', description: 'Presence, leave and attendance rate per staff member.', icon: 'CalendarCheck', category: 'team', roles: STAFF_UP, keywords: 'presence leave' },

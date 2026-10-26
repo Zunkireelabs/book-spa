@@ -1,4 +1,4 @@
--- Migration 285: service-images writes scoped to the uploader's org; no anonymous listing (supersedes migration-014's policies)
+-- Migration 304: service-images writes scoped to the uploader's org; no anonymous listing (supersedes migration-014's policies)
 -- Idempotent: safe to re-run in either database.
 -- Applied: local only (feat/ui-port-from-clinicmd)
 --
@@ -55,12 +55,12 @@ BEGIN
       AND (coalesce(qual, '') LIKE '%service-images%' OR coalesce(with_check, '') LIKE '%service-images%')
       AND policyname NOT IN ('service-images org read', 'service-images org insert', 'service-images org delete')
   LOOP
-    RAISE WARNING 'migration-285: unexpected storage.objects policy "%" (%) still applies to service-images; review and drop it if it is not intended', r.policyname, r.cmd;
+    RAISE WARNING 'migration-304: unexpected storage.objects policy "%" (%) still applies to service-images; review and drop it if it is not intended', r.policyname, r.cmd;
   END LOOP;
 END $$;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('285', 'service-images-org-scoped')
+VALUES ('304', 'service-images-org-scoped')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

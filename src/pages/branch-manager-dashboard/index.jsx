@@ -25,6 +25,9 @@ import ServiceManagementPanel from './components/MasterData/ServiceManagementPan
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
 import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
+import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel';
+import RosterPanel from './components/MasterData/RosterPanel';
+import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
@@ -53,6 +56,7 @@ import { isReportView } from './components/Reports/reportRegistry';
 import AttendanceCalendarPage from 'pages/attendance-calendar';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
+import DueReportPanel from './components/Outstanding/DueReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import CustomerReferralsReportPanel from './components/Referrals/CustomerReferralsReportPanel';
 import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
@@ -170,7 +174,7 @@ const BranchManagerDashboard = () => {
           const isToday = newBooking.date === today;
 
           // Add every new booking to the header notification feed (deduped by id). Online bookings (created_by IS NULL) already
-          // arrive as a persisted new_online_booking notification (migration-282), so they are not added a second time here.
+          // arrive as a persisted new_online_booking notification (migration-301), so they are not added a second time here.
           if (newBooking.created_by != null) setNotifications((prev) =>
             prev.some((n) => n.id === newBooking.id)
               ? prev
@@ -430,6 +434,7 @@ const BranchManagerDashboard = () => {
       case 'category-revenue': return <CategoryRevenueReportPanel branchId={branchId} />;
       case 'discounts': return <DiscountsPanel branchId={branchId} />;
       case 'outstanding': return <OutstandingReportPanel branchId={branchId} />;
+      case 'due-report': return profile?.role === 'admin' ? <DueReportPanel /> : null;
       case 'performance': return <TherapistPerformancePanel branchId={branchId} />;
       case 'attendance-report': return <AttendanceReportPanel branchId={branchId} />;
       case 'attendance-calendar': return <AttendanceCalendarPage embedded />;
@@ -455,6 +460,7 @@ const BranchManagerDashboard = () => {
       case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
       case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall || salesReadOnly} />;
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
+      case 'roster': return !isOverall && ['manager', 'admin'].includes(profile?.role) ? <RosterPanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'package-overview':
       case 'packages': return salesViewer ? <PackagesPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;
@@ -488,6 +494,8 @@ const BranchManagerDashboard = () => {
       case 'payment-methods': return <PaymentMethodsPanel />;
       case 'reward-catalog': return <RewardCatalogPanel />;
       case 'booking-settings': return <BookingSettingsPanel />;
+      case 'calendar-settings': return profile?.role === 'admin' ? <CalendarSettingsPanel /> : null;
+      case 'closed-dates': return !isOverall && profile?.role === 'admin' ? <ClosedDatesPanel branchId={branchId} /> : null;
       case 'provider-profile': return <ProviderProfilePanel />;
       case 'audit': return <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />;
       default: return null;

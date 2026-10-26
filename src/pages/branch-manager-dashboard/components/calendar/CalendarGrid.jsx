@@ -6,7 +6,8 @@ import { useDroppable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard from './CalendarBookingCard';
 import { BookingHoverLayer, useHoverCardBookingId } from './BookingHoverCard';
-import { to12h, toKathmanduParts, addDays } from './calendarDates';
+import { toKathmanduParts, addDays } from './calendarDates';
+import { formatClockTime, formatHourLabel } from './timeFormat';
 import SharedBookingLines from './SharedBookingLines';
 import OverflowBadge from './OverflowBadge';
 import ManualBlockOverlay from './ManualBlockOverlay';
@@ -29,9 +30,9 @@ const TIME_COL_WIDTH = 64;
 const PINNED_SHADOW = '6px 0 8px -6px rgba(14,13,12,0.16)'; // right shadow on the pinned Unassigned column while the grid is scrolled
 
 // Pinch-to-zoom bounds (mobile/touch only) — effective hour height 40px–320px
-const MIN_ZOOM = 40 / HOUR_HEIGHT;
-const MAX_ZOOM = 320 / HOUR_HEIGHT;
-const clampZoom = (v) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
+export const MIN_ZOOM = 40 / HOUR_HEIGHT;
+export const MAX_ZOOM = 320 / HOUR_HEIGHT;
+export const clampZoom = (v) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
 const touchDistance = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
 
 function formatShortDate(dateStr) {
@@ -177,6 +178,14 @@ const CalendarGrid = ({
   onEditTransfer,
   onCancelScheduledTransfer,
   onCancelActiveTransfer,
+  hideSensitive = false,
+  startHour,
+  endHour,
+  showFullDay = false,
+  intervalMinutes = 30,
+  use24h = false,
+  zoomScale: zoomScaleProp,
+  onZoomScaleChange,
 }) => {
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
@@ -204,13 +213,17 @@ const CalendarGrid = ({
   // Relayouts the grid at a scaled HOUR_HEIGHT/column width rather than a CSS
   // transform, so drag/tap hit-testing (which reads real DOM pixel positions)
   // stays correct at any zoom level.
-  const [zoomScale, setZoomScaleState] = useState(1);
-  const zoomScaleRef = useRef(1);
+  // Controlled by the parent toolbar's zoom buttons when onZoomScaleChange is passed; local state otherwise.
+  const [zoomScaleState, setZoomScaleState] = useState(1);
+  const zoomScale = zoomScaleProp != null ? zoomScaleProp : zoomScaleState;
+  const zoomScaleRef = useRef(zoomScale);
+  useEffect(() => { zoomScaleRef.current = zoomScale; }, [zoomScale]);
   const setZoomScale = useCallback((v) => {
     const clamped = clampZoom(v);
     zoomScaleRef.current = clamped;
-    setZoomScaleState(clamped);
-  }, []);
+    if (onZoomScaleChange) onZoomScaleChange(clamped);
+    else setZoomScaleState(clamped);
+  }, [onZoomScaleChange]);
   const pinchStateRef = useRef(null); // { startDist, startScale }
   const pinchAnchorRef = useRef(null); // { viewportX, viewportY, contentX, contentY }
   const pinchRAFRef = useRef(null);
@@ -328,6 +341,11 @@ const CalendarGrid = ({
 
   const days = useMemo(() => {
     if (viewMode === '4day') return [0, 1, 2, 3].map(i => addDays(currentDate, i));
+    if (viewMode === 'week') {
+      // Sunday-first, must match calendar/index.jsx's own startOfWeek so the fetched range and rendered columns agree.
+      const start = addDays(currentDate, -new Date(currentDate + 'T00:00:00').getDay());
+      return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    }
     return [currentDate];
   }, [currentDate, viewMode]);
 
@@ -335,7 +353,9 @@ const CalendarGrid = ({
 
   // Visible hour range: branch hours padded by 1h each side, extended to include
   // any booking on a displayed day that falls outside it. Falls back to 9–21.
-  const { openHour, closeHour } = useMemo(() => {
+  // Calendar settings: startHour/endHour are the configured business hours (override the branch-hours default); showFullDay
+  // renders 00:00-24:00 with the hours outside business hours shaded.
+  const { openHour, closeHour, businessStartHour, businessEndHour } = useMemo(() => {
     const hourOf = (t, fallback) => {
       const n = parseInt(String(t || '').split(':')[0], 10);
       return Number.isNaN(n) ? fallback : n;
@@ -360,8 +380,25 @@ const CalendarGrid = ({
       if (em != null) close = Math.max(close, Math.min(24, Math.ceil(em / 60)));
     });
     if (close <= open) close = Math.min(24, open + 1);
-    return { openHour: open, closeHour: close };
-  }, [branchHours, bookings, days]);
+    if (Number.isInteger(startHour) && Number.isInteger(endHour) && endHour > startHour) {
+      // configured hours replace the branch-hours padding but never hide a booking that falls outside them
+      let o = startHour; let c = endHour;
+      (bookings || []).forEach(b => {
+        const date = b.date || (b.start_datetime ? b.start_datetime.split('T')[0] : null);
+        if (!date || !days.includes(date)) return;
+        const st = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
+        const et = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
+        const sm = minsOf(st); const em = minsOf(et);
+        if (sm != null) o = Math.min(o, Math.floor(sm / 60));
+        if (em != null) c = Math.max(c, Math.min(24, Math.ceil(em / 60)));
+      });
+      open = o; close = c;
+    }
+    const bizStart = Number.isInteger(startHour) ? startHour : hourOf(branchHours?.openTime, 9);
+    const bizEnd = Number.isInteger(endHour) && endHour > bizStart ? endHour : (closeMins == null ? 21 : Math.ceil(closeMins / 60));
+    if (showFullDay) return { openHour: 0, closeHour: 24, businessStartHour: bizStart, businessEndHour: bizEnd };
+    return { openHour: open, closeHour: close, businessStartHour: bizStart, businessEndHour: bizEnd };
+  }, [branchHours, bookings, days, startHour, endHour, showFullDay]);
 
   const TOP_PAD = 12;  // breathing room above the first hour line
 
@@ -427,16 +464,21 @@ const CalendarGrid = ({
 
       const startTime = b.start_time || (b.start_datetime ? b.start_datetime.split('T')[1]?.slice(0, 8) : null);
       const endTime = b.end_time || (b.end_datetime ? b.end_datetime.split('T')[1]?.slice(0, 8) : null);
-      const isShared = columnMode === 'therapist' && b.booking_therapists?.length > 1;
+      // Combo service: booking_combo_items carries one row per bundled service, each with its own therapist/time slice.
+      // Takes priority over isShared (a combo's primary therapist_id/booking_therapists must not render a second overlapping card).
+      const isCombo = b.booking_combo_items?.length > 0;
+      const isShared = !isCombo && columnMode === 'therapist' && b.booking_therapists?.length > 1;
       // Couple in separate rooms: each therapist's effective room is their own booking_therapists.room_id override,
       // falling back to the booking's primary room. >1 distinct effective room means the booking needs a card in each.
-      const effectiveRoomIds = columnMode === 'room' && b.booking_therapists?.length > 0
+      const effectiveRoomIds = !isCombo && columnMode === 'room' && b.booking_therapists?.length > 0
         ? [...new Set(b.booking_therapists.map(bt => bt.room_id || b.room_id).filter(Boolean))]
         : [];
-      const isRoomShared = columnMode === 'room' && effectiveRoomIds.length > 1;
+      const isRoomShared = !isCombo && columnMode === 'room' && effectiveRoomIds.length > 1;
       const { id: visibleTherapistId, name: therapistName } = isShared
         ? { id: null, name: b.booking_therapists.map(bt => therapistMap[bt.therapist_id] || bt.therapist?.name).filter(Boolean).join(', ') }
-        : resolveSingleTherapist(b, therapistMap);
+        : isCombo
+          ? { id: null, name: b.booking_combo_items.map(ci => therapistMap[ci.therapist_id] || ci.therapist?.name).filter(Boolean).join(', ') }
+          : resolveSingleTherapist(b, therapistMap);
 
       const baseEntry = {
         id: b.id,
@@ -471,9 +513,40 @@ const CalendarGrid = ({
         requiresTherapist: b.service?.requires_therapist !== false,
         isShared,
         sharedCount: isShared ? b.booking_therapists.length : 0,
+        isCombo,
+        comboCount: isCombo ? b.booking_combo_items.length : 0,
       };
 
-      if (isShared) {
+      if (isCombo) {
+        // One card per component, each in its own therapist's (or room's) column at the component's own start/end time.
+        // An unassigned component lands in the 'unassigned' column rather than being dropped.
+        const columnOrder = columns.map(c => c.id);
+        const orderedItems = [...b.booking_combo_items].sort((a, c) => (a.display_order ?? 0) - (c.display_order ?? 0));
+        const resolvedColIds = orderedItems.map(ci => {
+          if (columnMode === 'room') return (ci.room_id || b.room_id) || 'unassigned';
+          return ci.therapist_id && isTherapistVisible(ci.therapist_id, therapistMap) ? ci.therapist_id : 'unassigned';
+        });
+        const leftmostId = columnOrder.find(cid => resolvedColIds.includes(cid)) ?? 'unassigned';
+        orderedItems.forEach((ci, index) => {
+          const colId = resolvedColIds[index];
+          if (!map[bookingDate][colId]) map[bookingDate][colId] = [];
+          map[bookingDate][colId].push({
+            ...baseEntry,
+            serviceName: ci.service?.name || baseEntry.serviceName,
+            serviceDuration: ci.service?.duration_minutes || null,
+            roomId: ci.room_id || b.room_id,
+            roomName: roomMap[ci.room_id] || baseEntry.roomName,
+            _colTherapistId: columnMode === 'room' ? baseEntry.therapistId : colId,
+            _colRoomId: columnMode === 'room' ? colId : undefined,
+            _isFaded: colId !== leftmostId,
+            _comboIndex: index,
+            startTime: ci.start_time || startTime,
+            endTime: ci.end_time || endTime,
+            _bookingStartTime: startTime,
+            _bookingEndTime: endTime,
+          });
+        });
+      } else if (isShared) {
         // Place booking in each assigned therapist's column with per-therapist times
         // Leftmost column in current visual order = primary (unfaded), rest = faded
         const columnOrder = columns.map(c => c.id);
@@ -554,7 +627,11 @@ const CalendarGrid = ({
     if (!startStr || !endStr) return eSlot;
     const [sh, sm] = startStr.split(':').map(Number);
     const [eh, em] = endStr.split(':').map(Number);
-    return Math.max(((eh * 60 + em) - (sh * 60 + sm)) / 60 * eHH, 24);
+    let rawMinutes = (eh * 60 + em) - (sh * 60 + sm);
+    // A manual block spanning exactly 1440 minutes (whole-day holiday from 00:00) has identical start/end clock times:
+    // treat 0 like a negative (wrapped past midnight) so it renders full-day, not as a sliver.
+    if (rawMinutes <= 0) rawMinutes += 1440;
+    return Math.max(rawMinutes / 60 * eHH, 24);
   };
 
   const openHourStr = `${String(openHour).padStart(2, '0')}:00`;
@@ -756,7 +833,7 @@ const CalendarGrid = ({
         }}
       >
         <div className={`font-body text-[11px] leading-tight truncate ${g.overlap ? 'text-error' : 'text-text-secondary'}`}>{g.label || 'Blocked'}</div>
-        {h >= 36 && <div className={`font-body text-[11px] leading-tight truncate ${g.overlap ? 'text-error/80' : 'text-text-tertiary'}`}>{to12h(g.startTime)}–{to12h(endStr)}</div>}
+        {h >= 36 && <div className={`font-body text-[11px] leading-tight truncate ${g.overlap ? 'text-error/80' : 'text-text-tertiary'}`}>{formatClockTime(g.startTime, use24h)}–{formatClockTime(endStr, use24h)}</div>}
       </div>
     );
   };
@@ -807,7 +884,7 @@ const CalendarGrid = ({
     const endMin = startMin + (draftGhost.durationMinutes || 30);
     const pad = (n) => String(n).padStart(2, '0');
     const endStr = `${pad(Math.floor(endMin / 60) % 24)}:${pad(endMin % 60)}`;
-    const range = `${to12h(draftGhost.startTime)}–${to12h(endStr)}`;
+    const range = `${formatClockTime(draftGhost.startTime, use24h)}–${formatClockTime(endStr, use24h)}`;
     const ghostHeight = Math.max(timeToHeight(draftGhost.startTime, endStr), 22);
     const tone = draftGhost.overlap ? 'text-error' : 'text-primary';
     return (
@@ -919,6 +996,7 @@ const CalendarGrid = ({
           onDeleteClick={(e) => handleDeleteBlockClick(e, range, range.day)}
           onResizeStart={(e) => handleBlockResizeStart(e, range, range.day)}
           onClick={() => onEditManualBlock?.(range)}
+          use24h={use24h}
         />
       );
     });
@@ -946,6 +1024,7 @@ const CalendarGrid = ({
   const nowTop = timeToTop(`${nowTime}:00`);
   const nowLabel = (() => {
     const [h, m] = nowTime.split(':').map(Number);
+    if (use24h) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}`;
   })();
 
@@ -1045,11 +1124,11 @@ const CalendarGrid = ({
                 title={`Scheduled transfer to ${col.scheduledTransfer.toBranch || 'another branch'} — click to cancel`}
                 className="font-body text-[10px] leading-tight text-text-tertiary truncate text-left hover:underline hover:text-error"
               >
-                Transfer at {to12h(col.scheduledTransfer.startTime)} · Cancel
+                Transfer at {formatClockTime(col.scheduledTransfer.startTime, use24h)} · Cancel
               </button>
             ) : activeBlock && (
               <span className="font-body text-[10px] leading-tight text-text-tertiary truncate">
-                back at {to12h(activeBlock.toTime)}
+                back at {formatClockTime(activeBlock.toTime, use24h)}
               </span>
             )}
           </span>
@@ -1093,7 +1172,7 @@ const CalendarGrid = ({
       {hours.map((hour) => (
         <div key={hour} className="absolute w-full" style={{ top: (hour - openHour) * eHH + TOP_PAD }}>
           <span className="absolute -top-2.5 right-2 font-data text-[11px] text-text-tertiary">
-            {hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`}
+            {formatHourLabel(hour, use24h)}
           </span>
         </div>
       ))}
@@ -1107,7 +1186,27 @@ const CalendarGrid = ({
     </div>
   );
 
-  // Hour + half-hour hairlines — rendered once per container, spans all columns
+  // Light sub-hour lines, purely visual ("Calendar interval" setting) — position math below is hour-based and unaffected.
+  const subLineFractions = intervalMinutes >= 60 ? [] : intervalMinutes <= 15 ? [0.25, 0.5, 0.75] : [0.5];
+
+  // Hatched shading over the hours outside business hours; only non-empty when showFullDay renders those hours. Visual only.
+  const renderClosedHoursShading = () => {
+    const beforeHeight = Math.max(0, businessStartHour - openHour) * eHH;
+    const afterTop = (Math.max(businessEndHour, openHour) - openHour) * eHH + TOP_PAD;
+    const afterHeight = Math.max(0, closeHour - businessEndHour) * eHH;
+    const stripeStyle = {
+      backgroundImage: 'repeating-linear-gradient(45deg, var(--color-border) 0, var(--color-border) 1px, transparent 1px, transparent 9px)',
+      backgroundColor: 'var(--color-background)',
+    };
+    return (
+      <>
+        {beforeHeight > 0 && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: TOP_PAD, height: beforeHeight, ...stripeStyle }} />}
+        {afterHeight > 0 && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: afterTop, height: afterHeight, ...stripeStyle }} />}
+      </>
+    );
+  };
+
+  // Hour + sub-hour hairlines — rendered once per container, spans all columns
   const renderGridLines = () => (
     <>
       {hours.map((hour) => {
@@ -1115,7 +1214,9 @@ const CalendarGrid = ({
         return (
           <React.Fragment key={`lines-${hour}`}>
             <div className="absolute left-0 right-0 border-t border-border" style={{ top }} />
-            <div className="absolute left-0 right-0 border-t border-border/50" style={{ top: top + eSlot }} />
+            {subLineFractions.map((frac) => (
+              <div key={frac} className="absolute left-0 right-0 border-t border-border/50" style={{ top: top + eHH * frac }} />
+            ))}
           </React.Fragment>
         );
       })}
@@ -1361,22 +1462,24 @@ const CalendarGrid = ({
       );
       return (
         <div
-          key={`cluster-${cluster[0].id}`}
+          key={`cluster-${cluster[0].id}${cluster[0]._comboIndex != null ? `-c${cluster[0]._comboIndex}` : ''}`}
           className="group absolute inset-x-0"
           style={{ top: clusterTop, height: clusterHeight }}
         >
           {cluster.slice(0, MAX_VISIBLE_OVERLAP).map((booking, idx) => {
-            const cardKey = (booking._colTherapistId || booking._colRoomId) ? `${booking.id}__${booking._colTherapistId || booking._colRoomId}` : booking.id;
+            const cardKey = (booking._colTherapistId || booking._colRoomId) ? `${booking.id}__${booking._colTherapistId || booking._colRoomId}${booking._comboIndex != null ? `__c${booking._comboIndex}` : ''}` : booking.id;
             const pos = layout.cards[idx];
             return (
               <CalendarBookingCard
                 isPanelSelected={!!selectedBookingId && (booking.bookingId || booking.id) === selectedBookingId}
-                isLinkedActive={!!(booking.isShared || booking.isRoomShared) && !!activeSharedId && booking.bookingId === activeSharedId}
+                isLinkedActive={!!(booking.isShared || booking.isRoomShared || booking.isCombo) && !!activeSharedId && booking.bookingId === activeSharedId}
                 onSharedActivate={activateShared}
                 onSharedDeactivate={deactivateShared}
                 key={cardKey}
                 booking={booking}
                 columnMode={columnMode}
+                hideSensitive={hideSensitive}
+                use24h={use24h}
                 style={{
                   top: timeToTop(booking.startTime) - clusterTop,
                   height: timeToHeight(booking.startTime, booking.endTime),
@@ -1402,9 +1505,11 @@ const CalendarGrid = ({
             const hiddenTop = Math.max(0, Math.min(hiddenTopRaw, clusterHeight - hiddenHeight));
             return (
             <OverflowBadge
-              key={`badge-${cluster[0].id}`}
+              key={`badge-${cluster[0].id}${cluster[0]._comboIndex != null ? `-c${cluster[0]._comboIndex}` : ''}`}
               count={layout.badge.count}
               bookings={hidden}
+              use24h={use24h}
+              hideSensitive={hideSensitive}
               onBookingClick={onBookingClick}
               onAdd={onEmptySlotClick ? () => {
                 if (activeDragId) return;
@@ -1459,6 +1564,7 @@ const CalendarGrid = ({
   // the column frame (classes, sticky/pinned style, click handler) stays with each caller.
   const renderColumnBody = (col, day, colBookings, v, nowDot = false) => (
     <>
+      {v.gridLines && renderClosedHoursShading()}
       {v.gridLines && renderGridLines()}
       {v.nowLine === 'before-droppable' && renderNowIndicator(day, nowDot)}
       {/* Single droppable zone for the entire column (sibling to booking cards) */}
@@ -1616,6 +1722,7 @@ const CalendarGrid = ({
             </div>
           )}
           <div className="flex flex-1 relative overflow-hidden" style={{ minWidth: regularMinWidth }}>
+            {renderClosedHoursShading()}
             {renderGridLines()}
             {renderNowIndicator(currentDate, !unassignedCol)}
             {regularColumns.map(col => renderColumn(col, currentDate))}
@@ -1682,6 +1789,7 @@ const CalendarGrid = ({
           {renderHoverTime()}
           {renderTimeLabels()}
           <div className="flex flex-1 relative" style={{ minWidth: daysMinWidth }}>
+            {renderClosedHoursShading()}
             {renderGridLines()}
             {days.map((day, di) => {
               const isCurrentDay = day === todayStr;

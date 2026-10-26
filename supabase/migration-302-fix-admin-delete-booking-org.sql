@@ -1,4 +1,4 @@
--- Migration 283: admin_delete_booking() — restore the migration-239 organization check
+-- Migration 302: admin_delete_booking() — restore the migration-239 organization check
 --
 -- WHAT BROKE
 --   Migration-239 fixed admin_correct_booking()/admin_delete_booking() reading `(v_old->>'org_id')`: public.bookings has NO
@@ -123,7 +123,7 @@ END;
 $function$;
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('283', 'fix-admin-delete-booking-org')
+VALUES ('302', 'fix-admin-delete-booking-org')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

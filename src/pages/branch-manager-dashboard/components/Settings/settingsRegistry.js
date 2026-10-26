@@ -24,6 +24,8 @@ export const SETTINGS = [
   ] : []),
 
   { id: 'booking-settings', view: 'booking-settings', title: 'Booking Settings', description: 'Online booking rules and availability.', icon: 'Settings', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'online rules hours' },
+  { id: 'calendar-settings', view: 'calendar-settings', title: 'Calendar Settings', description: 'Calendar hours, full-day view and display options.', icon: 'CalendarCog', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'calendar hours grid start end full day' },
+  { id: 'closed-dates', view: 'closed-dates', title: 'Closed Dates', description: 'Days the branch is closed (holidays and special closures).', icon: 'CalendarOff', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'holiday closed days off' },
   { id: 'provider-profile', view: 'provider-profile', title: 'Provider Profile', description: 'Your spa profile and images shown to customers.', icon: 'Image', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'logo photos about' },
 
   { id: 'audit', view: 'audit', title: 'Audit Log', description: 'Every change made in this spa, and who made it.', icon: 'History', category: 'account', roles: STAFF_UP, keywords: 'history log changes who' },

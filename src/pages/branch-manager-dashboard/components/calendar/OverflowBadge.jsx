@@ -3,7 +3,7 @@ import { useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import { canDragBooking } from './CalendarBookingCard';
 import { useBookingHover } from './BookingHoverCard';
-import { to12h } from './calendarDates';
+import { formatClockTime } from './timeFormat';
 
 // One row in the overflow popover's hidden-bookings list. Draggable exactly
 // like CalendarBookingCard (same activation constraint tells clicks from
@@ -11,7 +11,7 @@ import { to12h } from './calendarDates';
 // without first opening it. Reports its dragging state up so the popover can
 // fade out (not unmount — unmounting mid-drag would tear down dnd-kit's
 // active drag) while it's in flight, then close once the drag ends.
-const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
+const OverflowPopoverRow = ({ booking, onClick, onDragChange, use24h, hideSensitive }) => {
   const isDraggable = canDragBooking(booking);
   const dragId = (booking._colTherapistId || booking._colRoomId)
     ? `${booking.bookingId || booking.id}__${booking._colTherapistId || booking._colRoomId}`
@@ -35,7 +35,7 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
   }, [isDragging, onDragChange]);
 
   // Same hover card as a regular card (shared popover; see BookingHoverCard.jsx).
-  const { ref: rowRef, handlers: hoverHandlers, hideNow } = useBookingHover(booking, { draggable: isDraggable });
+  const { ref: rowRef, handlers: hoverHandlers, hideNow } = useBookingHover(booking, { draggable: isDraggable, suppress: hideSensitive });
 
   return (
     <>
@@ -55,9 +55,9 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
         onKeyDown={hoverHandlers.onKeyDown}
         {...(isDraggable ? { ...listeners, ...attributes } : {})}
       >
-        <div className="text-[11px] font-medium text-text-primary truncate">{booking.customerName || 'Guest'}</div>
+        <div className="text-[11px] font-medium text-text-primary truncate">{hideSensitive ? '•••••' : (booking.customerName || 'Guest')}</div>
         <div className="text-[10px] text-text-secondary truncate">{booking.serviceName || 'Service'}</div>
-        <div className="text-[10px] font-data text-text-secondary/80">{to12h(booking.startTime)} – {to12h(booking.endTime)}</div>
+        <div className="text-[10px] font-data text-text-secondary/80">{formatClockTime(booking.startTime, use24h)} – {formatClockTime(booking.endTime, use24h)}</div>
       </button>
     </>
   );
@@ -74,7 +74,7 @@ const OverflowPopoverRow = ({ booking, onClick, onDragChange }) => {
 // NOT the 2 already-visible ones too: they're already rendered as their own
 // draggable CalendarBookingCard, and dnd-kit doesn't allow two draggable
 // elements sharing the same id in one DndContext.
-const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, onAdd }) => {
+const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, onAdd, use24h, hideSensitive }) => {
   const [expanded, setExpanded] = useState(false);
   const [rowDragging, setRowDragging] = useState(false);
   const wrapRef = useRef(null);
@@ -120,6 +120,8 @@ const OverflowBadge = ({ count, bookings, style, expandedStyle, onBookingClick, 
             <OverflowPopoverRow
               key={booking._colRoomId ? `${booking.id}__${booking._colRoomId}` : booking.id}
               booking={booking}
+              use24h={use24h}
+              hideSensitive={hideSensitive}
               onClick={(b) => {
                 setExpanded(false);
                 onBookingClick?.(b);

@@ -1,4 +1,4 @@
--- Migration 282: booking inbox — a persisted "new online booking" notification, plus team-level acknowledgement
+-- Migration 301: booking inbox — a persisted "new online booking" notification, plus team-level acknowledgement
 --
 -- PROBLEM
 --   * A customer booking online (public flow, created_by IS NULL) created NO persisted notification: the "new booking"
@@ -69,7 +69,7 @@ CREATE OR REPLACE FUNCTION public.enforce_booking_immutability()
  SET search_path TO 'public'
 AS $function$
 BEGIN
-  -- Acknowledgement escape hatch (migration 282): only acknowledge_booking() sets this transaction-local flag, and the
+  -- Acknowledgement escape hatch (migration 301): only acknowledge_booking() sets this transaction-local flag, and the
   -- UPDATE must touch nothing but the acknowledgement columns (+ updated_at). Everything else is still fully enforced.
   IF current_setting('app.acknowledging', true) = 'on'
      AND (to_jsonb(NEW) - 'acknowledged_at' - 'acknowledged_by' - 'updated_at')
@@ -321,7 +321,7 @@ CREATE TRIGGER trg_notify_new_online_booking
   EXECUTE FUNCTION public.notify_new_online_booking();
 
 INSERT INTO public.schema_migrations (version, name)
-VALUES ('282', 'booking-inbox')
+VALUES ('301', 'booking-inbox')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
