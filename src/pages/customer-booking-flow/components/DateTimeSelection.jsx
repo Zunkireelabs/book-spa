@@ -93,11 +93,11 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     if (!selectedBranch?.id) return;
     setLoadingSlots(true);
     setExtendedWindow(null);
-    fetchBranchAvailabilityWindow(selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
+    fetchBranchAvailabilityWindow(selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate, { serviceId: selectedService?.id, durationMinutes: selectedService?.durationMinutes })
       .then(setAvailabilityWindow)
       .catch((err) => console.error('[DateTimeSelection] availability fetch failed:', err.message))
       .finally(() => setLoadingSlots(false));
-  }, [selectedBranch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedBranch?.id, selectedService?.id, selectedService?.durationMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-therapist busy rows — only fetched when filtering by a specific professional
   // or "any professional"; every other caller (every other tenant, and this tenant's
@@ -135,7 +135,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     if (!selectedBranch?.id || loadingExtended || extendedWindow) return;
     setLoadingExtended(true);
     const tasks = [
-      fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+      fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate, { serviceId: selectedService?.id, durationMinutes: selectedService?.durationMinutes })
         .then(setExtendedWindow)
         .catch((err) => {
           console.error('[DateTimeSelection] extended room/gender availability fetch failed:', err.message);
@@ -161,6 +161,8 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     const rooms = availabilityWindow.rooms || [];
     const allBookings = [...(availabilityWindow.bookings || []), ...(extendedWindow?.bookings || [])];
     const { byRoom, byGender } = buildOccupancy(allBookings);
+    // Start times with no eligible, on-shift, free staff member (staff-availability rule). No reasons are shown to customers.
+    const noStaff = new Set([...(availabilityWindow.noStaffStarts || []), ...(extendedWindow?.noStaffStarts || [])]);
 
     const therapistOccupancy = therapistFilter
       ? buildTherapistOccupancy([...(therapistWindow?.bookings || []), ...(extendedTherapistWindow?.bookings || [])])
@@ -223,7 +225,10 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
           }
         }
 
-        const isAvailable = !isPast && roomAvailable && genderOk && therapistOk;
+        // Skipped for a specific professional: that person's own busy rows (shift, break, leave) already cover it.
+        const staffOk = therapistFilter?.therapistId ? true : !noStaff.has(`${d.fullDate}|${minutesToTime24(start)}`);
+
+        const isAvailable = !isPast && roomAvailable && genderOk && therapistOk && staffOk;
 
         slots.push({
           time24: minutesToTime24(start),

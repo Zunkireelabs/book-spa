@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import BookingHistory from './BookingHistory';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -2309,6 +2310,11 @@ const BookingActionModal = ({
                     {creator?.createdByName && <span>· Created by {creator.createdByName}{creator.createdAt ? ` · ${formatCreatedAt(creator.createdAt)}` : ''}</span>}
                     {creator && !creator.createdByName && creator.acknowledgedAt && creator.acknowledgedByName && <span>· Seen by {creator.acknowledgedByName} · {formatCreatedAt(creator.acknowledgedAt)}</span>}
                   </div>
+                )}
+
+                {/* History: availability overrides (reason, code, who) for managers/admins */}
+                {!isEditing && (userRole === 'manager' || userRole === 'admin') && booking?.bookingId && (
+                  <BookingHistory bookingId={booking.bookingId} />
                 )}
 
                 {/* Action error (status update failures) */}

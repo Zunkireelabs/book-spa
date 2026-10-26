@@ -15,6 +15,7 @@ import {
 import { transformBooking, toDbStatus } from '../../../services/bookingTransformers';
 import { nepalNow } from '../../../utils/customerDirectory';
 import { friendlyError } from '../../../utils/friendlyError';
+import { useAvailabilityGuard } from '../../../contexts/AvailabilityOverrideContext';
 import {
   makeRange, VIEWS, SORTS, inView, viewCounts, matchesBookingSearch, matchesFilters, sortBookings, groupByDay, dayHeading, nowLineIndex,
   isDimmed, lateMinutes, formatLate, clockLabel, amountCell, nextAction, moneyOf,
@@ -44,6 +45,7 @@ const rangeFromParams = (sp, today) => {
 
 const BookingsViewPanel = ({ branchId }) => {
   const { profile } = useAuth();
+  const { guard } = useAvailabilityGuard();
   const { isOverall } = useBranch();
   const role = profile?.role || 'staff';
   const readOnly = !profile?.role || role === 'admin_viewer'; // no write affordances until the role is known
@@ -348,9 +350,9 @@ const BookingsViewPanel = ({ branchId }) => {
   // Same signature the booking dialog calls it with (bookingId, therapistIds[], notes, roomId, overrides, companion…); a single id also works.
   const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
-    const result = await assignTherapist({
-      bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone,
-    });
+    const result = await guard((overrideReason) => assignTherapist({
+      bookingId, therapistIds: ids, roomId: roomId !== undefined ? (roomId || null) : undefined, therapistRoomOverrides, companionName, companionPhone, overrideReason,
+    }));
     if (result.error) { showToast(friendlyError(result.error, 'Failed to assign therapist.'), 'error'); return; }
     showToast('Therapist assigned successfully');
     await load();
@@ -384,7 +386,7 @@ const BookingsViewPanel = ({ branchId }) => {
     return { data: result.data };
   };
   const handleEditBooking = async (bookingId, updates) => {
-    const result = await updateBookingDetails({ bookingId, ...updates });
+    const result = await guard((overrideReason) => updateBookingDetails({ bookingId, ...updates, overrideReason }));
     if (result.error) { showToast(friendlyError(result.error, 'Failed to update booking.'), 'error'); return { error: result.error }; }
     showToast('Booking updated successfully');
     await load();

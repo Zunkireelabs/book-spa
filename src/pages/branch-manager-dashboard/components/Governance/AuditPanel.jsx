@@ -17,6 +17,7 @@ const TABLE_OPTIONS = [
 const ACTION_BADGES = {
   INSERT: 'bg-green-100 text-green-700',
   UPDATE: 'bg-purple-100 text-purple-700',
+  AVAILABILITY_OVERRIDE: 'bg-amber-100 text-amber-700',
 };
 
 const PAGE_SIZE = 20;

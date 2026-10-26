@@ -15,6 +15,7 @@ import { transformBooking } from '../../../../../services/bookingTransformers';
 import { isOverallBranch } from '../../../../../services/api';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blockOverlap';
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
+import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 
@@ -23,6 +24,7 @@ import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots'
 // rebook "pick and place" mode, and the create / block / transfer-cancel actions those panels trigger.
 export function useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { guard } = useAvailabilityGuard();
 
   // Modal state
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -230,14 +232,15 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         // user can pick another slot.
         reschedulePendingRef.current = true;
         setReschedulePending(true);
-        const result = await rescheduleBookingAsNewBooking({
+        const result = await guard((overrideReason) => rescheduleBookingAsNewBooking({
           bookingId: source.originalBookingId,
           date: slotInfo.day,
           startTime,
           therapistId,
           roomId,
           reason: `Rescheduled to ${slotInfo.day} ${startTime}`,
-        });
+          overrideReason,
+        }));
         reschedulePendingRef.current = false;
         setReschedulePending(false);
         if (result.error) {
@@ -273,7 +276,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         return;
       }
 
-      const result = await createBooking({
+      const result = await guard((overrideReason) => createBooking({
         branchId,
         serviceId: source.serviceId,
         date: slotInfo.day,
@@ -282,7 +285,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         customerPhone: source.customerPhone,
         therapistId,
         roomId,
-      });
+        overrideReason,
+      }));
       if (result.error) {
         if (isNetworkError(result.error)) {
           // Rebook isn't atomic: the insert may have committed before the connection dropped, so restoring pick mode would invite a
@@ -337,7 +341,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     // Overall is view-only for anything that creates data (booking, block, transfer): nothing to offer, so no menu.
     if (isOverallBranch(branchId)) return;
     setChoiceMenuSlot(slotInfo);
-  }, [rebookSource, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist]);
+  }, [rebookSource, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist, guard]);
 
   // Transfers: cancel a scheduled transfer / bring an active one back now, via an in-app confirm.
   const handleConfirmTransferCancel = useCallback(async () => {
@@ -424,7 +428,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       let created = 0;
       for (let i = 0; i < people.length; i++) {
         const person = people[i];
-        const result = await createBooking({
+        const result = await guard((overrideReason) => createBooking({
           branchId,
           serviceId: person.serviceId,
           date,
@@ -437,7 +441,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
           therapistIds: person.therapistIds,
           roomId: person.roomId || undefined,
           bookingGroupId: groupId,
-        });
+          overrideReason,
+        }));
         if (result.error) {
           const who = person.customerName || `person ${i + 1}`;
           const tail = created > 0 ? ` (${created} booking${created > 1 ? 's' : ''} already created)` : '';
@@ -451,7 +456,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       return null;
     }
 
-    const result = await createBooking({
+    const result = await guard((overrideReason) => createBooking({
       branchId,
       serviceId: formData.serviceId,
       date,
@@ -470,7 +475,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,
-    });
+      overrideReason,
+    }));
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
     }
@@ -483,6 +489,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
         startTime,
         roomId: formData.roomId && formData.roomId !== 'none' ? formData.roomId : null,
         components: formData.comboAssignments,
+        overrideReason: result.overrideReason,
       });
       if (comboResult.error) {
         showToast(`Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, 'error');
@@ -500,7 +507,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
-  }, [branchId, refreshCalendar]);
+  }, [branchId, refreshCalendar, guard]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
 

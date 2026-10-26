@@ -21,6 +21,7 @@ import {
 } from '../../services/api';
 import { transformBooking, toDbStatus } from '../../services/bookingTransformers';
 import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { useAvailabilityGuard } from '../../contexts/AvailabilityOverrideContext';
 
 // Same component the branch-manager calendar uses for its booking dialog
 // (BookingActionModal) — this route page is just a URL-addressable wrapper
@@ -28,6 +29,7 @@ import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 // opened from the calendar grid or linked to directly (e.g. from a report).
 const BookingDetailsAssignmentModal = () => {
   const navigate = useNavigate();
+  const { guard } = useAvailabilityGuard();
   const location = useLocation();
   const { bookingId: paramBookingId, orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
@@ -129,14 +131,15 @@ const BookingDetailsAssignmentModal = () => {
 
   const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
-    const result = await assignTherapist({
+    const result = await guard((overrideReason) => assignTherapist({
       bookingId,
       therapistIds: ids,
       roomId: roomId !== undefined ? (roomId || null) : undefined,
       therapistRoomOverrides,
       companionName,
       companionPhone,
-    });
+      overrideReason,
+    }));
     if (result.error) {
       showToast(result.error.message || 'Failed to assign therapist.', 'error');
       return;
@@ -178,7 +181,7 @@ const BookingDetailsAssignmentModal = () => {
   };
 
   const handleEditBooking = async (bookingId, updates) => {
-    const result = await updateBookingDetails({ bookingId, ...updates });
+    const result = await guard((overrideReason) => updateBookingDetails({ bookingId, ...updates, overrideReason }));
     if (result.error) {
       showToast(result.error.message || 'Failed to update booking.', 'error');
       return { error: result.error };
@@ -190,7 +193,7 @@ const BookingDetailsAssignmentModal = () => {
 
   const handleCreateBooking = async (formData) => {
     if (!branchId) return 'Missing branch info.';
-    const result = await createBooking({
+    const result = await guard((overrideReason) => createBooking({
       branchId,
       serviceId: formData.serviceId,
       date: formData.bookingDate,
@@ -199,7 +202,8 @@ const BookingDetailsAssignmentModal = () => {
       customerPhone: formData.customerPhone,
       therapistIds: formData.therapistId ? [formData.therapistId] : null,
       roomId: formData.roomId || 'none',
-    });
+      overrideReason,
+    }));
     if (result.error) return result.error.message || 'Failed to create booking.';
     showToast(
       result.data?._therapistAssignmentWarning

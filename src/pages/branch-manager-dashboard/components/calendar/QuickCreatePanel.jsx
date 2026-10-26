@@ -3,6 +3,9 @@ import Icon from '../../../../components/AppIcon';
 import MiniMonthCalendar from './MiniMonthCalendar';
 import SidePanel from '../../../../components/ui/SidePanel';
 import BlockOverlapWarning from '../../../../components/ui/BlockOverlapWarning';
+import AvailabilityNotice from '../../../../components/ui/AvailabilityNotice';
+import { useAvailabilityPrecheck } from '../../../../hooks/useAvailabilityPrecheck';
+import { useIndustry } from '../../../../hooks/useIndustry';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
@@ -528,6 +531,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // ── Ghost block on the grid: report the draft (date, time, length, column) to the calendar ──
   const draftDuration = (services || []).find((t) => t.id === (bookingMode === 'group' ? groupServiceId : serviceId))?.duration_minutes || dragMinutes || 30;
+  // Staff-availability pre-check (ZNLY-100): the guard's verdict for the first selected therapist, before Save.
+  const { staffLabel } = useIndustry();
+  const precheck = useAvailabilityPrecheck({
+    branchId, date: bookingDate, startTime: bookingTime, durationMin: draftDuration,
+    therapistId: bookingMode === 'individual' ? selectedTherapistIds[0] : null, enabled: !!slotInfo,
+  });
   useEffect(() => {
     if (!isOpen) { onDraftChange?.(null); return; }
     onDraftChange?.({
@@ -571,12 +580,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   }, [retarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Footer: why Create is disabled, or the inline confirm ──────────────────────────────
-  const disabledReason = submitting ? '' : blockOverlapMsg
+  const disabledReason = submitting ? '' : precheck.blocked ? `${staffLabel} unavailable at this time` : blockOverlapMsg
     ? (/^Overlaps '(Transferred|Visiting)/.test(blockOverlapMsg) ? 'Therapist unavailable' : 'Overlaps a block')
     : bookingMode === 'group'
       ? (groupValid ? '' : 'Complete the group details')
       : !serviceId ? 'Pick a service' : !customerName.trim() ? 'Enter the customer name' : !customerPhone.replace(/\D/g, '') ? 'Enter the customer phone' : '';
-  const createDisabled = submitting || !!blockOverlapMsg || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, '')));
+  const createDisabled = submitting || !!blockOverlapMsg || precheck.blocked || (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, '')));
   const confirmSlotLabel = confirm?.type === 'move'
     ? [therapists.find((d) => d.id === confirm.slot.colId)?.name || rooms.find((c) => c.id === confirm.slot.colId)?.name || confirm.slot.colName,
        confirm.slot.day,
@@ -626,7 +635,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 spa-transition-fast disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
       >
         {submitting && <div className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />}
-        {submitting ? 'Creating...' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : 'Create booking'}
+        {submitting ? 'Creating...' : bookingMode === 'group' ? `Create ${peopleCount} bookings` : precheck.warn ? 'Book anyway…' : 'Create booking'}
       </button>
     </div>
   );
@@ -713,6 +722,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
         {summaryRow}
 
         <BlockOverlapWarning message={blockOverlapMsg} />
+        <AvailabilityNotice
+          precheck={precheck}
+          staffLabel={staffLabel?.toLowerCase()}
+          onPickTime={(t) => { setBookingTime(t); setTimeText(format12h(t)); }}
+          onPickTherapist={(id) => setSelectedTherapistIds([id])}
+        />
 
             {/* Booking mode: Individual | Group */}
             <div className="grid grid-cols-2 gap-0.5 p-0.5 h-9 bg-background border border-border rounded-spa">

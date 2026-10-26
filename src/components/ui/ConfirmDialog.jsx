@@ -26,6 +26,7 @@ const ConfirmDialog = ({
   reasonPlaceholder = 'e.g. Customer changed their mind',
   cancelLabel = 'Back',
   confirmVariant = 'danger', // 'danger' | 'primary' (a save prompt is not destructive)
+  tone = 'danger', // 'danger' | 'warning': header icon colour (warning = a permitted override, not a destructive action)
   secondaryLabel = null, // optional middle button, e.g. 'Discard'
   onSecondary = null,
 }) => {
@@ -57,8 +58,8 @@ const ConfirmDialog = ({
       <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in">
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-error/10 rounded-lg flex items-center justify-center">
-              <Icon name="AlertTriangle" size={20} className="text-error" />
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tone === 'warning' ? 'bg-warning/10' : 'bg-error/10'}`}>
+              <Icon name="AlertTriangle" size={20} className={tone === 'warning' ? 'text-warning' : 'text-error'} />
             </div>
             <h2 className="font-heading font-heading-semibold text-lg text-text-primary">
               {title}

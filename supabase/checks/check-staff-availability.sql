@@ -534,6 +534,28 @@ SELECT pg_temp.err('rollout: staff refused', '42501', format($q$SELECT public.av
 SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000001');
 SELECT pg_temp.err('rollout: another org refused', '42501', $q$SELECT public.availability_rollout_check('99999999-9999-9999-9999-999999999999')$q$);
 
+-- ================= 14. reschedule_booking RPC takes the override reason (migration 322) =================
+UPDATE public.organizations SET enforce_staff_availability = true WHERE id = current_setting('t.org')::uuid;
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000001');
+SELECT pg_temp.parent(current_setting('t.th0')::uuid, '2030-09-02', '11:00');
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000002');
+SELECT pg_temp.err('reschedule rpc: into a break without a reason', 'ON_BREAK',
+  format($q$SELECT public.reschedule_booking((SELECT id FROM public.bookings WHERE customer_name = 'ZZ Avail'), '2030-03-04', '14:00', %L, NULL, 'moved')$q$, current_setting('t.th')));
+SELECT pg_temp.parent(current_setting('t.th0')::uuid, '2030-09-02', '11:00');
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000003');
+SELECT pg_temp.err('reschedule rpc: staff with a reason is refused', 'OVERRIDE_NOT_ALLOWED',
+  format($q$SELECT public.reschedule_booking((SELECT id FROM public.bookings WHERE customer_name = 'ZZ Avail'), '2030-03-04', '14:00', %L, NULL, 'moved', 'sneaky')$q$, current_setting('t.th')));
+SELECT pg_temp.parent(current_setting('t.th0')::uuid, '2030-09-02', '11:00');
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000002');
+SELECT pg_temp.err('reschedule rpc: ON_LEAVE is not overridable', 'ON_LEAVE',
+  format($q$SELECT public.reschedule_booking((SELECT id FROM public.bookings WHERE customer_name = 'ZZ Avail'), '2030-03-08', '12:00', %L, NULL, 'moved', 'please')$q$, current_setting('t.th')));
+SELECT pg_temp.parent(current_setting('t.th0')::uuid, '2030-09-02', '11:00');
+SELECT pg_temp.run(format($q$CREATE TEMP TABLE _rs ON COMMIT DROP AS SELECT public.reschedule_booking((SELECT id FROM public.bookings WHERE customer_name = 'ZZ Avail'), '2030-03-04', '14:00', %L, NULL, 'moved', 'client request') AS j$q$, current_setting('t.th')));
+SELECT pg_temp.assert('reschedule rpc: manager + reason moves into the break, is audited, and the reason is not left on the row',
+  EXISTS (SELECT 1 FROM public.bookings b JOIN _rs ON b.id = (_rs.j->>'id')::uuid WHERE b.availability_override_reason IS NULL AND b.start_time = '14:00')
+  AND EXISTS (SELECT 1 FROM public.audit_logs a JOIN _rs ON a.record_id = (_rs.j->>'id')::uuid WHERE a.action_type = 'AVAILABILITY_OVERRIDE' AND a.reason = 'client request'));
+DELETE FROM public.bookings WHERE customer_name = 'ZZ Avail';
+
 -- ================= report =================
 SELECT count(*) || ' staff-availability checks passed' AS result FROM _r;
 ROLLBACK;

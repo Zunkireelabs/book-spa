@@ -11,10 +11,12 @@ import {
   resizeSharedBookingTime,
 } from '../../../../../services/api';
 import { transformBooking, toDbStatus } from '../../../../../services/bookingTransformers';
+import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 
 // Booking-level actions wired to the booking panel (status, assignment, edit, discount, payment) plus the
 // shared-booking card resize from the grid.
 export function useBookingActions({ showToast, refreshCalendar, selectedBooking, setSelectedBooking, getSelectedBookingsRef, staffLabel }) {
+  const { guard } = useAvailabilityGuard();
   const handleStatusUpdate = async (bookingId, newStatus, reason) => {
     const dbStatus = toDbStatus(newStatus);
     const result = await updateBookingStatus({ bookingId, newStatus: dbStatus, reason });
@@ -27,7 +29,7 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
 
   const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId, therapistRoomOverrides, companionName, companionPhone) => {
     const ids = Array.isArray(therapistIds) ? therapistIds : (therapistIds ? [therapistIds] : []);
-    const result = await assignTherapist({
+    const result = await guard((overrideReason) => assignTherapist({
       bookingId,
       therapistIds: ids,
       roomId: roomId !== undefined ? (roomId || null) : undefined,
@@ -35,7 +37,8 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
       therapistRoomOverrides,
       companionName,
       companionPhone,
-    });
+      overrideReason,
+    }));
     if (result.error) {
       showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
@@ -85,13 +88,14 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
 
     const bookingId = booking.bookingId || booking.id;
     const result = isPartOfSelection
-      ? await updateTherapistTime({
+      ? await guard((overrideReason) => updateTherapistTime({
           bookingId,
           therapistId: booking._colTherapistId,
           startTime: newStartTime,
           endTime: newEndTime,
-        })
-      : await resizeSharedBookingTime({ bookingId, startTime: newStartTime, endTime: newEndTime });
+          overrideReason,
+        }))
+      : await guard((overrideReason) => resizeSharedBookingTime({ bookingId, startTime: newStartTime, endTime: newEndTime, overrideReason }));
 
     if (result.error) {
       showToast(result.error.message || 'Failed to resize.', 'error');
@@ -101,10 +105,10 @@ export function useBookingActions({ showToast, refreshCalendar, selectedBooking,
       showToast(`Resized to ${newStartTime} – ${newEndTime}`, 'success');
     }
     refreshCalendar();
-  }, [refreshCalendar]);
+  }, [refreshCalendar, guard]);
 
   const handleEditBooking = async (bookingId, updates) => {
-    const result = await updateBookingDetails({ bookingId, ...updates });
+    const result = await guard((overrideReason) => updateBookingDetails({ bookingId, ...updates, overrideReason }));
     if (result.error) {
       showToast(result.error.message || 'Failed to update booking.', 'error');
       return { error: result.error };

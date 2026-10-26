@@ -7,7 +7,34 @@ import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from 
 import { toE164, samePhone } from '../utils/phone';
 import { expandBlockOccurrences } from '../utils/blockRecurrence';
 import { leafMethods, qrMethodDiff, validateQrFile } from '../utils/paymentQr';
+import { parseAvailabilityError, createEnforcementCache } from './availability';
 import { computeTherapistBranchAt, toKathmanduDate, isAfterCheckout, resolveOrphanTransferWindow } from './therapistBranchWindow';
+
+// Staff-availability rule (ZNLY-100, migration-319): the guard raises OFF_SHIFT / ON_BREAK / ON_LEAVE / BLOCKED /
+// OTHER_BRANCH / OVERLAP / OVERRIDE_NOT_ALLOWED. Every booking writer maps it to { code, message, overridable, detail }
+// through here, and takes an optional `overrideReason` (manager/admin only; the DB re-checks the role).
+const availabilityFailure = (err) => {
+  const mapped = parseAvailabilityError(err);
+  return mapped ? { data: null, error: mapped } : null;
+};
+const staffAvailabilityCache = createEnforcementCache(async (branchId) => {
+  const { data, error } = await supabase.from('branches').select('organizations(enforce_staff_availability)').eq('id', branchId).maybeSingle();
+  if (error) throw error;
+  return data?.organizations?.enforce_staff_availability;
+});
+// true = the tenant switch is ON: leave/transfer windows are judged by the DB guard only (same code and message everywhere).
+const staffAvailabilityEnforced = (branchId) => staffAvailabilityCache.get(branchId);
+const overrideReasonOf = (reason) => (typeof reason === 'string' && reason.trim() ? reason.trim() : null);
+// The reason authorises exactly one write; clear it afterwards so it can never be mistaken for a fresh override later.
+async function clearAvailabilityOverride(bookingId) {
+  try {
+    await supabase.from('bookings').update({ availability_override_reason: null }).eq('id', bookingId);
+    await supabase.from('booking_therapists').update({ availability_override_reason: null }).eq('booking_id', bookingId).not('availability_override_reason', 'is', null);
+    await supabase.from('booking_combo_items').update({ availability_override_reason: null }).eq('booking_id', bookingId).not('availability_override_reason', 'is', null);
+  } catch (e) {
+    console.warn('[API] clearAvailabilityOverride failed:', e.message);
+  }
+}
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
@@ -259,7 +286,7 @@ export async function fetchRooms(branchId) {
 // Real, room-capacity-aware availability for the customer booking flow — fetches active rooms
 // (with capacity) plus every non-cancelled booking in the branch across a date range in one call,
 // so the client can compute per-service, duration-aware slot availability without a fetch per date.
-export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate) {
+export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate, { serviceId, durationMinutes } = {}) {
   const [{ data: rooms, error: roomsError }, { data: bookings, error: bookingsError }] =
     await Promise.all([
       fetchRooms(branchId),
@@ -267,13 +294,23 @@ export async function fetchBranchAvailabilityWindow(branchId, startDate, endDate
         p_branch_id: branchId,
         p_start_date: startDate,
         p_end_date: endDate,
+        // staff availability (migration-320): with both, the tenant's "no_staff" start times come back too
+        ...(serviceId && durationMinutes ? { p_service_id: serviceId, p_duration_minutes: durationMinutes } : {}),
       }),
     ]);
 
   if (roomsError) throw roomsError;
   if (bookingsError) throw bookingsError;
 
-  return { rooms: rooms || [], bookings: bookings || [] };
+  // 'no_staff' rows are not busy intervals: each is one 15-minute-grid START time that must not be offered
+  // (match on equality, never overlap -- see the COMMENT on the function). Keep them out of `bookings`.
+  const noStaffStarts = new Set();
+  const busy = [];
+  for (const row of bookings || []) {
+    if (row.source === 'no_staff') noStaffStarts.add(`${row.booking_date}|${String(row.start_time).slice(0, 5)}`);
+    else busy.push(row);
+  }
+  return { rooms: rooms || [], bookings: busy, noStaffStarts };
 }
 
 // Per-therapist sibling to fetchBranchAvailabilityWindow — same shape, but backed
@@ -292,6 +329,52 @@ export async function fetchTherapistAvailabilityWindow(orgSlug, branchId, startD
   });
   if (error) throw error;
   return { bookings: data || [] };
+}
+
+// Everything the live availability pre-check needs for one branch + date, in three reads and no write:
+// the rule's own shifts (therapist_shifts_for_range, migration-320: weekly/roster hours, breaks, leave, blocks,
+// transfer windows) plus the day's bookings (own and companion) to detect overlaps.
+// -> { data: { therapists: [{ id, name, shiftDay, bookings: [{ id, startMin, endMin, number }] }] }, error }
+export async function fetchAvailabilityDay({ branchId, date }) {
+  try {
+    const toMin = (t) => { const [h, m] = String(t || '0:0').split(':'); return Number(h) * 60 + Number(m || 0); };
+    const [shifts, therapists, mine, companions] = await Promise.all([
+      supabase.rpc('therapist_shifts_for_range', { p_branch_id: branchId, p_from_date: date, p_to_date: date }),
+      supabase.from('therapists').select('id, name').eq('branch_id', branchId).eq('is_active', true).eq('is_service_staff', true).order('display_order').order('name'),
+      supabase.from('bookings').select('id, booking_number, therapist_id, start_time, end_time')
+        .eq('branch_id', branchId).eq('date', date).not('status', 'in', '("Cancelled","No Show")').not('therapist_id', 'is', null),
+      supabase.from('booking_therapists')
+        .select('booking_id, therapist_id, start_time, end_time, booking:bookings!inner(id, booking_number, date, branch_id, status, start_time, end_time)')
+        .eq('booking.branch_id', branchId).eq('booking.date', date).not('booking.status', 'in', '("Cancelled","No Show")'),
+    ]);
+    const firstError = shifts.error || therapists.error || mine.error || companions.error;
+    if (firstError) throw firstError;
+
+    const shiftBy = new Map((shifts.data || []).map((r) => [r.therapist_id, r]));
+    const seen = new Set();
+    const bookingsBy = new Map();
+    const add = (therapistId, id, number, start, end) => {
+      const key = `${id}:${therapistId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (!bookingsBy.has(therapistId)) bookingsBy.set(therapistId, []);
+      bookingsBy.get(therapistId).push({ id, number, startMin: toMin(start), endMin: toMin(end) });
+    };
+    (mine.data || []).forEach((b) => add(b.therapist_id, b.id, b.booking_number, b.start_time, b.end_time));
+    (companions.data || []).forEach((r) => add(r.therapist_id, r.booking_id, r.booking?.booking_number, r.start_time || r.booking?.start_time, r.end_time || r.booking?.end_time));
+
+    return {
+      data: {
+        therapists: (therapists.data || []).map((t) => ({
+          id: t.id, name: t.name, shiftDay: shiftBy.get(t.id) || null, bookings: bookingsBy.get(t.id) || [],
+        })),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAvailabilityDay error:', error.message);
+    return { data: null, error };
+  }
 }
 
 export async function fetchTherapists(branchId, { date } = {}) {
@@ -2442,8 +2525,9 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   }
 }
 
-export async function assignTherapist({ bookingId, therapistIds = [], roomId, therapistRoomOverrides, companionName, companionPhone }) {
+export async function assignTherapist({ bookingId, therapistIds = [], roomId, therapistRoomOverrides, companionName, companionPhone, overrideReason }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     // Support legacy single therapistId param
     const ids = Array.isArray(therapistIds) ? therapistIds.filter(Boolean) : (therapistIds ? [therapistIds] : []);
 
@@ -2501,7 +2585,8 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
         (transfersByTherapist[t.therapist_id] ||= []).push(t);
       });
 
-      const wrongBranch = (therapistsData || []).find(t =>
+      const guardOwnsAvailability = await staffAvailabilityEnforced(booking.branch_id);
+      const wrongBranch = guardOwnsAvailability ? null : (therapistsData || []).find(t =>
         computeTherapistBranchAt(transfersByTherapist[t.id] || [], t.branch_id, atDate) !== booking.branch_id
       );
       if (wrongBranch) {
@@ -2515,7 +2600,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
           .in('therapist_id', ids)
           .eq('date', booking.date);
 
-        const absent = (attendanceRecords || []).find(a =>
+        const absent = guardOwnsAvailability ? null : (attendanceRecords || []).find(a =>
           a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)
         );
         if (absent) {
@@ -2543,6 +2628,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     };
     if (companionName !== undefined) updatePayload.companion_name = companionName?.trim() || null;
     if (companionPhone !== undefined) updatePayload.companion_phone = companionPhone ? toE164(companionPhone) : null;
+    if (availabilityOverride) updatePayload.availability_override_reason = availabilityOverride;
 
     // 6. Room assignment (if roomId provided)
     if (roomId !== undefined) {
@@ -2578,6 +2664,8 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
       .single();
 
     if (updateError) {
+      const availabilityErr = availabilityFailure(updateError);
+      if (availabilityErr) return availabilityErr;
       if (updateError.code === '23P01') {
         return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
       }
@@ -2633,8 +2721,17 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
           overridesMap: therapistRoomOverrides,
           existingRoomId: existingTimeMap[tid]?.room_id,
         }),
+        ...(availabilityOverride && tid !== primaryId ? { availability_override_reason: availabilityOverride } : {}),
       }));
       const { error: junctionError } = await supabase.from('booking_therapists').insert(rows);
+      const junctionAvailability = junctionError && availabilityFailure(junctionError);
+      if (junctionAvailability) {
+        // A companion is off shift / on break: the rows were just deleted, so put the previous ones back before
+        // reporting, instead of leaving the booking with no therapist rows.
+        const restore = (existingBt || []).map((bt) => ({ booking_id: bookingId, ...bt }));
+        if (restore.length > 0) await supabase.from('booking_therapists').insert(restore);
+        return junctionAvailability;
+      }
       if (junctionError) {
         // Non-fatal: the primary therapist/room update on `bookings` above already
         // committed. But since migration-171 added a trigger that can reject this
@@ -2649,6 +2746,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
       }
     }
 
+    if (availabilityOverride) await clearAvailabilityOverride(bookingId);
     return { data: { success: true, bookingId, therapistIds: ids, roomId: updated.room_id }, error: null };
   } catch (error) {
     console.error('[API] assignTherapist error:', error.message);
@@ -2733,15 +2831,21 @@ export async function fetchGroupBookings({ bookingGroupId, customerName, date, e
   }
 }
 
-export async function updateTherapistTime({ bookingId, therapistId, startTime, endTime }) {
+export async function updateTherapistTime({ bookingId, therapistId, startTime, endTime, overrideReason }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     const { error } = await supabase
       .from('booking_therapists')
-      .update({ start_time: startTime, end_time: endTime })
+      .update({ start_time: startTime, end_time: endTime, ...(availabilityOverride ? { availability_override_reason: availabilityOverride } : {}) })
       .eq('booking_id', bookingId)
       .eq('therapist_id', therapistId);
 
-    if (error) throw error;
+    if (error) {
+      const availabilityErr = availabilityFailure(error);
+      if (availabilityErr) return availabilityErr;
+      throw error;
+    }
+    if (availabilityOverride) await clearAvailabilityOverride(bookingId);
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] updateTherapistTime error:', error.message);
@@ -2756,8 +2860,9 @@ export async function updateTherapistTime({ bookingId, therapistId, startTime, e
 // row and is reserved for the explicit Cmd/Ctrl-selected independent-resize case).
 // Without this, resizing one therapist's card silently desyncs it from the rest
 // of the booking with no warning — see calendar/index.jsx handleBookingResize.
-export async function resizeSharedBookingTime({ bookingId, startTime, endTime }) {
+export async function resizeSharedBookingTime({ bookingId, startTime, endTime, overrideReason }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     // bookings is ground truth (same order/failure policy as rescheduleBooking):
     // update it first and fail loudly if it errors. booking_therapists is synced
     // second, best-effort — if that write fails, bookings is still correct and
@@ -2768,9 +2873,11 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime })
     // the exact class of desync this function exists to prevent.
     const { error: bookingError } = await supabase
       .from('bookings')
-      .update({ start_time: startTime, end_time: endTime })
+      .update({ start_time: startTime, end_time: endTime, ...(availabilityOverride ? { availability_override_reason: availabilityOverride } : {}) })
       .eq('id', bookingId);
     if (bookingError) {
+      const availabilityErr = availabilityFailure(bookingError);
+      if (availabilityErr) return availabilityErr;
       // compute_booking_datetimes trigger (migration-179): the resized time
       // + service duration would extend past midnight.
       if (bookingError.message?.includes('BOOKING_CROSSES_MIDNIGHT')) {
@@ -2781,12 +2888,18 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime })
 
     const { error: therapistsError } = await supabase
       .from('booking_therapists')
-      .update({ start_time: startTime, end_time: endTime })
+      .update({ start_time: startTime, end_time: endTime, ...(availabilityOverride ? { availability_override_reason: availabilityOverride } : {}) })
       .eq('booking_id', bookingId);
     if (therapistsError) {
+      // bookings.end_time is always start + service duration (compute_booking_datetimes), so a longer/shorter card is
+      // carried by these junction rows alone: the availability rule (off shift, break, leave...) is enforced HERE.
+      // Report it instead of swallowing it, so the resize is refused (or offers "Book anyway") like every other path.
+      const availabilityErr = availabilityFailure(therapistsError);
+      if (availabilityErr) return availabilityErr;
       console.error('[API] resizeSharedBookingTime booking_therapists sync error:', therapistsError.message);
     }
 
+    if (availabilityOverride) await clearAvailabilityOverride(bookingId);
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] resizeSharedBookingTime error:', error.message);
@@ -2794,8 +2907,9 @@ export async function resizeSharedBookingTime({ bookingId, startTime, endTime })
   }
 }
 
-export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy }) {
+export async function updateBookingDetails({ bookingId, customerName, customerPhone, serviceId, date, startTime, specialRequests, referredBy, overrideReason }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     customerName = toTitleCase(customerName);
     // 1. Fetch current booking
     const { data: booking, error: fetchError } = await supabase
@@ -2961,6 +3075,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     }
 
     // Note: Scheduling conflicts are enforced by DB constraints (error 23P01 handled below)
+    if (availabilityOverride && (dateChanged || timeChanged)) updatePayload.availability_override_reason = availabilityOverride;
 
     // 8. Only update if there are changes
     if (Object.keys(updatePayload).length === 0) {
@@ -2976,6 +3091,8 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       .single();
 
     if (updateError) {
+      const availabilityErr = availabilityFailure(updateError);
+      if (availabilityErr) return availabilityErr;
       if (updateError.code === '23P01' || updateError.code === 'P0003') {
         return { data: null, error: { code: 'SCHEDULING_CONFLICT', message: 'The new date/time conflicts with an existing booking.' } };
       }
@@ -3007,6 +3124,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
       }
     }
 
+    if (updatePayload.availability_override_reason) await clearAvailabilityOverride(bookingId);
     return { data: { success: true, bookingId }, error: null };
   } catch (error) {
     console.error('[API] updateBookingDetails error:', error.message);
@@ -3560,8 +3678,9 @@ export async function markAllNotificationsRead() {
  * Optionally reassign to a different therapist or room (cross-column drag).
  * Validates lifecycle, checks room/therapist availability, and updates the booking.
  */
-export async function rescheduleBooking({ bookingId, newDate, newStartTime, newTherapistId, newRoomId }) {
+export async function rescheduleBooking({ bookingId, newDate, newStartTime, newTherapistId, newRoomId, overrideReason }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     // 1. Fetch booking with service duration, room, therapist, and branch
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
@@ -3608,6 +3727,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       date: newDate,
       start_time: newStartTime,
       end_time: newEndTime,
+      ...(availabilityOverride ? { availability_override_reason: availabilityOverride } : {}),
     };
 
     // 6a. Therapist reassignment
@@ -3638,7 +3758,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
             .eq('therapist_id', newTherapistId);
           const atDate = toKathmanduDate(newDate, newStartTime);
           const effectiveBranch = computeTherapistBranchAt(transferRows || [], therapist.branch_id, atDate);
-          if (effectiveBranch !== booking.branch_id) {
+          if (effectiveBranch !== booking.branch_id && !(await staffAvailabilityEnforced(booking.branch_id))) {
             return { data: null, error: { code: 'INVALID_THERAPIST', message: `${therapist.name} is not available in this branch at this time (transferred elsewhere for this date).` } };
           }
 
@@ -3672,7 +3792,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
           .eq('therapist_id', booking.therapist_id);
         const atDate = toKathmanduDate(newDate, newStartTime);
         const effectiveBranch = computeTherapistBranchAt(transferRows || [], currentTherapist.branch_id, atDate);
-        if (effectiveBranch !== booking.branch_id) {
+        if (effectiveBranch !== booking.branch_id && !(await staffAvailabilityEnforced(booking.branch_id))) {
           return { data: null, error: { code: 'INVALID_THERAPIST', message: `${currentTherapist.name} is not available in this branch at this time (transferred elsewhere for this date). Reassign or choose a different date.` } };
         }
 
@@ -3749,6 +3869,8 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       .single();
 
     if (updateError) {
+      const availabilityErr = availabilityFailure(updateError);
+      if (availabilityErr) return availabilityErr;
       // GIST exclusion: therapist double-booking
       if (updateError.code === '23P01') {
         return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'Therapist is already booked during this time slot.' } };
@@ -3793,6 +3915,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
       // the whole reschedule if this secondary sync write errors.
       console.error('[API] rescheduleBooking booking_therapists sync error:', junctionError.message);
     }
+    if (availabilityOverride) await clearAvailabilityOverride(bookingId);
 
     return {
       data: {
@@ -5794,8 +5917,10 @@ export async function createBooking({
   referralSource,
   referralSourceDetail,
   customerAccountId,
+  overrideReason,
 }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     if (!customerPhone || !customerPhone.trim()) {
       return { data: null, error: { message: 'Phone number is required' } };
     }
@@ -6075,7 +6200,8 @@ export async function createBooking({
         (transfersByTherapist[t.therapist_id] ||= []).push(t);
       });
 
-      const wrongBranch = therapistsData.find(t =>
+      const guardOwnsAvailability = await staffAvailabilityEnforced(resolvedBranchId);
+      const wrongBranch = guardOwnsAvailability ? null : therapistsData.find(t =>
         computeTherapistBranchAt(transfersByTherapist[t.id] || [], t.branch_id, atDate) !== resolvedBranchId
       );
       if (wrongBranch) {
@@ -6089,7 +6215,7 @@ export async function createBooking({
           .in('therapist_id', allTherapistIds)
           .eq('date', date);
 
-        const absent = (attendanceRecords || []).find(a =>
+        const absent = guardOwnsAvailability ? null : (attendanceRecords || []).find(a =>
           a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)
         );
         if (absent) {
@@ -6193,6 +6319,7 @@ export async function createBooking({
       service_category_snapshot: service.category,
       room_name_snapshot: availableRoom?.name || null,
       therapist_name_snapshot: therapistNameSnapshot,
+      ...(availabilityOverride ? { availability_override_reason: availabilityOverride } : {}),
     };
 
     let booking;
@@ -6208,6 +6335,8 @@ export async function createBooking({
     }
 
     if (insertError) {
+      const availabilityErr = availabilityFailure(insertError);
+      if (availabilityErr) return availabilityErr;
       if (insertError.code === '23P01') {
         return { data: null, error: { code: 'THERAPIST_CONFLICT', message: 'One or more selected therapists are already booked during this time slot.' } };
       }
@@ -6304,6 +6433,8 @@ export async function createBooking({
           overridesMap: therapistRoomOverrides,
           existingRoomId: null, // brand-new booking, nothing to preserve
         }),
+        // companions carry their own reason (mirror row of the primary is skipped by the guard)
+        ...(availabilityOverride && tid !== primaryTherapistId ? { availability_override_reason: availabilityOverride } : {}),
       }));
       // upsert, not insert — sync_booking_therapists_from_booking (migration-252)
       // already inserted the primary therapist's row off the bookings AFTER INSERT
@@ -6322,9 +6453,11 @@ export async function createBooking({
         // committed, so this stays non-fatal, but must be visible to the caller now
         // that a real trigger can reject this insert.
         console.warn('[API] booking_therapists insert error:', btError.message);
-        booking._therapistAssignmentWarning = btError.message;
+        booking._therapistAssignmentWarning = parseAvailabilityError(btError)?.message || btError.message;
       }
     }
+
+    if (availabilityOverride) await clearAvailabilityOverride(booking.id);
 
     capture('staff_booking_created', {
       service_id: serviceId,
@@ -6441,9 +6574,10 @@ export async function createBookingGroup({ services, date, startTime, therapistI
 // discount/specialRequests/companion/referral fields because createBooking()
 // always recomputes a fresh booking from scratch. The RPC copies every
 // preservable field from the original row server-side instead.
-export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime, therapistId, roomId, reason }) {
+export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime, therapistId, roomId, reason, overrideReason }) {
   try {
     const { data, error } = await supabase.rpc('reschedule_booking', {
+      p_override_reason: overrideReasonOf(overrideReason),
       p_booking_id: bookingId,
       p_date: date,
       p_start_time: startTime,
@@ -6451,7 +6585,11 @@ export async function rescheduleBookingAsNewBooking({ bookingId, date, startTime
       p_room_id: roomId || null,
       p_reason: reason || null,
     });
-    if (error) throw error;
+    if (error) {
+      const availabilityErr = availabilityFailure(error);
+      if (availabilityErr) return availabilityErr;
+      throw error;
+    }
 
     capture('staff_booking_rescheduled', { booking_id: bookingId, new_booking_id: data?.id });
 
@@ -8881,8 +9019,9 @@ export async function fetchServiceComboComponents(serviceId) {
 // components: [{ serviceId, componentId, defaultTiming, therapistId }] — therapistId
 // already resolved by the caller (same as the booking's primary therapist, or a
 // staff-picked override for a "different staff" component).
-export async function createComboBookingItems({ bookingId, branchId, date, startTime, roomId, components }) {
+export async function createComboBookingItems({ bookingId, branchId, date, startTime, roomId, components, overrideReason }) {
   try {
+    const availabilityOverride = overrideReasonOf(overrideReason);
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
@@ -8925,6 +9064,7 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
         start_time: compStartTime,
         commission_weight: 1,
         base_share_amount: 0,
+        ...(availabilityOverride ? { availability_override_reason: availabilityOverride } : {}),
       };
     });
 
@@ -8932,7 +9072,12 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
       .from('booking_combo_items')
       .insert(rows)
       .select('id, service_id, therapist_id, room_id, start_time, end_time');
-    if (error) throw error;
+    if (error) {
+      const availabilityErr = availabilityFailure(error);
+      if (availabilityErr) return availabilityErr;
+      throw error;
+    }
+    if (availabilityOverride) await clearAvailabilityOverride(bookingId);
     return { data, error: null };
   } catch (error) {
     console.error('[API] createComboBookingItems error:', error.message);

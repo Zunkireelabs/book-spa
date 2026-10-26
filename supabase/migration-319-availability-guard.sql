@@ -2,7 +2,8 @@
 -- check_therapist_booking_guards is extended with the range/booking end, the booking id (overlap exclusion + audit),
 -- the manager/admin override reason and a skip flag. With organizations.enforce_staff_availability = false only
 -- today's checks run (allowlist, absent, checked-out). With it on, therapist_unavailable_ranges (317) is applied and
--- a violation raises  '<CODE>: message'  with ERRCODE P0006 and DETAIL = JSON {code, reason, therapist_id,
+-- a violation raises  '<CODE>: message'  with ERRCODE PT409 (PostgREST turns PT### into HTTP ###, 409 here, 403 for
+-- OVERRIDE_NOT_ALLOWED, and returns message + details as JSON; a plain P0006 reaches the browser as a generic 500) and DETAIL = JSON {code, reason, therapist_id,
 -- therapist_name, date, start, end, range_start, range_end, label}.
 -- Codes: ON_LEAVE, OVERLAP (never overridable) | OTHER_BRANCH, BLOCKED, ON_BREAK, OFF_SHIFT (overridable).
 -- Override: bookings.availability_override_reason, honoured only if newly set in this INSERT/UPDATE (compared with OLD,
@@ -120,14 +121,14 @@ BEGIN
         'range_start', public.minutes_to_hhmm(r.start_min), 'range_end', public.minutes_to_hhmm(r.end_min), 'label', r.label);
 
       IF r.code IN ('ON_LEAVE', 'OVERLAP') OR v_reason = '' THEN
-        RAISE EXCEPTION '%: %', r.code, v_msg USING ERRCODE = 'P0006', DETAIL = v_detail::text;
+        RAISE EXCEPTION '%: %', r.code, v_msg USING ERRCODE = 'PT409', DETAIL = v_detail::text;
       END IF;
 
       -- overridable code with a reason supplied: managers/admins only
       v_role := public.get_user_role();
       IF v_role IS DISTINCT FROM 'manager'::user_role AND v_role IS DISTINCT FROM 'admin'::user_role THEN
         RAISE EXCEPTION 'OVERRIDE_NOT_ALLOWED: Only a manager or admin can book outside a staff member''s availability.'
-          USING ERRCODE = 'P0006', DETAIL = v_detail::text;
+          USING ERRCODE = 'PT403', DETAIL = v_detail::text;
       END IF;
       INSERT INTO public.audit_logs (branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, reason)
       SELECT p_branch_id, 'bookings', p_booking_id, 'AVAILABILITY_OVERRIDE', NULL,
@@ -174,7 +175,7 @@ BEGIN
     v_role := get_user_role();
     IF v_role IS DISTINCT FROM 'manager'::user_role AND v_role IS DISTINCT FROM 'admin'::user_role THEN
       RAISE EXCEPTION 'OVERRIDE_NOT_ALLOWED: Only a manager or admin can book outside a staff member''s availability.'
-        USING ERRCODE = 'P0006';
+        USING ERRCODE = 'PT403';
     END IF;
   END IF;
 
@@ -227,7 +228,7 @@ BEGIN
     v_role := get_user_role();
     IF v_role IS DISTINCT FROM 'manager'::user_role AND v_role IS DISTINCT FROM 'admin'::user_role THEN
       RAISE EXCEPTION 'OVERRIDE_NOT_ALLOWED: Only a manager or admin can book outside a staff member''s availability.'
-        USING ERRCODE = 'P0006';
+        USING ERRCODE = 'PT403';
     END IF;
   END IF;
 
@@ -287,7 +288,7 @@ BEGIN
     v_role := get_user_role();
     IF v_role IS DISTINCT FROM 'manager'::user_role AND v_role IS DISTINCT FROM 'admin'::user_role THEN
       RAISE EXCEPTION 'OVERRIDE_NOT_ALLOWED: Only a manager or admin can book outside a staff member''s availability.'
-        USING ERRCODE = 'P0006';
+        USING ERRCODE = 'PT403';
     END IF;
   END IF;
 

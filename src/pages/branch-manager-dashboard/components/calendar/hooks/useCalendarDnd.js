@@ -10,10 +10,12 @@ import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blo
 import { HOUR_HEIGHT } from '../CalendarGrid';
 import { formatTimeFromSlot, calculateEndTime } from '../calendarDates';
 import { isCheckedOutBlockedSlot } from '../calendarSlots';
+import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 
 // Drag-and-drop for the calendar grid: sensors, pointer tracking, drag start/move/over/end, block drag, the
 // cross-column confirm state and its execution.
 export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refreshCalendar, showToast, gridRef, getSelectedBookingsRef }) {
+  const { guard } = useAvailabilityGuard();
   // Drag state
   const [activeDragId, setActiveDragId] = useState(null);
   const [activeDragBooking, setActiveDragBooking] = useState(null);
@@ -339,24 +341,28 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         const [newH, newM] = newStartTime.split(':').map(Number);
         const deltaMins = (newH * 60 + newM) - (oldH * 60 + oldM);
 
-        const updates = selectedBookings.map(b => {
+        const updates = selectedBookings.map(b => () => {
           const [sh, sm] = (b.startTime || '').split(':').map(Number);
           const [eh, em] = (b.endTime || '').split(':').map(Number);
           const ns = sh * 60 + sm + deltaMins;
           const ne = eh * 60 + em + deltaMins;
-          return updateTherapistTime({
+          return guard((overrideReason) => updateTherapistTime({
             bookingId: b.bookingId || b.id,
             therapistId: b._colTherapistId,
             startTime: `${String(Math.floor(ns / 60)).padStart(2, '0')}:${String(ns % 60).padStart(2, '0')}`,
             endTime: `${String(Math.floor(ne / 60)).padStart(2, '0')}:${String(ne % 60).padStart(2, '0')}`,
-          });
+            overrideReason,
+          }));
         });
-        Promise.all(updates).then(results => {
+        // one at a time: a "Book anyway" prompt may open for any of them
+        (async () => {
+          const results = [];
+          for (const run of updates) results.push(await run());
           const failed = results.find(r => r.error);
           if (failed) showToast(failed.error.message || 'Failed to update.', 'error');
           else showToast(`Moved ${selectedBookings.length} selected`, 'success');
           refreshCalendar();
-        });
+        })();
       } else {
         // Default: show confirmation dialog to reschedule entire booking (moves all therapists)
         setPendingReassign({
@@ -395,7 +401,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         timeOnly: true,
       });
     }
-  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData, handleMoveManualBlock, overSlotData]);
+  }, [refreshCalendar, calculateTimeFromPointer, columnMode, colNameMap, calendarData, handleMoveManualBlock, overSlotData, guard]);
 
   // Handle cross-column reassignment confirmation
   const handleConfirmReassign = useCallback(async () => {
@@ -409,7 +415,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
     try {
       if (isSharedReschedule) {
         // Shared booking time-only reschedule: moves all therapists together
-        const result = await rescheduleBooking({ bookingId, newDate, newStartTime });
+        const result = await guard((overrideReason) => rescheduleBooking({ bookingId, newDate, newStartTime, overrideReason }));
         if (result.error) {
           showToast(result.error.message || 'Failed to reschedule.', 'error');
         } else {
@@ -425,7 +431,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         if (currentTherapistIds.includes(targetColId) && targetColId !== sourceColId) {
           // Dragged to a therapist who already has this booking → consolidate (remove source)
           const newIds = currentTherapistIds.filter(id => id !== sourceColId);
-          const result = await assignTherapist({ bookingId, therapistIds: newIds });
+          const result = await guard((overrideReason) => assignTherapist({ bookingId, therapistIds: newIds, overrideReason }));
           if (result.error) {
             showToast(result.error.message || 'Failed to consolidate assignment.', 'error');
           } else if (result.data?.warning) {
@@ -436,7 +442,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
         } else {
           // Dragged to a new therapist → replace source with target
           const newIds = currentTherapistIds.map(id => id === sourceColId ? targetColId : id);
-          const result = await assignTherapist({ bookingId, therapistIds: newIds });
+          const result = await guard((overrideReason) => assignTherapist({ bookingId, therapistIds: newIds, overrideReason }));
           if (result.error) {
             showToast(result.error.message || 'Failed to reassign therapist.', 'error');
           } else if (result.data?.warning) {
@@ -473,7 +479,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
           };
         });
 
-        const result = await rescheduleBooking(apiParams);
+        const result = await guard((overrideReason) => rescheduleBooking({ ...apiParams, overrideReason }));
         if (result.error) {
           showToast(result.error.message || 'Failed to reassign booking.', 'error');
           refreshCalendar();
@@ -487,7 +493,7 @@ export function useCalendarDnd({ calendarData, setCalendarData, columnMode, refr
     } finally {
       setIsRescheduling(false);
     }
-  }, [pendingReassign, refreshCalendar, calendarData, colNameMap]);
+  }, [pendingReassign, refreshCalendar, calendarData, colNameMap, guard]);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragId(null);
