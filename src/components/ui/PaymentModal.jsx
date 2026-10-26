@@ -26,7 +26,11 @@ import { useBranch } from '../../contexts/BranchContext';
 import { pendingQrRows, qrSignature, isQrConfirmed } from '../../utils/paymentQr';
 import { computeChange, quickCashOptions, buildReceiptText, buildReceiptHtml, buildWhatsAppUrl } from '../../utils/checkoutReceipt';
 import { useAuth } from '../../contexts/AuthContext';
-import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
+import {
+  allocateProductsFirst, dueState, isTreatmentOnly, treatmentOnlyEntered, treatmentOnlyOverflow, splitAcrossLines, lineTotal, parseStockError,
+} from '../../services/checkoutAllocation';
+import { useCheckoutProducts, ProductsBlock, BusyNotice } from './CheckoutProducts';
 
 // First immediately-selectable leaf value in the tree — a plain method, or a
 // group's first sub-method (the group name itself isn't selectable once it has
@@ -344,7 +348,18 @@ const PaymentModal = ({
   const includedMemberIds = [mainBookingId, ...additionalBookings.map((b) => b.bookingId)];
   const memberSavings = round2(includedMemberIds.reduce((s, id) => s + (memberState[id]?.memberAmount || 0), 0));
   const memberDeltaIncluded = round2(includedMemberIds.reduce((s, id) => s + (memberState[id]?.on ? Math.max(0, memberDelta(id)) : 0), 0));
-  const grandTotal = round2(remaining + additionalRemaining);
+  // Products at checkout (V26): paid first, in full; only the treatment can stay due. `treatmentDue` is what the bookings still owe.
+  const [bookingRowInfo, setBookingRowInfo] = useState(null); // guest name/phone/therapist for the header + receipt (and the seller default)
+  const productBranchId = booking.branchId || booking.branch_id;
+  const cp = useCheckoutProducts({
+    enabled: PRODUCTS_ENABLED && !!mainBookingId && !!productBranchId,
+    branchId: productBranchId,
+    customerId: bookingRowInfo?.customer_id || null,
+    defaultSellerId: bookingRowInfo?.therapist?.id || bookingRowInfo?.therapist_id || null,
+  });
+  const productsTotal = cp.total;
+  const treatmentDue = round2(remaining + additionalRemaining);
+  const grandTotal = round2(treatmentDue + productsTotal);
 
   const [notes, setNotes] = useState('');
   // Customer gratuity — NOT part of the amount-due math at all (deliberately kept
@@ -581,7 +596,6 @@ const PaymentModal = ({
   // "replace, don't append" approach as the Membership auto-fill effect above —
   // rather than being added alongside other tenders.
   const [customerPackages, setCustomerPackages] = useState([]);
-  const [bookingRowInfo, setBookingRowInfo] = useState(null); // guest name/phone/therapist for the header + receipt
   useEffect(() => {
     if (!bookingId) return;
     let cancelled = false;
@@ -851,7 +865,17 @@ const PaymentModal = ({
         ...(t.paymentMode === 'VoucherWallet' ? { voucherId: t.voucherId } : {}),
         ...(t.paymentMode === 'SessionPackage' ? { packageId: t.packageId } : {}),
       }));
-    const { primaryTenders, additionalAllocations, skippedBookings } = allocateTenders(cleanedTenders);
+    // Products are paid first, in full, by money methods; vouchers and packages pay the treatment only (the server enforces the same).
+    const productSplit = allocateProductsFirst(cleanedTenders, productsTotal);
+    if (productSplit.shortfall > 0.001) {
+      setError(`Products come to ${formatNPR(productsTotal)} and are paid in full today. Cash, card, wallets and the membership wallet cover ${formatNPR(round2(productsTotal - productSplit.shortfall))}; vouchers and packages pay the treatment only.`);
+      return;
+    }
+    if (treatmentOnlyOverflow(cleanedTenders, treatmentDue) > 0.001) {
+      setError(`Vouchers and packages pay the treatment only (${formatNPR(treatmentDue)}); reduce them or use another method for the rest.`);
+      return;
+    }
+    const { primaryTenders, additionalAllocations, skippedBookings } = allocateTenders(productSplit.treatment);
     // Safety net: nothing should be left unallocated when the staff entered
     // the full amount due. If it happens anyway (stale balance, rounding),
     // block rather than silently drop a bundled booking's payment.
@@ -876,17 +900,24 @@ const PaymentModal = ({
       notes,
       tipAmount,
       tipSplits,
+      // V26: with products the whole checkout is ONE database call (products + treatment); `productTenders` is what the screen
+      // allocated to the products, and the server re-derives it from the tender order.
+      products: cp.count > 0 ? cp.payloadLines : [],
+      productTenders: productSplit.product.map((x) => ({ amount: x.amount, paymentMode: x.paymentMode })),
     });
     if (result?.error) {
+      const stock = parseStockError(result.error);
+      if (stock) { cp.markBusy(stock.variantId, stock.left, stock.message); setError(null); return; }
       setError(result.error.message || 'Failed to record payment.');
       return;
     }
-    setReceipt(buildReceipt(cleanedTenders, tipAmount, tipSplits));
+    setReceipt(buildReceipt(cleanedTenders, tipAmount, tipSplits, { split: productSplit, sales: result?.data?.sales || null }));
   };
 
   // ───────────────────────── Checkout UI state (no money logic below this line) ─────────────────────────
   const [receipt, setReceipt] = useState(null); // snapshot shown by the success state
   const [touched, setTouched] = useState(false);
+  useEffect(() => { if (cp.count > 0) setTouched(true); }, [cp.count]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [showVoucherSearch, setShowVoucherSearch] = useState(false);
@@ -1013,7 +1044,9 @@ const PaymentModal = ({
     setTouched(true);
     setTenders((prev) => {
       const credit = sumTenders(prev.filter((t) => isCreditMode(t.paymentMode)));
-      const a = round2(Math.max(0, Math.min(available, grandTotal - credit)));
+      // Vouchers, packages and the referral wallet pay the treatment only; the membership wallet can pay anything.
+      const cap = isTreatmentOnly(mode) ? Math.max(0, treatmentDue - treatmentOnlyEntered(prev)) : grandTotal - credit;
+      const a = round2(Math.max(0, Math.min(available, cap)));
       if (a <= 0) return prev;
       let next = prev.map((t) => ({ ...t }));
       const ri = restIndexOf(next, restOn); // the REST row re-balances itself; only the other rows are trimmed here
@@ -1169,13 +1202,18 @@ const PaymentModal = ({
     || (voucherPoolUsable && voucherPoolCommitted > voucherPoolBalance)
     || appliedVoucherBalances.some((v) => (voucherWalletCommittedByVoucher.get(v.voucherId) || 0) > v.remainingBalance);
   const tipActive = showTip && Number(tip) > 0;
+  const productDue = dueState({ treatmentDue, productsTotal, tenders: tenders.filter((t) => t.paymentMode && Number(t.amount) > 0) });
+  const busyFirst = Object.keys(cp.busy)[0];
   const blockReason = (() => {
     if (memberOnly) return '';
+    if (busyFirst) return `Fix ${cp.lines.find((l) => l.variantId === busyFirst)?.name || 'the product'} first`;
     if (referralRewardBlocksPayment) return 'Apply the referral reward first';
     if (tenders.some((t) => !t.paymentMode)) return 'Choose a method for the new row';
     if (entered <= 0 && leftover <= 0) return 'Enter an amount';
     if (entered > grandTotal) return `Over the total by NPR ${fmt(round2(entered - grandTotal))}`;
     if (walletOver) return 'A wallet or voucher amount exceeds its balance';
+    if (productDue.belowProducts) return `Products need NPR ${fmt(productDue.shortBy)} more from a money method`;
+    if (treatmentOnlyOverflow(tenders.filter((t) => t.paymentMode && Number(t.amount) > 0), treatmentDue) > 0.001) return 'Vouchers and packages pay the treatment only';
     if (leftover > 0 && !leaveDue) return `${fmt(leftover)} not covered yet`;
     if (leftover > 0 && !dueHolderName.trim()) return 'Add who the remaining due is under';
     if (!qrSingle && pendingQr.length === 1) return `Confirm the ${tenderLabel(tenders[pendingQr[0]])} payment`;
@@ -1203,7 +1241,7 @@ const PaymentModal = ({
   };
 
   // Snapshot for the success state / receipt (taken at submit, so the booking refreshing underneath can't change it).
-  const buildReceipt = (cleaned, tipAmount, tipSplits) => {
+  const buildReceipt = (cleaned, tipAmount, tipSplits, extra = null) => {
     const staffName = (id) => branchStaffOptions.find((s) => s.id === id)?.name || 'staff';
     const gross = Number(booking.base_amount ?? booking.baseAmount ?? 0) > 0 ? Number(booking.base_amount ?? booking.baseAmount) : finalAmount;
     const mainMember = memberState[mainBookingId];
@@ -1233,11 +1271,38 @@ const PaymentModal = ({
     if (membershipUsable && membershipCommitted > 0) walletAfter.push({ label: 'Wallet balance now', amount: round2(membership.balance - membershipCommitted) });
     if (referralWalletUsable && referralWalletCommitted > 0) walletAfter.push({ label: 'Referral wallet now', amount: round2(referralReward.walletBalance - referralWalletCommitted) });
     if (voucherPoolUsable && voucherPoolCommitted > 0) walletAfter.push({ label: 'Voucher balance now', amount: round2(voucherPoolBalance - voucherPoolCommitted) });
+    // Products (V26): the receipt is one document in two parts; the treatment keeps its methods, the products get theirs.
+    let productPart = null;
+    if (cp.count > 0 && extra?.split) {
+      const shortSeller = (id) => { const w = String(cp.sellerName(id) || '').trim().split(/\s+/); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : (w[0] || ''); };
+      const sums = (list, labelOf) => {
+        const m = new Map();
+        list.forEach((e) => { const k = labelOf(e); m.set(k, round2((m.get(k) || 0) + e.amount)); });
+        return [...m].map(([label, amount]) => ({ label, amount }));
+      };
+      const labelFor = (e) => tenderLabel(tenders.find((t) => t.paymentMode === e.paymentMode && (e.paymentMode !== 'VoucherWallet' || t.voucherId === e.voucherId)) || e);
+      const sales = extra.sales || [];
+      const stockBits = cp.lines.map((l) => {
+        const sale = sales.find((x) => x.variantId === l.variantId);
+        return sale ? `${l.name}${l.size ? ` ${l.size}` : ''} ${sale.stockBefore} → ${sale.stockAfter}` : null;
+      }).filter(Boolean);
+      const sellerIds = [...new Set(cp.lines.map((l) => cp.sellerOf(l)).filter(Boolean))];
+      productPart = {
+        lines: cp.lines.map((l) => ({ label: `${l.name}${l.size ? ` · ${l.size}` : ''}`, qty: l.qty, amount: lineTotal(l.price, l.qty) })),
+        tenders: sums(extra.split.product, (e) => labelFor(e)),
+        treatmentTenders: sums(extra.split.treatment, (e) => labelFor(e)),
+        total: productsTotal,
+        stockLine: stockBits.length ? `Stock updated at ${branchName || 'this branch'}: ${stockBits.join(', ')}.` : '',
+        creditLine: sellerIds.length ? (() => { const names = sellerIds.map(shortSeller).join(' and '); return `The sale is credited to ${names}${names.endsWith('.') ? '' : '.'}`; })() : 'No commission on this sale.',
+        perLine: splitAcrossLines(cp.lines.map((l) => lineTotal(l.price, l.qty)), extra.split.product),
+      };
+    }
     return {
       orgName, branchName, guestName, guestPhone, bookingNumber,
       dateLabel: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-      lines, tenders: tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
-      hasMember: lines.some((l) => l.member), lineTotal: grandTotal,
+      lines, tenders: productPart ? productPart.treatmentTenders : tenderRows, total: entered, leftover, extraCount: additionalBookings.length,
+      products: productPart,
+      hasMember: lines.some((l) => l.member), lineTotal: round2(grandTotal - productsTotal),
       tipTotal: tipAmount,
       tipLabel: tipAmount > 0 ? `Tip to ${tipSplits.map((s) => staffName(s.receivedBy)).join(', ')}` : '',
       walletAfter,
@@ -1428,7 +1493,8 @@ const PaymentModal = ({
             : <>{receipt.bookingNumber}{receipt.extraCount > 0 ? ` + ${receipt.extraCount} more` : ''} {receipt.extraCount > 0 ? 'are' : 'is'} fully paid</>}
         </div>
         <div className="mt-5 border-t border-[#E7E8E6] text-left text-[13px] pb-1">
-          {receipt.hasMember && (
+          {receipt.products && <div className="pt-3 pb-1 text-[11px] font-medium text-[#8A8A90] tracking-[.04em] uppercase">Treatment</div>}
+          {(receipt.hasMember || receipt.products) && (
             <div data-receipt-lines>
               {receipt.lines.map((l, i) => (
                 <div key={`l${i}`} className={`flex justify-between items-center h-9 border-b border-[#F1F1EF] ${l.member ? 'text-[#9A6B0B]' : l.sub ? 'text-[#8A8A90]' : 'text-[#515152]'}`}>
@@ -1436,7 +1502,7 @@ const PaymentModal = ({
                   <span className="tabular-nums">{l.amount < 0 ? `−${fmt(-l.amount)}` : fmt(l.amount)}</span>
                 </div>
               ))}
-              <div className="flex justify-between items-center h-9 border-b border-[#F1F1EF] font-semibold"><span>Total</span><span className="tabular-nums">{fmt(receipt.lineTotal)}</span></div>
+              {!receipt.products && <div className="flex justify-between items-center h-9 border-b border-[#F1F1EF] font-semibold"><span>Total</span><span className="tabular-nums">{fmt(receipt.lineTotal)}</span></div>}
             </div>
           )}
           {receipt.tenders.map((t, i) => (
@@ -1445,6 +1511,25 @@ const PaymentModal = ({
               <span className="tabular-nums">{fmt(t.amount)}</span>
             </div>
           ))}
+          {receipt.products && (
+            <div data-receipt-products>
+              <div className="pt-4 pb-1 text-[11px] font-medium text-[#8A8A90] tracking-[.04em] uppercase">Products</div>
+              {receipt.products.lines.map((l, i) => (
+                <div key={`p${i}`} className="flex justify-between items-center h-9 border-b border-[#F1F1EF] text-[#515152]">
+                  <span>{l.label} <span className="text-[#8A8A90]">× {l.qty}</span></span><span className="tabular-nums">{fmt(l.amount)}</span>
+                </div>
+              ))}
+              {receipt.products.tenders.map((t, i) => (
+                <div key={`pt${i}`} className="flex justify-between items-center h-9 border-b border-[#F1F1EF] text-[#8A8A90]"><span>{t.label}</span><span className="tabular-nums">{fmt(t.amount)}</span></div>
+              ))}
+              {(receipt.products.stockLine || receipt.products.creditLine) && (
+                <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#F7F7F5] px-3 py-2.5 text-[12.5px] text-[#515152]" data-receipt-stock>
+                  <Icon name="Package" size={13} className="mt-0.5 flex-none text-[#8A8A90]" />
+                  <span>{receipt.products.stockLine} {receipt.products.creditLine}</span>
+                </div>
+              )}
+            </div>
+          )}
           {receipt.tipTotal > 0 && (
             <div className="flex justify-between items-center h-9 border-b border-[#F1F1EF] text-[#8A8A90]"><span>{receipt.tipLabel}, recorded separately</span><span className="tabular-nums">{fmt(receipt.tipTotal)}</span></div>
           )}
@@ -1463,7 +1548,7 @@ const PaymentModal = ({
     </div>
   ) : (
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Checkout"
-      className="checkout-dialog relative bg-white rounded-[14px] w-[900px] max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]">
+      className={`checkout-dialog relative bg-white rounded-[14px] ${cp.available ? 'w-[960px]' : 'w-[900px]'} max-w-[calc(100vw-32px)] h-[min(640px,calc(100vh-64px))] flex flex-col outline-none shadow-[0_0_0_1px_rgba(14,13,12,.06),0_2px_4px_rgba(14,13,12,.04),0_24px_64px_-12px_rgba(14,13,12,.28)] animate-fade-in text-[13px] text-[#0E0D0C]`}>
       {/* Header */}
       <div className="h-[60px] pl-6 pr-5 flex items-center gap-3 border-b border-[#E7E8E6] flex-none">
         <h2 className="text-[15px] font-semibold tracking-[-.2px]">Checkout</h2>
@@ -1481,7 +1566,7 @@ const PaymentModal = ({
       </div>
 
       {/* Body */}
-      <div className="grid grid-cols-1 min-[960px]:grid-cols-[380px_minmax(0,1fr)] min-[960px]:grid-rows-[minmax(0,1fr)] flex-1 overflow-y-auto min-[960px]:overflow-hidden min-h-0"
+      <div className={`grid grid-cols-1 ${cp.available ? 'min-[960px]:grid-cols-[430px_minmax(0,1fr)]' : 'min-[960px]:grid-cols-[380px_minmax(0,1fr)]'} min-[960px]:grid-rows-[minmax(0,1fr)] flex-1 overflow-y-auto min-[960px]:overflow-hidden min-h-0`}
         onInputCapture={() => setTouched(true)}
         onClickCapture={(e) => { if (e.target.closest && e.target.closest('button, input, label')) setTouched(true); }}>
         {/* Left: paying for */}
@@ -1556,6 +1641,8 @@ const PaymentModal = ({
               )}
             </div>
           )}
+
+          {cp.available && <ProductsBlock cp={cp} guestName={guestName} disabled={busy} />}
 
           {(membershipUsable || referralWalletUsable || (referralReward?.vouchers || []).length > 0 || voucherPoolUsable || VOUCHER_ENABLED || packagesUsable) && (
             <div className="mt-5">
@@ -1685,6 +1772,10 @@ const PaymentModal = ({
             {memberDeltaIncluded > 0 && <s className="text-[13px] font-normal text-[#B4B4BA] tracking-normal mr-2 align-middle" data-was>{fmt(round2(grandTotal + memberDeltaIncluded))}</s>}
             <span className="text-[16px] font-medium text-[#8A8A90] tracking-normal mr-1.5">NPR</span>{fmt(grandTotal)}
           </div>
+          {productsTotal > 0 && (
+            <div className="text-[12.5px] text-[#8A8A90] tabular-nums mt-0.5" data-due-split>Treatment <b className="font-medium text-[#515152]">{fmt(treatmentDue)}</b> · Products <b className="font-medium text-[#515152]">{fmt(productsTotal)}</b></div>
+          )}
+          <span className="sr-only" role="status" aria-live="polite">{productsTotal > 0 ? `Amount due NPR ${fmt(grandTotal)}: treatment ${fmt(treatmentDue)}, products ${fmt(productsTotal)}.` : ''}{busyFirst ? ` ${cp.busy[busyFirst].message}` : ''}</span>
           <div className="h-[3px] rounded-sm bg-[#F1F1EF] mt-3.5 mb-1.5 overflow-hidden"><i className={`block h-full transition-all ${leftover > 0.001 && entered > 0 ? 'bg-[#C99A2E]' : 'bg-primary'}`} style={{ width: `${dueFraction * 100}%` }} /></div>
           <div className="flex justify-between text-[12px] text-[#8A8A90]">
             <span className="tabular-nums">{entered > 0 ? `${fmt(Math.min(entered, grandTotal))} of ${fmt(grandTotal)} covered` : 'Nothing entered yet'}</span>
@@ -1759,6 +1850,7 @@ const PaymentModal = ({
                 else if (isVoucherWallet && t.voucherId) hint = overVoucherWallet ? `Exceeds this voucher (${fmt(t.voucherRemainingBalance)})` : `${fmt(Math.max(0, round2(t.voucherRemainingBalance - (voucherWalletCommittedByVoucher.get(t.voucherId) || 0))))} remains on voucher`;
                 else if (isSessionPackage) hint = 'One session, covers this booking';
                 else if (t.paymentMode === 'ReferralVoucher') hint = 'Referral voucher';
+                if (productsTotal > 0 && isTreatmentOnly(t.paymentMode)) hint = 'Covers the treatment only';
                 const isActive = i === activeTenderIdx && !credit;
                 const isRest = i === restIdx;
                 const label = tenderLabel(t);
@@ -1837,7 +1929,24 @@ const PaymentModal = ({
             </button>
           </div>
 
-          {leftover > 0.001 && (
+          <BusyNotice cp={cp} />
+
+          {productsTotal > 0 && tenders.some((t) => isTreatmentOnly(t.paymentMode)) && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#F7F7F5] px-3 py-2.5 text-[12.5px] text-[#515152]" data-testid="treatment-only-note">
+              <Icon name="Ticket" size={13} className="mt-0.5 flex-none text-[#8A8A90]" />
+              <span>Service vouchers and packages pay for treatments, never products. Cash, card, wallets and the membership wallet can pay for anything.</span>
+            </div>
+          )}
+
+          {leftover > 0.001 && productDue.belowProducts && (
+            <div className="mt-3 relative rounded-[10px] border border-dashed border-[#E6C46F] bg-[#FEF7E8] px-3 py-2.5" data-testid="checkout-gap" data-products-short>
+              <div className="flex items-center gap-2 text-[#92600A]"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(productDue.shortBy)}</b> short of the products</span></div>
+              <p className="mt-1 text-[12.5px] text-[#515152]">Products are always paid in full today. Only the treatment can stay due, so you can't enter less than <b className="font-medium tabular-nums">{fmt(productsTotal)}</b> in cash, card or wallets.</p>
+              <div className="mt-2"><button type="button" onClick={addSplit} className="h-8 px-3 rounded-[7px] border border-[#E6C46F] bg-white text-[12.5px] font-medium text-[#0E0D0C] inline-flex items-center gap-1.5 hover:bg-[#FFFDF7]"><Icon name="Plus" size={13} strokeWidth={2} />Pay it with another method</button></div>
+            </div>
+          )}
+
+          {leftover > 0.001 && !productDue.belowProducts && (
             <div className="mt-3 relative rounded-[10px] border border-dashed border-[#E6C46F] bg-[#FEF7E8] px-3 py-2.5" data-testid="checkout-gap">
               {!leaveDue ? (
                 <>
@@ -1853,6 +1962,7 @@ const PaymentModal = ({
                     <span className="inline-flex items-center gap-2"><Icon name="AlertCircle" size={14} className="flex-none" /><span><b className="font-semibold tabular-nums">NPR {fmt(leftover)}</b> stays due</span></span>
                     <button type="button" onClick={() => setLeaveDue(false)} className="text-[12.5px] font-medium hover:underline">Undo</button>
                   </div>
+                  {productsTotal > 0 && <p className="mt-1 text-[12px] text-[#92600A]" data-due-note>The products are paid in full; this is the treatment only.</p>}
                   <label htmlFor="due-holder" className="block text-[12px] text-[#515152] mt-2 mb-1">Who is responsible for it? <span className="text-error">*</span></label>
                   <input id="due-holder" type="text" value={dueHolderName} autoComplete="off"
                     onChange={(e) => { setDueHolderName(e.target.value); setShowSuggestions(true); }}

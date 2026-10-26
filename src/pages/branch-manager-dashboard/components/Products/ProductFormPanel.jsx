@@ -26,11 +26,11 @@ const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClo
   const editing = !!product;
   const original = useMemo(() => {
     if (!product) {
-      return { name: '', brand: '', category: '', supplierId: '', optionLabel: 'Size', sell: productsSoldByDefault, track: true, notify: true, sizes: [blankSize()] };
+      return { name: '', brand: '', category: '', supplierId: '', optionLabel: 'Size', sell: productsSoldByDefault, track: true, notify: true, earns: true, sizes: [blankSize()] };
     }
     return {
       name: product.name, brand: product.brand, category: product.category, supplierId: product.supplierId || '', optionLabel: product.optionLabel || 'Size',
-      sell: product.sellAtCheckout, track: product.trackStock, notify: product.notifyLow,
+      sell: product.sellAtCheckout, track: product.trackStock, notify: product.notifyLow, earns: product.earnsCommission !== false,
       sizes: product.variants.map((v) => ({
         key: newKey(), id: v.id, name: v.name, sku: v.sku, barcode: v.barcode, cost: numStr(v.lastCost ?? (v.avgCost > 0 ? v.avgCost : null)), price: numStr(v.price),
         low: numStr(v.low), reorder: numStr(v.reorder), active: v.active,
@@ -103,7 +103,7 @@ const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClo
       productId: product?.id || null,
       product: {
         name: form.name.trim(), brand: form.brand.trim() || null, category: form.category || null, supplierId: form.supplierId || null, imageUrl: finalImage,
-        optionLabel: multi ? form.optionLabel : null, proUse: !form.sell, sellAtCheckout: form.sell, trackStock: form.track, notifyLow: form.notify,
+        optionLabel: multi ? form.optionLabel : null, proUse: !form.sell, sellAtCheckout: form.sell, trackStock: form.track, notifyLow: form.notify, earnsCommission: form.earns,
       },
       variants: sizes.map((s) => ({ ...s, name: s.name.trim(), sku: s.sku.trim(), active: s.active !== false })),
       opening: openingRows,
@@ -207,6 +207,7 @@ const ProductFormPanel = ({ product = null, branches, suppliers, branchId, onClo
         </div>
 
         <SwitchRow id="prd-sell" label="Sell at checkout" description="Turn off for pro-use items you only use in the work." checked={form.sell} onChange={(v) => set({ sell: v })} />
+        {form.sell && <SwitchRow id="prd-earns" label="Earns commission" description="Whoever sold it earns their product commission on this item. Turn off for items that should not count." checked={form.earns} onChange={(v) => set({ earns: v })} />}
         <SwitchRow id="prd-track" label="Count stock" description="Off for things you don't count, like candles you restock by eye." checked={form.track} onChange={(v) => set({ track: v })} />
         {form.track && <SwitchRow id="prd-notify" label="Tell me when it runs low" description="Managers of that branch get a notification, and it shows in Needs you now." checked={form.notify} onChange={(v) => set({ notify: v })} />}
 

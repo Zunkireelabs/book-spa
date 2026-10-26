@@ -63,6 +63,15 @@ describe('memberDiscountFor', () => {
     expect(memberDiscountFor({ booking: booking({ discountAmount: 1400, discountStatus: 'approved', discountReason: 'Manager 50%' }), membership: member(), today: TODAY })).toBeNull();
     expect(memberDiscountFor({ booking: booking({ discountAmount: 560, discountStatus: 'pending', discountReason: 'Asked 20%' }), membership: member(), today: TODAY })).toMatchObject({ kind: 'better' });
   });
+  it('a discount already stored on the booking is never applied again on top', () => {
+    // saved by apply_member_discount → 'saved', nothing more to take off
+    const saved = memberDiscountFor({ booking: booking({ discountAmount: 1260, discountStatus: 'approved', memberDiscount: 'applied' }), membership: member(), today: TODAY });
+    expect(saved).toMatchObject({ kind: 'saved', amount: 1260 });
+    expect(effectOf(saved, true).delta).toBe(0);
+    // an amount stored without an approved status (legacy/odd rows) still counts as already in the price
+    const odd = memberDiscountFor({ booking: booking({ discountAmount: 1260, discountStatus: 'none' }), membership: member(), today: TODAY });
+    expect(odd).toBeNull();
+  });
   it('follows bookings.member_discount, not the reason text', () => {
     expect(memberDiscountFor({ booking: booking({ discountAmount: 1260, discountStatus: 'approved', discountReason: 'anything', memberDiscount: 'applied' }), membership: member(), today: TODAY }))
       .toMatchObject({ kind: 'saved', amount: 1260 });

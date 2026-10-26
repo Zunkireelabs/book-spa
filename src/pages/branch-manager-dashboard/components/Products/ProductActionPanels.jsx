@@ -6,7 +6,8 @@ import PaymentMethodSelector from '../../../../components/ui/PaymentMethodSelect
 import { PanelShell, FormBody, Field, TextInput, MoneyInput, Stepper, InfoRows, InlineError, CONTROL } from '../../../../components/ui/PanelFormKit';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { useIndustry } from '../../../../hooks/useIndustry';
-import { adjustProductStock, transferProductStock, sellProduct } from '../../../../services/api';
+import { adjustProductStock, transferProductStock, sellProduct, fetchProductSellers, fetchGuestVisitsToday } from '../../../../services/api';
+import { nepalNow } from '../../../../utils/customerDirectory';
 import { newAvgCost, npr, REMOVE_REASONS, withArticle } from '../../../../services/productsView';
 import { friendlyError } from '../../../../utils/friendlyError';
 import { ProductThumb, Seg, BeforeAfter } from './productBits';
@@ -324,8 +325,26 @@ export const SellPanel = ({ product, variantId: givenVariant = null, branchId, b
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [sold, setSold] = useState(null);
+  const [sellers, setSellers] = useState([]);
+  const [soldBy, setSoldBy] = useState(undefined); // undefined = not chosen yet (required); '__none' = no one (no commission); else a therapist id
+  const [visits, setVisits] = useState([]); // this guest's visits today at this branch
+  const [attach, setAttach] = useState(null); // the visit id the sale is added to
   const [soldQty, setSoldQty] = useState({}); // variantId -> units sold in this panel, so "Sell another" respects the stock left
   const customerRef = useRef(null);
+  useEffect(() => {
+    if (!branchId) return undefined;
+    let live = true;
+    fetchProductSellers({ branchId }).then(({ data }) => { if (live && data) setSellers(data); });
+    return () => { live = false; };
+  }, [branchId]);
+  // A guest who had a visit today can have this sale added to it (this is also how products reach an already-paid booking).
+  useEffect(() => {
+    setAttach(null);
+    if (!customerId || !branchId) { setVisits([]); return undefined; }
+    let live = true;
+    fetchGuestVisitsToday({ customerId, branchId, date: nepalNow().today }).then(({ data }) => { if (live) setVisits(data || []); });
+    return () => { live = false; };
+  }, [customerId, branchId]);
 
   const tracked = product.trackStock;
   const left = tracked && variant ? qtyAt(variant, branchId) - (soldQty[variant.id] || 0) : null;
@@ -342,15 +361,19 @@ export const SellPanel = ({ product, variantId: givenVariant = null, branchId, b
     : tracked && left <= 0 ? 'Out of stock'
       : !(qty > 0) ? 'Enter the quantity'
         : tracked && qty > left ? `Only ${left} in stock`
-          : !paymentMode ? 'Pick a payment method' : '';
+          : soldBy === undefined ? 'Choose who sold it'
+            : !paymentMode ? 'Pick a payment method' : '';
 
   const submit = async () => {
     if (savingRef.current || why) return;
     savingRef.current = true; setSaving(true); setError(null);
-    const res = await sellProduct({ variantId: variant.id, quantity: qty, paymentMode, branchId, customerId, notes: notes.trim() || null });
+    const res = await sellProduct({
+      variantId: variant.id, quantity: qty, paymentMode, branchId, customerId, notes: notes.trim() || null,
+      soldByTherapistId: soldBy && soldBy !== '__none' ? soldBy : null, bookingId: attach,
+    });
     savingRef.current = false; setSaving(false);
     if (res.error) { setError(friendlyError(res.error, 'The sale could not be recorded.')); return; }
-    setSold({ qty, total, customer: customerName.trim(), mode: paymentMode, variant });
+    setSold({ qty, total, customer: customerName.trim(), mode: paymentMode, variant, seller: soldBy && soldBy !== '__none' ? (sellers.find((x) => x.id === soldBy)?.name || '') : '', visit: attach ? visits.find((v) => v.id === attach) : null });
     setSoldQty((m) => ({ ...m, [variant.id]: (m[variant.id] || 0) + qty }));
   };
   const submitRef = useRef(submit);
@@ -360,8 +383,8 @@ export const SellPanel = ({ product, variantId: givenVariant = null, branchId, b
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [sold]);
-  const sellAnother = () => { setSold(null); setQuantity('1'); setCustomerName(''); setCustomerId(null); setNotes(''); setShowNotes(false); setError(null); };
-  const dirty = !!(customerName || notes || quantity !== '1' || paymentMode);
+  const sellAnother = () => { setSold(null); setQuantity('1'); setCustomerName(''); setCustomerId(null); setNotes(''); setShowNotes(false); setError(null); setAttach(null); setSoldBy(undefined); };
+  const dirty = !!(customerName || notes || quantity !== '1' || paymentMode || soldBy !== undefined);
 
   if (sold) {
     return (
@@ -378,6 +401,7 @@ export const SellPanel = ({ product, variantId: givenVariant = null, branchId, b
           <p className="mt-3 font-data font-data-medium text-2xl text-primary tabular-nums">{npr(sold.total)}</p>
           <p className="mt-3 text-[13px] text-text-secondary tabular-nums">{product.name}{sizeLabel(sold.variant) ? ` ${sizeLabel(sold.variant)}` : ''} × {sold.qty} · {sold.mode}{sold.customer ? ` · ${sold.customer}` : ' · walk-in'}</p>
           {tracked && <p className="mt-1 text-xs text-text-tertiary tabular-nums">{left} left at {branchName}</p>}
+          <p className="mt-1 text-xs text-text-tertiary">{sold.seller ? `Credited to ${sold.seller}` : 'No commission on this sale'}{sold.visit ? ` · added to ${sold.visit.serviceName}` : ''}</p>
         </div>
       </PanelShell>
     );
@@ -394,7 +418,27 @@ export const SellPanel = ({ product, variantId: givenVariant = null, branchId, b
           <CustomerAutocomplete id="sell-customer" value={customerName} onChange={(v) => { setCustomerName(v); setCustomerId(null); }}
             onSelect={(c) => { setCustomerName(c.full_name); setCustomerId(c.id); }} branchId={branchId} inputRef={customerRef} searchBy="name" placeholder="Search by name" inputClassName={CONTROL} />
         </Field>
+        {visits.length > 0 && (
+          <div className="rounded-[10px] border border-border bg-background px-3 py-2.5 text-[13px] flex items-start gap-2" data-visit-banner>
+            <Icon name="Link" size={14} className="text-text-secondary mt-0.5 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              {visits.map((v) => {
+                const on = attach === v.id;
+                return (
+                  <p key={v.id} className="text-text-secondary">
+                    {(customerName || 'The guest').split(' ')[0]} had <b className="font-medium text-text-primary">{v.serviceName}</b>{v.startTime ? ` at ${String(v.startTime).slice(0, 5)}` : ''} today{v.paid ? ' (paid)' : ''}.{' '}
+                    <button type="button" aria-pressed={on} onClick={() => { setAttach(on ? null : v.id); if (!on && soldBy === undefined && v.therapistId) setSoldBy(v.therapistId); }} className="font-medium text-primary hover:underline" data-attach-visit>{on ? 'Added to that visit · Undo' : 'Add this sale to that visit'}</button>
+                  </p>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <Field label="Quantity" required id="sell-qty"><Stepper id="sell-qty" value={quantity} onChange={setQuantity} min={1} max={tracked ? Math.max(1, left) : undefined} /></Field>
+        <Field label="Sold by" required id="sell-soldby" labelExtra={<span className="text-xs text-text-secondary">earns the commission</span>}>
+          <CustomSelect value={soldBy === undefined ? '' : soldBy} onChange={(v) => setSoldBy(v)} placeholder="Choose who sold it"
+            options={[...sellers.map((x) => ({ value: x.id, label: x.name })), { value: '__none', label: 'No one (no commission)' }]} />
+        </Field>
         <Field label="Payment method" required id="sell-method">
           <PaymentMethodSelector value={paymentMode} onChange={setPaymentMode} paymentMethods={paymentMethods} placeholder="Select a payment method" />
         </Field>

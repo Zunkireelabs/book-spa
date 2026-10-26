@@ -142,7 +142,7 @@ export function buildRows(catalog, branchId) {
     const row = {
       id: p.id, name: p.name, brand: p.brand || '', category: p.category || '', supplierId: p.supplier_id || null,
       supplierName: p.supplier_id ? (supplierName[p.supplier_id] || '') : '', imageUrl: p.image_url || null, description: p.description || '',
-      optionLabel: p.option_label || '', proUse: !!p.pro_use, sellAtCheckout: p.sell_at_checkout !== false, notifyLow: p.notify_low !== false,
+      optionLabel: p.option_label || '', earnsCommission: p.earns_commission !== false, proUse: !!p.pro_use, sellAtCheckout: p.sell_at_checkout !== false, notifyLow: p.notify_low !== false,
       trackStock: !!p.track_stock, isActive: p.is_active !== false, createdAt: p.created_at, variants: sizes,
       stockHere: sum(act, (v) => v.qty), priceFrom: prices.length ? Math.min(...prices) : 0, priceVaries: prices.length > 1 && Math.min(...prices) !== Math.max(...prices),
       others, othersTotal: sum(others, (o) => o.qty), margins: costBy ? shown.map((v) => v.margin) : null,

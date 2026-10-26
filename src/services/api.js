@@ -529,6 +529,36 @@ function classifyPaymentMode(mode) {
   return 'fonepay'; // MobileBanking, Esewa, Khalti, Cheque (+ legacy Fonepay) → digital/other
 }
 
+// Products sold on [date] (Nepal day) at a branch, net of refunds (a refunded sale is left out entirely, like Today's Insights), with how
+// each sale was paid from product_sale_payments (migration-293). Wallet modes (the membership wallet) are a deduction, not new money in
+// the drawer, so they are counted in `gross` but not in `total` / the cash-card-other buckets — same policy as vouchers.
+//   { count, gross, total, breakdown: { cash, card, fonepay }, byMode: { 'Cash': 2300, ... } }
+export async function getProductSalesForDate(branchId, date) {
+  const next = new Date(`${date}T00:00:00+05:45`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  let q = supabase
+    .from('product_sales')
+    .select('id, total_amount, product_sale_payments(payment_mode, amount)')
+    .is('refunded_at', null)
+    .gte('created_at', `${date}T00:00:00+05:45`)
+    .lt('created_at', next.toISOString());
+  q = withBranch(q, branchId);
+  const { data, error } = await q;
+  if (error) throw error;
+  const out = { count: (data || []).length, gross: 0, total: 0, breakdown: { cash: 0, card: 0, fonepay: 0 }, byMode: {} };
+  for (const sale of (data || [])) {
+    out.gross += Number(sale.total_amount);
+    for (const p of (sale.product_sale_payments || [])) {
+      if (WALLET_MODES.has(p.payment_mode)) continue;
+      const amount = Number(p.amount);
+      out.total += amount;
+      out.breakdown[classifyPaymentMode(p.payment_mode)] += amount;
+      out.byMode[p.payment_mode] = (out.byMode[p.payment_mode] || 0) + amount;
+    }
+  }
+  return out;
+}
+
 // Membership top-ups and package purchases on [date] — new cash in from selling
 // a wallet-style product. Mirrors the voucher-sale pattern (voucherSalesTotal)
 // already folded into getDailySummary/getDailyOperationalReport: recognized as
@@ -3841,6 +3871,14 @@ export async function getDailySummary(branchId, date) {
     paymentBreakdown.card += modeBreakdown.card;
     paymentBreakdown.fonepay += modeBreakdown.fonepay;
 
+    // 4c-2. Products sold today (V26) — money in the drawer exactly like voucher sales, so it folds into the same buckets; also
+    // reported as its own `productSales` line so the treatment figures stay comparable (treatment = net minus this).
+    const productSales = await getProductSalesForDate(branchId, date);
+    netRevenue += productSales.total;
+    paymentBreakdown.cash += productSales.breakdown.cash;
+    paymentBreakdown.card += productSales.breakdown.card;
+    paymentBreakdown.fonepay += productSales.breakdown.fonepay;
+
     // 4d. Tips collected today — NOT revenue (migration-240). Reported separately,
     // deliberately NEVER folded into netRevenue/paymentBreakdown, same "visible but
     // excluded" treatment as SessionPackage/WALLET_MODES above for a different reason
@@ -3877,6 +3915,7 @@ export async function getDailySummary(branchId, date) {
         netRevenue,
         paymentBreakdown,
         voucherSalesTotal,
+        productSales,
         tipsTotal,
         unpaidCount,
         isClosed: !!existingReport,
@@ -4103,9 +4142,11 @@ export async function getTodayInsights(branchId, from, to) {
     // into totalSales/modeTotals. Timestamp-based (created_at) like
     // memberships (5/5b) rather than a plain date column, same Nepal-
     // midnight boundary logic.
+    // Per-method rows come from product_sale_payments (migration-293); the membership wallet is a deduction, not money in, so it is in
+    // `value` (what was sold) but not in totalSales / the method bars — same as daily close.
     let productSalesQuery = supabase
       .from('product_sales')
-      .select('total_amount, payment_mode, refunded_at')
+      .select('total_amount, refunded_at, product_sale_payments(payment_mode, amount)')
       .gte('created_at', `${rangeStart}T00:00:00+05:45`)
       .lt('created_at', nextDayBoundary.toISOString());
     productSalesQuery = withBranch(productSalesQuery, branchId);
@@ -4116,10 +4157,13 @@ export async function getTodayInsights(branchId, from, to) {
       count: activeProductSales.length,
       value: activeProductSales.reduce((sum, p) => sum + Number(p.total_amount), 0),
     };
-    for (const p of activeProductSales) {
-      const amount = Number(p.total_amount);
-      totalSales += amount;
-      modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+    for (const sale of activeProductSales) {
+      for (const p of (sale.product_sale_payments || [])) {
+        if (WALLET_MODES.has(p.payment_mode)) continue;
+        const amount = Number(p.amount);
+        totalSales += amount;
+        modeTotals[p.payment_mode] = (modeTotals[p.payment_mode] || 0) + amount;
+      }
     }
 
     // 8. Staff utilization (reuse existing intelligence function)
@@ -4203,6 +4247,7 @@ export async function closeDay(branchId, date) {
         cash_total: summary.paymentBreakdown.cash,
         card_total: summary.paymentBreakdown.card,
         fonepay_total: summary.paymentBreakdown.fonepay,
+        product_revenue: summary.productSales?.total || 0,
         unpaid_count: summary.unpaidCount,
         closed_by: user.id,
       })
@@ -4348,6 +4393,15 @@ export async function getDailyOperationalReport(branchId, date) {
       }
     }
 
+    // Products sold that day (V26): live count + per-method detail; the money total of a CLOSED day comes from the snapshot
+    // (daily_reports.product_revenue, already inside its net revenue and method totals), an open day's from the live sum.
+    const liveProductSales = await getProductSalesForDate(branchId, date);
+    const productSales = {
+      count: liveProductSales.count,
+      total: isClosed ? Number(closedReport.product_revenue || 0) : liveProductSales.total,
+      byMode: liveProductSales.byMode,
+    };
+
     // Build bookings list — Phase 9A: use snapshot fields for display
     const bookingsList = all.map(b => {
       const payment = paymentsMap[b.id];
@@ -4410,7 +4464,7 @@ export async function getDailyOperationalReport(branchId, date) {
         // getDailySummary()'s sold-inclusive netRevenue).
         netRevenue: paymentRows
           .filter(p => p.payment_mode !== 'SessionPackage' && !WALLET_MODES.has(p.payment_mode))
-          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal + membershipSoldTotal + packageSoldTotal,
+          .reduce((sum, p) => sum + Number(p.amount), 0) + voucherSalesTotal + membershipSoldTotal + packageSoldTotal + liveProductSales.total,
       };
     }
 
@@ -4435,6 +4489,9 @@ export async function getDailyOperationalReport(branchId, date) {
       paymentBreakdown.cash += voucherPaymentBreakdown.cash;
       paymentBreakdown.card += voucherPaymentBreakdown.card;
       paymentBreakdown.fonepay += voucherPaymentBreakdown.fonepay;
+      paymentBreakdown.cash += liveProductSales.breakdown.cash;
+      paymentBreakdown.card += liveProductSales.breakdown.card;
+      paymentBreakdown.fonepay += liveProductSales.breakdown.fonepay;
     }
 
     // Step 5 — Staff discount summary
@@ -4531,6 +4588,7 @@ export async function getDailyOperationalReport(branchId, date) {
         totals,
         paymentBreakdown,
         voucherSalesTotal,
+        productSales,
         tipsTotal,
         staffDiscountSummary,
         therapistRevenueSummary,
@@ -4586,6 +4644,9 @@ export function exportDailyReportCSV(reportData) {
   rows.push(`Gross Revenue,${totals.grossRevenue.toFixed(2)}`);
   rows.push(`Total Discount,${totals.totalDiscount.toFixed(2)}`);
   rows.push(`Net Revenue,${totals.netRevenue.toFixed(2)}`);
+  if (reportData.productSales) {
+    rows.push(`Products sold (${reportData.productSales.count}),${Number(reportData.productSales.total).toFixed(2)}`);
+  }
 
   // Section 3: Payment Breakdown
   rows.push('');
@@ -4651,7 +4712,7 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
   if (!overall) {
     const { data, error: reportsError } = await supabase
       .from('daily_reports')
-      .select('report_date, gross_revenue, total_discounts, net_revenue')
+      .select('report_date, gross_revenue, total_discounts, net_revenue, product_revenue')
       .eq('branch_id', resolveBranchId(branchId))
       .gte('report_date', startDate)
       .lte('report_date', endDate);
@@ -4662,11 +4723,12 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
 
   const closedDates = new Set((reports || []).map(r => r.report_date));
 
-  let closedGross = 0, closedDiscount = 0, closedNet = 0;
+  let closedGross = 0, closedDiscount = 0, closedNet = 0, closedProducts = 0;
   for (const r of (reports || [])) {
     closedGross += Number(r.gross_revenue);
     closedDiscount += Number(r.total_discounts);
     closedNet += Number(r.net_revenue);
+    closedProducts += Number(r.product_revenue || 0);
   }
 
   // 2. Count of paid bookings in range (display only — revenue math for open
@@ -4699,7 +4761,7 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
     if (!closedDates.has(iso)) openDates.push(iso);
   }
 
-  let liveGross = 0, liveDiscount = 0, liveNet = 0;
+  let liveGross = 0, liveDiscount = 0, liveNet = 0, liveProducts = 0;
   if (openDates.length > 0) {
     const summaries = await Promise.all(openDates.map(d => getDailySummary(branchId, d)));
     for (const { data: summary, error: summaryError } of summaries) {
@@ -4708,6 +4770,7 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
       liveGross += summary.grossRevenue;
       liveDiscount += summary.totalDiscounts;
       liveNet += summary.netRevenue;
+      liveProducts += summary.productSales?.total || 0;
     }
   }
 
@@ -4715,6 +4778,8 @@ async function computeRevenueForRange(branchId, startDate, endDate) {
     grossRevenue: closedGross + liveGross,
     totalDiscount: closedDiscount + liveDiscount,
     netRevenue: closedNet + liveNet,
+    // Product money is already inside netRevenue; this is the separate "Products" line (treatment = net minus this).
+    productRevenue: closedProducts + liveProducts,
     paidBookings,
   };
 }
@@ -11599,7 +11664,7 @@ export async function fetchStaffCompensation(branchId) {
   try {
     let query = supabase
       .from('therapists')
-      .select('id, name, position, is_service_staff, staff_compensation(monthly_salary, commission_rate)')
+      .select('id, name, position, is_service_staff, staff_compensation(monthly_salary, commission_rate, product_commission_rate)')
       .eq('is_active', true)
       .order('name');
     query = withBranch(query, branchId);
@@ -11617,6 +11682,9 @@ export async function fetchStaffCompensation(branchId) {
         commissionRate: t.staff_compensation?.commission_rate != null
           ? Number(t.staff_compensation.commission_rate)
           : 0,
+        productCommissionRate: t.staff_compensation?.product_commission_rate != null
+          ? Number(t.staff_compensation.product_commission_rate)
+          : 0,
       })),
       error: null,
     };
@@ -11627,10 +11695,14 @@ export async function fetchStaffCompensation(branchId) {
 }
 
 // Upsert a staff member's compensation. Admin-only (enforced by RLS).
-export async function setStaffCompensation({ therapistId, monthlySalary, commissionRate }) {
+export async function setStaffCompensation({ therapistId, monthlySalary, commissionRate, productCommissionRate }) {
   try {
     const salary = Number(monthlySalary);
     const rate = Number(commissionRate);
+    const productRate = productCommissionRate === undefined ? undefined : Number(productCommissionRate);
+    if (productRate !== undefined && (!(productRate >= 0) || productRate > 100)) {
+      return { data: null, error: { code: 'INVALID_VALUE', message: 'Product commission must be between 0 and 100.' } };
+    }
     if (!(salary >= 0)) {
       return { data: null, error: { code: 'INVALID_VALUE', message: 'Monthly salary must be zero or more.' } };
     }
@@ -11646,6 +11718,7 @@ export async function setStaffCompensation({ therapistId, monthlySalary, commiss
           therapist_id: therapistId,
           monthly_salary: salary,
           commission_rate: rate,
+          ...(productRate === undefined ? {} : { product_commission_rate: productRate }),
           updated_by: user?.id ?? null,
           updated_at: new Date().toISOString(),
         },
@@ -11707,6 +11780,10 @@ export async function getPayrollRun({ branchId, periodMonth }) {
           serviceRevenue: Number(i.service_revenue),
           serviceCommission: Number(i.service_commission),
           referralCommission: Number(i.referral_commission),
+          productRevenue: Number(i.product_revenue || 0),
+          productCommissionRate: Number(i.product_commission_rate || 0),
+          productCommission: Number(i.product_commission || 0),
+          productCommissionDeduction: Number(i.product_commission_deduction || 0),
           netPay: Number(i.net_pay),
         })),
       },
@@ -11714,6 +11791,103 @@ export async function getPayrollRun({ branchId, periodMonth }) {
     };
   } catch (error) {
     console.error('[API] getPayrollRun error:', error.message);
+    return { data: null, error };
+  }
+}
+
+const nepalMonthStart = (periodMonth) => `${periodMonth}-01T00:00:00+05:45`;
+const nextPeriodMonth = (periodMonth) => {
+  const [y, m] = periodMonth.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+};
+const prevPeriodMonth = (periodMonth) => {
+  const [y, m] = periodMonth.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+};
+const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' }).slice(0, 7);
+
+// What product commission is worked out from, per therapist, for one pay run:
+//   earned   = unrefunded product_sales.total_amount of sales made in [month] (Nepal) at the branch, credited to that therapist, for
+//              products that earn commission;
+//   refunded = the same kind of sale from an EARLIER, already-finalized run's month that was refunded AFTER that run was finalized
+//              (never an edit to a finalized run: it lands as a deduction in the first run after the refund, i.e. in month
+//              max(month of the refund, month of the sale + 1)). A refund made before the run was finalized is simply not in `earned`.
+// Returns { earned: { [therapistId]: NPR }, refunded: { [therapistId]: NPR } } (amounts, before the rate).
+export async function computeProductCommissionBase({ branchId, periodMonth, therapistIds }) {
+  const out = { earned: {}, refunded: {} };
+  therapistIds.forEach((id) => { out.earned[id] = 0; out.refunded[id] = 0; });
+  const from = nepalMonthStart(periodMonth);
+  const to = nepalMonthStart(nextPeriodMonth(periodMonth));
+
+  let earnedQ = supabase
+    .from('product_sales')
+    .select('sold_by_therapist_id, total_amount, products(earns_commission)')
+    .in('sold_by_therapist_id', therapistIds)
+    .is('refunded_at', null)
+    .gte('created_at', from)
+    .lt('created_at', to);
+  earnedQ = withBranch(earnedQ, branchId);
+  const { data: earnedRows, error: earnedErr } = await earnedQ;
+  if (earnedErr) throw earnedErr;
+  for (const r of (earnedRows || [])) {
+    if (r.products?.earns_commission === false) continue;
+    out.earned[r.sold_by_therapist_id] = Math.round((out.earned[r.sold_by_therapist_id] + Number(r.total_amount)) * 100) / 100;
+  }
+
+  // Refunds that land in this run: refunded in this month of an older sale, or in the previous month for a sale of that same month.
+  const lowerBound = nepalMonthStart(prevPeriodMonth(periodMonth));
+  let refundQ = supabase
+    .from('product_sales')
+    .select('sold_by_therapist_id, total_amount, created_at, refunded_at, products(earns_commission)')
+    .in('sold_by_therapist_id', therapistIds)
+    .not('refunded_at', 'is', null)
+    .gte('refunded_at', lowerBound)
+    .lt('refunded_at', to);
+  refundQ = withBranch(refundQ, branchId);
+  const { data: refundRows, error: refundErr } = await refundQ;
+  if (refundErr) throw refundErr;
+  const candidates = (refundRows || []).filter((r) => {
+    const created = nepalMonthOf(r.created_at);
+    const refunded = nepalMonthOf(r.refunded_at);
+    const dueMonth = refunded > created ? refunded : nextPeriodMonth(created);
+    return dueMonth === periodMonth && r.products?.earns_commission !== false;
+  });
+  if (candidates.length > 0) {
+    const saleMonths = [...new Set(candidates.map((r) => `${nepalMonthOf(r.created_at)}-01`))];
+    let runsQ = supabase.from('payroll_runs').select('period_month, finalized_at').eq('status', 'finalized').in('period_month', saleMonths);
+    runsQ = withBranch(runsQ, branchId);
+    const { data: runs, error: runsErr } = await runsQ;
+    if (runsErr) throw runsErr;
+    const finalizedAt = Object.fromEntries((runs || []).map((r) => [String(r.period_month).slice(0, 7), r.finalized_at]));
+    for (const r of candidates) {
+      const fin = finalizedAt[nepalMonthOf(r.created_at)];
+      // No finalized run for the sale's month = nothing was paid on it; refunded before the run was finalized = already left out.
+      if (!fin || new Date(r.refunded_at) <= new Date(fin)) continue;
+      out.refunded[r.sold_by_therapist_id] = Math.round((out.refunded[r.sold_by_therapist_id] + Number(r.total_amount)) * 100) / 100;
+    }
+  }
+  return out;
+}
+
+// The product sales behind one person's product commission in a pay run (the drill-down): the month's credited sales (with refunds shown)
+// plus any deduction lines from earlier months.
+export async function fetchTherapistProductSales({ branchId, therapistId, periodMonth }) {
+  try {
+    const from = nepalMonthStart(periodMonth);
+    const to = nepalMonthStart(nextPeriodMonth(periodMonth));
+    const cols = 'id, product_name, variant_name, quantity, total_amount, created_at, refunded_at, booking_id, products(earns_commission)';
+    let monthQ = supabase.from('product_sales').select(cols).eq('sold_by_therapist_id', therapistId).gte('created_at', from).lt('created_at', to).order('created_at');
+    monthQ = withBranch(monthQ, branchId);
+    let refundQ = supabase.from('product_sales').select(cols).eq('sold_by_therapist_id', therapistId).not('refunded_at', 'is', null)
+      .gte('refunded_at', nepalMonthStart(prevPeriodMonth(periodMonth))).lt('refunded_at', to).lt('created_at', from);
+    refundQ = withBranch(refundQ, branchId);
+    const [monthRes, refundRes] = await Promise.all([monthQ, refundQ]);
+    if (monthRes.error) throw monthRes.error;
+    if (refundRes.error) throw refundRes.error;
+    const map = (r) => ({ id: r.id, name: [r.product_name, r.variant_name].filter(Boolean).join(' · '), quantity: r.quantity, amount: Number(r.total_amount), createdAt: r.created_at, refundedAt: r.refunded_at, earns: r.products?.earns_commission !== false });
+    return { data: { credited: (monthRes.data || []).map(map), earlierRefunds: (refundRes.data || []).map(map) }, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistProductSales error:', error.message);
     return { data: null, error };
   }
 }
@@ -11760,7 +11934,7 @@ export async function generatePayroll({ branchId, periodMonth }) {
     // Fetch active therapists with compensation.
     let therapistQuery = supabase
       .from('therapists')
-      .select('id, name, staff_compensation(monthly_salary, commission_rate)')
+      .select('id, name, staff_compensation(monthly_salary, commission_rate, product_commission_rate)')
       .eq('is_active', true)
       .order('name');
     therapistQuery = withBranch(therapistQuery, branchId);
@@ -11877,6 +12051,10 @@ export async function generatePayroll({ branchId, periodMonth }) {
       }
     }
 
+    // Product commission (V26): the unrefunded product sales credited to each person this month, at this branch, for products that
+    // earn commission, and the deduction for refunds of earlier months' sales that were already paid out.
+    const productPay = await computeProductCommissionBase({ branchId, periodMonth, therapistIds });
+
     // Build payroll items.
     const { data: { user } } = await supabase.auth.getUser();
     const itemsPayload = [];
@@ -11893,8 +12071,12 @@ export async function generatePayroll({ branchId, periodMonth }) {
       const serviceRev = serviceRevenueMap[t.id] || 0;
       const svcCommission = Math.round(serviceRev * (rate / 100) * 100) / 100;
       const refCommission = referralCommissionMap[t.id] || 0;
+      const productRate = comp?.product_commission_rate != null ? Number(comp.product_commission_rate) : 0;
+      const productRev = productPay.earned[t.id] || 0;
+      const productEarned = Math.round(productRev * (productRate / 100) * 100) / 100;
+      const productDeduction = Math.round((productPay.refunded[t.id] || 0) * (productRate / 100) * 100) / 100;
       const netPay = Math.round(
-        (salary - deduction + svcCommission + refCommission) * 100
+        (salary - deduction + svcCommission + refCommission + productEarned - productDeduction) * 100
       ) / 100;
       totalNet = Math.round((totalNet + netPay) * 100) / 100;
 
@@ -11913,6 +12095,10 @@ export async function generatePayroll({ branchId, periodMonth }) {
         service_revenue: serviceRev,
         service_commission: svcCommission,
         referral_commission: refCommission,
+        product_revenue: productRev,
+        product_commission_rate: productRate,
+        product_commission: productEarned,
+        product_commission_deduction: productDeduction,
         net_pay: netPay,
       });
     }
@@ -15001,7 +15187,7 @@ export async function fetchProductCatalog() {
 
     const [products, variants, stock, costs, suppliersRes, branchesRes] = await Promise.all([
       pagedSelect(() => supabase.from('products')
-        .select('id, name, description, category, brand, supplier_id, image_url, option_label, pro_use, sell_at_checkout, notify_low, is_active, track_stock, created_at')
+        .select('id, name, description, category, brand, supplier_id, image_url, option_label, pro_use, sell_at_checkout, notify_low, is_active, track_stock, earns_commission, created_at')
         .eq('org_id', profile.org_id).order('name')),
       pagedSelect(() => supabase.from('product_variants')
         .select('id, product_id, name, sku, barcode, retail_price, low_stock_level, reorder_qty, sort_order, is_active, created_at')
@@ -15112,6 +15298,7 @@ export async function saveProduct({ productId = null, product, variants, opening
         name: product.name, description: product.description ?? null, brand: product.brand ?? null, category: product.category ?? null,
         supplier_id: product.supplierId || null, image_url: product.imageUrl ?? null, option_label: product.optionLabel || null,
         pro_use: !!product.proUse, sell_at_checkout: !!product.sellAtCheckout, track_stock: !!product.trackStock, notify_low: !!product.notifyLow,
+        ...(product.earnsCommission === undefined ? {} : { earns_commission: !!product.earnsCommission }),
         ...(product.isActive === undefined ? {} : { is_active: !!product.isActive }),
       },
       p_variants: variants.map((v) => ({
@@ -15165,22 +15352,177 @@ export async function transferProductStock({ variantId, toBranchId, fromBranchId
   }
 }
 
-/** Sell one size (staff, manager, admin). The stock check is server-side. */
-export async function sellProduct({ variantId, quantity, paymentMode, branchId, customerId, notes }) {
+/**
+ * Sell one size (staff, manager, admin). The stock check is server-side. `soldByTherapistId` (null = no one, no commission) and
+ * `bookingId` (attach the sale to that visit) are optional; `payments` = [{ paymentMode, amount }] splits the sale across methods.
+ */
+export async function sellProduct({ variantId, quantity, paymentMode, branchId, customerId, notes, soldByTherapistId = null, bookingId = null, payments = null }) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
     if (!variantId || !quantity || quantity <= 0) return rpcError('VALIDATION', 'A product and a positive quantity are required.');
-    if (!paymentMode) return rpcError('VALIDATION', 'Payment method is required.');
+    if (!paymentMode && !payments) return rpcError('VALIDATION', 'Payment method is required.');
     if (!branchId) return rpcError('VALIDATION', 'Branch is required.');
     const { data, error } = await supabase.rpc('sell_product', {
-      p_variant_id: variantId, p_quantity: quantity, p_payment_mode: paymentMode, p_branch_id: branchId,
-      p_customer_id: customerId || null, p_notes: notes || null,
+      p_variant_id: variantId, p_quantity: quantity, p_payment_mode: paymentMode || (payments?.[0]?.paymentMode ?? null), p_branch_id: branchId,
+      p_customer_id: customerId || null, p_notes: notes || null, p_sold_by_therapist_id: soldByTherapistId || null, p_booking_id: bookingId || null,
+      p_payments: payments ? payments.map((p) => ({ payment_mode: p.paymentMode, amount: Number(p.amount) })) : null,
     });
     if (error) throw error;
     return { data, error: null };
   } catch (error) {
     console.error('[API] sellProduct error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ── Products at checkout (V26, migration-293) ───────────────────────────────────────────────────
+
+/**
+ * What the checkout product picker needs for one branch: items that are for sale (active, sell_at_checkout) with their sizes, price and
+ * stock here, and the stock at other branches (for the "3 at Sanepa" hint). Never cost. Rows come from productsView.buildRows.
+ */
+export async function fetchCheckoutProducts({ branchId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) return rpcError('NO_ORG', 'User is not associated with an organization.');
+    const [products, variants, stock, branchesRes] = await Promise.all([
+      pagedSelect(() => supabase.from('products')
+        .select('id, name, description, category, brand, supplier_id, image_url, option_label, pro_use, sell_at_checkout, notify_low, is_active, track_stock, created_at')
+        .eq('org_id', profile.org_id).eq('is_active', true).eq('sell_at_checkout', true).order('name')),
+      pagedSelect(() => supabase.from('product_variants')
+        .select('id, product_id, name, sku, barcode, retail_price, low_stock_level, reorder_qty, sort_order, is_active, created_at')
+        .eq('org_id', profile.org_id).eq('is_active', true).gt('retail_price', 0).order('id')),
+      pagedSelect(() => supabase.from('product_branch_stock').select('variant_id, branch_id, quantity').order('variant_id').order('branch_id')),
+      supabase.from('branches').select('id, name').eq('org_id', profile.org_id).order('name'),
+    ]);
+    if (branchesRes.error) throw branchesRes.error;
+    return { data: { products, variants, stock, costs: null, suppliers: [], branches: branchesRes.data || [] }, error: null };
+  } catch (error) {
+    console.error('[API] fetchCheckoutProducts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The products this guest bought before (latest first, distinct sizes): [{ variantId, lastBoughtAt }]. */
+export async function fetchGuestProductHistory({ customerId, limit = 5 }) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('product_sales').select('variant_id, created_at').eq('customer_id', customerId).is('refunded_at', null).not('variant_id', 'is', null)
+      .order('created_at', { ascending: false }).limit(40);
+    if (error) throw error;
+    const seen = new Set();
+    const out = [];
+    for (const r of (data || [])) {
+      if (seen.has(r.variant_id)) continue;
+      seen.add(r.variant_id);
+      out.push({ variantId: r.variant_id, lastBoughtAt: r.created_at });
+      if (out.length >= limit) break;
+    }
+    return { data: out, error: null };
+  } catch (error) {
+    console.error('[API] fetchGuestProductHistory error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Team members who can be credited for a product sale at a branch (active therapists / service staff): [{ id, name }]. */
+export async function fetchProductSellers({ branchId }) {
+  try {
+    let q = supabase.from('therapists').select('id, name').eq('is_active', true).order('display_order').order('name');
+    q = withBranch(q, branchId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchProductSellers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** The product sales added to one booking (the visit), with who sold them and how they were paid: for the booking panel. */
+export async function fetchBookingProductSales({ bookingId }) {
+  try {
+    const { data, error } = await supabase
+      .from('product_sales')
+      .select('id, product_name, variant_name, quantity, unit_price_npr, total_amount, payment_mode, created_at, refunded_at, sold_by_therapist_id, therapists:sold_by_therapist_id(name), product_sale_payments(payment_mode, amount)')
+      .eq('booking_id', bookingId)
+      .order('created_at');
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        id: r.id, name: [r.product_name, r.variant_name].filter(Boolean).join(' · '), quantity: r.quantity, unitPrice: Number(r.unit_price_npr), total: Number(r.total_amount),
+        paymentMode: r.payment_mode, createdAt: r.created_at, refundedAt: r.refunded_at, soldBy: r.therapists?.name || null,
+        payments: (r.product_sale_payments || []).map((p) => ({ paymentMode: p.payment_mode, amount: Number(p.amount) })),
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchBookingProductSales error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Visits this guest has today at this branch (not cancelled / no-show), for "Add this sale to that visit": [{ id, serviceName, startTime, paid }]. */
+export async function fetchGuestVisitsToday({ customerId, branchId, date }) {
+  try {
+    if (!customerId || !branchId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, booking_number, start_time, payment_status, status, service_name_snapshot, therapist_id')
+      .eq('customer_id', customerId).eq('branch_id', branchId).eq('date', date)
+      .not('status', 'in', '("Cancelled","No Show")')
+      .order('start_time');
+    if (error) throw error;
+    return { data: (data || []).map((b) => ({ id: b.id, number: b.booking_number, serviceName: b.service_name_snapshot || 'Visit', startTime: b.start_time, paid: b.payment_status === 'paid', status: b.status, therapistId: b.therapist_id || null })), error: null };
+  } catch (error) {
+    console.error('[API] fetchGuestVisitsToday error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * The atomic checkout: product sales + the treatment payment in ONE transaction (checkout_booking_with_products). `tenders` are what
+ * the guest pays with, in order, for the main booking (money for the products first); `products` = [{ variantId, qty, soldByTherapistId }].
+ * Prices and stock are checked by the server. On a stock problem the error has `hint` "STOCK:<variantId>:<left>" (see checkoutAllocation.parseStockError).
+ */
+export async function checkoutWithProducts({ bookingId, tenders, products, dueHolderName, notes, additional = [] }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const mapTender = (t) => ({
+      amount: Number(t.amount),
+      payment_mode: t.paymentMode,
+      ...(t.paymentMode === 'ReferralVoucher' ? { referral_id: t.referralId } : {}),
+      ...(t.paymentMode === 'VoucherWallet' ? { voucher_id: t.voucherId || null } : {}),
+      ...(t.paymentMode === 'SessionPackage' ? { package_id: t.packageId } : {}),
+    });
+    const { data, error } = await supabase.rpc('checkout_booking_with_products', {
+      p_booking_id: bookingId,
+      p_tenders: (tenders || []).map(mapTender),
+      p_products: (products || []).map((l) => ({ variant_id: l.variantId, qty: l.qty, sold_by_therapist_id: l.soldByTherapistId || null })),
+      p_notes: notes || null,
+      p_due_holder_name: dueHolderName || null,
+      p_additional: (additional || []).map((a) => ({ booking_id: a.bookingId, tenders: (a.tenders || []).map(mapTender), due_holder_name: a.dueHolderName || null, notes: notes || null })),
+    });
+    if (error) throw error;
+    capture('staff_checkout_with_products', { products: (products || []).length, total: Number(data?.products_total || 0) });
+    return {
+      data: {
+        payments: (data?.payments || []).map((r) => ({ bookingId: r.booking_id, amountPaid: Number(r.amount_paid || 0), amountDue: Number(r.amount_due || 0), fullyPaid: !!r.fully_paid })),
+        sales: (data?.sales || []).map((x) => ({
+          id: x.id, variantId: x.variant_id, productName: x.product_name, variantName: x.variant_name, quantity: x.quantity, unitPrice: Number(x.unit_price),
+          total: Number(x.total_amount), stockBefore: x.stock_before, stockAfter: x.stock_after, soldByTherapistId: x.sold_by_therapist_id,
+        })),
+        productsTotal: Number(data?.products_total || 0),
+        productPayments: (data?.product_payments || []).map((p) => ({ paymentMode: p.payment_mode, amount: Number(p.amount) })),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] checkoutWithProducts error:', error.message);
     return { data: null, error };
   }
 }

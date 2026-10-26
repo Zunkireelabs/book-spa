@@ -69,3 +69,23 @@ describe('buildReceiptHtml', () => {
     expect(html).toContain('3,000');
   });
 });
+
+describe('receipt with products (V26)', () => {
+  const base = { orgName: 'Nuad', branchName: 'Lazimpat', total: 3840, leftover: 0, bookingNumber: 'BK-1', lines: [{ label: 'Massage', amount: 1540 }], tenders: [{ label: 'Membership wallet', amount: 1540 }],
+    products: { lines: [{ label: 'Lavender Oil · 500 ml', qty: 1, amount: 900 }, { label: 'Herbal Balm', qty: 2, amount: 1400 }], tenders: [{ label: 'Cash', amount: 2300 }] } };
+  it('the WhatsApp text lists the products and how they were paid', () => {
+    const t = buildReceiptText(base);
+    expect(t).toContain('Products:');
+    expect(t).toContain('Herbal Balm × 2: NPR 1,400');
+    expect(t).toContain('Paid by Cash: NPR 2,300');
+  });
+  it('the printed receipt has a Products table', () => {
+    const h = buildReceiptHtml(base);
+    expect(h).toContain('<h2>Products</h2>');
+    expect(h).toContain('Lavender Oil · 500 ml × 1');
+  });
+  it('no products: unchanged', () => {
+    expect(buildReceiptText({ ...base, products: null })).not.toContain('Products:');
+    expect(buildReceiptHtml({ ...base, products: null })).not.toContain('<h2>Products</h2>');
+  });
+});

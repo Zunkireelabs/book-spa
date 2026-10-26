@@ -347,6 +347,17 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                     {formatNPR(report.paymentBreakdown.fonepay)}
                   </span>
                 </div>
+                {report.productSales?.count > 0 && (
+                  <div className="border-t border-border pt-2 flex items-center justify-between" data-products-line>
+                    <div className="flex items-center gap-2">
+                      <Icon name="Package" size={14} className="text-text-secondary" />
+                      <span className="text-sm text-text-secondary">of which: Products ({report.productSales.count} sold)</span>
+                    </div>
+                    <span className="text-sm font-semibold text-text-primary">
+                      {formatNPR(report.productSales.total)}
+                    </span>
+                  </div>
+                )}
                 {report.voucherSalesTotal > 0 && (
                   <div className="border-t border-border pt-2 flex items-center justify-between">
                     <div className="flex items-center gap-2">

@@ -37,6 +37,7 @@ export const AREAS = [
     id: 'payroll',
     title: 'Payroll',
     description: () => 'Monthly pay runs for your team.',
+    selfHeader: true, // the panel draws its own header + the Pay rates / Pay runs tabs (V26)
     tabs: [{ view: 'payroll', label: 'Payroll', roles: ['admin', 'admin_viewer'] }],
   },
   // Packages (V20) draws its own header (lead sentence + counted tabs), so `selfHeader` skips the shared one.

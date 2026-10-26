@@ -57,7 +57,8 @@ export function memberDiscountFor({ booking, membership, today }) {
   const out = { tierName, key, label, pct, amount, capped, paid, reason: memberReason(tierName, pct, key) };
 
   const current = Number(booking.discountAmount) || 0;
-  const hasDiscount = current > 0 && ['approved', 'pending'].includes(booking.discountStatus);
+  // final_amount is always base − discount_amount, so any stored amount is already in the price — whatever its status.
+  const hasDiscount = current > 0;
   const declined = booking.memberDiscount === 'declined';
   if (hasDiscount && booking.memberDiscount === 'applied') return { ...out, kind: 'saved', amount: current };
   if (hasDiscount) return amount > current ? { ...out, kind: 'better', current, extra: round2(amount - current), declined } : null;

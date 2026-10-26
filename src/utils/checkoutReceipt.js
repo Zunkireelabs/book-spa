@@ -39,6 +39,12 @@ export function buildReceiptText(r) {
   if (r.bookingNumber) lines.push(`Booking ${r.bookingNumber}${r.dateLabel ? ` · ${r.dateLabel}` : ''}`);
   (r.lines || []).forEach((l) => lines.push(`${l.label}: NPR ${fmtNum(l.amount)}`));
   (r.tenders || []).forEach((t) => lines.push(`Paid by ${t.label}: NPR ${fmtNum(t.amount)}`));
+  // Products bought on the same bill (V26): their own lines and the methods that paid them.
+  if (r.products && r.products.lines?.length) {
+    lines.push('Products:');
+    r.products.lines.forEach((l) => lines.push(`${l.label} × ${l.qty}: NPR ${fmtNum(l.amount)}`));
+    (r.products.tenders || []).forEach((t) => lines.push(`Paid by ${t.label}: NPR ${fmtNum(t.amount)}`));
+  }
   if (r.leftover > 0) lines.push(`Still due: NPR ${fmtNum(r.leftover)}`);
   if (r.tipTotal > 0) lines.push(`Tip (separate): NPR ${fmtNum(r.tipTotal)}`);
   lines.push('Thank you!');
@@ -61,6 +67,9 @@ export function buildReceiptHtml(r) {
     ...(r.lines || []).map((l) => row(l.label, fmtNum(l.amount), l.sub ? 'sub' : '')),
   ].join('');
   const tenders = (r.tenders || []).map((t) => row(t.detail ? `${t.label} · ${t.detail}` : t.label, fmtNum(t.amount))).join('');
+  const productsHtml = r.products && r.products.lines?.length
+    ? `<h2>Products</h2><table>${r.products.lines.map((l) => row(`${l.label} × ${l.qty}`, fmtNum(l.amount))).join('')}${(r.products.tenders || []).map((t) => row(t.label, fmtNum(t.amount), 'sub')).join('')}</table>`
+    : '';
   return `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(r.bookingNumber)}</title>
 <style>
 body{font:13px/1.5 Inter,-apple-system,system-ui,sans-serif;color:#0E0D0C;max-width:360px;margin:24px auto;padding:0 16px}
@@ -79,6 +88,7 @@ h2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#6b6b70;ma
 <h2>Payment</h2><table>${tenders}
 ${r.leftover > 0 ? row('Still due', fmtNum(r.leftover)) : ''}
 <tr class="tot"><td>Total paid (NPR)</td><td class="n">${fmtNum(r.total)}</td></tr></table>
+${productsHtml}
 ${r.tipTotal > 0 ? `<div class="muted">Tip NPR ${fmtNum(r.tipTotal)} was given to staff and recorded separately.</div>` : ''}
 <div class="foot">Thank you!</div>
 </body></html>`;

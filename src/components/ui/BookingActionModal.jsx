@@ -8,7 +8,7 @@ import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import AdminCorrectionModal from './AdminCorrectionModal';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
-import { fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
+import { fetchMemberDiscountContext, applyMemberDiscount, fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, acknowledgeBooking, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, checkoutWithProducts, fetchBookingProductSales, refundProductSale, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
 import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
@@ -22,7 +22,7 @@ import { useBlockOverlap } from '../../hooks/useBlockOverlap';
 import { Segmented } from './PanelFormKit';
 import { memberDiscountFor } from '../../services/memberDiscount';
 import { nepalNow } from '../../utils/customerDirectory';
-import { MEMBERSHIP_ENABLED } from '../../lib/featureFlags';
+import { MEMBERSHIP_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 
 function getNepalNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
@@ -218,6 +218,9 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  // Products added to this visit (V26, product_sales.booking_id): read-only lines on the Payment tab; a manager/admin can refund one.
+  const [visitProducts, setVisitProducts] = useState([]);
+  const [visitProductRefund, setVisitProductRefund] = useState(null); // the sale awaiting a refund confirmation
   const [showAdminCorrection, setShowAdminCorrection] = useState(false);
   const [correctingPayment, setCorrectingPayment] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
@@ -415,6 +418,15 @@ const BookingActionModal = ({
       setMembership(null);
     }
   }, [activeTab, booking?.bookingId, booking?.paymentStatus, booking?.customerPhone, branchId, isOpen]);
+
+  const loadVisitProducts = useCallback(async () => {
+    if (!booking?.bookingId) { setVisitProducts([]); return; }
+    const { data } = await fetchBookingProductSales({ bookingId: booking.bookingId });
+    setVisitProducts(data || []);
+  }, [booking?.bookingId]);
+  useEffect(() => {
+    if (isOpen && booking?.bookingId && PRODUCTS_ENABLED) loadVisitProducts(); else setVisitProducts([]);
+  }, [isOpen, booking?.bookingId, booking?.paymentStatus, booking?.amountPaid, loadVisitProducts]);
 
   // Load who created this booking when the modal opens
   // Opening an unopened online booking acknowledges it for the whole team (migration-282). Fire and forget: never blocks the UI,
@@ -785,7 +797,7 @@ const BookingActionModal = ({
     }
   };
 
-  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipSplits }) => {
+  const handlePaymentConfirm = async ({ tenders, additionalAllocations, dueHolderName, notes: paymentNotes, tipSplits, products = [], productTenders = [] }) => {
     if (!booking || !onRecordPayment) return { error: { message: 'No payment handler available.' } };
     setPaymentSubmitting(true);
     setActionError(null);
@@ -797,6 +809,27 @@ const BookingActionModal = ({
       // fails partway through (payments rows are immutable). This closes
       // the partial-bundle failure mode, not just the stale-related-list
       // display bug the BK-20260915-0025/-0026/-0027 incident also had.
+      // Products on the bill (V26): ONE database call writes the product sales, their stock and the treatment payment together, so
+      // "payment saved but stock not taken" cannot happen. `productTenders` first, then the treatment's tenders: the server pays the
+      // products first, in that order, and rejects anything that does not cover them in full.
+      if (products.length > 0) {
+        const { data, error } = await checkoutWithProducts({
+          bookingId: booking.bookingId,
+          tenders: [...productTenders, ...tenders],
+          products,
+          dueHolderName,
+          notes: paymentNotes,
+          additional: (additionalAllocations || []).map((alloc) => ({ bookingId: alloc.bookingId, tenders: alloc.tenders })),
+        });
+        if (error) return { error };
+        for (const split of (tipSplits || [])) {
+          const tipResult = await recordTip({ bookingId: booking.bookingId, amount: split.amount, receivedBy: split.receivedBy });
+          if (tipResult.error) console.warn('[Tips] recordTip failed:', tipResult.error.message);
+        }
+        if (onGroupPaymentRecorded) onGroupPaymentRecorded(); else await onRefreshBooking?.(booking.bookingId);
+        return { data, error: null };
+      }
+
       if (onGroupPaymentRecorded) {
         const { data, error } = await recordGroupPayment([
           { bookingId: booking.bookingId, tenders, dueHolderName, notes: paymentNotes },
@@ -2774,6 +2807,26 @@ const BookingActionModal = ({
                   </div>
                 )}
 
+                {visitProducts.length > 0 && (
+                  <div className="rounded-spa border border-border" data-visit-products>
+                    <div className="px-3 pt-2.5 pb-1 text-[11px] font-medium uppercase tracking-[.04em] text-text-secondary">Products on this visit</div>
+                    <ul className="divide-y divide-border">
+                      {visitProducts.map((vp) => (
+                        <li key={vp.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <p className={`truncate ${vp.refundedAt ? 'line-through text-text-secondary' : 'text-text-primary'}`}>{vp.name} × {vp.quantity}</p>
+                            <p className="text-text-secondary truncate">{[vp.soldBy ? `Sold by ${vp.soldBy}` : 'No commission', vp.payments.map((p) => p.paymentMode).join(' + ') || vp.paymentMode, vp.refundedAt ? 'refunded' : null].filter(Boolean).join(' · ')}</p>
+                          </div>
+                          <span className="font-data text-text-primary">NPR {Number(vp.total).toLocaleString('en-IN')}</span>
+                          {['manager', 'admin'].includes(userRole) && !vp.refundedAt && (
+                            <button type="button" onClick={() => setVisitProductRefund(vp)} className="text-[12px] font-medium text-primary hover:underline" data-visit-product-refund>Refund</button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 {/* Payment status */}
                 <div className="flex items-center justify-between px-1">
                   <span className="font-body font-body-normal text-xs text-text-secondary">Status</span>
@@ -3014,6 +3067,27 @@ const BookingActionModal = ({
 
   const overlays = (
     <>
+      {/* Refund one product sale added to this visit (manager / admin): the units go back on the shelf */}
+      {visitProductRefund && (
+        <ConfirmDialog
+          title="Refund this product?"
+          message={`${visitProductRefund.name} × ${visitProductRefund.quantity} (NPR ${Number(visitProductRefund.total).toLocaleString('en-IN')}) will be refunded and the stock put back.`}
+          confirmLabel="Refund"
+          reasonOptional
+          reasonLabel="Note"
+          reasonPlaceholder="Optional"
+          isSubmitting={isLoading}
+          onClose={() => setVisitProductRefund(null)}
+          onConfirm={async (note) => {
+            setIsLoading(true);
+            const { error } = await refundProductSale({ saleId: visitProductRefund.id, reason: (note || '').trim() || null });
+            setIsLoading(false);
+            setVisitProductRefund(null);
+            if (error) { setActionError(error.message || 'Could not refund the product.'); return; }
+            loadVisitProducts();
+          }}
+        />
+      )}
       {/* Cancel / No Show confirmation */}
       {pendingStatus === 'no show' && (
         <ConfirmDialog

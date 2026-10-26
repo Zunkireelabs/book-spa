@@ -255,6 +255,17 @@ const DailyClosingPanel = ({ branchId }) => {
                     {formatNPR(summary.paymentBreakdown.fonepay)}
                   </span>
                 </div>
+                {summary.productSales?.count > 0 && (
+                  <div className="border-t border-border pt-2 flex items-center justify-between" data-products-line>
+                    <div className="flex items-center space-x-2">
+                      <Icon name="Package" size={14} className="text-text-secondary" />
+                      <span className="font-body font-body-normal text-sm text-text-secondary">of which: Products ({summary.productSales.count} sold)</span>
+                    </div>
+                    <span className="font-body font-body-semibold text-sm text-text-primary">
+                      {formatNPR(summary.productSales.total)}
+                    </span>
+                  </div>
+                )}
                 {summary.voucherSalesTotal > 0 && (
                   <div className="border-t border-border pt-2 flex items-center justify-between">
                     <div className="flex items-center space-x-2">
@@ -279,7 +290,7 @@ const DailyClosingPanel = ({ branchId }) => {
                     Close Day
                   </h3>
                   <p className="font-caption font-caption-normal text-sm text-text-secondary mt-1">
-                    Locks all bookings for {formatDate(selectedDate)}. This action cannot be undone.
+                    Locks all bookings and product sales for {formatDate(selectedDate)}. This action cannot be undone.
                   </p>
                 </div>
                 <Button
