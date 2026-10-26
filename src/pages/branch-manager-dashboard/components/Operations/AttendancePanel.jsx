@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
@@ -73,6 +74,10 @@ const AttendancePanel = ({ branchId }) => {
   const { staffLabel } = useIndustry();
 
   const [selectedDate, setSelectedDate] = useState(today);
+  // Deep link from the Therapists list ("Mark attendance"): ?view=attendance&therapist=<id> shows only that person, on today.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusTherapistId = searchParams.get('therapist');
+  const clearFocusTherapist = () => { const next = new URLSearchParams(searchParams); next.delete('therapist'); setSearchParams(next, { replace: true }); };
   const [therapists, setTherapists] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -118,6 +123,7 @@ const AttendancePanel = ({ branchId }) => {
   const filteredTherapists = useMemo(() => {
     if (staffTypeFilter === 'transferred') return [];
     return therapists.filter((t) => {
+      if (focusTherapistId) return t.therapistId === focusTherapistId;
       if (isIncomingTransferOverdue(t.therapistId)) return false;
       const matchesSearch = !searchQuery.trim()
         || (t.therapistName || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
@@ -611,6 +617,12 @@ const AttendancePanel = ({ branchId }) => {
       )}
 
       {/* Search & Status Filter */}
+      {focusTherapistId && (
+        <div className="flex items-center gap-2 px-1 pb-2 text-[13px]" data-attendance-focus>
+          <span className="text-text-secondary">Showing only <b className="text-text-primary font-medium">{therapists.find((t) => t.therapistId === focusTherapistId)?.therapistName || 'one person'}</b></span>
+          <button type="button" onClick={clearFocusTherapist} className="text-primary hover:underline">Show everyone</button>
+        </div>
+      )}
       <FilterBar
         search={{
           value: searchQuery,

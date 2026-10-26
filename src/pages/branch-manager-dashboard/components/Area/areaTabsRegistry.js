@@ -25,8 +25,12 @@ export const AREAS = [
     id: 'therapists',
     title: ({ staffLabelPlural }) => staffLabelPlural || 'Staff',
     description: () => 'Everyone who serves customers, and their positions.',
+    selfHeader: true, // Therapists (V28) draws its own header (lead sentence + counted tabs), like Packages and Products
     tabs: [
-      { view: 'therapists', label: ({ staffLabelPlural }) => staffLabelPlural || 'Staff', roles: STAFF_UP },
+      { view: 'therapists', label: 'Active', roles: STAFF_UP },
+      { view: 'therapists-inactive', label: 'Inactive', roles: STAFF_UP },
+      { view: 'therapists-positions', label: 'Positions', roles: ['manager', 'admin'], overallHidden: true },
+      { view: 'therapists-transfers', label: 'Transfer log', roles: STAFF_UP },
       { view: 'roster', label: 'Roster', roles: ['manager', 'admin'], overallHidden: true }, // weekly roster + day overrides (opens from Calendar ⋮ too)
     ],
   },

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from '../AppIcon';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
@@ -33,7 +33,7 @@ const Avatar = ({ name, src }) => {
 
 const ProfileMenu = () => {
   const { profile, signOut } = useAuth();
-  const navigate = useNavigate();
+  const navigate = useGuardedNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
   const triggerRef = useRef(null);

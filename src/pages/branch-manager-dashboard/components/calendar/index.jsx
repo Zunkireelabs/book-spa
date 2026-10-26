@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DndContext, pointerWithin } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import BookingActionModal from '../../../../components/ui/BookingActionModal';
@@ -35,6 +35,10 @@ const OperationalCalendar = ({ branchId }) => {
   const { orgSettings } = useOrg();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
+  // Deep link from the Therapists list ("See on calendar"): ?view=calendar&therapist=<id> shows only that person's column.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusTherapistId = searchParams.get('therapist');
+  const clearFocusTherapist = () => { const next = new URLSearchParams(searchParams); next.delete('therapist'); setSearchParams(next, { replace: true }); };
   const userRole = profile?.role || 'staff';
   // Calendar settings (admin: ⋮ → Calendar settings): visible hours, interval, full-day view
   const hourFromSetting = (t, min, max) => {
@@ -125,6 +129,7 @@ const OperationalCalendar = ({ branchId }) => {
   const filteredTherapists = useMemo(() => {
     if (!calendarData?.therapists) return [];
     let list = calendarData.therapists;
+    if (focusTherapistId) return list.filter(t => t.id === focusTherapistId);
     list = list.filter(t => !attendanceMap[t.id]);
     if (showServiceOnly) {
       list = list.filter(t => t.is_service_staff !== false);
@@ -133,7 +138,7 @@ const OperationalCalendar = ({ branchId }) => {
       list = list.filter(t => t.position && t.position.split('/').some(p => selectedPositions.includes(p.trim())));
     }
     return list;
-  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap, currentDate]);
+  }, [calendarData?.therapists, showServiceOnly, selectedPositions, attendanceMap, currentDate, focusTherapistId]);
 
   // Absent / on-leave therapists (hidden from columns) for the toolbar "N away" summary
   const awayList = useMemo(() => {
@@ -279,6 +284,12 @@ const OperationalCalendar = ({ branchId }) => {
             setHideSensitive={setHideSensitive}
           />
 
+          {focusTherapistId && (
+            <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-background border-b border-border" data-calendar-focus>
+              <span className="text-text-secondary">Showing only <b className="text-text-primary font-medium">{(calendarData?.therapists || []).find(t => t.id === focusTherapistId)?.name || 'one person'}</b></span>
+              <button type="button" onClick={clearFocusTherapist} className="text-primary hover:underline">Show everyone</button>
+            </div>
+          )}
           {/* Main content area: Grid */}
           <div className="flex flex-1 min-h-0 overflow-clip">
             {/* Calendar grid */}

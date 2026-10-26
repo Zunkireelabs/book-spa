@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { useGuardedNavigate } from '../../contexts/DirtyGuardContext';
 import Icon from 'components/AppIcon';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
@@ -17,7 +18,7 @@ const GROUP_LABEL = { recent: 'Recent', page: 'Pages', action: 'Actions', custom
 
 // ⌘K search: find pages, customers and bookings, or run a couple of simple actions.
 const CommandPalette = ({ onClose }) => {
-  const navigate = useNavigate();
+  const navigate = useGuardedNavigate();
   const { orgSlug: urlOrgSlug } = useParams();
   const { profile } = useAuth();
   const { branchId, isOverall } = useBranch();

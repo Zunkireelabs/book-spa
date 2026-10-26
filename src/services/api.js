@@ -1,3 +1,4 @@
+import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay } from './payrollCalc';
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
@@ -15,6 +16,7 @@ import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/cus
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
+import { buildTherapistsOverview, addDaysStr, weekDatesOf } from './therapistsOverview';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -1700,19 +1702,7 @@ export async function getSettledDueHistory({ branchId, from, to } = {}) {
 
 export const REFERRAL_COMMISSION_TYPES = ['percentage', 'amount'];
 
-// Earned commission for a booking from its per-booking commission config.
-// percentage -> final_amount * value / 100 ; amount -> flat value.
-function computeReferralCommission(finalAmount, type, value) {
-  const v = Number(value);
-  if (!type || !(v >= 0)) return 0;
-  if (type === 'percentage') {
-    return Math.round(((Number(finalAmount) * v) / 100) * 100) / 100;
-  }
-  if (type === 'amount') {
-    return Math.round(v * 100) / 100;
-  }
-  return 0;
-}
+// computeReferralCommission lives in ./payrollCalc (shared with the therapist profile); imported at the top of this file.
 
 // Set / change a booking's per-booking referral commission. Pass a null type to
 // clear it. Allowed while the booking's day is not locked.
@@ -7027,6 +7017,79 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
+// Therapists list (V28): everything the list, its Today strip and the peek panel need, in a handful of batched reads (no per-therapist
+// queries): staff, weekly hours + breaks, this week's roster overrides, today's attendance, today's bookings (with shared / combo
+// slices), who may do which service, and (managers / admins only) pay rates. Shaping is in services/therapistsOverview.js.
+// `date` is the Nepal "today" (YYYY-MM-DD); the week is Monday..Sunday around it.
+export async function fetchTherapistsOverview(branchId, date) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin', 'admin_viewer'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+    const scopeBranch = profile.role === 'manager' ? profile.branch_id : branchId;
+    if (!scopeBranch) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    // Pay rates follow Payroll's rule: admin (and admin_viewer, read-only) only. Managers and staff never get them, and staff_compensation is not even read for them.
+    const canSeeRates = profile.role === 'admin' || profile.role === 'admin_viewer';
+    const week = weekDatesOf(date);
+    const rangeEnd = [week[6], addDaysStr(date, 1)].sort().pop();
+
+    const [therapists, hours, overrides, attendance, bookings, links, services, comp] = await Promise.all([
+      withBranch(supabase.from('therapists')
+        .select('id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years')
+        .order('display_order').order('name'), scopeBranch),
+      withBranch(supabase.from('therapist_working_hours')
+        .select('therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(name, start_time, end_time, sort_order)'), scopeBranch),
+      withBranch(supabase.from('staff_roster_overrides')
+        .select('therapist_id, override_date, start_time, end_time, is_day_off')
+        .gte('override_date', week[0]).lte('override_date', rangeEnd), scopeBranch),
+      withBranch(supabase.from('therapist_attendance').select('therapist_id, status, check_in_time, check_out_time').eq('date', date), scopeBranch),
+      withBranch(supabase.from('bookings')
+        .select('id, therapist_id, status, start_time, end_time, customer_name, service_name_snapshot, booking_therapists(therapist_id, start_time, end_time), booking_combo_items(therapist_id, start_time, end_time, service:services(name))')
+        .eq('date', date).not('status', 'in', '("Cancelled","No Show")'), scopeBranch),
+      pageAllRows(() => supabase.from('service_therapists').select('service_id, therapist_id').order('service_id').order('therapist_id')),
+      supabase.from('services').select('id, name, is_active, requires_therapist').order('name'),
+      canSeeRates
+        ? withBranch(supabase.from('staff_compensation').select('therapist_id, monthly_salary, commission_rate, product_commission_rate, therapists!inner(branch_id)'), scopeBranch, 'therapists.branch_id')
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    for (const r of [therapists, hours, overrides, attendance, bookings, services, comp]) if (r.error) throw r.error;
+
+    const data = buildTherapistsOverview({
+      therapists: therapists.data || [],
+      hoursRows: hours.data || [],
+      overrideRows: overrides.data || [],
+      attendanceRows: attendance.data || [],
+      bookingRows: bookings.data || [],
+      links: links || [],
+      services: services.data || [],
+      compRows: comp.data || [],
+    }, { date, nowTime: nepalNow().hm, canSeeRates });
+    // admin_viewer has no SELECT policy on therapist_working_hours / staff_roster_overrides, so for them "no hours" means "can't read them".
+    return { data: { ...data, canSeeRates, rosterReadable: profile.role !== 'admin_viewer' }, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistsOverview error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Delete pre-check (V28): how many bookings a therapist has, so the confirm can say "can't be deleted" BEFORE asking. Counts the same
+// rows deleteTherapist's HAS_BOOKINGS guard looks at (bookings.therapist_id); upcoming = today or later and not cancelled / no-show.
+export async function fetchTherapistBookingCounts({ therapistId, today }) {
+  try {
+    const total = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('therapist_id', therapistId);
+    const upcoming = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('therapist_id', therapistId)
+      .gte('date', today).not('status', 'in', '("Cancelled","No Show")');
+    if (total.error) throw total.error;
+    if (upcoming.error) throw upcoming.error;
+    return { data: { total: total.count || 0, upcoming: upcoming.count || 0, past: (total.count || 0) - (upcoming.count || 0) }, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistBookingCounts error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating, phone, address, city, email, pronouns }) {
   try {
     name = toTitleCase(name);
@@ -7314,30 +7377,44 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
 
     if (error) throw error;
 
+    // Breaks: diff against what is stored and write only what changed (insert / update / delete), so the audit log shows real
+    // changes instead of a delete-everything-and-reinsert on every save.
     const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    const whIds = (data || []).map(r => r.id);
+    const { data: existingAll, error: existingError } = whIds.length
+      ? await supabase.from('therapist_working_hours_breaks').select('id, working_hours_id, name, start_time, end_time, sort_order').in('working_hours_id', whIds)
+      : { data: [], error: null };
+    if (existingError) throw existingError;
+    const hm = (t) => (t || '').slice(0, 5);
     for (const row of rows) {
       const whRow = byDay.get(row.dayOfWeek);
       if (!whRow) continue;
-
-      const { error: deleteError } = await supabase
-        .from('therapist_working_hours_breaks')
-        .delete()
-        .eq('working_hours_id', whRow.id);
-      if (deleteError) throw deleteError;
-
-      const breaks = row.breaks || [];
-      if (breaks.length > 0) {
-        const breakPayload = breaks.map((brk, index) => ({
-          working_hours_id: whRow.id,
-          name: brk.name || '',
-          start_time: brk.startTime,
-          end_time: brk.endTime,
-          sort_order: index,
-        }));
-        const { error: insertError } = await supabase
-          .from('therapist_working_hours_breaks')
-          .insert(breakPayload);
-        if (insertError) throw insertError;
+      const existing = (existingAll || []).filter(e => e.working_hours_id === whRow.id).sort((x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0));
+      const wanted = (row.breaks || []).map((brk, index) => ({ name: brk.name || '', start: hm(brk.startTime), end: hm(brk.endTime), index }));
+      // 1) untouched breaks stay exactly as they are
+      const left = [];
+      const keptIds = new Set();
+      for (const w of wanted) {
+        const hit = existing.find(e => !keptIds.has(e.id) && (e.name || '') === w.name && hm(e.start_time) === w.start && hm(e.end_time) === w.end);
+        if (hit) keptIds.add(hit.id); else left.push(w);
+      }
+      const spare = existing.filter(e => !keptIds.has(e.id));
+      // 2) changed breaks update in place (paired in order), extras insert, leftovers delete
+      for (const w of left) {
+        const old = spare.shift();
+        if (old) {
+          const { error: updError } = await supabase.from('therapist_working_hours_breaks')
+            .update({ name: w.name, start_time: w.start, end_time: w.end, sort_order: w.index }).eq('id', old.id);
+          if (updError) throw updError;
+        } else {
+          const { error: insError } = await supabase.from('therapist_working_hours_breaks')
+            .insert({ working_hours_id: whRow.id, name: w.name, start_time: w.start, end_time: w.end, sort_order: w.index });
+          if (insError) throw insError;
+        }
+      }
+      if (spare.length > 0) {
+        const { error: delError } = await supabase.from('therapist_working_hours_breaks').delete().in('id', spare.map(e => e.id));
+        if (delError) throw delError;
       }
     }
 
@@ -12415,11 +12492,8 @@ export async function fetchTherapistProductSales({ branchId, therapistId, period
 // periodMonth: 'YYYY-MM' string.
 export async function generatePayroll({ branchId, periodMonth }) {
   try {
-    const firstDay = `${periodMonth}-01`;
-    // Parse year/month for date math
-    const [year, month] = periodMonth.split('-').map(Number);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const lastDay = `${periodMonth}-${String(daysInMonth).padStart(2, '0')}`;
+    // Month bounds (calendar dates), shared with the therapist profile via payrollCalc.
+    const { firstDay, lastDay, daysInMonth, year } = payrollMonthBounds(periodMonth);
 
     // Check for a finalized run — if found, block.
     const { data: existing, error: checkErr } = await supabase
@@ -12462,10 +12536,6 @@ export async function generatePayroll({ branchId, periodMonth }) {
     }
 
     const therapistIds = therapists.map((t) => t.id);
-    const therapistByName = {};
-    for (const t of therapists) {
-      therapistByName[t.name.trim().toLowerCase()] = t.id;
-    }
 
     // Fetch attendance in the period.
     const { data: attendance, error: attErr } = await supabase
@@ -12538,35 +12608,8 @@ export async function generatePayroll({ branchId, periodMonth }) {
     const { data: bookings, error: bErr } = await bookingQuery;
     if (bErr) throw bErr;
 
-    // Sum service revenue per therapist, and referral commission per therapist name.
-    const serviceRevenueMap = {};
-    const referralCommissionMap = {};
-    for (const therapistId of therapistIds) {
-      serviceRevenueMap[therapistId] = 0;
-      referralCommissionMap[therapistId] = 0;
-    }
-    for (const b of (bookings || [])) {
-      if (b.therapist_id && serviceRevenueMap[b.therapist_id] !== undefined) {
-        serviceRevenueMap[b.therapist_id] = Math.round(
-          (serviceRevenueMap[b.therapist_id] + Number(b.final_amount)) * 100
-        ) / 100;
-      }
-      // Attribute referral commission by name match.
-      if (b.referred_by) {
-        const refKey = b.referred_by.trim().toLowerCase();
-        const matchedId = therapistByName[refKey];
-        if (matchedId !== undefined) {
-          const earned = computeReferralCommission(
-            b.final_amount,
-            b.referral_commission_type,
-            b.referral_commission_value
-          );
-          referralCommissionMap[matchedId] = Math.round(
-            (referralCommissionMap[matchedId] + earned) * 100
-          ) / 100;
-        }
-      }
-    }
+    // Sum service revenue per therapist, and referral commission per therapist name (shared maths: payrollCalc.js).
+    const { serviceRevenueMap, referralCommissionMap } = tallyBookingEarnings({ bookings, therapists });
 
     // Product commission (V26): the unrefunded product sales credited to each person this month, at this branch, for products that
     // earn commission, and the deduction for refunds of earlier months' sales that were already paid out.
@@ -12579,22 +12622,19 @@ export async function generatePayroll({ branchId, periodMonth }) {
 
     for (const t of therapists) {
       const comp = t.staff_compensation;
-      const salary = comp?.monthly_salary != null ? Number(comp.monthly_salary) : 0;
-      const rate = comp?.commission_rate != null ? Number(comp.commission_rate) : 0;
       const att = attMap[t.id];
       const unpaidLeaveDays = unpaidLeaveDaysFor(t.id);
+      const parts = computeCommissionParts({
+        comp,
+        serviceRev: serviceRevenueMap[t.id] || 0,
+        refCommission: referralCommissionMap[t.id] || 0,
+        productRev: productPay.earned[t.id] || 0,
+        productRefunded: productPay.refunded[t.id] || 0,
+      });
+      const { salary, rate, productRate, serviceRev, svcCommission, refCommission, productRev, productEarned, productDeduction } = parts;
       const perDay = daysInMonth > 0 ? salary / daysInMonth : 0;
       const deduction = Math.round(perDay * (att.absent + 0.5 * att.halfDay + unpaidLeaveDays) * 100) / 100;
-      const serviceRev = serviceRevenueMap[t.id] || 0;
-      const svcCommission = Math.round(serviceRev * (rate / 100) * 100) / 100;
-      const refCommission = referralCommissionMap[t.id] || 0;
-      const productRate = comp?.product_commission_rate != null ? Number(comp.product_commission_rate) : 0;
-      const productRev = productPay.earned[t.id] || 0;
-      const productEarned = Math.round(productRev * (productRate / 100) * 100) / 100;
-      const productDeduction = Math.round((productPay.refunded[t.id] || 0) * (productRate / 100) * 100) / 100;
-      const netPay = Math.round(
-        (salary - deduction + svcCommission + refCommission + productEarned - productDeduction) * 100
-      ) / 100;
+      const netPay = computeNetPay({ salary, deduction, svcCommission, refCommission, productEarned, productDeduction });
       totalNet = Math.round((totalNet + netPay) * 100) / 100;
 
       itemsPayload.push({

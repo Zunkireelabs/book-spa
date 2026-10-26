@@ -20,13 +20,12 @@ import RevenueAnalyticsChart from './components/RevenueAnalyticsChart';
 import DailyOperationalReportPanel from './components/DailyOperationalReportPanel';
 import OperationalCalendar from './components/calendar';
 import RoomManagementPanel from './components/MasterData/RoomManagementPanel';
-import TherapistManagementPanel from './components/MasterData/TherapistManagementPanel';
+import TherapistsPage from './components/MasterData/TherapistsPage';
 import ServiceManagementPanel from './components/MasterData/ServiceManagementPanel';
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
 import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
 import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel';
-import RosterPanel from './components/MasterData/RosterPanel';
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
@@ -458,9 +457,12 @@ const BranchManagerDashboard = () => {
       case 'bookings': return <BookingsViewPanel branchId={branchId} />;
       case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
       case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
-      case 'therapists': return <TherapistManagementPanel branchId={branchId} readOnly={isOverall || salesReadOnly} />;
+      case 'therapists':
+      case 'therapists-inactive':
+      case 'therapists-positions':
+      case 'therapists-transfers':
+      case 'roster': return <TherapistsPage view={view} />;
       case 'attendance': return !isOverall ? <AttendancePanel branchId={branchId} /> : null;
-      case 'roster': return !isOverall && ['manager', 'admin'].includes(profile?.role) ? <RosterPanel branchId={branchId} /> : null;
       case 'payroll': return ['admin', 'admin_viewer'].includes(profile?.role) ? <PayrollPanel branchId={branchId} isOverall={isOverall} readOnly={profile?.role === 'admin_viewer'} /> : null;
       case 'package-overview':
       case 'packages': return salesViewer ? <PackagesPage view={view} branchId={branchId} readOnly={salesReadOnly} /> : null;

@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { DirtyGuardProvider } from "contexts/DirtyGuardContext";
 import { BrowserRouter, Routes as RouterRoutes, Route, useLocation, useParams, Navigate } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import BrandMark from "components/ui/BrandMark";
@@ -301,7 +302,9 @@ const LegacyBookingRedirect = () => {
 
 const Routes = () => (
   <BrowserRouter>
-    <AppRoutes />
+    <DirtyGuardProvider>
+      <AppRoutes />
+    </DirtyGuardProvider>
   </BrowserRouter>
 );
 

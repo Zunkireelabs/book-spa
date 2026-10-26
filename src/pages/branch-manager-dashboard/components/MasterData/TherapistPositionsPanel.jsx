@@ -5,12 +5,17 @@ import { PanelShell, FormBody, InlineError, CONTROL, CONTROL_ERROR } from '../..
 import { updateTherapist } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
 
+// `inline` renders the editor as the page's Positions tab (V28); otherwise it is the right-hand panel it used to be.
+const Wrap = ({ inline, onClose, children }) => (inline
+  ? <div className="max-w-[640px] pt-4 space-y-4">{children}</div>
+  : <PanelShell variant="panel" title="Manage positions" onClose={onClose} hideFooter><FormBody>{children}</FormBody></PanelShell>);
+
 const parts = (position) => (position ? position.split('/').map((p) => p.trim()) : []);
 
 // "Manage positions" in the right-hand panel: an add row on top, then one row per position with inline rename (Enter saves,
 // Esc cancels) and delete (through a ConfirmDialog, since it edits every staff member holding the position).
 // A position exists because staff hold it; a newly added one lives in the filter list until a staff member is given it.
-const TherapistPositionsPanel = ({ therapists, customPositions, onCustomChange, onReload, staffLabel = 'Staff', staffLabelPlural = 'Staff', onClose }) => {
+const TherapistPositionsPanel = ({ therapists, customPositions, onCustomChange, onReload, staffLabel = 'Staff', staffLabelPlural = 'Staff', onClose, inline = false }) => {
   const names = useMemo(() => {
     const set = new Set();
     therapists.forEach((t) => parts(t.position).forEach((p) => set.add(p)));
@@ -80,8 +85,8 @@ const TherapistPositionsPanel = ({ therapists, customPositions, onCustomChange, 
   const deleteCount = confirmDelete ? holders(confirmDelete).length : 0;
   return (
     <>
-      <PanelShell variant="panel" title="Manage positions" onClose={onClose} hideFooter>
-        <FormBody>
+      <Wrap inline={inline} onClose={onClose}>
+        <>
           <InlineError message={error} />
           <div>
             <div className="flex gap-2">
@@ -136,8 +141,8 @@ const TherapistPositionsPanel = ({ therapists, customPositions, onCustomChange, 
             </ul>
           )}
           <p className="text-xs text-text-secondary">Renaming or deleting a position updates everyone who holds it.</p>
-        </FormBody>
-      </PanelShell>
+        </>
+      </Wrap>
       {confirmDelete && (
         <ConfirmDialog
           title="Delete position?"

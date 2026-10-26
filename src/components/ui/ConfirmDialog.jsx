@@ -24,6 +24,10 @@ const ConfirmDialog = ({
   error = null, // message shown inside the dialog, above the buttons (the dialog stays open on error)
   reasonLabel = 'Reason', // label of the optional field (reasonOptional only), e.g. 'Note'
   reasonPlaceholder = 'e.g. Customer changed their mind',
+  cancelLabel = 'Back',
+  confirmVariant = 'danger', // 'danger' | 'primary' (a save prompt is not destructive)
+  secondaryLabel = null, // optional middle button, e.g. 'Discard'
+  onSecondary = null,
 }) => {
   const [reason, setReason] = useState('');
   const trimmedReason = reason.trim();
@@ -146,10 +150,15 @@ const ConfirmDialog = ({
 
         <div className="flex items-center justify-end space-x-3 p-5 border-t border-border">
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
-            Back
+            {cancelLabel}
           </Button>
+          {secondaryLabel && onSecondary && (
+            <Button variant="outline" onClick={onSecondary} disabled={isSubmitting}>
+              {secondaryLabel}
+            </Button>
+          )}
           <Button
-            variant="danger"
+            variant={confirmVariant}
             onClick={handleConfirm}
             disabled={isSubmitting || !canConfirm}
           >
