@@ -460,9 +460,10 @@ plan or track there. If the `plane` tools are missing, run `/mcp` → plane → 
    investigation or follow-up has a ZNLY ticket with an assignee. Untracked work is not allowed, however small.
 2. **One ticket per piece of work — no duplicates.** Search Plane before creating. If someone else's ticket
    already covers it, comment on that ticket or link a child; never open a second one.
-3. **`tasks/TRACKER.md` is the one to-do file in this repo**, for the whole team. It mirrors Plane: every line has
-   its ZNLY id and its owner. When you create, start, finish or cancel a ticket, update the tracker in the same
-   PR or commit. If the two disagree, Plane wins: fix the file.
+3. **`tasks/TRACKER.md` is the one to-do file in this repo**, for the whole team. It is **generated from Plane**
+   by `/project-pm sync`. **Never hand-edit it, and never push its content back into Plane**, so a stale local
+   copy can never override the board. A git conflict in it → take either side and re-run sync.
+   **Use `/project-pm` for all of this:** "status", "what's mine?", "start ZNLY-n", "sync".
 4. **No other to-do lists.** Not in `todo.md`, handoffs, briefs, PR descriptions or session logs. A to-do
    found anywhere else moves to Plane and the tracker.
 5. **Claim your migration number in Plane** (in the ticket description) after checking `supabase/` on `stage`
