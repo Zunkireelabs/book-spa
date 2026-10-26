@@ -440,14 +440,38 @@ gh pr create --base main ...
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
 
-## Task Management
+## Task Management — Plane is the single source of truth
 
-1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
-2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Mark items complete as you go
-4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review section to `tasks/todo.md`
-6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
+All development work is tracked in **Plane** (project **Zennly WebApp**, key `ZNLY`,
+workspace `zunkireelabs`), via the `plane` MCP server. `tasks/todo.md` is retired — do not
+plan or track there. If the `plane` tools are missing, run `/mcp` → plane → authenticate.
+
+- Project id: `f544ce12-5085-4868-82cf-b4c94d520c7c` (use with `mcp__plane__*` tools)
+- No work without a ticket. Search Plane first (`workitem search`); create one if none exists.
+- Ticket id goes in the branch name and PR title: `feature/ZNLY-123-short-name`, `ZNLY-123: ...`
+- Move the ticket as the work moves:
+  `Backlog → Todo → In Progress → In Review (PR open) → On Stage (merged to stage) → Done (live on main)`
+- Done means live on `main`, not merged to `stage`.
+- Anything you can't verify gets the `needs-verification` label — never state it as fact.
+- Full rules: `.claude/skills/project-pm/SKILL.md` ("Plane workflow").
+
+**HARD RULE — every developer, every session (human or Claude), no exceptions:**
+1. **Your work is in Plane before you start it.** Every bug fix, feature, migration, data fix, hotfix,
+   investigation or follow-up has a ZNLY ticket with an assignee. Untracked work is not allowed, however small.
+2. **One ticket per piece of work — no duplicates.** Search Plane before creating. If someone else's ticket
+   already covers it, comment on that ticket or link a child; never open a second one.
+3. **`tasks/TRACKER.md` is the one to-do file in this repo**, for the whole team. It mirrors Plane: every line has
+   its ZNLY id and its owner. When you create, start, finish or cancel a ticket, update the tracker in the same
+   PR or commit. If the two disagree, Plane wins: fix the file.
+4. **No other to-do lists.** Not in `todo.md`, handoffs, briefs, PR descriptions or session logs. A to-do
+   found anywhere else moves to Plane and the tracker.
+5. **Claim your migration number in Plane** (in the ticket description) after checking `supabase/` on `stage`
+   and open PRs. Two PRs must never use the same number (PR #413 vs this repo's UI branch collided on 282–293).
+6. **Keep the state honest** as the work moves (see the states above). A PR without a ZNLY id in its title
+   doesn't get merged.
+
+**Still local:** `tasks/lessons.md` (capture lessons after corrections) and
+`docs/session-logs/` (narrative logs; link the ZNLY ids they cover).
 
 ## Core Principles
 
@@ -462,3 +486,12 @@ gh pr create --base main ...
 - `docs/session-logs/` — Daily session logs
 - `docs/session-log.md` — Legacy comprehensive session log
 - `docs/claude-project-template/` — Reusable project template
+
+## REA (Reverse Engineer Anything)
+
+REA is available as the `rea` MCP server plus the `reverse-engineer-anything` skill (user-level, installed 2026-10-25).
+
+- **Use it** to understand how a feature works in a shipped product we don't have source for: a website, Electron/JS app, HAR capture, or APK. Ask for evidence, then build our own implementation.
+- **Don't use it** for this repo's own code. Read the source directly.
+- Only examine software we own or are authorized to examine. Learn the pattern; don't copy proprietary code or assets.
+- Native binaries need Hopper/Ghidra/IDA, which are not installed. If a tool reports `needs_configuration`, say so rather than guessing.

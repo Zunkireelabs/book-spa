@@ -48,6 +48,13 @@ Update `docs/session-log.md` to reflect the latest changes for: `$ARGUMENTS`
 - Keep entries concise but complete
 - Preserve all existing content — only add/update, never remove history
 
+## Plane Sync
+
+Plane (project `ZNLY`) holds work status; this log holds narrative. When logging a session:
+- Reference the ZNLY ticket ids the session touched.
+- Confirm each ticket's state in Plane matches reality (In Review / On Stage / Done).
+- Any leftover follow-up becomes a new Plane ticket, not a line in the log.
+
 ## Session Log Location
 
 `/home/zunkireelabs/devprojects/nuad-thai-web-app/docs/session-log.md`
