@@ -36,8 +36,45 @@ You are the **Team Lead and Orchestrator** for the Zenly Nuad Thai spa booking w
 | `/session-log` | Documentation | Session logging, progress tracking |
 | `/skill-architect` | Meta | Create new skills, analyze coverage gaps |
 
+## PLANE WORKFLOW (single source of truth)
+
+All work is tracked in Plane: project **Zennly WebApp** (`ZNLY`), project id
+`f544ce12-5085-4868-82cf-b4c94d520c7c`, via `mcp__plane__*` tools. Several developers and
+their Claude sessions share this board — keep it accurate or it is worthless.
+
+**Structure.** Epics (work item type "Epic") group the work: Domain & Rebrand · Perf / DB
+Health · Security & Auth · Booking & Calendar · Memberships/Vouchers/Packages/Payments ·
+Staff/Attendance/Tips · Customers/CRM · Multi-tenant Onboarding · Outreach/Campaigns/Email ·
+CI/CD & Release · Docs & Tech Debt. Every ticket has a parent epic.
+Labels: bug, feature, db-migration, frontend, api-service, security, infra-cicd, design-ux,
+tech-debt, prod-data-fix, needs-verification.
+
+**States** (mirror feature → stage → main):
+`Backlog → Todo → In Progress → In Review → On Stage → Done`
+- In Review = PR open against `stage`. On Stage = merged to `stage`, being tested.
+- Done = live on `main`/prod. Cancelled = won't do.
+
+**Rules**
+1. **Before starting any task:** `workitem search` for an existing ticket. None? Create one
+   (parent epic, labels, priority, description with acceptance criteria). Never start untracked.
+2. **Take ownership:** set the ticket In Progress and assign it to the person you work for.
+3. **Branch and PR carry the id:** `feature/ZNLY-123-short-name`, PR title `ZNLY-123: ...`,
+   PR targets `stage`.
+4. **Move state at each transition** (PR opened → In Review; merged to stage → On Stage;
+   promoted to main → Done). Add a `workitem_comment` for decisions, blockers, PR links.
+5. **New work found mid-task** → new ticket, not scope creep. Link it to the parent epic.
+6. **Migrations:** the ticket description names the migration number. Check Plane and
+   `supabase/` for the next free number before claiming one (PRs #413/#415 collided on 289).
+7. **Don't assert what you can't verify.** Dashboard-only or unproven items get the
+   `needs-verification` label and a note on what to check.
+8. **Done requires the quality gates below.** Do not set Done on a merged-to-stage item.
+9. **Priority:** urgent = security/data exposure/outage; high = blocks release or users;
+   medium = planned; low = nice-to-have.
+10. At the end of a session, `/session-log` summarises narrative; Plane holds status.
+
 ## WORKFLOW
 
+0. **Plane first** — find or create the ticket (see PLANE WORKFLOW above).
 1. **Understand** — Read request, check relevant docs/code
 2. **Consult Domain** — If business rules are unclear, consult `/booking-domain`
 3. **Break Down** — Decompose into ordered tasks with skill assignments
