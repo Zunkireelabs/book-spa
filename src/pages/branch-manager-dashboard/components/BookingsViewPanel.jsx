@@ -9,7 +9,7 @@ import { useBranch } from '../../../contexts/BranchContext';
 import { supabase } from '../../../lib/supabase';
 import {
   fetchBookingsForList, fetchBookingById, fetchServices, fetchTherapists, 
-  fetchAttendance, fetchBlocksForRange, fetchTransferOccurrences, fetchRosterForDay, fetchServiceEligibility, fetchRenderedVisitTherapists,
+  fetchAttendance, fetchBlocksForRange, fetchTransferOccurrences, fetchShiftsForRange, fetchServiceEligibility, fetchRenderedVisitTherapists,
   updateBookingStatus, updateBookingDetails, fetchRooms, assignTherapist, recordPayment, recordTip, applyDiscount,
 } from '../../../services/api';
 import { transformBooking, toDbStatus } from '../../../services/bookingTransformers';
@@ -21,10 +21,12 @@ import {
   isDimmed, lateMinutes, formatLate, clockLabel, amountCell, nextAction, moneyOf,
 } from '../../../utils/bookingsList';
 import {
-  toMin, fromMin, clock, rosterDay, shiftSource, availabilityNow, nextSlot10, suggestTherapist, usualTherapistId, needsYouNow, matchesNeed, isUnseen, needsTherapist,
+  toMin, fromMin, clock, shiftSource, availabilityNow, nextSlot10, suggestTherapist, usualTherapistId, needsYouNow, matchesNeed, isUnseen, needsTherapist,
 } from '../../../utils/freeNow';
+import { hoursFromShiftRow } from '../../../utils/staffDay';
 import DateNavigator from './Bookings/DateNavigator';
 import NeedsYouNow from './Bookings/NeedsYouNow';
+import { isClosedByBlocks } from '../../../utils/todayStatusLine';
 import FreeNowChip from './Bookings/FreeNowChip';
 import BookingRow, { COLUMN_DEFS } from './Bookings/BookingRow';
 
@@ -194,7 +196,7 @@ const BookingsViewPanel = ({ branchId }) => {
 
   // ── Today-only signals: who is free, who to suggest, what needs attention ────────────────────────────────────────────
   const [signals, setSignals] = useState(null);   // attendance / blocks / transfers for today (refetched with the bookings)
-  const [roster, setRoster] = useState(null);     // { workingHours, eligibility } (rarely changes)
+  const [roster, setRoster] = useState(null);     // { shifts, eligibility }: today's shift per person from the availability rule (rarely changes)
   const [usual, setUsual] = useState({});         // customerId -> usual therapist id
   useEffect(() => {
     if (!isTodayView) { setSignals(null); return undefined; }
@@ -207,15 +209,15 @@ const BookingsViewPanel = ({ branchId }) => {
   useEffect(() => {
     if (!isTodayView || !therapistKey) { setRoster(null); return undefined; }
     let alive = true;
-    Promise.all([fetchRosterForDay(therapistKey.split(','), rosterDay(today)), fetchServiceEligibility()])
-      .then(([wh, el]) => { if (alive) setRoster({ workingHours: wh.data || {}, eligibility: el.data || {} }); });
+    Promise.all([fetchShiftsForRange({ branchId, startDate: today, endDate: today }), fetchServiceEligibility()])
+      .then(([sh, el]) => { if (alive) setRoster({ shifts: Object.fromEntries((sh.data || []).map((r) => [r.therapist_id, hoursFromShiftRow(r)])), eligibility: el.data || {} }); });
     return () => { alive = false; };
-  }, [isTodayView, therapistKey, today]);
+  }, [isTodayView, therapistKey, today, branchId]);
   const fnCtx = useMemo(() => {
     if (!signals || !roster) return null;
     return {
-      date: today, nowMin, source: shiftSource(signals.attendance), bookings: rows, blocks: signals.blocks, transfers: signals.transfers,
-      attendanceById: Object.fromEntries(signals.attendance.map((a) => [a.therapistId, a])), workingHoursById: roster.workingHours,
+      date: today, nowMin, branchClosed: isClosedByBlocks(signals.blocks, today), source: shiftSource(signals.attendance), bookings: rows, blocks: signals.blocks, transfers: signals.transfers,
+      attendanceById: Object.fromEntries(signals.attendance.map((a) => [a.therapistId, a])), shiftById: roster.shifts,
     };
   }, [signals, roster, today, nowMin, rows]);
   const availability = useMemo(() => (fnCtx ? availabilityNow(therapists, fnCtx) : null), [fnCtx, therapists]);

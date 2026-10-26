@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  jsDayToDbDow, dbDowToJsDay, dbDowOfDate, dayWorkingMinutes, weekWorkingMinutes, formatMinutes, effectiveHoursForDate, todayStatus,
+  jsDayToDbDow, dbDowToJsDay, dbDowOfDate, dayWorkingMinutes, weekWorkingMinutes, formatMinutes, effectiveHoursForDate, todayStatus, hoursFromShiftRow, todayLabels,
 } from './staffDay';
 
 describe('day-of-week mapping (DB 0=Mon, JS 0=Sun)', () => {
@@ -61,6 +61,25 @@ describe('todayStatus', () => {
   it('upcoming before the shift', () => expect(todayStatus({ hours, nowTime: '08:00' }).key).toBe('upcoming'));
   it('leave beats the roster', () => expect(todayStatus({ attendance: { status: 'Sick Leave' }, hours, nowTime: '10:00' }).key).toBe('leave'));
   it('day off on the roster', () => expect(todayStatus({ hours: { ...hours, isDayOff: true }, nowTime: '10:00' }).key).toBe('off'));
-  it('no roster', () => expect(todayStatus({ hours: { source: 'none' }, nowTime: '10:00' }).key).toBe('no-roster'));
+  it('hours that cannot be read', () => expect(todayStatus({ hours: hoursFromShiftRow(null), nowTime: '10:00' }).key).toBe('no-roster'));
+  it('no hours set, inside branch hours: open', () => {
+    const h = hoursFromShiftRow({ works: true, source: 'none', start_time: '09:00:00', end_time: '21:00:00' });
+    const st = todayStatus({ hours: h, nowTime: '10:00' });
+    expect(st.key).toBe('no-hours-open');
+    expect(todayLabels({ status: st, attendance: null, hours: h })).toEqual({ title: 'No hours set', sub: 'Branch hours 09:00 – 21:00' });
+  });
+  it('no hours set and the branch is closed that day: off', () => expect(todayStatus({ hours: hoursFromShiftRow({ works: false, source: 'none', start_time: null, end_time: null }), nowTime: '10:00' }).key).toBe('off'));
   it('after the shift with no check-in is not "needs you"', () => expect(todayStatus({ hours, nowTime: '18:00' }).key).toBe('off'));
+});
+
+describe('hoursFromShiftRow', () => {
+  it('maps the rule row: roster -> override, 24:00, breaks', () => {
+    const h = hoursFromShiftRow({ works: true, source: 'roster', start_time: '11:00:00', end_time: '23:59:59', breaks: [{ name: 'Lunch', start: '14:00', end: '14:30' }], off: [] });
+    expect(h).toMatchObject({ source: 'override', startTime: '11:00', endTime: '24:00', isDayOff: false, openNoHours: false, missing: false });
+    expect(h.breaks).toEqual([{ name: 'Lunch', startTime: '14:00', endTime: '14:30' }]);
+  });
+  it('not working is a day off; a missing row is "missing"', () => {
+    expect(hoursFromShiftRow({ works: false, source: 'weekly', start_time: null, end_time: null })).toMatchObject({ isDayOff: true, source: 'weekly' });
+    expect(hoursFromShiftRow(undefined).missing).toBe(true);
+  });
 });

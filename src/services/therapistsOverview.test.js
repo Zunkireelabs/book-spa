@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { todayLabels } from '../utils/staffDay';
 import {
   weekDatesOf, groupBookingsByTherapist, bookingSummary, serviceAccess, buildTherapistsOverview, stripStats, needsYouNow, segmentOf, inSegment,
   sortTherapists, matchesSearch, addDaysStr,
@@ -6,20 +7,30 @@ import {
 
 const DATE = '2026-10-26'; // a Monday
 
-const mkRaw = (over = {}) => ({
+// The overview now reads hours only from therapist_shifts_for_range; these fixtures build its rows from the plain weekly config.
+const toShiftRows = (therapists, weekly) => therapists.flatMap((t) => weekDatesOf(DATE).concat(addDaysStr(DATE, 7)).map((d) => {
+  const dow = weekDatesOf(d).indexOf(d);
+  const w = weekly.find((r) => r.therapist_id === t.id && r.day_of_week === dow);
+  if (!w) return { therapist_id: t.id, shift_date: d, works: true, source: 'none', start_time: '09:00:00', end_time: '21:00:00', breaks: [], off: [] };
+  return {
+    therapist_id: t.id, shift_date: d, works: !w.is_day_off, source: 'weekly', start_time: w.is_day_off ? null : w.start_time, end_time: w.is_day_off ? null : w.end_time,
+    breaks: (w.therapist_working_hours_breaks || []).map((b) => ({ name: b.name, start: b.start_time, end: b.end_time })), off: [],
+  };
+}));
+
+const mkBase = (over = {}) => ({
   therapists: [
     { id: 't1', name: 'Rojina Tamang', gender: 'Female', position: 'Senior therapist', is_service_staff: true, is_active: true, branch_id: 'b', phone: '9841203311' },
     { id: 't2', name: 'Sita Gurung', gender: 'Female', position: 'Therapist', is_service_staff: true, is_active: true, branch_id: 'b', phone: '9802214410' },
     { id: 't3', name: 'Kabita Thapa', gender: 'Female', position: 'Therapist', is_service_staff: true, is_active: true, branch_id: 'b', phone: '' },
     { id: 't4', name: 'Front Desk', gender: 'Male', position: 'Receptionist', is_service_staff: false, is_active: true, branch_id: 'b', phone: '' },
   ],
-  hoursRows: [
+  _weekly: [
     { therapist_id: 't1', day_of_week: 0, start_time: '10:00:00', end_time: '19:00:00', is_day_off: false, therapist_working_hours_breaks: [{ name: 'Lunch', start_time: '13:00', end_time: '14:00', sort_order: 0 }] },
     { therapist_id: 't2', day_of_week: 0, start_time: '10:00:00', end_time: '19:00:00', is_day_off: false, therapist_working_hours_breaks: [] },
     { therapist_id: 't3', day_of_week: 0, start_time: '10:00:00', end_time: '19:00:00', is_day_off: true, therapist_working_hours_breaks: [] },
     { therapist_id: 't3', day_of_week: 1, start_time: '10:00:00', end_time: '19:00:00', is_day_off: false, therapist_working_hours_breaks: [] },
   ],
-  overrideRows: [],
   attendanceRows: [{ therapist_id: 't1', status: 'Present', check_in_time: '2026-10-26T04:07:00Z', check_out_time: null }],
   bookingRows: [
     { id: 'b1', therapist_id: 't1', status: 'Completed', start_time: '10:15:00', end_time: '11:15:00', customer_name: 'A', service_name_snapshot: 'Deep tissue' },
@@ -37,6 +48,11 @@ const mkRaw = (over = {}) => ({
   compRows: [{ therapist_id: 't1', monthly_salary: '28000', commission_rate: '12', product_commission_rate: '5' }],
   ...over,
 });
+const mkRaw = (over = {}) => {
+  const { _weekly, ...rest } = mkBase(over);
+  return { ...rest, shiftRows: over.shiftRows || toShiftRows(rest.therapists, _weekly) };
+};
+
 
 describe('weekDatesOf', () => {
   it('runs Monday..Sunday around the date', () => {
@@ -114,9 +130,27 @@ describe('buildTherapistsOverview', () => {
     expect(buildTherapistsOverview(mkRaw({ compRows: [] }), { date: DATE, nowTime: '12:00', canSeeRates: true }).ratesReadable).toBe(false);
     expect(ov.ratesReadable).toBe(true);
   });
-  it('a roster override for the day beats the weekly row', () => {
-    const o = buildTherapistsOverview(mkRaw({ overrideRows: [{ therapist_id: 't2', override_date: DATE, start_time: '16:00', end_time: '20:00', is_day_off: false }] }), { date: DATE, nowTime: '12:00' });
-    expect(o.therapists.find((t) => t.id === 't2').status.key).toBe('upcoming');
+  it('a roster date change for the day beats the weekly row', () => {
+    const base = mkRaw();
+    const shiftRows = base.shiftRows.map((r) => (r.therapist_id === 't2' && r.shift_date === DATE ? { ...r, source: 'roster', start_time: '16:00:00', end_time: '20:00:00' } : r));
+    const o = buildTherapistsOverview({ ...base, shiftRows }, { date: DATE, nowTime: '12:00' });
+    const t2 = o.therapists.find((t) => t.id === 't2');
+    expect(t2.status.key).toBe('upcoming');
+    expect(t2.hours.source).toBe('override');
+  });
+  it('no hours set shows "No hours set" (and is not part of the working week)', () => {
+    const base = mkRaw();
+    const shiftRows = base.shiftRows.filter((r) => !(r.therapist_id === 't2')).concat(
+      weekDatesOf(DATE).map((d) => ({ therapist_id: 't2', shift_date: d, works: true, source: 'none', start_time: '09:00:00', end_time: '21:00:00', breaks: [], off: [] })));
+    const t2 = buildTherapistsOverview({ ...base, shiftRows }, { date: DATE, nowTime: '12:00' }).therapists.find((t) => t.id === 't2');
+    expect(t2.status.key).toBe('no-hours-open');
+    expect(todayLabels(t2)).toEqual({ title: 'No hours set', sub: 'bookable in branch hours 09:00–21:00' });
+    expect(segmentOf(t2)).toBe('noroster');
+    expect(t2.weekMinutes).toBe(0);
+  });
+  it('shifts that cannot be read (no access) fall back to "no roster", never a false "open"', () => {
+    const t2 = buildTherapistsOverview({ ...mkRaw(), shiftRows: [] }, { date: DATE, nowTime: '12:00' }).therapists.find((t) => t.id === 't2');
+    expect(t2.status.key).toBe('no-roster');
   });
 });
 

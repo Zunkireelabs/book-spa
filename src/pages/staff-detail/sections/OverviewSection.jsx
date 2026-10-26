@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { dbDowOfDate, DB_DOW_LABELS, formatMinutes, dayWorkingMinutes } from '../../../utils/staffDay';
+import { dbDowOfDate, DB_DOW_LABELS, formatMinutes, dayWorkingMinutes, NO_HOURS_LABEL } from '../../../utils/staffDay';
 import { buildTimeline } from '../profileModel';
 import { Loading, Problem, Fig, Figs, npr } from './ui';
 
@@ -91,13 +91,13 @@ const Spark = ({ now = [], last = [] }) => {
 const WeekBars = ({ week, today }) => (
   <div className="grid grid-cols-7 gap-1.5 items-end h-24 mt-3">
     {week.map((d) => {
-      const off = d.hours?.isDayOff || d.hours?.source === 'none';
+      const off = d.hours?.isDayOff || d.hours?.missing;
       const mins = off ? 0 : dayWorkingMinutes({ startTime: d.hours.startTime, endTime: d.hours.endTime, isDayOff: false, breaks: d.hours.breaks });
       const full = off ? 0 : dayWorkingMinutes({ startTime: d.hours.startTime, endTime: d.hours.endTime, isDayOff: false, breaks: [] });
       const brk = Math.max(0, full - mins);
       const isToday = d.date === today;
       const label = DB_DOW_LABELS[dbDowOfDate(d.date)].slice(0, 3);
-      const tip = off ? `${label}: day off` : `${label}: ${short(d.hours.startTime)} – ${short(d.hours.endTime)} · ${formatMinutes(mins)}${d.changed ? ' · changed on the roster' : ''}`;
+      const tip = off ? `${label}: day off` : d.hours.openNoHours ? `${label}: ${NO_HOURS_LABEL} · bookable in branch hours ${short(d.hours.startTime)}–${short(d.hours.endTime)}` : `${label}: ${short(d.hours.startTime)} – ${short(d.hours.endTime)} · ${formatMinutes(mins)}${d.changed ? ' · changed on the roster' : ''}`;
       const barH = off ? 6 : Math.max(8, (full / 600) * 56);
       return (
         <div key={d.date} title={tip} className="flex flex-col items-center justify-end gap-1 h-full text-xs text-text-secondary">
@@ -117,7 +117,7 @@ const OverviewSection = ({ data, loading, error, onRetry, today, nowTime, isServ
   if (!data) return null;
   const m = data.month || {};
   const week = data.week || [];
-  const weekMinutes = week.reduce((sum, d) => sum + dayWorkingMinutes({ startTime: d.hours?.startTime, endTime: d.hours?.endTime, isDayOff: d.hours?.isDayOff, breaks: d.hours?.breaks }), 0);
+  const weekMinutes = week.reduce((sum, d) => sum + dayWorkingMinutes({ startTime: d.hours?.startTime, endTime: d.hours?.endTime, isDayOff: d.hours?.isDayOff || d.hours?.openNoHours, breaks: d.hours?.breaks }), 0);
   const monthName = new Date(`${today}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
   const prev = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
   prev.setUTCMonth(prev.getUTCMonth() - 1);
@@ -130,7 +130,7 @@ const OverviewSection = ({ data, loading, error, onRetry, today, nowTime, isServ
     const scheduled = rows.filter((r) => ['on-time', 'late', 'absent', 'leave'].includes(r.status)).length;
     const leave = rows.filter((r) => r.status === 'leave').length;
     const late = rows.filter((r) => r.status === 'late').length;
-    const nextOff = week.find((d) => d.date > today && (d.hours?.isDayOff || d.hours?.source === 'none'));
+    const nextOff = week.find((d) => d.date > today && (d.hours?.isDayOff && !d.hours?.missing));
     return (
       <Figs>
         <Fig label="Shifts worked" value={worked} detail={scheduled ? `of ${scheduled}${leave ? ` · ${leave} day${leave === 1 ? '' : 's'} of leave` : ''}` : 'no attendance this month'} />

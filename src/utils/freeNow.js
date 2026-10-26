@@ -1,10 +1,12 @@
 // Pure rules for "who is free" on the Bookings page (V15b): Free-now card, suggested therapist, "Needs you now" line.
 // Everything is in Nepal-local minutes since midnight for ONE day (`ctx.date`); callers pass already-fetched data.
 //
-// On-shift source (reported to the lead): attendance check-in when the branch actually records it for the day
-// (some therapist has a Present/half-day row or a check-in time), otherwise the roster (therapist_working_hours +
-// leave/absent from therapist_attendance). A therapist with no roster row is treated as on shift all day.
+// On-shift source: attendance check-in when the branch actually records it for the day (some therapist has a Present/half-day
+// row or a check-in time), otherwise the rule's own shift for the day (`ctx.shiftById`, built from therapist_shifts_for_range
+// with utils/staffDay#hoursFromShiftRow: weekly row, roster date change, breaks, branch-hours clamp). A therapist with no hours
+// set is open inside branch hours (the clamp is already in the shift), shown as "No hours set · open".
 import { lateMinutes } from './bookingsList';
+import { todayStatusLine } from './todayStatusLine';
 
 export const toMin = (t) => { if (t == null || t === '') return null; const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + (m || 0); };
 export const fromMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -15,9 +17,6 @@ const LEAVE = ['Leave', 'Annual Leave', 'Sick Leave', 'Day Off'];
 const ACTIVE = ['pending', 'confirmed', 'in-progress'];
 const dbStatus = (b) => String(b?.status || '').toLowerCase();
 
-/** Monday-first day index (matches therapist_working_hours.day_of_week: 0 = Monday). */
-export const rosterDay = (iso) => { const [y, m, d] = iso.split('-').map(Number); return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7; };
-
 /** 'attendance' when check-in is actually recorded for the day, else 'roster'. */
 export function shiftSource(attendance = []) {
   return attendance.some((a) => a.checkInTime || a.status === 'Present' || a.status === '1st-Half Day' || a.status === '2nd-Half Day') ? 'attendance' : 'roster';
@@ -25,22 +24,24 @@ export function shiftSource(attendance = []) {
 
 /** { on, from, to, reason } — `from`/`to` null = open ended. Leave/absent always win. */
 function shiftOf(t, ctx) {
+  if (ctx.branchClosed) return { on: false, reason: 'Branch closed' };
   const att = ctx.attendanceById?.[t.id];
   if (att?.status === 'Absent') return { on: false, reason: 'Absent today' };
   if (att && LEAVE.includes(att.status)) return { on: false, reason: att.status === 'Day Off' ? 'Day off' : 'On leave' };
-  const wh = ctx.workingHoursById?.[t.id];
+  const wh = ctx.shiftById?.[t.id];
+  const known = !!wh && !wh.missing;
   const cap = (m) => (m != null && m >= 1440 ? null : m); // a shift "until 24:00" is open ended
-  const roster = wh ? (wh.isDayOff ? null : { from: toMin(wh.startTime), to: cap(toMin(wh.endTime)) }) : { from: null, to: null };
-  if (wh?.isDayOff) return { on: false, reason: 'Day off' };
+  const roster = known ? (wh.isDayOff ? null : { from: toMin(wh.startTime), to: cap(toMin(wh.endTime)) }) : { from: null, to: null };
+  if (known && wh.isDayOff) return { on: false, reason: wh.source === 'none' ? 'Closed' : 'Day off' };
   if (ctx.source === 'attendance') {
     if (!att || !att.status) return { on: false, reason: 'Not checked in' };
     const inAt = toMin(att.checkInTime);
     const outAt = toMin(att.checkOutTime);
     return { on: true, from: inAt ?? roster?.from ?? null, to: outAt ?? roster?.to ?? null, reason: '' };
   }
-  // Roster mode. A therapist with no roster row has no shift data, so only count them when something shows they work today:
-  // an assigned (non-cancelled) booking. Otherwise every active service staffer would look "free".
-  if (!wh && !worksToday(t, ctx)) return { on: false, reason: 'No shift or bookings today' };
+  // Shift mode. Only when the shift can't be read at all (no access / rule unavailable) do we fall back to counting people who have
+  // an assigned (non-cancelled) booking today; otherwise every active service staffer would look "free".
+  if (!known && !worksToday(t, ctx)) return { on: false, reason: 'No shift or bookings today' };
   return { on: true, from: roster?.from ?? null, to: roster?.to ?? null, reason: '' };
 }
 
@@ -57,10 +58,10 @@ function worksToday(t, ctx) {
   return ctx._works.has(t.id);
 }
 
-/** How "on shift" was decided for the Free-now count: 'attendance' | 'roster' (every active therapist has shift hours) | 'bookings' (no shift data: people with a booking today). */
+/** How "on shift" was decided for the Free-now count: 'attendance' | 'roster' (the rule's shift is known for everyone) | 'bookings' (shifts unreadable: people with a booking today). */
 export function shiftBasis(therapists, ctx) {
   if (ctx.source === 'attendance') return 'attendance';
-  return therapists.every((t) => ctx.workingHoursById?.[t.id]) ? 'roster' : 'bookings';
+  return therapists.every((t) => ctx.shiftById?.[t.id] && !ctx.shiftById[t.id].missing) ? 'roster' : 'bookings';
 }
 
 /** Everything that occupies the therapist: active bookings, manual blocks, transfer windows, roster breaks. */
@@ -79,8 +80,10 @@ function intervalsOf(t, ctx, { excludeBookingId } = {}) {
   }
   for (const k of ctx.blocks || []) if (k.therapistId === t.id) out.push({ from: toMin(k.startTime), to: k.endTime === '24:00' ? 1440 : toMin(k.endTime), kind: 'block', label: k.description });
   for (const k of ctx.transfers || []) if (k.therapistId === t.id) out.push({ from: toMin(k.startTime), to: k.endTime === '24:00' ? 1440 : toMin(k.endTime), kind: 'transfer', label: k.description });
-  const wh = ctx.workingHoursById?.[t.id];
+  const wh = ctx.shiftById?.[t.id];
   for (const br of wh?.breaks || []) out.push({ from: toMin(br.startTime), to: toMin(br.endTime), kind: 'break', label: br.name || 'Break' });
+  // a half day of leave takes that part of the shift off
+  for (const o of wh?.off || []) if (o.code === 'ON_LEAVE' && o.reason === 'leave_half') out.push({ from: o.start_min, to: o.end_min, kind: 'leave', label: 'Half day off' });
   return out.filter((i) => i.from != null && i.to != null).sort((a, b) => a.from - b.from);
 }
 
@@ -118,7 +121,16 @@ export function availabilityNow(therapists, ctx) {
   const inSession = [];
   for (const t of therapists) {
     const s = therapistState(t, ctx);
-    if (s.state === 'free') free.push({ therapist: t, freeUntil: s.freeUntil, label: freeUntilLabel(s.freeUntil, ctx.nowMin) });
+    if (s.state === 'free') {
+      // `status` is the shared "today" line (same wording as the Therapists list, the profile and the calendar header); `label` is the free-for part.
+      const noHours = !!ctx.shiftById?.[t.id]?.openNoHours;
+      const att = ctx.attendanceById?.[t.id];
+      const status = todayStatusLine({
+        hours: ctx.shiftById?.[t.id], nowMin: ctx.nowMin, branchClosed: !!ctx.branchClosed,
+        attendance: att?.status ? { status: att.status, checkInTime: att.checkInTime || null, checkOutTime: att.checkOutTime || null } : null,
+      }).full;
+      free.push({ therapist: t, freeUntil: s.freeUntil, noHours, status, label: freeUntilLabel(s.freeUntil, ctx.nowMin) });
+    }
     else if (s.state === 'busy' && s.kind === 'booking') inSession.push({ therapist: t, freeAt: s.freeAt, overrun: s.overrun, label: s.freeAt != null ? `free at ${clock(s.freeAt)}` : 'running over' });
   }
   free.sort((a, b) => (a.freeUntil ?? 1e9) - (b.freeUntil ?? 1e9) || a.therapist.name.localeCompare(b.therapist.name));

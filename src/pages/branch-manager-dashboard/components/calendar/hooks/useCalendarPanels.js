@@ -587,7 +587,8 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
 
     // Ignore a stale response if the user already clicked another booking.
     if (previewBookingRef.current && (previewBookingRef.current.bookingId || previewBookingRef.current.id) !== bookingId) return;
-    setSelectedBooking(transformBooking(result.data));
+    // availabilityNote: the card's "why this booking breaks the availability rule" line, carried onto the fresh copy
+    setSelectedBooking({ ...transformBooking(result.data), availabilityNote: booking.availabilityNote });
     setModalLoading(false);
 
     // Pre-fetch services for "Add Another Service" / edit mode
@@ -609,7 +610,7 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   // Re-fetch the open booking after an in-place panel action (status change).
   const refreshOpenBooking = useCallback(async (bookingId) => {
     const refreshed = await fetchBookingById(bookingId);
-    if (!refreshed.error) setSelectedBooking(transformBooking(refreshed.data));
+    if (!refreshed.error) setSelectedBooking((prev) => ({ ...transformBooking(refreshed.data), availabilityNote: prev?.availabilityNote }));
     refreshCalendar();
   }, [refreshCalendar]);
 

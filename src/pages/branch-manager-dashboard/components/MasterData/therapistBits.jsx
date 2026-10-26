@@ -1,5 +1,6 @@
 import React from 'react';
 import { todayLabels } from '../../../../utils/staffDay';
+import { STATUS_DOT_COLOR } from '../../../../utils/todayStatusLine';
 
 // Small shared bits of the Therapists list + peek (V28).
 
@@ -10,14 +11,16 @@ const TONE = {
   leave: { dot: '#C9CBC7', text: 'text-text-primary', pill: 'bg-[#F1F1EF] text-[#515152]' },
   off: { dot: '#C9CBC7', text: 'text-text-primary', pill: 'bg-[#F1F1EF] text-[#515152]' },
   'no-roster': { dot: '#C9CBC7', text: 'text-[#8A8A90]', pill: 'bg-[#F1F1EF] text-[#8A8A90]' },
+  'no-hours-open': { dot: '#C9CBC7', text: 'text-[#8A8A90]', pill: 'bg-[#F1F1EF] text-[#8A8A90]' },
 };
 
 export { todayLabels };
 
 export const TodayCell = ({ t, pill = false, rosterReadable = true }) => {
   // Support staff are not rostered for bookings, so "no shift set" is noise for them; a role that cannot read rosters sees "—", not a false "no shift".
-  if (!pill && t.status.key === 'no-roster' && (!t.isServiceStaff || !rosterReadable)) return <span className="text-[13px] text-[#8A8A90]">—</span>;
-  const tone = TONE[t.status.key] || TONE['no-roster'];
+  if (!pill && (t.status.key === 'no-roster' || t.status.key === 'no-hours-open') && (!t.isServiceStaff || (t.status.key === 'no-roster' && !rosterReadable))) return <span className="text-[13px] text-[#8A8A90]">—</span>;
+  const base = TONE[t.status.key] || TONE['no-roster'];
+  const tone = t.statusLine ? { ...base, dot: STATUS_DOT_COLOR[t.statusLine.dot] } : base;
   const { title, sub } = todayLabels(t);
   if (pill) {
     return (

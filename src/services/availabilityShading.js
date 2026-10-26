@@ -2,6 +2,8 @@
 // therapist_shifts_for_range returns; no shift logic lives here (the database owns the rule). The look of each kind is
 // defined once in SHADE_STYLES so the calendar, the staff's own view and the profile Working hours reuse the same colours.
 import { evaluateAvailability, hhmmToMinutes, minutesToHHMM } from './availability';
+import { hoursFromShiftRow } from '../utils/staffDay';
+import { todayStatusLine } from '../utils/todayStatusLine';
 
 const stripes = (a, b) => `repeating-linear-gradient(135deg, ${a} 0 6px, ${b} 6px 7px)`;
 
@@ -69,14 +71,18 @@ export function buildShadeSegments(shiftDay, fmt = (t) => t) {
   return out;
 }
 
-// Column-header line for one day: "09:00 – 18:00" | "Off today" | "On leave" | "No hours set". Returns { text, tone }.
-export function shiftHeaderInfo(shiftDay, fmt = (t) => t) {
+// Column-header line for one day: the SHORT form of the shared status line (utils/todayStatusLine). Returns { text, full, dot, tone }.
+// `ctx` only matters for today's column: { isToday, nowMin, attendance: { status, checkInTime, checkOutTime } }. Any other date reads
+// as "before the shift", so it shows the plain range / day off / leave / no set hours.
+export function shiftHeaderInfo(shiftDay, ctx = {}) {
   if (!shiftDay) return null;
-  if ((shiftDay.off || []).some((o) => o.code === 'ON_LEAVE' && o.reason === 'leave_full')) return { text: 'On leave', tone: 'leave' };
-  if (!shiftDay.works) return { text: 'Off today', tone: 'off' };
-  if (shiftDay.source === 'none') return { text: 'No hours set', tone: 'none' };
-  const e = endMinOf(shiftDay);
-  return { text: `${fmt(String(shiftDay.start_time).slice(0, 5))}–${fmt(minutesToHHMM(e))}`, tone: 'shift' };
+  const line = todayStatusLine({
+    hours: hoursFromShiftRow(shiftDay),
+    attendance: ctx.isToday ? ctx.attendance || null : null,
+    nowMin: ctx.isToday ? ctx.nowMin ?? 0 : (shiftDay.source === 'none' && shiftDay.start_time ? hhmmToMinutes(shiftDay.start_time) : -1),
+    branchClosed: !!ctx.branchClosed,
+  });
+  return { text: line.short, full: line.full, dot: line.dot, tone: line.tone, key: line.key };
 }
 
 // Why this time can't take a booking for the therapist, or null when it can. Same verdict the pre-check and the
@@ -88,3 +94,19 @@ export function slotVerdict(shiftDay, startMin, endMin, opts = {}) {
 
 // An existing booking that the rule would now refuse (hours / break / leave changed after it was made).
 export const isOutsideShift = (shiftDay, startMin, endMin) => !!slotVerdict(shiftDay, startMin, endMin);
+
+// The short reason on an outlined booking card: names which rule it breaks, not always "outside hours".
+export const OUTSIDE_REASON_TEXT = { ON_LEAVE: 'on leave', ON_BREAK: 'during a break', BLOCKED: 'in a block', OFF_SHIFT: 'outside hours' };
+// "In a block 11:00–12:00 · booking kept": the amber line for the hover card and the side panel. `fmt` formats an "HH:MM".
+export function outsideNote(verdict, fmt = (t) => t) {
+  const text = outsideReasonText(verdict);
+  if (!text) return null;
+  const d = verdict.detail || {};
+  const withRange = verdict.code !== 'OFF_SHIFT' && d.range_start && d.range_end ? ` ${fmt(d.range_start)}–${fmt(d.range_end)}` : '';
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${withRange} · booking kept`;
+}
+export function outsideReasonText(verdict) {
+  if (!verdict) return null;
+  if (verdict.code === 'OTHER_BRANCH') return `at ${verdict.detail?.label || 'another branch'}`;
+  return OUTSIDE_REASON_TEXT[verdict.code] || 'outside hours';
+}

@@ -4,7 +4,9 @@
 for anyone working in the repo. Every line carries its `ZNLY-n` id. If this file and Plane disagree, Plane wins:
 fix this file.
 
-Last synced with Plane: **2026-10-26**
+*Generated from Plane by `/project-pm sync`. Don't hand-edit; change Plane, then re-sync.*
+
+Last synced: **2026-10-26** by bookx-79 (lead)
 
 ---
 
@@ -26,64 +28,101 @@ Last synced with Plane: **2026-10-26**
 
 ---
 
-## Now (in progress)
+## In progress
 
-| Ticket | What | Next step |
-|---|---|---|
-| ZNLY-81 | **UI-15: renumber our migrations 282–293 → 301+.** PR #413 (Anish) already put 282–298 on the staging DB; ours would be skipped. | Owner runs the read-only staging ledger query (in the ticket) → executor renumbers → lead review → owner commit OK. |
-| ZNLY-75 | **UI-9 (V19): cross-tenant RLS fix.** Built, committed (0c25948). | After ZNLY-81: apply on STAGE, click-test per role. Prod after the holidays. |
-| ZNLY-40 | Retire stale docs now superseded by Plane. | This cleanup. |
-| ZNLY-66 | **Epic: UI/UX Upgrade** (`feat/ui-port-from-clinicmd`, 78 local commits, never pushed). | Keep going page by page; one PR to stage at the end (ZNLY-82). |
+| Ticket | Owner | Priority | What |
+|---|---|---|---|
+| ZNLY-74 | Sadin | urgent | UI-8 (V18): storage security, org-scoped service-images, private customer-files |
+| ZNLY-75 | Sadin | urgent | UI-9 (V19): cross-tenant RLS sweep. Stage test, then prod after the holidays |
+| ZNLY-70 | Sadin | high | UI-4 (V14): one money model |
+| ZNLY-71 | Sadin | high | UI-5 (V15–V16): Bookings redesign + booking inbox |
+| ZNLY-72 | Sadin | high | UI-6: admin "Delete permanently" bug |
+| ZNLY-73 | Sadin | high | UI-7 (V17): centred checkout, split payments, QR |
+| ZNLY-77 | Sadin | high | UI-11 (V22): member discount at checkout |
+| ZNLY-78 | Sadin | high | UI-12 (V23): Vouchers redesign |
+| ZNLY-80 | Sadin | high | UI-14 (V26): products in checkout + commission |
+| ZNLY-98 | Sadin | high | UI-19 (V27): merge PR #413 branch into the UI branch, renumber to 301+ |
+| ZNLY-100 | Sadin | high | UI-21: one staff-availability rule everywhere. V29c2 built; owner fix batch with bookx-15 |
+| ZNLY-67 | Sadin | medium | UI-1: calendar port + app shell |
+| ZNLY-68 | Sadin | medium | UI-2 (V5–V9): panel unification |
+| ZNLY-69 | Sadin | medium | UI-3 (V11–V13): Customers redesign |
+| ZNLY-76 | Sadin | medium | UI-10 (V20–V21): Packages + Memberships redesign |
+| ZNLY-79 | Sadin | medium | UI-13 (V25): Products + Inventory with variants |
+| ZNLY-97 | Sadin | medium | UI-18: Therapists redesign |
 
-**Built on the UI branch (committed locally, In Progress until the PR):**
-ZNLY-67 calendar port · ZNLY-68 panels (V5–V9) · ZNLY-69 Customers (V11–V13) · ZNLY-70 money model (V14) ·
-ZNLY-71 Bookings + inbox (V15–V16) · ZNLY-72 admin delete bug · ZNLY-73 checkout (V17) · ZNLY-74 storage
-security (V18) · ZNLY-76 Packages + Memberships (V20–V21) · ZNLY-77 member discount (V22) · ZNLY-78 Vouchers
-(V23) · ZNLY-79 Products (V25) · ZNLY-80 products in checkout + commission (V26, 29aa908).
+## In review / on stage
 
-## Next
+| Ticket | Owner | Priority | What |
+|---|---|---|---|
+| ZNLY-12 | unassigned | urgent | Revoke anon EXECUTE on public_search_booking (In Review, PR #415) |
+| ZNLY-14 | unassigned | high | PIN login service-role → Edge Function (In Review, PR #30) |
+| ZNLY-34 | unassigned | high | PR #413: combo-service bookings, calendar full-day view (In Review) |
+| ZNLY-41 | unassigned | high | Promote stage → main: customer/staff detail + migrations 275–281 (On Stage) |
+| ZNLY-95 | Sadin | high | project-pm upgrade: what's mine/urgent, generated tracker, token rules (On Stage) |
+| ZNLY-40 | Sadin | low | Retire stale docs superseded by Plane (On Stage) |
 
-| Ticket | What |
-|---|---|
-| ZNLY-83 | UI-17: next pages: Therapists, Reports, Dashboard, Calendar polish, Settings lists. |
-| ZNLY-82 | UI-16: release prep: regression pass, stage re-merge, PR to stage. Last step. |
+## Todo
+
+| Ticket | Owner | Priority | What |
+|---|---|---|---|
+| ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+ |
+| ZNLY-13 | unassigned | high | Renumber colliding migration-289 (PR #413 vs #415) |
+| ZNLY-26 | unassigned | high | Verify 503 "Reconnecting" screen + login banner against a real failure |
+| ZNLY-94 | Anish | high | Get onboarded to the Plane workflow |
+| ZNLY-17 | unassigned | medium | Flip STAGING_DOMAIN to dev-app.zennly.io, verify stage health check |
 
 ## Waiting on owner
 
-| Ticket | Question |
-|---|---|
-| ZNLY-81 | Run the read-only staging ledger query, send a screenshot. |
-| ZNLY-12 | Merge PR #415 (stage copy of the search-booking revoke; the prod fix is already live). |
-| ZNLY-84 | A-2: viewer sees write buttons on customer-detail (Anish's page). Hand to Anish, or fix here? |
-| ZNLY-85 | V-4: staff voucher limits. Match bookings (50% cap)? Recommended: yes. |
-| ZNLY-86 | V-6: staff can't use member discount / wallet when issuing vouchers. Intended? |
-| ZNLY-87 | V-7: let admins edit live membership tiers? |
-| ZNLY-88 | V-8: room on/off switch? |
-| ZNLY-89 | V-9: win-back emails guests who are already booked. Align with the At-risk rule? |
+| Ticket | Owner | Priority | What |
+|---|---|---|---|
+| ZNLY-84 | Sadin | medium | A-2: admin_viewer sees write actions on customer-detail. Hand to Anish or fix here? |
+| ZNLY-85 | Sadin | medium | V-4: staff voucher limits. Match booking limits? |
+| ZNLY-89 | Sadin | medium | V-9: win-back emails already-booked guests. Align with At-risk rule? |
+| ZNLY-86 | Sadin | low | V-6: staff issuing vouchers get no member discount / wallet. Intended? |
+| ZNLY-87 | Sadin | low | V-7: let admins edit existing membership tiers? |
+| ZNLY-88 | Sadin | low | V-8: room active/deactivate switch? |
 
-## Follow-ups (Backlog)
+## Backlog
 
-| Ticket | What |
-|---|---|
-| ZNLY-90 | V19 security follow-ups: views not security_invoker, SECURITY DEFINER param audit, anon insert policy. |
-| ZNLY-91 | Products follow-ups: vouchers paying for products, receptionist commission, product discounts, payroll vs booking_therapists, SKU wipe. |
-| ZNLY-92 | V20–V24 follow-ups: % coupons at checkout, package dues, tier pill, khems-cleaning voucher types. |
-| ZNLY-93 | Small UI backlog: calendar min/max, dead panel, bounded customer lookup, a11y, legacy BookingsList, V10c. |
-
-## Rest of the board (other epics, not on this branch)
-
-Open tickets owned outside the UI branch. See Plane for detail.
-
-- **Security & Auth:** ZNLY-12 search-booking revoke (In Review, #415) · ZNLY-14 PIN login Edge Function (In Review, PR #30) · ZNLY-15 rotate accounts exposed by dev-info.html · ZNLY-16 RLS access harness.
-- **CI/CD & Release:** ZNLY-13 migration-289 collision · ZNLY-30 linear history · ZNLY-31 staging ledger anomalies · ZNLY-32 repo housekeeping.
-- **Booking & Calendar:** ZNLY-34 PR #413 combo services (In Review) · ZNLY-33 PR #350 gaps.
-- **Customers / CRM:** ZNLY-41 promote stage → main (customer/staff detail + 275–281, On Stage) · ZNLY-38 centralise data phase 2.
-- **Perf / DB health:** ZNLY-26 verify 503 screen (Todo) · ZNLY-27 re-measure perf · ZNLY-28 idle-tab polling · ZNLY-29 dashboard cleanup.
-- **Domain & Rebrand:** ZNLY-17 staging domain flip (Todo) · ZNLY-18 auth URL allowlists · ZNLY-19 "Zenly" strings · ZNLY-20 legacy redirect.
-- **Outreach / Email:** ZNLY-21 Resend SMTP · ZNLY-22 booking emails · ZNLY-23 click-through new prod pages.
-- **Memberships / Payments:** ZNLY-24 admin corrections log page · ZNLY-25 generic package system.
-- **Multi-tenant:** ZNLY-36 sbal provider profile · ZNLY-37 Phase 9 governance.
-- **Docs & Tech Debt:** ZNLY-35 manual verification debt · ZNLY-39 PostHog status · ZNLY-40 this cleanup.
+| Ticket | Owner | Priority | What |
+|---|---|---|---|
+| ZNLY-15 | unassigned | high | Rotate/remove accounts exposed by deleted dev-info.html |
+| ZNLY-18 | unassigned | high | Supabase Auth URL config / allowlists for the new domain |
+| ZNLY-82 | Sadin | high | UI-16: release prep, regression pass, stage re-merge, PR to stage |
+| ZNLY-16 | unassigned | medium | RLS access harness, confirm merged |
+| ZNLY-20 | unassigned | medium | Legacy-domain redirect + retire old domains |
+| ZNLY-21 | unassigned | medium | Auth email via Resend SMTP + DKIM/SPF/DMARC |
+| ZNLY-23 | unassigned | medium | Click-through the four newly flag-enabled prod pages |
+| ZNLY-24 | unassigned | medium | Admin corrections log page |
+| ZNLY-27 | unassigned | medium | Perf: re-measure in Nepal business hours |
+| ZNLY-28 | unassigned | medium | Idle-tab polling fan-out |
+| ZNLY-30 | unassigned | medium | Decide on required_linear_history for main/stage |
+| ZNLY-83 | Sadin | medium | UI-17: next pages (Reports, Dashboard, Calendar polish, Settings lists) |
+| ZNLY-90 | Sadin | medium | V19 security follow-ups |
+| ZNLY-96 | Sadin | medium | GitHub → Plane automation + CI check for ZNLY id in PR title |
+| ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere |
+| ZNLY-102 | unassigned | medium | Falls-outside list: block drag, transfer extend/return, recurring blocks |
+| ZNLY-103 | unassigned | medium | One shared modal overlay for every centred popup |
+| ZNLY-104 | unassigned | medium | Calendar address-bar date doesn't follow navigation |
+| ZNLY-19 | unassigned | low | Remaining "Zenly" strings |
+| ZNLY-22 | unassigned | low | Booking confirmation + reminder emails |
+| ZNLY-25 | unassigned | low | Decide on generic Package (bundle) booking system |
+| ZNLY-29 | unassigned | low | Supabase dashboard cleanup |
+| ZNLY-31 | unassigned | low | Staging migration-ledger anomalies |
+| ZNLY-32 | unassigned | low | Repo housekeeping |
+| ZNLY-33 | unassigned | low | PR #350 follow-up gaps |
+| ZNLY-35 | unassigned | low | Manual verification debt |
+| ZNLY-36 | unassigned | low | sbal provider-profile content |
+| ZNLY-37 | unassigned | low | Phase 9 Platform Governance status |
+| ZNLY-38 | unassigned | low | Centralize customer/staff data, phase 2 |
+| ZNLY-39 | unassigned | low | PostHog adoption status |
+| ZNLY-91 | Sadin | low | V25/V26 products follow-ups |
+| ZNLY-92 | Sadin | low | V20–V24 follow-ups |
+| ZNLY-93 | Sadin | low | Small UI backlog |
+| ZNLY-99 | unassigned | low | UI-20: #413 merge follow-ups (visible-hours chip, W/M shortcuts, ServiceFormPanel) |
+| ZNLY-105 | unassigned | low | Calendar: shading under a booking is invisible |
+| ZNLY-106 | unassigned | low | Therapist photo shows on the profile but not in the list / peek panel |
+| ZNLY-107 | unassigned | low | Break chip: one clear, consistent design (roster, calendar, profile) |
 
 ---
 
@@ -107,6 +146,6 @@ order by 1, 2, 3;
 ```
 
 **Where the rest lives:** briefs `temp_ss/briefs/` · mockups `temp_ss/mockups/` · screenshots `temp_ss/cal-port/`
-(next number 67) · lead resume notes `temp_ss/HANDOFF-lead-resume.md` (session state and rules only, no
+(next number 117) · lead resume notes `temp_ss/HANDOFF-lead-resume.md` (session state and rules only, no
 to-dos) · DB promotion `supabase/PROMOTION.md` · session logs `docs/session-logs/` · old handoffs
 `docs/archive/`.

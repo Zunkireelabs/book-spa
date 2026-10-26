@@ -25,6 +25,8 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
 
   // Attendance indicators
   const [attendanceMap, setAttendanceMap] = useState({});
+  // { [therapistId]: { status, checkInTime, checkOutTime } } for the first visible day: feeds today's column-header status line.
+  const [attendanceByTherapist, setAttendanceByTherapist] = useState({});
   // Availability rule rows for the visible range, { [therapistId]: { [date]: row } } (therapist_shifts_for_range).
   const [shiftsByTherapist, setShiftsByTherapist] = useState({});
 
@@ -70,6 +72,7 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
       }
     }
     setAttendanceMap(attMap);
+    setAttendanceByTherapist(Object.fromEntries((attResult.data || []).filter((a) => a.status).map((a) => [a.therapistId, { status: a.status, checkInTime: a.checkInTime || null, checkOutTime: a.checkOutTime || null }])));
     setShiftsByTherapist(indexShifts(shiftsResult.data));
     setLoading(false);
   }, [branchId]);
@@ -140,7 +143,7 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
 
 
   return {
-    calendarData, setCalendarData, loading, error, attendanceMap, shiftsByTherapist, blocksAvailable, transfersAvailable,
+    calendarData, setCalendarData, loading, error, attendanceMap, attendanceByTherapist, shiftsByTherapist, blocksAvailable, transfersAvailable,
     fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder,
   };
 }

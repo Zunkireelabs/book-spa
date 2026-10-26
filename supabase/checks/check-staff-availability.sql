@@ -1,4 +1,4 @@
--- SQL checks for migrations 316-321 (staff availability rule, ZNLY-100). LOCAL DB only; everything rolls back. Run:
+-- SQL checks for migrations 316-323 (staff availability rule, ZNLY-100). LOCAL DB only; everything rolls back. Run:
 --   psql "postgresql://postgres:postgres@127.0.0.1:56422/postgres" -v ON_ERROR_STOP=1 -f supabase/checks/check-staff-availability.sql
 -- Needs the local users from supabase/seed.sql + temp_ss/seed/local-demo-seed.sql (admin/manager/staff @local.test, branch b...01).
 -- Bookings take their end from the service, so the fixtures use a 60-minute service with no staff allowlist.
@@ -555,6 +555,17 @@ SELECT pg_temp.assert('reschedule rpc: manager + reason moves into the break, is
   EXISTS (SELECT 1 FROM public.bookings b JOIN _rs ON b.id = (_rs.j->>'id')::uuid WHERE b.availability_override_reason IS NULL AND b.start_time = '14:00')
   AND EXISTS (SELECT 1 FROM public.audit_logs a JOIN _rs ON a.record_id = (_rs.j->>'id')::uuid WHERE a.action_type = 'AVAILABILITY_OVERRIDE' AND a.reason = 'client request'));
 DELETE FROM public.bookings WHERE customer_name = 'ZZ Avail';
+
+-- ================= 15. admin-only switch write path (migration 323) =================
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000001');
+SELECT pg_temp.run($q$CREATE TEMP TABLE _sw ON COMMIT DROP AS SELECT public.set_enforce_staff_availability(false) AS off_v$q$);
+SELECT pg_temp.assert('switch: admin turns it off', (SELECT off_v = false FROM _sw) AND NOT (SELECT enforce_staff_availability FROM public.organizations WHERE id = current_setting('t.org')::uuid));
+SELECT pg_temp.ok('switch: admin turns it back on', $q$SELECT public.set_enforce_staff_availability(true)$q$);
+SELECT pg_temp.assert('switch: on again', (SELECT enforce_staff_availability FROM public.organizations WHERE id = current_setting('t.org')::uuid));
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000002');
+SELECT pg_temp.err('switch: a manager cannot change it', '42501', $q$SELECT public.set_enforce_staff_availability(false)$q$);
+SELECT pg_temp.as_user('e0000000-0000-0000-0000-000000000003');
+SELECT pg_temp.err('switch: staff cannot change it', '42501', $q$SELECT public.set_enforce_staff_availability(false)$q$);
 
 -- ================= report =================
 SELECT count(*) || ' staff-availability checks passed' AS result FROM _r;

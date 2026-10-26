@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
+import ModalShell from './ModalShell';
 
 export const CANCEL_REASON_OPTIONS = [
   { value: 'not-specified', label: "Didn't specify" },
@@ -54,8 +55,8 @@ const ConfirmDialog = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-text-primary/50 backdrop-blur-sm z-modal-overlay flex items-center justify-center p-4">
-      <div className="bg-surface rounded-spa-lg spa-shadow-modal w-full max-w-md animate-fade-in">
+    <ModalShell onClose={isSubmitting ? undefined : onClose}>
+      <div>
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div className="flex items-center space-x-3">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tone === 'warning' ? 'bg-warning/10' : 'bg-error/10'}`}>
@@ -167,7 +168,7 @@ const ConfirmDialog = ({
           </Button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 };
 

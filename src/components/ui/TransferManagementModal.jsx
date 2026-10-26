@@ -6,6 +6,8 @@ import {
 import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm, validateExtension } from '../../utils/transferPreview';
 import { friendlyError } from '../../utils/friendlyError';
 import { useIndustry } from '../../hooks/useIndustry';
+import { useAvailabilityConflictGuard } from '../../hooks/useAvailabilityConflictGuard';
+import { transferChange } from '../../services/availabilityConflicts';
 import {
   transferTherapist,
   extendStaffTransfer,
@@ -41,6 +43,7 @@ function toLocalYMD(date) {
 // only need to hand it a therapist + branch.
 const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName, currentBranchId, defaultStartDate, guardRef, onClose, onSuccess, onDraftChange }) => {
   const { staffLabel } = useIndustry();
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const today = new Date().toISOString().split('T')[0];
 
   const [loadingStatus, setLoadingStatus] = useState(true);
@@ -296,6 +299,20 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
 
     setTransferring(true);
     setTransferError(null);
+
+    // Bookings still at this branch inside the window are listed first (kept either way).
+    const proceed = await confirmConflicts({
+      therapistId,
+      change: transferChange({
+        fromTs: `${transferStartDate}T${isPermanentTransfer ? '00:00' : transferStartTime}:00+05:45`,
+        toTs: revertDateObj ? `${toYmd(revertDateObj)}T${toHm(revertDateObj)}:00+05:45` : null,
+        toBranchId: transferToBranch,
+      }),
+      summary: `Moving ${therapistName} to another branch from ${transferStartDate}${isPermanentTransfer ? '' : ` ${transferStartTime}`}.`,
+      titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} at this branch while away`,
+      saveLabel: 'Transfer anyway',
+    });
+    if (!proceed) { setTransferring(false); return; }
 
     const isFuture = transferStartDate > today;
     const result = await transferTherapist({

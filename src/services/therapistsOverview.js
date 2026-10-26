@@ -1,6 +1,7 @@
 import {
-  dbDowOfDate, effectiveHoursForDate, dayWorkingMinutes, todayStatus, timeToMinutes,
+  dbDowOfDate, hoursFromShiftRow, dayWorkingMinutes, todayStatus, timeToMinutes,
 } from '../utils/staffDay';
+import { todayStatusLine, nextWorkingDay } from '../utils/todayStatusLine';
 
 // Pure shaping for the Therapists list (V28). api.js#fetchTherapistsOverview does the (few, batched) reads and hands the raw
 // rows here; everything that turns rows into "today" facts lives in this file so it can be unit-tested.
@@ -82,46 +83,30 @@ export function serviceAccess({ services = [], links = [] }) {
 }
 
 /**
- * raw: { therapists, hoursRows (with therapist_working_hours_breaks), overrideRows, attendanceRows, bookingRows, links, services, compRows }
+ * raw: { therapists, shiftRows (therapist_shifts_for_range for the week), attendanceRows, bookingRows, links, services, compRows }
  * opts: { date, nowTime, canSeeRates }
  */
 export function buildTherapistsOverview(raw, { date, nowTime, canSeeRates = false }) {
   const week = weekDatesOf(date);
   const tomorrow = addDaysStr(date, 1);
-  const hoursBy = new Map();
-  (raw.hoursRows || []).forEach((r) => {
-    if (!hoursBy.has(r.therapist_id)) hoursBy.set(r.therapist_id, []);
-    hoursBy.get(r.therapist_id).push({
-      dayOfWeek: r.day_of_week,
-      startTime: r.start_time,
-      endTime: r.end_time,
-      isDayOff: !!r.is_day_off,
-      breaks: (r.therapist_working_hours_breaks || [])
-        .slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map((b) => ({ name: b.name || '', startTime: b.start_time, endTime: b.end_time })),
-    });
-  });
-  const overridesBy = new Map();
-  (raw.overrideRows || []).forEach((r) => {
-    if (!overridesBy.has(r.therapist_id)) overridesBy.set(r.therapist_id, []);
-    overridesBy.get(r.therapist_id).push({ date: r.override_date, startTime: r.start_time, endTime: r.end_time, isDayOff: !!r.is_day_off });
-  });
+  // Hours for any date come ONLY from therapist_shifts_for_range (weekly row, roster date change, breaks and the branch-hours clamp
+  // are resolved in the database): { 'therapistId|date': row }.
+  const shiftBy = new Map((raw.shiftRows || []).map((r) => [`${r.therapist_id}|${r.shift_date}`, r]));
   const attBy = new Map((raw.attendanceRows || []).map((a) => [a.therapist_id, { status: a.status, checkInTime: a.check_in_time, checkOutTime: a.check_out_time }]));
   const bookingsBy = groupBookingsByTherapist(raw.bookingRows || []);
   const access = serviceAccess({ services: raw.services || [], links: raw.links || [] });
   const compBy = new Map((raw.compRows || []).map((c) => [c.therapist_id, c]));
 
   const therapists = (raw.therapists || []).map((t, index) => {
-    const weekly = hoursBy.get(t.id) || [];
-    const overrides = overridesBy.get(t.id) || [];
+    const hoursOn = (d) => hoursFromShiftRow(shiftBy.get(`${t.id}|${d}`));
     const weekDays = week.map((d) => {
-      const h = effectiveHoursForDate(d, weekly, overrides);
-      return { date: d, ...h, minutes: dayWorkingMinutes(h) };
+      const h = hoursOn(d);
+      return { date: d, ...h, minutes: dayWorkingMinutes({ ...h, isDayOff: h.isDayOff || h.openNoHours }) };  // branch hours of a no-hours day are not their working week
     });
-    const todayHours = weekDays.find((d) => d.date === date) || effectiveHoursForDate(date, weekly, overrides);
+    const todayHours = weekDays.find((d) => d.date === date) || hoursOn(date);
     const att = attBy.get(t.id) || null;
     const status = todayStatus({ attendance: att, hours: todayHours, nowTime });
-    const tomorrowHours = effectiveHoursForDate(tomorrow, weekly, overrides);
+    const tomorrowHours = hoursOn(tomorrow);
     const entries = bookingsBy.get(t.id) || [];
     const names = access.namesFor(t.id);
     const comp = compBy.get(t.id);
@@ -138,11 +123,19 @@ export function buildTherapistsOverview(raw, { date, nowTime, canSeeRates = fals
       photoUrl: t.photo_url || null,
       rating: t.rating != null ? Number(t.rating) : null,
       experienceYears: t.experience_years ?? null,
-      hours: { source: todayHours.source, startTime: todayHours.startTime, endTime: todayHours.endTime, isDayOff: todayHours.isDayOff },
+      hours: { source: todayHours.source, startTime: todayHours.startTime, endTime: todayHours.endTime, isDayOff: todayHours.isDayOff, openNoHours: todayHours.openNoHours, missing: todayHours.missing },
       weekDays,
       weekMinutes: weekDays.reduce((s, d) => s + d.minutes, 0),
-      worksTomorrow: tomorrowHours.source !== 'none' && !tomorrowHours.isDayOff,
+      worksTomorrow: !tomorrowHours.missing && tomorrowHours.source !== 'none' && !tomorrowHours.isDayOff,
       attendance: att ? { status: att.status, checkedInAt: nepalClock(att.checkInTime) } : null,
+      // The one "today" line (utils/todayStatusLine): the Today column, the peek pill and the profile header all word it from this.
+      statusLine: todayStatusLine({
+        hours: todayHours,
+        attendance: att ? { status: att.status, checkInTime: nepalClock(att.checkInTime) || null, checkOutTime: nepalClock(att.checkOutTime) || null } : null,
+        nowMin: timeToMinutes(nowTime) ?? 0,
+        branchClosed: !!raw.branchClosedToday,
+        back: nextWorkingDay(date, hoursOn),
+      }),
       status: { ...status, checkedInAt: status.checkedInAt ? nepalClock(status.checkedInAt) : undefined },
       bookings: { ...bookingSummary(entries, nowTime), entries },
       serviceCount: names.length,
@@ -183,7 +176,7 @@ export function segmentOf(t) {
   if (!t.isServiceStaff) return 'support';
   const k = t.status.key;
   if (k === 'off' || k === 'leave') return 'off';
-  if (k === 'no-roster') return 'noroster';
+  if (k === 'no-roster' || k === 'no-hours-open') return 'noroster';
   return 'working'; // checked-in, not-checked-in, upcoming
 }
 

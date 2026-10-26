@@ -3,9 +3,10 @@
 // admin and admin_viewer (Payroll's rule: admin edits, admin_viewer reads; managers and staff NEVER see pay); for everyone else they
 // are null (and RLS / get_therapist_activity enforce it a second time on the server).
 import { supabase } from '../lib/supabase';
-import { computeProductCommissionBase } from './api';
+import { computeProductCommissionBase, fetchClosedDateRanges } from './api';
 import { payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, totalCommissionEarned } from './payrollCalc';
-import { dbDowOfDate, effectiveHoursForDate, timeToMinutes, DB_DOW_LABELS } from '../utils/staffDay';
+import { dbDowOfDate, effectiveHoursForDate, hoursFromShiftRow, timeToMinutes, DB_DOW_LABELS } from '../utils/staffDay';
+import { nextWorkingDay, isClosedDate } from '../utils/todayStatusLine';
 import { nepalNow } from '../utils/customerDirectory';
 
 const PAY_ROLES = ['admin', 'admin_viewer'];
@@ -339,14 +340,18 @@ export async function fetchTherapistOverview({ therapistId, branchId, today, rol
     const lastEnd = `${lastYm}-${String(Math.min(dayNo, daysInYm(lastYm))).padStart(2, '0')}`;
     const week = weekDates(todayStr);
 
-    const [slicesRes, revRes, attRes, hours, earnings] = await Promise.all([
+    const lookAheadEnd = [week[6], addDays(todayStr, 8)].sort().pop(); // +8: "back Tue 09:00" looks a week ahead
+    const [slicesRes, revRes, attRes, hours, earnings, shiftsRes, closedRes] = await Promise.all([
       fetchTherapistSlices({ therapistId, from: `${lastYm}-01`, to: todayStr }),
       // Revenue is the PRIMARY therapist's Completed + paid bookings, exactly what Payroll attributes to them.
       supabase.from('bookings').select('final_amount, date').eq('therapist_id', therapistId).eq('status', 'Completed').eq('payment_status', 'paid')
         .gte('date', monthStart).lte('date', todayStr),
-      supabase.from('therapist_attendance').select('date, status, check_in_time').eq('therapist_id', therapistId).gte('date', monthStart < week[0] ? monthStart : week[0]).lte('date', todayStr > week[6] ? todayStr : week[6]),
+      supabase.from('therapist_attendance').select('date, status, check_in_time, check_out_time').eq('therapist_id', therapistId).gte('date', monthStart < week[0] ? monthStart : week[0]).lte('date', todayStr > week[6] ? todayStr : week[6]),
       fetchHoursInputs({ therapistId, from: monthStart < week[0] ? monthStart : week[0], to: week[6] > todayStr ? week[6] : todayStr }),
       canSeePay(role) ? fetchTherapistEarnings({ therapistId, branchId, periodMonth: ym, role }) : Promise.resolve({ data: null }),
+      // This week's hours come only from the staff-availability rule (therapist_shifts_for_range), like the calendar and the Therapists list.
+      branchId ? supabase.rpc('therapist_shifts_for_range', { p_branch_id: branchId, p_from_date: week[0], p_to_date: lookAheadEnd }) : Promise.resolve({ data: [], error: null }),
+      branchId ? fetchClosedDateRanges(branchId) : Promise.resolve({ data: [] }),
     ]);
     if (revRes.error) throw revRes.error;
     if (attRes.error) throw attRes.error;
@@ -394,9 +399,11 @@ export async function fetchTherapistOverview({ therapistId, branchId, today, rol
           thisMonth: runningTotal(thisMonth.map((b) => b.date), dayNo),
           lastMonth: runningTotal(lastMonthSame.map((b) => b.date), dayNo),
         },
+        branchClosedToday: isClosedDate(closedRes.data, todayStr),
+        nextWork: nextWorkingDay(todayStr, (d) => hoursFromShiftRow((shiftsRes.data || []).find((x) => x.therapist_id === therapistId && x.shift_date === d))),
         week: week.map((date) => {
-          const h = effectiveHoursForDate(date, hours.weekly, hours.overrides);
-          return { date, dbDow: dbDowOfDate(date), hours: h, attendanceStatus: attByDate.get(date)?.status || null, checkInTime: attByDate.get(date)?.check_in_time || null, changed: h.source === 'override' };
+          const h = hoursFromShiftRow((shiftsRes.data || []).find((r) => r.therapist_id === therapistId && r.shift_date === date));
+          return { date, dbDow: dbDowOfDate(date), hours: h, attendanceStatus: attByDate.get(date)?.status || null, checkInTime: attByDate.get(date)?.check_in_time || null, checkOutTime: attByDate.get(date)?.check_out_time || null, changed: h.source === 'override' };
         }),
       },
       error: null,

@@ -16,6 +16,9 @@ export function dbDowOfDate(dateStr) {
   return jsDayToDbDow(new Date(Date.UTC(y, m - 1, d)).getUTCDay());
 }
 
+/** Shown wherever today's hours are "nothing set": bookable, but only inside branch hours. */
+export const NO_HOURS_LABEL = 'No hours set';
+
 export const DB_DOW_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 /** 'HH:MM' or 'HH:MM:SS' -> minutes since midnight (null for empty/invalid). */
@@ -74,6 +77,30 @@ export function effectiveHoursForDate(dateStr, weeklyRows = [], overrides = []) 
   return { source: 'none', startTime: null, endTime: null, isDayOff: false, breaks: [] };
 }
 
+const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
+
+/**
+ * One therapist_shifts_for_range row (the staff-availability rule, migration-320) -> the hours object the "today" surfaces read.
+ * THE one place "what are this person's hours on that date" comes from: weekly row, roster date change, branch-hours clamp and
+ * breaks are all already resolved in the database. `source`: 'override' (roster date change) | 'weekly' | 'none' (nothing set:
+ * open, but only inside branch hours -> `openNoHours`). A missing row (no access / RPC unavailable) is `missing`.
+ */
+export function hoursFromShiftRow(row) {
+  if (!row) return { source: 'none', startTime: null, endTime: null, isDayOff: false, breaks: [], openNoHours: false, off: [], missing: true };
+  const source = row.source === 'roster' ? 'override' : row.source === 'weekly' ? 'weekly' : 'none';
+  const works = row.works === true && !!row.start_time;
+  return {
+    source,
+    startTime: works ? hhmm(row.start_time) : null,
+    endTime: works ? (String(row.end_time) === '23:59:59' ? '24:00' : hhmm(row.end_time)) : null,
+    isDayOff: !works,
+    breaks: (row.breaks || []).map((b) => ({ name: b.name || '', startTime: b.start, endTime: b.end })),
+    openNoHours: source === 'none' && works,
+    off: row.off || [],   // leave / block / other-branch ranges of that day (start_min / end_min), as the rule returns them
+    missing: false,
+  };
+}
+
 const LEAVE_STATUSES = new Set(['Leave', 'Annual Leave', 'Sick Leave', '1st-Half Day', '2nd-Half Day']);
 
 /**
@@ -82,7 +109,8 @@ const LEAVE_STATUSES = new Set(['Leave', 'Annual Leave', 'Sick Leave', '1st-Half
  *   hours: effectiveHoursForDate() for today;  nowTime: 'HH:MM' Nepal time
  * Returns { key, checkedInAt?, shift? } where key is one of:
  *   'checked-in' | 'not-checked-in' (shift started, no check-in) | 'upcoming' (shift later today) |
- *   'leave' | 'off' (day off / marked Day Off / Absent) | 'no-roster' (no hours configured, nothing marked)
+ *   'leave' | 'off' (day off / marked Day Off / Absent) | 'no-hours-open' (no hours set, open inside branch hours) |
+ *   'no-roster' (hours can't be read at all)
  */
 export function todayStatus({ attendance = null, hours = null, nowTime = '00:00' } = {}) {
   const shift = hours && hours.startTime && hours.endTime && !hours.isDayOff ? { start: hours.startTime.slice(0, 5), end: hours.endTime.slice(0, 5) } : null;
@@ -90,7 +118,9 @@ export function todayStatus({ attendance = null, hours = null, nowTime = '00:00'
   if (st && LEAVE_STATUSES.has(st) && !attendance.checkInTime) return { key: 'leave', shift };
   if (st === 'Day Off' || st === 'Absent') return { key: 'off', shift };
   if (attendance?.checkInTime) return { key: 'checked-in', checkedInAt: attendance.checkInTime, shift };
-  if (!hours || hours.source === 'none') return { key: 'no-roster', shift: null };
+  if (!hours || hours.missing) return { key: 'no-roster', shift: null };
+  // Nothing set for today: bookable inside branch hours (the rule's own answer), shown as "No hours set · open".
+  if (hours.openNoHours) return { key: 'no-hours-open', shift };
   if (hours.isDayOff || !shift) return { key: 'off', shift: null };
   const now = timeToMinutes(nowTime);
   const start = timeToMinutes(shift.start);
@@ -105,6 +135,8 @@ export function todayStatus({ attendance = null, hours = null, nowTime = '00:00'
  * and the Overview all call it. `t` = { status (from todayStatus, checkedInAt already a Nepal 'HH:MM' string), attendance: { status }, hours, worksTomorrow }.
  */
 export function todayLabels(t) {
+  // The shared status line (utils/todayStatusLine) wins when the caller built one; the branches below are the fallback.
+  if (t.statusLine) return { title: t.statusLine.parts[0], sub: t.statusLine.parts.slice(1).join(' · ') || null };
   const s = t.status;
   const shift = s.shift ? `Shift ${s.shift.start} – ${s.shift.end}` : null;
   switch (s.key) {
@@ -119,6 +151,7 @@ export function todayLabels(t) {
       if (t.hours.source === 'weekly' && t.hours.isDayOff) return { title: 'Off today', sub: t.worksTomorrow ? 'Weekly day off · back tomorrow' : 'Weekly day off' };
       return { title: 'Off today', sub: shift ? `Shift ended ${s.shift.end}` : null };
     }
+    case 'no-hours-open': return { title: NO_HOURS_LABEL, sub: shift ? `Branch hours ${s.shift.start} – ${s.shift.end}` : 'Set hours in their profile' };
     default: return { title: 'No shift set', sub: 'Set hours in their profile' };
   }
 }

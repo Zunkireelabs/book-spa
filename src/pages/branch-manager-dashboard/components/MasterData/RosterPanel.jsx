@@ -9,6 +9,10 @@ import {
   upsertRosterOverrides,
   fetchBlocksForRange,
 } from '../../../../services/api';
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { rosterChange } from '../../../../services/availabilityConflicts';
+import { SHADE_STYLES } from '../../../../services/availabilityShading';
+import ModalShell from '../../../../components/ui/ModalShell';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -42,6 +46,11 @@ function avatarColor(name) {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
+const formatDialogDate = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
 const cellKey = (therapistId, date) => `${therapistId}_${date}`;
 
 // Timely-style monthly roster: staff rows x date columns, each cell showing that day's
@@ -64,8 +73,9 @@ const RosterPanel = ({ branchId }) => {
   const [overrides, setOverrides] = useState(new Map());       // cellKey -> {startTime,endTime,isDayOff}
   const [pending, setPending] = useState(new Map());            // cellKey -> {startTime,endTime,isDayOff} (unsaved)
   const [closedDates, setClosedDates] = useState(new Set());    // dates with a whole-location Calendar block ("Business closed")
-  const [editingKey, setEditingKey] = useState(null);
-  const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '' });
+  const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '', breaks: [] });
+  const [editTarget, setEditTarget] = useState(null);           // { therapist, dateInfo } the date-change dialog is open for
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
 
   const [staffLoading, setStaffLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -163,7 +173,7 @@ const RosterPanel = ({ branchId }) => {
   const defaultForCell = useCallback((therapistId, dayOfWeek) => {
     const rows = defaultHours.get(therapistId);
     const row = rows?.find(r => r.dayOfWeek === dayOfWeek);
-    return row || { startTime: null, endTime: null, isDayOff: true };
+    return row || { startTime: null, endTime: null, isDayOff: true, breaks: [], noHours: !rows?.length };
   }, [defaultHours]);
 
   // Effective state for a cell, preferring an unsaved edit, then a saved override, then
@@ -182,7 +192,6 @@ const RosterPanel = ({ branchId }) => {
       next.set(cellKey(therapistId, date), { ...current, ...patch });
       return next;
     });
-    setEditingKey(null);
   };
 
   const toggleCell = (therapistId, dateInfo, state) => {
@@ -191,24 +200,41 @@ const RosterPanel = ({ branchId }) => {
         isDayOff: false,
         startTime: state.startTime || '09:00',
         endTime: state.endTime || '17:00',
+        breaks: state.breaks || [],
       });
     } else {
-      setCell(therapistId, dateInfo.date, { isDayOff: true, startTime: null, endTime: null });
+      setCell(therapistId, dateInfo.date, { isDayOff: true, startTime: null, endTime: null, breaks: [] });
     }
   };
 
-  const startEditing = (therapistId, dateInfo, state) => {
-    setEditingKey(cellKey(therapistId, dateInfo.date));
-    setEditDraft({ startTime: state.startTime || '09:00', endTime: state.endTime || '17:00' });
+  // A date change replaces that day's weekly hours AND breaks, so the dialog starts from what applies today (breaks included).
+  const startEditing = (therapist, dateInfo, state) => {
+    setEditTarget({ therapist, dateInfo });
+    setEditDraft({
+      startTime: String(state.startTime || '09:00').slice(0, 5),
+      endTime: String(state.endTime || '17:00').slice(0, 5),
+      breaks: (state.breaks || []).map((b) => ({ name: b.name || '', startTime: b.startTime, endTime: b.endTime })),
+    });
   };
 
-  const commitEdit = (therapistId, dateInfo) => {
-    if (!editDraft.startTime || !editDraft.endTime || editDraft.startTime >= editDraft.endTime) {
-      setError('Start time must be before end time.');
-      setEditingKey(null);
-      return;
+  const draftError = (() => {
+    if (!editTarget) return null;
+    const { startTime, endTime, breaks } = editDraft;
+    if (!startTime || !endTime || startTime >= endTime) return 'Start time must be before end time.';
+    for (const b of breaks) {
+      if (!b.startTime || !b.endTime || b.startTime >= b.endTime) return 'Each break needs a start before its end.';
+      if (b.startTime < startTime || b.endTime > endTime) return 'Breaks must sit inside the working hours.';
     }
-    setCell(therapistId, dateInfo.date, { isDayOff: false, startTime: editDraft.startTime, endTime: editDraft.endTime });
+    return null;
+  })();
+
+  const commitEdit = () => {
+    if (!editTarget || draftError) return;
+    setCell(editTarget.therapist.id, editTarget.dateInfo.date, {
+      isDayOff: false, startTime: editDraft.startTime, endTime: editDraft.endTime,
+      breaks: editDraft.breaks.filter((b) => b.startTime && b.endTime),
+    });
+    setEditTarget(null);
   };
 
   const handleSave = async () => {
@@ -219,8 +245,19 @@ const RosterPanel = ({ branchId }) => {
 
     const payload = Array.from(pending.entries()).map(([key, value]) => {
       const [therapistId, date] = [key.slice(0, key.indexOf('_')), key.slice(key.indexOf('_') + 1)];
-      return { therapistId, date, isDayOff: value.isDayOff, startTime: value.startTime, endTime: value.endTime };
+      return { therapistId, date, isDayOff: value.isDayOff, startTime: value.startTime, endTime: value.endTime, breaks: value.isDayOff ? [] : (value.breaks || []) };
     });
+
+    // List the upcoming bookings these date changes would strand before saving (kept either way).
+    const checks = payload.map((o) => ({
+      therapistId: o.therapistId,
+      name: therapists.find((t) => t.id === o.therapistId)?.name,
+      change: rosterChange({ date: o.date, isDayOff: o.isDayOff, start: o.startTime, end: o.endTime, breaks: o.breaks.map((b) => ({ start: b.startTime, end: b.endTime })) }),
+    }));
+    if (!(await confirmConflicts({ checks, summary: 'You are changing these dates in the roster.', titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} outside the new schedule`, saveLabel: 'Save roster' }))) {
+      setSaving(false);
+      return;
+    }
 
     const { error: saveErr } = await upsertRosterOverrides(payload);
     if (saveErr) {
@@ -466,7 +503,6 @@ const RosterPanel = ({ branchId }) => {
                       const state = stateForCell(t.id, d);
                       const key = cellKey(t.id, d.date);
                       const isModified = state.source !== 'default';
-                      const isEditing = editingKey === key;
 
                       // Shared segmented ✕/✓ pill — always visible (not a hover-only corner
                       // badge) so the undo path for a toggle is never a mystery. The active
@@ -507,7 +543,7 @@ const RosterPanel = ({ branchId }) => {
                               }`}
                             >
                               <span className={`font-caption text-[10px] font-caption-medium ${isModified ? 'text-amber-700' : 'text-text-tertiary'}`}>
-                                {isModified ? 'Day off' : 'Off'}
+                                {isModified ? 'Day off' : state.noHours ? 'No set hours' : 'Off'}
                               </span>
                               {renderToggle(false)}
                             </div>
@@ -517,49 +553,34 @@ const RosterPanel = ({ branchId }) => {
 
                       return (
                         <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
-                          {isEditing ? (
-                            <div
-                              className="flex flex-col gap-1 p-1.5 rounded-spa bg-surface border-2 border-primary shadow-spa-elevated animate-fade-in"
-                              onClick={(e) => e.stopPropagation()}
+                          <div
+                            className={`flex flex-col items-center justify-center min-h-[64px] py-1 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
+                              isModified
+                                ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white'
+                                : 'bg-gradient-to-br from-primary to-primary/85 text-white'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => startEditing(t, d, state)}
+                              title="Click to change hours and breaks"
+                              className="flex flex-col items-center leading-tight hover:underline"
                             >
-                              <input
-                                type="time"
-                                autoFocus
-                                value={editDraft.startTime}
-                                onChange={(e) => setEditDraft(prev => ({ ...prev, startTime: e.target.value }))}
-                                onBlur={() => commitEdit(t.id, d)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(t.id, d); if (e.key === 'Escape') setEditingKey(null); }}
-                                className="w-full text-[10px] text-text-primary border border-border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                              />
-                              <input
-                                type="time"
-                                value={editDraft.endTime}
-                                onChange={(e) => setEditDraft(prev => ({ ...prev, endTime: e.target.value }))}
-                                onBlur={() => commitEdit(t.id, d)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(t.id, d); if (e.key === 'Escape') setEditingKey(null); }}
-                                className="w-full text-[10px] text-text-primary border border-border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                              />
-                            </div>
-                          ) : (
-                            <div
-                              className={`flex flex-col items-center justify-center h-16 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
-                                isModified
-                                  ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white'
-                                  : 'bg-gradient-to-br from-primary to-primary/85 text-white'
-                              }`}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => startEditing(t.id, d, state)}
-                                title="Click to change hours"
-                                className="flex flex-col items-center leading-tight hover:underline"
+                              <span className="font-data text-[11px] font-data-medium">{to12h(state.startTime)}</span>
+                              <span className="font-data text-[11px] opacity-90">{to12h(state.endTime)}</span>
+                            </button>
+                            {(state.breaks || []).length > 0 && (
+                              <span
+                                data-testid="roster-cell-breaks"
+                                title={state.breaks.map((b) => `${b.name || 'Break'} ${b.startTime}–${b.endTime}`).join(', ')}
+                                className="mt-1 inline-flex items-center rounded px-1 font-data text-[9px] leading-4 whitespace-nowrap"
+                                style={{ background: SHADE_STYLES.break.solid, color: SHADE_STYLES.break.color }}
                               >
-                                <span className="font-data text-[11px] font-data-medium">{to12h(state.startTime)}</span>
-                                <span className="font-data text-[11px] opacity-90">{to12h(state.endTime)}</span>
-                              </button>
-                              {renderToggle(true)}
-                            </div>
-                          )}
+                                {state.breaks.length === 1 ? `${state.breaks[0].name ? `${state.breaks[0].name} ` : ''}${state.breaks[0].startTime}–${state.breaks[0].endTime}` : `${state.breaks.length} breaks`}
+                              </span>
+                            )}
+                            {renderToggle(true)}
+                          </div>
                         </td>
                       );
                     })}
@@ -570,6 +591,71 @@ const RosterPanel = ({ branchId }) => {
           </table>
         </div>
       </div>
+
+      {editTarget && (
+        <ModalShell onClose={() => setEditTarget(null)} className="max-w-sm" aria-label="Change hours for this date" data-testid="roster-date-dialog">
+          <div>
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h4 className="font-heading font-heading-semibold text-base text-text-primary">
+                {formatDialogDate(editTarget.dateInfo.date)} · {editTarget.therapist.name}
+              </h4>
+              <button type="button" onClick={() => setEditTarget(null)} className="p-1.5 rounded-spa hover:bg-background" aria-label="Close"><Icon name="X" size={18} className="text-text-secondary" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <p className="font-caption text-xs text-text-secondary mb-1.5">Works</p>
+                <div className="flex items-center gap-2">
+                  <input type="time" aria-label="Works from" value={editDraft.startTime} onChange={(e) => setEditDraft((p) => ({ ...p, startTime: e.target.value }))}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                  <span className="text-text-tertiary">–</span>
+                  <input type="time" aria-label="Works until" value={editDraft.endTime} onChange={(e) => setEditDraft((p) => ({ ...p, endTime: e.target.value }))}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                </div>
+              </div>
+              <div>
+                <p className="font-caption text-xs text-text-secondary mb-1.5">Breaks that day</p>
+                <div className="space-y-2">
+                  {editDraft.breaks.map((b, i) => {
+                    const setBreak = (patch) => setEditDraft((p) => ({ ...p, breaks: p.breaks.map((x, n) => (n === i ? { ...x, ...patch } : x)) }));
+                    return (
+                      <div key={i} className="space-y-1.5 rounded-spa border border-border/70 p-2">
+                        <div className="flex items-center gap-2">
+                          <input type="text" aria-label={`Break ${i + 1} name`} placeholder="Name, e.g. Tea" maxLength={40} value={b.name || ''} onChange={(e) => setBreak({ name: e.target.value })}
+                            className="min-w-0 flex-1 px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm" />
+                          <button type="button" aria-label={`Remove break ${i + 1}`} onClick={() => setEditDraft((p) => ({ ...p, breaks: p.breaks.filter((_, n) => n !== i) }))} className="p-1.5 rounded-spa hover:bg-background text-text-tertiary hover:text-error">
+                            <Icon name="X" size={14} />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input type="time" aria-label={`Break ${i + 1} from`} value={b.startTime} onChange={(e) => setBreak({ startTime: e.target.value })}
+                            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                          <span className="text-text-tertiary">–</span>
+                          <input type="time" aria-label={`Break ${i + 1} until`} value={b.endTime} onChange={(e) => setBreak({ endTime: e.target.value })}
+                            className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setEditDraft((p) => ({ ...p, breaks: [...p.breaks, { name: '', startTime: '13:00', endTime: '14:00' }] }))}
+                    className="inline-flex items-center gap-1 font-caption text-xs text-primary hover:underline"
+                  >
+                    <Icon name="Plus" size={12} /> Add break
+                  </button>
+                </div>
+              </div>
+              {draftError && <p role="alert" className="font-caption text-xs text-error">{draftError}</p>}
+              <p className="font-caption text-[11px] text-text-tertiary">A date change replaces that day's usual hours and breaks.</p>
+            </div>
+            <div className="flex items-center justify-end gap-2 p-4 border-t border-border">
+              <button type="button" onClick={() => setEditTarget(null)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background">Cancel</button>
+              <button type="button" onClick={commitEdit} disabled={!!draftError} className="h-9 px-4 text-[13px] font-body font-body-medium bg-primary text-white rounded-spa hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">Apply to date</button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+      {conflictModal}
 
       {/* Legend */}
       <div className="flex items-center gap-2 flex-wrap">

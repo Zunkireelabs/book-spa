@@ -59,7 +59,8 @@ const OperationalCalendar = ({ branchId }) => {
   const enableRooms = industry?.enable_rooms !== false;
 
   // View state
-  const [currentDate, setCurrentDate] = useState(todayStr());
+  // ?date=YYYY-MM-DD deep-links a day (the "falls outside" list's "Open in calendar").
+  const [currentDate, setCurrentDate] = useState(() => (/^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date') || '') ? searchParams.get('date') : todayStr()));
   const [viewMode, setViewMode] = useState('day'); // day | 4day | week | month
   const [printReportOpen, setPrintReportOpen] = useState(false);
 
@@ -109,7 +110,7 @@ const OperationalCalendar = ({ branchId }) => {
 
 
   const {
-    calendarData, setCalendarData, error, attendanceMap, shiftsByTherapist, blocksAvailable, transfersAvailable,
+    calendarData, setCalendarData, error, attendanceMap, attendanceByTherapist, shiftsByTherapist, blocksAvailable, transfersAvailable,
     fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder,
   } = useCalendarData({ branchId, currentDate, viewMode });
 
@@ -313,6 +314,7 @@ const OperationalCalendar = ({ branchId }) => {
                   bookings={calendarData.bookings}
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
+                  attendanceByTherapist={attendanceByTherapist}
                   shiftsByTherapist={shiftsByTherapist}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
                   onBookingClick={handleBookingClick}

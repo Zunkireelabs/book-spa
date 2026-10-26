@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { fetchBlockById, updateBlock, deleteBlock } from '../../../../services/api';
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { blockChange } from '../../../../services/availabilityConflicts';
 import { countBookingsInRange, bookingsInRangeMessage } from '../../../../utils/bookingsInRange';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
@@ -36,6 +38,7 @@ const EditBlockModal = ({
   variant = 'modal', blockId, occurrenceDate, therapists, rooms, bookings = [], branchHours, retarget, guardRef,
   onClose, onSuccess, onDraftChange,
 }) => {
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
 
@@ -155,6 +158,17 @@ const EditBlockModal = ({
   const runSave = async (scope) => {
     setSubmitting(true);
     setError(null);
+    // Same "falls inside this block" list as adding one (the edited time / person, on the date being edited).
+    if (assigneeType === 'therapist') {
+      const proceed = await confirmConflicts({
+        therapistId,
+        change: blockChange({ date, start: startTime, durationMinutes: Number(durationMinutes) }),
+        summary: `Block ${startTime} for ${durationMinutes} min${description.trim() ? ` (${description.trim()})` : ''}.`,
+        titleFor: (n) => `${n} booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} inside this block`,
+        saveLabel: 'Save block, keep bookings',
+      });
+      if (!proceed) { setSubmitting(false); return; }
+    }
     const result = await updateBlock({
       blockId,
       scope,
@@ -236,6 +250,7 @@ const EditBlockModal = ({
     : assigneeType === 'therapist' && !therapistId ? 'Select a therapist' : '';
 
   return (
+    <>
     <PanelShell
       variant={variant}
       title="Edit block"
@@ -357,6 +372,8 @@ const EditBlockModal = ({
         </>
       )}
     </PanelShell>
+    {conflictModal}
+    </>
   );
 };
 

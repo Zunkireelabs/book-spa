@@ -9,6 +9,7 @@ import { BookingHoverLayer, useHoverCardBookingId } from './BookingHoverCard';
 import { toKathmanduParts, addDays } from './calendarDates';
 import { formatClockTime, formatHourLabel } from './timeFormat';
 import SharedBookingLines from './SharedBookingLines';
+import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatusLine';
 import OverflowBadge from './OverflowBadge';
 import ManualBlockOverlay from './ManualBlockOverlay';
 import {
@@ -22,7 +23,7 @@ import {
 } from './calendarLayout';
 import { PANEL_WIDTH } from '../../../../components/ui/SidePanel';
 import { findBlockOverlap, formatBlockRange } from '../../../../utils/blockOverlap';
-import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, isOutsideShift } from '../../../../services/availabilityShading';
+import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, outsideReasonText, outsideNote } from '../../../../services/availabilityShading';
 import { hhmmToMinutes } from '../../../../services/availability';
 
 // Export these constants for time calculation in parent
@@ -156,6 +157,7 @@ const CalendarGrid = ({
   bookings,
   branchHours,
   attendanceMap,
+  attendanceByTherapist,
   shiftsByTherapist = {},
   checkedOutByTherapistAndDate,
   onBookingClick,
@@ -1093,14 +1095,14 @@ const CalendarGrid = ({
           ? 'Please allocate the customer to a dedicated room'
           : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a therapist and allocate the room`)
       : null;
-    const hdrShift = col.type === 'therapist' && viewMode === 'day' ? shiftHeaderInfo(shiftOf(col.id, currentDate)) : null;
+    const hdrShift = col.type === 'therapist' && viewMode === 'day' ? shiftHeaderInfo(shiftOf(col.id, currentDate), { isToday: currentDate === todayStr, nowMin: hhmmToMinutes(nowTime), attendance: attendanceByTherapist?.[col.id], branchClosed: isClosedByBlocks(blockOccurrences, currentDate) }) : null;
     const initials = col.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
     return (
       <div
         key={col.id}
         className="relative flex-1 border-r border-border last:border-r-0 px-2 h-10 flex items-center justify-center"
         style={{ minWidth: minColWidth }}
-        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || (hdrShift ? `${col.name} · ${hdrShift.text}` : col.name))}
+        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || (hdrShift ? `${col.name} · ${hdrShift.full}` : col.name))}
         onMouseLeave={hideHeaderTooltip}
       >
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1139,8 +1141,9 @@ const CalendarGrid = ({
               <span
                 data-shift-line={hdrShift.tone}
                 className="font-data text-[10px] leading-tight truncate text-text-tertiary"
-                style={{ color: hdrShift.tone === 'leave' ? SHADE_STYLES.leave.color : hdrShift.tone === 'shift' ? undefined : SHADE_STYLES.off.color }}
+                style={{ color: hdrShift.tone === 'leave' ? SHADE_STYLES.leave.color : hdrShift.tone === 'alert' ? '#B45309' : hdrShift.tone === 'shift' ? undefined : SHADE_STYLES.off.color }}
               >
+                <i className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: STATUS_DOT_COLOR[hdrShift.dot] }} />
                 {hdrShift.text}
               </span>
             )}
@@ -1427,6 +1430,13 @@ const CalendarGrid = ({
   // Rows come from therapist_shifts_for_range; nothing here works out a shift. The 4-Day / Week columns are days with every
   // therapist's bookings merged, so there is no per-therapist time axis to shade there: Day view only.
   const shiftOf = (thId, day) => (thId ? shiftsByTherapist?.[thId]?.[day] || null : null);
+  // Why an existing booking now breaks the availability rule (null when it doesn't): { text: 'in a block', note: 'In a block 11:00–12:00 · booking kept' }.
+  const outsideOf = (col, day, booking) => {
+    const row = shiftOf(viewMode === 'day' ? shadeTherapistId(col) : null, day);
+    if (!row || !booking.startTime || !booking.endTime) return null;
+    const verdict = slotVerdict(row, hhmmToMinutes(booking.startTime), hhmmToMinutes(booking.endTime));
+    return verdict ? { text: outsideReasonText(verdict), note: outsideNote(verdict, fmtHHMM) } : null;
+  };
   const shadeTherapistId = (col) => (viewMode === 'day' && col.type === 'therapist' ? col.id : null);
   const minToTop = (min) => (min - openHour * 60) / 60 * eHH + TOP_PAD;
   const fmtHHMM = (t) => formatClockTime(t, use24h);
@@ -1532,16 +1542,11 @@ const CalendarGrid = ({
                 onSharedActivate={activateShared}
                 onSharedDeactivate={deactivateShared}
                 key={cardKey}
-                booking={booking}
+                booking={outsideOf(col, day, booking) ? { ...booking, availabilityNote: outsideOf(col, day, booking).note } : booking}
                 columnMode={columnMode}
                 hideSensitive={hideSensitive}
                 use24h={use24h}
-                outsideHours={(() => {
-                  const thId = viewMode === 'day' ? shadeTherapistId(col) : null;
-                  const row = shiftOf(thId, day);
-                  return !!row && !!booking.startTime && !!booking.endTime
-                    && isOutsideShift(row, hhmmToMinutes(booking.startTime), hhmmToMinutes(booking.endTime));
-                })()}
+                outsideHours={outsideOf(col, day, booking)?.text || null}
                 style={{
                   top: timeToTop(booking.startTime) - clusterTop,
                   height: timeToHeight(booking.startTime, booking.endTime),

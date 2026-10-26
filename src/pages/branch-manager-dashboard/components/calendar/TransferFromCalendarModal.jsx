@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { transferTherapist, fetchAllBranches } from '../../../../services/api';
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { transferChange } from '../../../../services/availabilityConflicts';
 import { computeRevertDate, DURATION_UNIT_OPTIONS, formatRevert, toYmd, toHm } from '../../../../utils/transferPreview';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, DateField, TimeField, InlineError,
@@ -12,6 +14,7 @@ import {
 const TransferFromCalendarModal = ({
   variant = 'modal', therapistId, therapistName, currentBranchId, defaultDate, defaultTime, guardRef, onClose, onSuccess, onDraftChange,
 }) => {
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const [orgBranches, setOrgBranches] = useState([]);
   const [transferMode, setTransferMode] = useState('temporary');
   const [toBranch, setToBranch] = useState('');
@@ -58,6 +61,20 @@ const TransferFromCalendarModal = ({
     setSubmitting(true);
     setError(null);
 
+    // Bookings the therapist still has at this branch inside the window are listed first (kept either way).
+    const proceed = await confirmConflicts({
+      therapistId,
+      change: transferChange({
+        fromTs: `${startDate}T${isPermanent ? '00:00' : startTime}:00+05:45`,
+        toTs: revertDate ? `${toYmd(revertDate)}T${toHm(revertDate)}:00+05:45` : null,
+        toBranchId: toBranch,
+      }),
+      summary: `Moving ${therapistName} to another branch from ${startDate}${isPermanent ? '' : ` ${startTime}`}.`,
+      titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} at this branch while away`,
+      saveLabel: 'Transfer anyway',
+    });
+    if (!proceed) { setSubmitting(false); return; }
+
     const result = await transferTherapist({
       therapistId,
       toBranchId: toBranch,
@@ -86,6 +103,7 @@ const TransferFromCalendarModal = ({
   const scheduled = startDate && startDate > new Date().toISOString().split('T')[0];
 
   return (
+    <>
     <PanelShell
       variant={variant}
       title={`Transfer therapist · ${therapistName}`}
@@ -143,6 +161,8 @@ const TransferFromCalendarModal = ({
         </Field>
       </FormBody>
     </PanelShell>
+    {conflictModal}
+    </>
   );
 };
 

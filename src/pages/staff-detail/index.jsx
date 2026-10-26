@@ -24,7 +24,10 @@ import {
 import * as profileApi from '../../services/therapistProfileApi';
 import { parsePhone } from '../../components/ui/CountryCodeSelect';
 import { nepalNow } from '../../utils/customerDirectory';
-import { todayStatus, todayLabels, effectiveHoursForDate, DB_DOW_LABELS } from '../../utils/staffDay';
+import { hoursFromShiftRow, timeToMinutes, DB_DOW_LABELS } from '../../utils/staffDay';
+import { todayStatusLine, STATUS_DOT_COLOR } from '../../utils/todayStatusLine';
+import { useAvailabilityConflictGuard } from '../../hooks/useAvailabilityConflictGuard';
+import { hoursChange } from '../../services/availabilityConflicts';
 import { nepalClock } from '../../services/therapistsOverview';
 import {
   changedKeys, hoursChanged, changedHourDays, payChanged, diffServiceIds, monthOf, attendanceSummary,
@@ -68,6 +71,7 @@ const StaffDetailPage = () => {
   const { branchId, branches } = useBranch();
   const { enableStaffRatings } = useOrg();
   const { staffLabel, staffLabelPlural } = useIndustry();
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const role = profile?.role || 'staff';
   const isEdit = !!staffId;
   const isAdmin = role === 'admin';
@@ -363,6 +367,15 @@ const StaffDetailPage = () => {
         await loadMatrix(); loadActivity();
         if (s.data?.skipped?.length) throw new Error(`${s.data.skipped.length} service${s.data.skipped.length === 1 ? ' was' : 's were'} left ticked because ${firstName || 'this person'} is the only one assigned (unticking would open ${s.data.skipped.length === 1 ? 'it' : 'them'} to everyone)`);
       } else if (id === 'hours') {
+        // Bookings that would fall outside the changed days (listed first; they are kept either way).
+        const days = changedHourDays(saved.hours, workingHours);
+        const changes = days.map((d) => workingHours.find((r) => r.dayOfWeek === d)).filter(Boolean).map((r) => hoursChange({
+          dayOfWeek: r.dayOfWeek, isDayOff: r.isDayOff, start: r.startTime, end: r.endTime,
+          breaks: (r.breaks || []).map((b) => ({ start: b.startTime, end: b.endTime })),
+        }));
+        const names = days.map((d) => DB_DOW_LABELS[d]).join(', ');
+        const proceed = await confirmConflicts({ therapistId: staffId, changes, summary: `You're changing ${firstName || 'their'}${firstName ? "'s" : ''} ${names} hours.`, titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} outside the new schedule`, saveLabel: 'Save hours' });
+        if (!proceed) { setSaving(false); return false; }
         const h = await upsertTherapistWorkingHours(staffId, workingHours);
         if (h.error) throw new Error(h.error.message || 'Could not save working hours.');
         await loadTherapist(); loadOverview(); loadActivity();
@@ -487,23 +500,21 @@ const StaffDetailPage = () => {
 
   // ── header status line ────────────────────────────────────────────────────
   const todayWeek = overview?.week?.find((d) => d.date === today);
-  const status = todayWeek
-    ? todayStatus({ attendance: todayWeek.attendanceStatus ? { status: todayWeek.attendanceStatus, checkInTime: todayWeek.checkInTime } : null, hours: todayWeek.hours || effectiveHoursForDate(today, [], []), nowTime })
-    : null;
-  // One shared helper (utils/staffDay todayLabels) words today's status for the list, the peek, this header and the Overview.
-  const statusView = status ? todayLabels({
-    status: { ...status, checkedInAt: status.checkedInAt ? nepalClock(status.checkedInAt) : undefined },
-    attendance: todayWeek?.attendanceStatus ? { status: todayWeek.attendanceStatus } : null,
-    hours: todayWeek?.hours || { source: 'none' },
-    worksTomorrow: false,
+  // The one "today" line (utils/todayStatusLine), the same wording as the Therapists list, the calendar header and Free now.
+  const statusLine = todayWeek ? todayStatusLine({
+    hours: todayWeek.hours || hoursFromShiftRow(null),
+    attendance: todayWeek.attendanceStatus ? { status: todayWeek.attendanceStatus, checkInTime: nepalClock(todayWeek.checkInTime) || null, checkOutTime: nepalClock(todayWeek.checkOutTime) || null } : null,
+    nowMin: timeToMinutes(nowTime) ?? 0,
+    branchClosed: !!overview?.branchClosedToday,
+    back: overview?.nextWork || null,
   }) : null;
-  const statusText = statusView ? [statusView.title, statusView.sub].filter(Boolean).join(' · ') : null;
+  const statusText = statusLine ? statusLine.full : null;
   const th = todayWeek?.hours;
-  const working = th && !th.isDayOff && th.startTime && th.endTime;
-  const shiftText = working && !/shift/i.test(statusText || '') ? `shift ${th.startTime.slice(0, 5)} – ${th.endTime.slice(0, 5)}` : null;
+  const working = th && !th.isDayOff && th.startTime && th.endTime && th.source !== 'none' && !['closed', 'leave', 'off', 'absent'].includes(statusLine?.key);
+  const shiftText = working && statusLine?.key === 'finished' && !/shift/i.test(statusText || '') ? `shift ${th.startTime.slice(0, 5)} – ${th.endTime.slice(0, 5)}` : null;
   const nextBreak = working ? (th.breaks || []).find((b) => String(b.endTime).slice(0, 5) > nowTime) : null;
   const breakText = nextBreak ? `${(nextBreak.name || 'break').toLowerCase()} ${String(nextBreak.startTime).slice(0, 5)} – ${String(nextBreak.endTime).slice(0, 5)}` : null;
-  const checkedIn = /checked in|in progress|here|on shift/i.test(statusText || '') || status?.checkedInAt;
+  const checkedIn = !!todayWeek?.checkInTime && statusLine?.key !== 'finished';
 
   const positionText = form.positions[0] || (form.isServiceStaff ? staffLabel : `Support ${staffLabel.toLowerCase()}`);
   const savedPhoto = photoPreview || saved.form.photoUrl;
@@ -519,7 +530,7 @@ const StaffDetailPage = () => {
   );
   const StatusPill = () => statusText ? (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${therapist?.is_active === false ? 'bg-background text-text-secondary border border-border' : 'bg-primary/10 text-primary'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />{therapist?.is_active === false ? 'Inactive' : statusText}
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine && therapist?.is_active !== false ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{therapist?.is_active === false ? 'Inactive' : statusText}
     </span>
   ) : null;
   const HeaderActions = ({ small }) => isEdit ? (
@@ -606,7 +617,7 @@ const StaffDetailPage = () => {
                   </p>
                   {isEdit && (statusText || shiftText) && (
                     <p className="mt-2 text-sm text-text-secondary flex flex-wrap items-center gap-x-2">
-                      {statusText && <span className="inline-flex items-center gap-1.5 text-text-primary font-medium"><span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />{statusText}</span>}
+                      {statusText && <span className="inline-flex items-center gap-1.5 text-text-primary font-medium"><span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{statusText}</span>}
                       {shiftText && <span>· {shiftText}</span>}
                       {breakText && <span>· next break {breakText}</span>}
                       {therapist?.is_active === false && <span className="font-medium text-text-primary">· Inactive</span>}
@@ -696,6 +707,8 @@ const StaffDetailPage = () => {
             onConfirm={async () => { const n = ask; const ok = await saveSection(editing); setAsk(null); if (ok) openSection(n.next, n.field); }}
           />
         )}
+
+        {conflictModal}
 
         <TodayBookingPanel booking={openBooking} branchId={effectiveBranchId} onClose={() => setOpenBooking(null)} onChanged={loadOverview} />
       </div>

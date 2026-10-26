@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../../../../components/AppIcon';
+import AvailabilityNoteLine from '../../../../components/ui/AvailabilityNoteLine';
 import { getBookingStatusColors } from '../../../../utils/bookingStatusColors';
 
 // ── Hover-card controller (module singleton) ──────────────────────────────────────────────────────────────────────────
@@ -190,6 +191,7 @@ export function BookingHoverContent({ booking, draggable }) {
         </div>
       )}
 
+      <AvailabilityNoteLine note={booking.availabilityNote} />
       <AlertsBlock customerNotes={booking.customerNotes} specialRequests={booking.specialRequests} className="!mt-3" />
       {booking.referredBy && <div className="text-xs text-text-secondary">Referred by {booking.referredBy}</div>}
 

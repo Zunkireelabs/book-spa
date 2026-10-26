@@ -43,6 +43,7 @@ const FreeNowChip = ({ availability, nowLabel, serviceNamesFor, onBook }) => {
                 <i className="w-[26px] h-[26px] rounded-full bg-[#ECFDF3] text-[#15803D] text-[10px] not-italic font-semibold grid place-items-center flex-shrink-0">{initials(f.therapist.name)}</i>
                 <div className="min-w-0 flex-1">
                   <b className="block font-medium text-[13px] truncate">{f.therapist.name}</b>
+                  {f.status && <span className="block text-[12px] text-[#8A8A90] truncate" data-free-status>{f.status}</span>}
                   <span className="block text-[12px] text-[#8A8A90] truncate">{[f.label, svc].filter(Boolean).join(' · ')}</span>
                 </div>
                 {onBook && <button type="button" onClick={() => { setOpen(false); onBook(f.therapist.id); }} className="h-[26px] px-[9px] border border-border rounded-md bg-white text-[12px] font-medium hover:bg-[#FAFAF9] flex-shrink-0">Book</button>}

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { hoursFromShiftRow } from './staffDay';
 import {
   shiftBasis, shiftSource, therapistState, availabilityNow, freeForSlot, freeUntilLabel, nextSlot10, usualTherapistId, suggestTherapist,
-  isNewOnline, isUnseen, needsYouNow, matchesNeed, rosterDay, clock, toMin,
+  isNewOnline, isUnseen, needsYouNow, matchesNeed, clock, toMin,
 } from './freeNow';
 
 const T = (id, name) => ({ id, name });
@@ -9,18 +10,13 @@ const A = T('a', 'Asha'); const B = T('b', 'Bina'); const C = T('c', 'Chhiring')
 const bk = (o) => ({ bookingId: 'x', status: 'confirmed', date: '2026-10-15', time: '10:00', endTime: '11:00', createdBy: 'u', customerName: 'Guest One', customerPhone: '9800', therapists: [], serviceId: 's1', service: 'Swedish', duration: '60 min', ...o });
 const OPEN = { startTime: '00:00', endTime: '24:00', isDayOff: false, breaks: [] };
 // Default: every therapist has an open roster row (shift data exists), so tests isolate one rule at a time.
-const ctx = (o = {}) => ({ date: '2026-10-15', nowMin: toMin('13:52'), source: 'roster', bookings: [], blocks: [], transfers: [], attendanceById: {}, workingHoursById: { a: OPEN, b: OPEN, c: OPEN, d: OPEN }, ...o });
+const ctx = (o = {}) => ({ date: '2026-10-15', nowMin: toMin('13:52'), source: 'roster', bookings: [], blocks: [], transfers: [], attendanceById: {}, shiftById: { a: OPEN, b: OPEN, c: OPEN, d: OPEN }, ...o });
 
 describe('shift source', () => {
   it('uses attendance only when check-in is actually recorded', () => {
     expect(shiftSource([])).toBe('roster');
     expect(shiftSource([{ therapistId: 'a', status: null }, { therapistId: 'b', status: 'Absent' }])).toBe('roster');
     expect(shiftSource([{ therapistId: 'a', status: 'Present', checkInTime: '09:05' }])).toBe('attendance');
-  });
-  it('rosterDay is Monday-first', () => {
-    expect(rosterDay('2026-10-12')).toBe(0); // Monday
-    expect(rosterDay('2026-10-15')).toBe(3); // Thursday
-    expect(rosterDay('2026-10-18')).toBe(6); // Sunday
   });
 });
 
@@ -68,19 +64,48 @@ describe('therapistState (roster mode)', () => {
     for (const status of ['Leave', 'Annual Leave', 'Sick Leave', 'Day Off', 'Absent']) {
       expect(therapistState(A, ctx({ attendanceById: { a: { status } } })).state).toBe('off');
     }
-    expect(therapistState(A, ctx({ workingHoursById: { a: { isDayOff: true } } }))).toMatchObject({ state: 'off', reason: 'Day off' });
+    expect(therapistState(A, ctx({ shiftById: { a: { isDayOff: true } } }))).toMatchObject({ state: 'off', reason: 'Day off' });
   });
   it('roster hours bound the shift; breaks occupy', () => {
     const wh = { startTime: '09:00', endTime: '18:00', isDayOff: false, breaks: [{ name: 'Lunch', startTime: '14:00', endTime: '14:30' }] };
-    expect(therapistState(A, ctx({ workingHoursById: { a: wh } }))).toEqual({ state: 'free', freeUntil: toMin('14:00') });
-    expect(therapistState(A, ctx({ nowMin: toMin('18:30'), workingHoursById: { a: wh } }))).toMatchObject({ state: 'off', reason: 'Shift ended' });
-    expect(therapistState(A, ctx({ nowMin: toMin('08:00'), workingHoursById: { a: wh } }))).toMatchObject({ state: 'off' });
-    expect(therapistState(A, ctx({ nowMin: toMin('17:30'), workingHoursById: { a: wh } }))).toEqual({ state: 'free', freeUntil: toMin('18:00') });
+    expect(therapistState(A, ctx({ shiftById: { a: wh } }))).toEqual({ state: 'free', freeUntil: toMin('14:00') });
+    expect(therapistState(A, ctx({ nowMin: toMin('18:30'), shiftById: { a: wh } }))).toMatchObject({ state: 'off', reason: 'Shift ended' });
+    expect(therapistState(A, ctx({ nowMin: toMin('08:00'), shiftById: { a: wh } }))).toMatchObject({ state: 'off' });
+    expect(therapistState(A, ctx({ nowMin: toMin('17:30'), shiftById: { a: wh } }))).toEqual({ state: 'free', freeUntil: toMin('18:00') });
+  });
+});
+
+describe('the rule\'s shift (therapist_shifts_for_range)', () => {
+  const row = (o) => hoursFromShiftRow({ works: true, source: 'weekly', start_time: '09:00:00', end_time: '18:00:00', breaks: [], off: [], ...o });
+  it('no hours set is open inside branch hours only', () => {
+    const open = row({ source: 'none', start_time: '10:00:00', end_time: '20:00:00' });  // the RPC already clamps to branch hours
+    expect(open.openNoHours).toBe(true);
+    expect(therapistState(A, ctx({ shiftById: { a: open } }))).toMatchObject({ state: 'free' });
+    expect(therapistState(A, ctx({ nowMin: toMin('21:00'), shiftById: { a: open } }))).toMatchObject({ state: 'off', reason: 'Shift ended' });
+    expect(therapistState(A, ctx({ nowMin: toMin('09:00'), shiftById: { a: open } }))).toMatchObject({ state: 'off' });
+  });
+  it('the Free-now row carries the shared status line, and "No hours set" for someone with no hours', () => {
+    const open = row({ source: 'none', start_time: '10:00:00', end_time: '20:00:00' });
+    const r = availabilityNow([A, B], ctx({ shiftById: { a: open, b: row() } }));
+    expect(r.free.find((f) => f.therapist.id === 'a')).toMatchObject({ status: 'No hours set · bookable in branch hours 10:00–20:00', label: 'free until 8:00pm' });
+    expect(r.free.find((f) => f.therapist.id === 'b').label).toBe('free until 6:00pm');
+  });
+  it('a closed branch day (no hours, not working) is off', () => {
+    expect(therapistState(A, ctx({ shiftById: { a: row({ source: 'none', works: false, start_time: null, end_time: null }) } }))).toMatchObject({ state: 'off', reason: 'Closed' });
+  });
+  it('a roster date change overrides the weekly hours, and its breaks occupy', () => {
+    const h = row({ source: 'roster', start_time: '11:00:00', end_time: '20:00:00', breaks: [{ name: '', start: '14:00', end: '14:30' }] });
+    expect(h.source).toBe('override');
+    expect(therapistState(A, ctx({ nowMin: toMin('14:10'), shiftById: { a: h } }))).toMatchObject({ state: 'busy', kind: 'break', freeAt: toMin('14:30') });
+  });
+  it('a half day of leave occupies that part of the shift', () => {
+    const h = row({ off: [{ code: 'ON_LEAVE', reason: 'leave_half', start_min: 9 * 60, end_min: 14 * 60 }] });
+    expect(therapistState(A, ctx({ nowMin: toMin('13:00'), shiftById: { a: h } }))).toMatchObject({ state: 'busy', kind: 'leave' });
   });
 });
 
 describe('no shift data (the "on today" fallback)', () => {
-  const none = (o = {}) => ctx({ workingHoursById: {}, ...o });
+  const none = (o = {}) => ctx({ shiftById: {}, ...o });
   it('counts only people with a non-cancelled booking today', () => {
     const c = none({ bookings: [
       bk({ bookingId: '1', status: 'completed', therapists: [{ id: 'a' }], time: '09:00', endTime: '10:00' }),
@@ -97,7 +122,7 @@ describe('no shift data (the "on today" fallback)', () => {
   });
   it('a roster row (even a long shift) or check-in is real shift data', () => {
     expect(shiftBasis([A, B], ctx())).toBe('roster');
-    expect(shiftBasis([A, B], ctx({ workingHoursById: { a: OPEN } }))).toBe('bookings');
+    expect(shiftBasis([A, B], ctx({ shiftById: { a: OPEN } }))).toBe('bookings');
     expect(shiftBasis([A], ctx({ source: 'attendance' }))).toBe('attendance');
   });
   it('leave still wins over a booking', () => {
@@ -153,7 +178,7 @@ describe('freeForSlot', () => {
     expect(freeForSlot(A, toMin('16:30'), toMin('17:30'), c)).toBe(false);
   });
   it('respects shift end and leave', () => {
-    const c = ctx({ workingHoursById: { a: { startTime: '09:00', endTime: '16:00', isDayOff: false } }, attendanceById: { b: { status: 'Sick Leave' } } });
+    const c = ctx({ shiftById: { a: { startTime: '09:00', endTime: '16:00', isDayOff: false } }, attendanceById: { b: { status: 'Sick Leave' } } });
     expect(freeForSlot(A, toMin('15:30'), toMin('16:30'), c)).toBe(false);
     expect(freeForSlot(B, toMin('10:00'), toMin('11:00'), c)).toBe(false);
   });

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useOrg } from '../../../../contexts/OrgContext';
 import { createBlock } from '../../../../services/api';
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { blockChange } from '../../../../services/availabilityConflicts';
 import { countBookingsInRange, bookingsInRangeMessage } from '../../../../utils/bookingsInRange';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, TabBar, DateField, TimeField,
@@ -35,6 +37,7 @@ const AddBlockModal = ({
   onClose, onSuccess, onRoomOnlyChange, onDraftChange,
 }) => {
   const { orgId } = useOrg();
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const [activeTab, setActiveTab] = useState('details');
 
   const [assigneeType, setAssigneeType] = useState(slotInfo?.colType === 'therapist' ? 'therapist' : 'location');
@@ -110,6 +113,18 @@ const AddBlockModal = ({
     setSubmitting(true);
     setError(null);
 
+    // List the bookings this block lands on before saving (kept either way). A repeating block is checked on its first date.
+    if (assigneeType === 'therapist') {
+      const proceed = await confirmConflicts({
+        therapistId,
+        change: blockChange({ date, start: startTime, durationMinutes: Number(durationMinutes) }),
+        summary: `Block ${format12h(startTime)} for ${durationMinutes} min${description.trim() ? ` (${description.trim()})` : ''}.`,
+        titleFor: (n) => `${n} booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} inside this block`,
+        saveLabel: 'Add block, keep bookings',
+      });
+      if (!proceed) { setSubmitting(false); return; }
+    }
+
     const result = await createBlock({
       orgId,
       branchId,
@@ -152,6 +167,7 @@ const AddBlockModal = ({
   ) : null;
 
   return (
+    <>
     <PanelShell
       variant={variant}
       title="Add block"
@@ -264,6 +280,8 @@ const AddBlockModal = ({
         )}
       </FormBody>
     </PanelShell>
+    {conflictModal}
+    </>
   );
 };
 

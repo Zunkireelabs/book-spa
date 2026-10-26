@@ -16,6 +16,7 @@ import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
 import BlockOverlapWarning from './BlockOverlapWarning';
 import SidePanel from './SidePanel';
+import AvailabilityNoteLine from './AvailabilityNoteLine';
 import { AlertsBlock } from '../../pages/branch-manager-dashboard/components/calendar/BookingHoverCard';
 import { getBookingStatusColors } from '../../utils/bookingStatusColors';
 import { formatPhoneGrouped } from '../../utils/phone';
@@ -1894,6 +1895,7 @@ const BookingActionModal = ({
                         </div>
                       </div>
 
+                      <AvailabilityNoteLine note={booking.availabilityNote} className="mb-2" />
                       <AlertsBlock customerNotes={extras?.customerNotes} specialRequests={booking.specialRequests} />
 
                       <div className="border-t border-border pt-5 space-y-2">

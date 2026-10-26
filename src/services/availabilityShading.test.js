@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { indexShifts, buildShadeSegments, shiftHeaderInfo, slotVerdict, isOutsideShift } from './availabilityShading';
+import { indexShifts, buildShadeSegments, shiftHeaderInfo, slotVerdict, isOutsideShift, outsideReasonText } from './availabilityShading';
 
 const day = (o = {}) => ({
   therapist_id: 't1', shift_date: '2026-10-26', works: true, start_time: '09:00:00', end_time: '18:00:00', source: 'weekly',
@@ -52,11 +52,14 @@ describe('buildShadeSegments', () => {
 
 describe('shiftHeaderInfo', () => {
   it('covers each header line', () => {
-    expect(shiftHeaderInfo(day())).toEqual({ text: '09:00–18:00', tone: 'shift' });
+    expect(shiftHeaderInfo(day())).toMatchObject({ text: '09:00–18:00', tone: 'shift', dot: 'grey' });
     expect(shiftHeaderInfo(day({ end_time: '23:59:59' })).text).toBe('09:00–24:00');
-    expect(shiftHeaderInfo(day({ works: false }))).toEqual({ text: 'Off today', tone: 'off' });
-    expect(shiftHeaderInfo(day({ works: false, off: [{ code: 'ON_LEAVE', reason: 'leave_full' }] }))).toEqual({ text: 'On leave', tone: 'leave' });
-    expect(shiftHeaderInfo(day({ source: 'none' }))).toEqual({ text: 'No hours set', tone: 'none' });
+    expect(shiftHeaderInfo(day({ works: false }))).toMatchObject({ text: 'Day off', tone: 'off' });
+    expect(shiftHeaderInfo(day({ works: false, off: [{ code: 'ON_LEAVE', reason: 'leave_full' }] }))).toMatchObject({ text: 'On leave', tone: 'leave', dot: 'purple' });
+    expect(shiftHeaderInfo(day({ source: 'none' }))).toMatchObject({ text: 'No set hours', dot: 'green' });
+    // today's column reads the live state
+    expect(shiftHeaderInfo(day(), { isToday: true, nowMin: 600 })).toMatchObject({ text: 'Not checked in', dot: 'amber' });
+    expect(shiftHeaderInfo(day(), { isToday: true, nowMin: 600, attendance: { status: 'Present', checkInTime: '09:07' } })).toMatchObject({ text: '09:00–18:00', dot: 'green' });
     expect(shiftHeaderInfo(null)).toBeNull();
   });
 });
@@ -79,5 +82,21 @@ describe('indexShifts', () => {
     const idx = indexShifts([day(), day({ therapist_id: 't2', shift_date: '2026-10-27' })]);
     expect(idx.t1['2026-10-26'].works).toBe(true);
     expect(idx.t2['2026-10-27']).toBeDefined();
+  });
+});
+
+describe('outsideReasonText (the outlined booking card names the real reason)', () => {
+  const d = day({ breaks: [{ name: 'Lunch', start_min: 780, end_min: 840 }], off: [
+    { code: 'ON_LEAVE', reason: 'leave_half', start_min: 900, end_min: 1020 },
+    { code: 'BLOCKED', reason: 'block', label: 'Training', start_min: 1020, end_min: 1080 },
+    { code: 'OTHER_BRANCH', reason: 'transfer', label: 'Sanepa', start_min: 600, end_min: 660 },
+  ] });
+  it('maps each rule to its own words', () => {
+    expect(outsideReasonText(slotVerdict(d, 480, 540))).toBe('outside hours');
+    expect(outsideReasonText(slotVerdict(d, 780, 810))).toBe('during a break');
+    expect(outsideReasonText(slotVerdict(d, 900, 960))).toBe('on leave');
+    expect(outsideReasonText(slotVerdict(d, 1030, 1060))).toBe('in a block');
+    expect(outsideReasonText(slotVerdict(d, 600, 630))).toBe('at Sanepa');
+    expect(outsideReasonText(slotVerdict(d, 700, 730))).toBeNull();
   });
 });

@@ -16,7 +16,11 @@ import {
   cancelScheduledTransfer,
   fetchTherapistTransferStatus,
   revertStaffTransferNow,
+  fetchShiftsForRange,
 } from '../../../../services/api';
+import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
+import { leaveChange, defaultHalfDayOff, validateHalfDay } from '../../../../services/availabilityConflicts';
+import { hhmmToMinutes } from '../../../../services/availability';
 
 function formatPrettyDate(d) {
   if (!d) return '—';
@@ -34,7 +38,20 @@ const ATTENDANCE_OPTIONS = [
   { value: 'Annual Leave', label: 'Annual Leave' },
   { value: 'Sick Leave', label: 'Sick Leave' },
   { value: 'Day Off', label: 'Day Off' },
+  { value: '1st-Half Day', label: '1st Half Day' },
+  { value: '2nd-Half Day', label: '2nd Half Day' },
 ];
+
+// therapist_shifts_for_range row -> the shape the half-day helpers take (null when the person doesn't work that day).
+const shiftShape = (r) => (!r || !r.works || !r.start_time ? null : {
+  start: String(r.start_time).slice(0, 5),
+  end: String(r.end_time) === '23:59:59' ? '23:59:59' : String(r.end_time).slice(0, 5),
+  breaks: r.breaks || [],
+});
+
+const isHalfDay = (status) => status === '1st-Half Day' || status === '2nd-Half Day';
+// Statuses that take the person out of (part of) the day: the "falls outside" list runs before these are saved.
+const OFF_STATUSES = ['Absent', 'Annual Leave', 'Sick Leave', 'Day Off'];
 
 const STATUS_FILTER_OPTIONS = [
   { value: 'all', label: 'All Statuses' },
@@ -44,6 +61,8 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'Annual Leave', label: 'Annual Leave' },
   { value: 'Sick Leave', label: 'Sick Leave' },
   { value: 'Day Off', label: 'Day Off' },
+  { value: '1st-Half Day', label: '1st Half Day' },
+  { value: '2nd-Half Day', label: '2nd Half Day' },
 ];
 
 const STAFF_TYPE_OPTIONS = [
@@ -72,6 +91,8 @@ function SummaryCard({ icon, iconBg, iconColor, label, value, highlight }) {
 const AttendancePanel = ({ branchId }) => {
   const today = new Date().toISOString().split('T')[0];
   const { staffLabel } = useIndustry();
+  const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
+  const [shiftByTherapist, setShiftByTherapist] = useState({});   // that date's shift per person (therapist_shifts_for_range)
 
   const [selectedDate, setSelectedDate] = useState(today);
   // Deep link from the Therapists list ("Mark attendance"): ?view=attendance&therapist=<id> shows only that person, on today.
@@ -246,11 +267,14 @@ const AttendancePanel = ({ branchId }) => {
     setError(null);
     setDayLocked(false);
 
-    const [attendanceResult, summaryResult] = await Promise.all([
+    const [attendanceResult, summaryResult, shiftsResult] = await Promise.all([
       fetchAttendance({ branchId, date: selectedDate }),
       fetchAttendanceSummary({ branchId, date: selectedDate }),
+      fetchShiftsForRange({ branchId, startDate: selectedDate, endDate: selectedDate }),
       loadPendingTransfers(),
     ]);
+    const shiftMap = Object.fromEntries((shiftsResult.data || []).map((r) => [r.therapist_id, r]));
+    setShiftByTherapist(shiftMap);
 
     if (attendanceResult.error) {
       setError(attendanceResult.error.message || 'Failed to load attendance.');
@@ -277,6 +301,9 @@ const AttendancePanel = ({ branchId }) => {
             checkInTime: t.checkInTime || '',
             checkOutTime: t.checkOutTime || '',
             notes: t.notes || '',
+            // a half day saved without exact times shows the times the split rule gives it
+            offStart: t.offStart || (isHalfDay(t.status) ? defaultHalfDayOff({ status: t.status, shift: shiftShape(shiftMap[t.therapistId]) })?.start || '' : ''),
+            offEnd: t.offEnd || (isHalfDay(t.status) ? defaultHalfDayOff({ status: t.status, shift: shiftShape(shiftMap[t.therapistId]) })?.end || '' : ''),
             dirty: false,
           };
         }
@@ -297,16 +324,46 @@ const AttendancePanel = ({ branchId }) => {
 
   useAutoRefresh(loadData, { intervalMs: 60000 });
 
+  // The shift of `therapistId` on the selected date, in the shape the half-day helpers take.
+  const shiftOf = (therapistId) => shiftShape(shiftByTherapist[therapistId]);
+
   const handleFieldChange = (therapistId, field, value) => {
-    setEdits(prev => ({
-      ...prev,
-      [therapistId]: {
-        ...prev[therapistId],
-        [field]: value,
-        dirty: true,
-      },
-    }));
+    setEdits(prev => {
+      const next = { ...prev[therapistId], [field]: value, dirty: true };
+      if (field === 'status') {
+        // A half day starts from the existing split rule (the editable times are prefilled); other statuses carry no off times.
+        if (isHalfDay(value)) {
+          const d = defaultHalfDayOff({ status: value, shift: shiftOf(therapistId) });
+          next.offStart = d?.start || '';
+          next.offEnd = d?.end || '';
+        } else {
+          next.offStart = '';
+          next.offEnd = '';
+        }
+      }
+      return { ...prev, [therapistId]: next };
+    });
   };
+
+  // Inline error for a half day's off times (null = fine or not a half day).
+  const halfDayError = (therapistId, edit = edits[therapistId]) => (
+    edit && isHalfDay(edit.status) ? validateHalfDay({ offStart: edit.offStart, offEnd: edit.offEnd, shift: shiftOf(therapistId) }) : null
+  );
+
+  // The change to list bookings for: leave / half day on the selected date. Present / not marked strand nothing.
+  const leaveCheckFor = (therapistId, status, edit = {}) => {
+    const name = therapists.find(t => t.therapistId === therapistId)?.therapistName;
+    if (OFF_STATUSES.includes(status)) return { therapistId, name, change: leaveChange({ from: selectedDate }) };
+    if (isHalfDay(status) && edit.offStart && edit.offEnd) return { therapistId, name, change: leaveChange({ from: selectedDate, offStart: edit.offStart, offEnd: edit.offEnd }) };
+    return null;
+  };
+
+  const confirmLeaves = (checks) => confirmConflicts({
+    checks: checks.filter(Boolean),
+    summary: `Marking ${selectedDate} as ${checks.length === 1 ? 'leave' : 'leave for these staff'}.`,
+    titleFor: (n) => `${n} upcoming booking${n === 1 ? '' : 's'} ${n === 1 ? 'falls' : 'fall'} during this leave`,
+    saveLabel: 'Save anyway',
+  });
 
   const handleSave = async (therapistId) => {
     const edit = edits[therapistId];
@@ -315,7 +372,15 @@ const AttendancePanel = ({ branchId }) => {
       return;
     }
 
+    const hdErr = halfDayError(therapistId, edit);
+    if (hdErr) { showToast(hdErr, 'error'); return; }
+
     setSaving(prev => ({ ...prev, [therapistId]: true }));
+
+    if (!(await confirmLeaves([leaveCheckFor(therapistId, edit.status, edit)]))) {
+      setSaving(prev => ({ ...prev, [therapistId]: false }));
+      return;
+    }
 
     const result = await markAttendance({
       therapistId,
@@ -324,6 +389,8 @@ const AttendancePanel = ({ branchId }) => {
       checkInTime: edit.checkInTime || null,
       checkOutTime: edit.checkOutTime || null,
       notes: edit.notes || null,
+      offStart: edit.offStart || null,
+      offEnd: edit.offEnd || null,
     });
 
     setSaving(prev => ({ ...prev, [therapistId]: false }));
@@ -362,6 +429,11 @@ const AttendancePanel = ({ branchId }) => {
       showToast('No changes to save.', 'error');
       return;
     }
+    if (dirtyIds.some((id) => halfDayError(id))) {
+      showToast('Fix the half-day times before saving.', 'error');
+      return;
+    }
+    if (!(await confirmLeaves(dirtyIds.map((id) => leaveCheckFor(id, edits[id].status, edits[id]))))) return;
 
     let successCount = 0;
     let lockHit = false;
@@ -377,6 +449,8 @@ const AttendancePanel = ({ branchId }) => {
         checkInTime: edit.checkInTime || null,
         checkOutTime: edit.checkOutTime || null,
         notes: edit.notes || null,
+        offStart: edit.offStart || null,
+        offEnd: edit.offEnd || null,
       });
 
       setSaving(prev => ({ ...prev, [id]: false }));
@@ -417,6 +491,8 @@ const AttendancePanel = ({ branchId }) => {
       return;
     }
 
+    if (!(await confirmLeaves(selectedIds.map((id) => leaveCheckFor(id, status, {}))))) return;
+
     let successCount = 0;
     let lockHit = false;
 
@@ -431,6 +507,8 @@ const AttendancePanel = ({ branchId }) => {
         checkInTime: edit.checkInTime || null,
         checkOutTime: edit.checkOutTime || null,
         notes: edit.notes || null,
+        offStart: null,
+        offEnd: null,
       });
 
       setSaving(prev => ({ ...prev, [id]: false }));
@@ -801,6 +879,16 @@ const AttendancePanel = ({ branchId }) => {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
+                        {(() => {
+                          // Late = checked in after that date's shift start (the same shift the calendar uses).
+                          const sh = shiftOf(t.therapistId);
+                          const late = sh && edit.checkInTime ? hhmmToMinutes(edit.checkInTime) - hhmmToMinutes(sh.start) : 0;
+                          return late > 0 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-warning/10 text-warning" title={`Shift starts ${sh.start}`}>
+                              Late {late} min
+                            </span>
+                          ) : null;
+                        })()}
                         {edit.status && (
                           <span className={`md:hidden inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium ${
                             edit.status === 'Present' ? 'bg-success/10 text-success' :
@@ -863,13 +951,13 @@ const AttendancePanel = ({ branchId }) => {
                   <div className="flex justify-center items-center gap-1.5">
                     <button
                       onClick={() => handleSave(t.therapistId)}
-                      disabled={isDisabled || !isDirty}
+                      disabled={isDisabled || !isDirty || !!halfDayError(t.therapistId, edit)}
                       className={`inline-flex items-center justify-center w-8 h-8 rounded-spa spa-transition-fast ${
-                        isDirty && !isDisabled
+                        isDirty && !isDisabled && !halfDayError(t.therapistId, edit)
                           ? 'bg-primary text-white hover:bg-primary/90'
                           : 'bg-background text-text-tertiary cursor-not-allowed'
                       }`}
-                      title={isDirty ? 'Save' : 'No changes'}
+                      title={halfDayError(t.therapistId, edit) ? 'Fix the half-day times first' : isDirty ? 'Save' : 'No changes'}
                     >
                       {isSaving ? (
                         <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
@@ -892,12 +980,44 @@ const AttendancePanel = ({ branchId }) => {
                       <Icon name="ArrowRightLeft" size={16} />
                     </button>
                   </div>
+
+                  {/* Half day: editable off times, prefilled by the split rule, validated inside that day's shift */}
+                  {isHalfDay(edit.status) && (
+                    <div className="md:col-span-full flex items-center flex-wrap gap-2 pl-9" data-testid={`half-day-${t.therapistId}`}>
+                      <span className="font-caption text-xs text-text-secondary">Off</span>
+                      <input
+                        type="time"
+                        aria-label="Off from"
+                        value={edit.offStart || ''}
+                        onChange={(e) => handleFieldChange(t.therapistId, 'offStart', e.target.value)}
+                        disabled={isDisabled}
+                        className={`px-2 py-1 rounded-spa border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${halfDayError(t.therapistId, edit) ? 'border-error' : 'border-border'}`}
+                      />
+                      <span className="font-caption text-xs text-text-secondary">to</span>
+                      <input
+                        type="time"
+                        aria-label="Off until"
+                        value={edit.offEnd || ''}
+                        onChange={(e) => handleFieldChange(t.therapistId, 'offEnd', e.target.value)}
+                        disabled={isDisabled}
+                        className={`px-2 py-1 rounded-spa border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${halfDayError(t.therapistId, edit) ? 'border-error' : 'border-border'}`}
+                      />
+                      {shiftOf(t.therapistId) && (
+                        <span className="font-caption text-xs text-text-tertiary">Shift {shiftOf(t.therapistId).start}–{shiftOf(t.therapistId).end === '23:59:59' ? '24:00' : shiftOf(t.therapistId).end}</span>
+                      )}
+                      {halfDayError(t.therapistId, edit) && (
+                        <span role="alert" className="font-caption text-xs text-error">{halfDayError(t.therapistId, edit)}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {conflictModal}
 
       {/* Transfer Modal */}
       {transferTarget && (

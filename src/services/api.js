@@ -44,6 +44,7 @@ import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
 import { buildTherapistsOverview, addDaysStr, weekDatesOf } from './therapistsOverview';
+import { isClosedDate } from '../utils/todayStatusLine';
 
 // Read-only enrichment queries share these (see services/queryHelpers.js): id lists go out in chunks, optional
 // lookups fail open after a timeout, and PostgREST caps a response at 1000 rows so paged reads use this page size.
@@ -344,6 +345,44 @@ export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
   }
 }
 
+// Upcoming open bookings a PROPOSED change would strand (availability_affected_bookings, migration-321). Read-only; the change
+// shapes are built in services/availabilityConflicts.js. Fails open: a database without migration-321 returns no rows so the
+// save still goes through (the rule itself is enforced by the database guard, this is only the early warning).
+export async function fetchAffectedBookings({ therapistId, change }) {
+  try {
+    const { data, error } = await supabase.rpc('availability_affected_bookings', { p_therapist_id: therapistId, p_change: change });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchAffectedBookings error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// What switching enforce_staff_availability ON would change today (availability_rollout_check, admin/manager of the org).
+export async function fetchAvailabilityRolloutCheck(orgId) {
+  try {
+    const { data, error } = await supabase.rpc('availability_rollout_check', { p_org_id: orgId });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchAvailabilityRolloutCheck error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin only, per tenant (migration-323: organizations has no UPDATE policy, so this goes through a SECURITY DEFINER function).
+export async function setEnforceStaffAvailability({ enabled }) {
+  try {
+    const { data, error } = await supabase.rpc('set_enforce_staff_availability', { p_value: !!enabled });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setEnforceStaffAvailability error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Everything the live availability pre-check needs for one branch + date, in three reads and no write:
 // the rule's own shifts (therapist_shifts_for_range, migration-320: weekly/roster hours, breaks, leave, blocks,
 // transfer windows) plus the day's bookings (own and companion) to detect overlaps.
@@ -498,30 +537,6 @@ export async function fetchBookingsForList(branchId, { dateFrom, dateTo }) {
     return { data: rows, error: null };
   } catch (error) {
     console.error('[API] fetchBookingsForList error:', error.message);
-    return { data: null, error };
-  }
-}
-
-/** Roster rows (with breaks) for one weekday (0 = Monday) across a set of therapists: { [therapistId]: { startTime, endTime, isDayOff, breaks } }. */
-export async function fetchRosterForDay(therapistIds, dayOfWeek) {
-  try {
-    if (!therapistIds?.length) return { data: {}, error: null };
-    const { data, error } = await supabase
-      .from('therapist_working_hours')
-      .select('therapist_id, start_time, end_time, is_day_off, therapist_working_hours_breaks(name, start_time, end_time)')
-      .in('therapist_id', therapistIds)
-      .eq('day_of_week', dayOfWeek);
-    if (error) throw error;
-    const out = {};
-    for (const r of data || []) {
-      out[r.therapist_id] = {
-        startTime: r.start_time, endTime: r.end_time, isDayOff: r.is_day_off,
-        breaks: (r.therapist_working_hours_breaks || []).map((b) => ({ name: b.name, startTime: b.start_time, endTime: b.end_time })),
-      };
-    }
-    return { data: out, error: null };
-  } catch (error) {
-    console.error('[API] fetchRosterForDay error:', error.message);
     return { data: null, error };
   }
 }
@@ -7184,17 +7199,17 @@ export async function fetchTherapistsOverview(branchId, date) {
     // Pay rates follow Payroll's rule: admin (and admin_viewer, read-only) only. Managers and staff never get them, and staff_compensation is not even read for them.
     const canSeeRates = profile.role === 'admin' || profile.role === 'admin_viewer';
     const week = weekDatesOf(date);
-    const rangeEnd = [week[6], addDaysStr(date, 1)].sort().pop();
+    const rangeEnd = [week[6], addDaysStr(date, 8)].sort().pop(); // +8: "back Tue 09:00" looks a week ahead
 
-    const [therapists, hours, overrides, attendance, bookings, links, services, comp] = await Promise.all([
+    // admin_viewer cannot read working hours (RLS); the shift RPC is SECURITY DEFINER, so it is simply not asked for them.
+    const rosterReadable = profile.role !== 'admin_viewer';
+    const [therapists, shifts, attendance, bookings, links, services, comp] = await Promise.all([
       withBranch(supabase.from('therapists')
         .select('id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years')
         .order('display_order').order('name'), scopeBranch),
-      withBranch(supabase.from('therapist_working_hours')
-        .select('therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(name, start_time, end_time, sort_order)'), scopeBranch),
-      withBranch(supabase.from('staff_roster_overrides')
-        .select('therapist_id, override_date, start_time, end_time, is_day_off')
-        .gte('override_date', week[0]).lte('override_date', rangeEnd), scopeBranch),
+      rosterReadable
+        ? supabase.rpc('therapist_shifts_for_range', { p_branch_id: scopeBranch, p_from_date: week[0], p_to_date: rangeEnd })
+        : Promise.resolve({ data: [], error: null }),
       withBranch(supabase.from('therapist_attendance').select('therapist_id, status, check_in_time, check_out_time').eq('date', date), scopeBranch),
       withBranch(supabase.from('bookings')
         .select('id, therapist_id, status, start_time, end_time, customer_name, service_name_snapshot, booking_therapists(therapist_id, start_time, end_time), booking_combo_items(therapist_id, start_time, end_time, service:services(name))')
@@ -7205,20 +7220,21 @@ export async function fetchTherapistsOverview(branchId, date) {
         ? withBranch(supabase.from('staff_compensation').select('therapist_id, monthly_salary, commission_rate, product_commission_rate, therapists!inner(branch_id)'), scopeBranch, 'therapists.branch_id')
         : Promise.resolve({ data: [], error: null }),
     ]);
-    for (const r of [therapists, hours, overrides, attendance, bookings, services, comp]) if (r.error) throw r.error;
+    for (const r of [therapists, shifts, attendance, bookings, services, comp]) if (r.error) throw r.error;
+    const closed = await fetchClosedDateRanges(scopeBranch); // best effort: a failure just means "not closed"
 
     const data = buildTherapistsOverview({
       therapists: therapists.data || [],
-      hoursRows: hours.data || [],
-      overrideRows: overrides.data || [],
+      shiftRows: shifts.data || [],
       attendanceRows: attendance.data || [],
       bookingRows: bookings.data || [],
       links: links || [],
       services: services.data || [],
       compRows: comp.data || [],
+      branchClosedToday: isClosedDate(closed.data, date),
     }, { date, nowTime: nepalNow().hm, canSeeRates });
     // admin_viewer has no SELECT policy on therapist_working_hours / staff_roster_overrides, so for them "no hours" means "can't read them".
-    return { data: { ...data, canSeeRates, rosterReadable: profile.role !== 'admin_viewer' }, error: null };
+    return { data: { ...data, canSeeRates, rosterReadable }, error: null };
   } catch (error) {
     console.error('[API] fetchTherapistsOverview error:', error.message);
     return { data: null, error };
@@ -7585,7 +7601,7 @@ export async function fetchBranchWorkingHours(branchId) {
 
     const { data, error } = await supabase
       .from('therapist_working_hours')
-      .select('therapist_id, day_of_week, start_time, end_time, is_day_off')
+      .select('therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(name, start_time, end_time, sort_order)')
       .eq('branch_id', branchId);
 
     if (error) throw error;
@@ -7598,6 +7614,9 @@ export async function fetchBranchWorkingHours(branchId) {
         startTime: row.start_time,
         endTime: row.end_time,
         isDayOff: row.is_day_off,
+        breaks: (row.therapist_working_hours_breaks || [])
+          .slice().sort((x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0))
+          .map((b) => ({ name: b.name || '', startTime: String(b.start_time).slice(0, 5), endTime: String(b.end_time).slice(0, 5) })),
       });
     });
 
@@ -7618,7 +7637,7 @@ export async function fetchRosterOverrides({ branchId, startDate, endDate }) {
 
     const { data, error } = await supabase
       .from('staff_roster_overrides')
-      .select('therapist_id, override_date, start_time, end_time, is_day_off')
+      .select('therapist_id, override_date, start_time, end_time, is_day_off, staff_roster_override_breaks(name, start_time, end_time, sort_order)')
       .eq('branch_id', branchId)
       .gte('override_date', startDate)
       .lte('override_date', endDate);
@@ -7633,6 +7652,10 @@ export async function fetchRosterOverrides({ branchId, startDate, endDate }) {
         startTime: row.start_time,
         endTime: row.end_time,
         isDayOff: row.is_day_off,
+        // breaks of that date change (migration-316); the calendar reads the same rows through the shift RPC
+        breaks: (row.staff_roster_override_breaks || [])
+          .slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+          .map((b) => ({ name: b.name || '', startTime: String(b.start_time).slice(0, 5), endTime: String(b.end_time).slice(0, 5) })),
       });
     });
 
@@ -7643,7 +7666,7 @@ export async function fetchRosterOverrides({ branchId, startDate, endDate }) {
   }
 }
 
-// overrides: [{ therapistId, date: 'YYYY-MM-DD', isDayOff, startTime, endTime }, ...] — bulk
+// overrides: [{ therapistId, date: 'YYYY-MM-DD', isDayOff, startTime, endTime, breaks?: [{ startTime, endTime, name? }] }, ...] — bulk
 // upsert for the Roster grid's "Save roster" button. Same manager/admin + branch-ownership
 // gating and start<end validation as upsertTherapistWorkingHours.
 export async function upsertRosterOverrides(overrides) {
@@ -7677,6 +7700,14 @@ export async function upsertRosterOverrides(overrides) {
       if (!o.isDayOff && (!o.startTime || !o.endTime || o.startTime >= o.endTime)) {
         return { data: null, error: { code: 'INVALID_HOURS', message: `${o.date}: start time must be before end time.` } };
       }
+      for (const b of (o.isDayOff ? [] : (o.breaks || []))) {
+        if (!b.startTime || !b.endTime || b.startTime >= b.endTime) {
+          return { data: null, error: { code: 'INVALID_BREAK', message: `${o.date}: a break's start must be before its end.` } };
+        }
+        if (b.startTime < o.startTime || b.endTime > o.endTime) {
+          return { data: null, error: { code: 'INVALID_BREAK', message: `${o.date}: breaks must sit inside the working hours.` } };
+        }
+      }
     }
 
     const payload = overrides.map(o => ({
@@ -7691,9 +7722,24 @@ export async function upsertRosterOverrides(overrides) {
     const { data, error } = await supabase
       .from('staff_roster_overrides')
       .upsert(payload, { onConflict: 'therapist_id,override_date' })
-      .select('therapist_id, override_date, start_time, end_time, is_day_off');
+      .select('id, therapist_id, override_date, start_time, end_time, is_day_off');
 
     if (error) throw error;
+
+    // Breaks: replace the saved set for every date whose caller sent a `breaks` array (a day off keeps none).
+    const idBy = new Map((data || []).map((r) => [`${r.therapist_id}_${r.override_date}`, r.id]));
+    const touched = overrides.filter((o) => Array.isArray(o.breaks) || o.isDayOff).map((o) => idBy.get(`${o.therapistId}_${o.date}`)).filter(Boolean);
+    if (touched.length > 0) {
+      const { error: delErr } = await supabase.from('staff_roster_override_breaks').delete().in('roster_override_id', touched);
+      if (delErr) throw delErr;
+      const rows = overrides.filter((o) => !o.isDayOff && Array.isArray(o.breaks)).flatMap((o) => o.breaks.map((b, i) => ({
+        roster_override_id: idBy.get(`${o.therapistId}_${o.date}`), name: b.name || null, start_time: b.startTime, end_time: b.endTime, sort_order: i,
+      })));
+      if (rows.length > 0) {
+        const { error: insErr } = await supabase.from('staff_roster_override_breaks').insert(rows);
+        if (insErr) throw insErr;
+      }
+    }
     return { data, error: null };
   } catch (error) {
     console.error('[API] upsertRosterOverrides error:', error.message);
@@ -10798,7 +10844,9 @@ export async function getRiskIndicators({ branchId, date }) {
 // Phase 10F-2: Therapist Attendance API (Read + Write)
 // ============================================================
 
-const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Annual Leave', 'Sick Leave', 'Day Off'];
+const VALID_ATTENDANCE_STATUSES = ['Present', 'Absent', 'Annual Leave', 'Sick Leave', 'Day Off', '1st-Half Day', '2nd-Half Day'];
+
+const isHalfDayStatus = (status) => status === '1st-Half Day' || status === '2nd-Half Day';
 
 // Statuses that mean the staffer isn't working that day — not deducted from salary (see
 // migration-151) and block booking assignment for the date, same as the legacy 'Leave' value
@@ -10855,7 +10903,7 @@ export async function fetchAttendance({ branchId, date }) {
     therapistsQuery = withBranch(therapistsQuery, branchId);
     const attendanceQuery = supabase
       .from('therapist_attendance')
-      .select('therapist_id, status, check_in_time, check_out_time, notes')
+      .select('therapist_id, status, check_in_time, check_out_time, notes, off_start, off_end')
       .eq('date', targetDate);
     const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceQuery]);
     if (therapistsResult.error) throw therapistsResult.error;
@@ -10881,6 +10929,8 @@ export async function fetchAttendance({ branchId, date }) {
         checkInTime: formatTimeKathmandu(att?.check_in_time),
         checkOutTime: formatTimeKathmandu(att?.check_out_time),
         notes: att?.notes || null,
+        offStart: att?.off_start ? String(att.off_start).slice(0, 5) : null,   // half day: exact off times (migration-316)
+        offEnd: att?.off_end ? String(att.off_end).slice(0, 5) : null,
       };
     });
 
@@ -10933,7 +10983,7 @@ export async function fetchAttendanceByTherapistIds({ therapistIds, date }) {
  * Uses INSERT-first, UPDATE on UNIQUE violation.
  * Lets DB trigger enforce closed-day lock (P0004).
  */
-export async function markAttendance({ therapistId, date, status, checkInTime, checkOutTime, notes }) {
+export async function markAttendance({ therapistId, date, status, checkInTime, checkOutTime, notes, offStart = null, offEnd = null }) {
   try {
     // 1. Validate status
     if (!VALID_ATTENDANCE_STATUSES.includes(status)) {
@@ -10978,6 +11028,9 @@ export async function markAttendance({ therapistId, date, status, checkInTime, c
       check_out_time: combineDateTimeKathmandu(targetDate, checkOutTime),
       notes: notes || null,
       marked_by: user.id,
+      // exact off times only mean something for a half day; any other status clears them
+      off_start: isHalfDayStatus(status) && offStart && offEnd ? offStart : null,
+      off_end: isHalfDayStatus(status) && offStart && offEnd ? offEnd : null,
     };
 
     // 5. Try INSERT first
@@ -11001,6 +11054,8 @@ export async function markAttendance({ therapistId, date, status, checkInTime, c
           check_out_time: combineDateTimeKathmandu(targetDate, checkOutTime),
           notes: notes || null,
           marked_by: user.id,
+          off_start: row.off_start,
+          off_end: row.off_end,
         })
         .eq('therapist_id', therapistId)
         .eq('date', targetDate)

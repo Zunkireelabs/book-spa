@@ -56,7 +56,7 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false, outsideHours = false }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false, outsideHours = null }) => {
   const colors = getBookingStatusColors(booking.status);
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
@@ -153,7 +153,6 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       data-booking-card="true"
       data-booking-key={booking.bookingId || booking.id}
       data-outside-hours={outsideHours ? 'true' : undefined}
-      title={outsideHours ? 'Outside this staff member\'s hours' : undefined}
       data-booking-id={(booking.isShared || booking.isRoomShared || booking.isCombo) ? booking.bookingId : undefined}
       data-shared={(booking.isShared || booking.isRoomShared || booking.isCombo) ? 'true' : undefined}
       data-bar={(booking.isShared || booking.isRoomShared || booking.isCombo) ? colors.bar : undefined}
@@ -237,7 +236,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             </div>
             <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
               {rangeLabel}{booking.serviceName ? ` · ${booking.serviceName}` : ''}
-              {outsideHours && <span className="font-medium" style={{ color: OUTSIDE_HOURS_OUTLINE }}> · outside hours</span>}
+              {outsideHours && <span className="font-medium" style={{ color: OUTSIDE_HOURS_OUTLINE }}> · {outsideHours}</span>}
             </div>
             {isTall && columnMode === 'room' && booking.therapistName && (
               <div className="font-body text-[11px] text-text-tertiary leading-tight truncate flex-shrink-0">

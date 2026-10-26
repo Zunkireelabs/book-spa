@@ -4,6 +4,8 @@ import { Note, Loading, Problem } from './ui';
 import { changedHourDays } from '../profileModel';
 import { formatMinutes, dayWorkingMinutes, DB_DOW_LABELS } from '../../../utils/staffDay';
 import { SHADE_STYLES } from '../../../services/availabilityShading';
+import { useOrg } from '../../../contexts/OrgContext';
+import { useIndustry } from '../../../hooks/useIndustry';
 
 const short = (t) => String(t || '').slice(0, 5);
 
@@ -39,13 +41,19 @@ const HoursView = ({ rows }) => {
 const HoursSection = ({
   editing, rows, savedRows, onChange, readOnly, overrides, overridesLoading, overridesError, canOpenRoster, openRoster, isCreate, hidden = false,
 }) => {
+  const { enforceStaffAvailability } = useOrg();
+  const { staffLabel } = useIndustry();
   if (hidden) return <div className="mt-4"><Note icon="Lock">Working hours aren't shown to view-only accounts.</Note></div>;
   return (
     <div>
       {editing ? (
         <div className="mt-4">
           <WorkingHoursSection rows={rows} onChange={onChange} readOnly={readOnly} changedDays={changedHourDays(savedRows, rows)} />
-          <div className="mt-4"><Note icon="AlertTriangle">Hours and breaks are for planning and attendance. Bookings can still be made during them; that rule is unchanged.</Note></div>
+          <div className="mt-4"><Note icon="AlertTriangle">
+            {enforceStaffAvailability
+              ? `The availability rule is on: a booking can only be made inside these hours and outside breaks. Staff and online booking can't book outside them; managers and admins can book anyway with a reason.`
+              : `Hours and breaks are for planning and attendance. The availability rule is off, so bookings can still be made outside them. A ${staffLabel.toLowerCase()} with no hours set can be booked within branch hours.`}
+          </Note></div>
         </div>
       ) : <HoursView rows={rows} />}
 

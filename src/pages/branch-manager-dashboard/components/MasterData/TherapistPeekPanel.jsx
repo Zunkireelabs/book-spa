@@ -109,12 +109,12 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
           </div>
           <div className="grid grid-cols-7 gap-1.5">
             {t.weekDays.map((d, i) => {
-              const off = d.source === 'none' || d.isDayOff;
+              const off = d.missing || d.isDayOff;
               const isToday = d.date === today;
               return (
                 <div key={d.date} data-week-day={d.date} className={`rounded-lg border px-1 py-1.5 text-center ${isToday ? 'border-primary border-2 py-[5px]' : 'border-border'} ${off ? 'bg-[#FAFAF9] text-[#B4B4BA]' : ''}`}>
                   <p className="text-[11.5px] font-semibold text-inherit">{DB_DOW_LABELS[i].slice(0, 3)}</p>
-                  <p className="text-[11px] tabular-nums text-[#8A8A90]">{d.source === 'none' ? '—' : d.isDayOff ? 'Off' : shortRange(d)}</p>
+                  <p className="text-[11px] tabular-nums text-[#8A8A90]">{d.missing ? '—' : d.isDayOff ? 'Off' : d.openNoHours ? 'Open' : shortRange(d)}</p>
                   {d.source === 'override' && <p className="text-[9.5px] text-[#B45309] font-medium leading-none mt-0.5">changed</p>}
                 </div>
               );
