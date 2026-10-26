@@ -32,7 +32,7 @@ import { todayStr, addDays, addMonths, getStepDays } from './calendarDates';
 
 const OperationalCalendar = ({ branchId }) => {
   const { profile } = useAuth();
-  const { orgSettings } = useOrg();
+  const { orgSettings, enforceStaffAvailability } = useOrg();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Deep link from the Therapists list ("See on calendar"): ?view=calendar&therapist=<id> shows only that person's column.
@@ -109,7 +109,7 @@ const OperationalCalendar = ({ branchId }) => {
 
 
   const {
-    calendarData, setCalendarData, error, attendanceMap, blocksAvailable, transfersAvailable,
+    calendarData, setCalendarData, error, attendanceMap, shiftsByTherapist, blocksAvailable, transfersAvailable,
     fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder,
   } = useCalendarData({ branchId, currentDate, viewMode });
 
@@ -130,7 +130,8 @@ const OperationalCalendar = ({ branchId }) => {
     if (!calendarData?.therapists) return [];
     let list = calendarData.therapists;
     if (focusTherapistId) return list.filter(t => t.id === focusTherapistId);
-    list = list.filter(t => !attendanceMap[t.id]);
+    // Only absent staff are hidden; someone on leave keeps their column (purple shade, header "On leave") so the day's plan stays visible.
+    list = list.filter(t => attendanceMap[t.id] !== 'Absent');
     if (showServiceOnly) {
       list = list.filter(t => t.is_service_staff !== false);
     }
@@ -312,6 +313,7 @@ const OperationalCalendar = ({ branchId }) => {
                   bookings={calendarData.bookings}
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
+                  shiftsByTherapist={shiftsByTherapist}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
                   onBookingClick={handleBookingClick}
                   onBookingResize={handleBookingResize}
@@ -378,7 +380,16 @@ const OperationalCalendar = ({ branchId }) => {
           </div>
         </div>
 
-        <DragPreviewOverlay activeDragBlock={activeDragBlock} activeDragBooking={activeDragBooking} overSlotData={overSlotData} />
+        <DragPreviewOverlay
+          activeDragBlock={activeDragBlock}
+          activeDragBooking={activeDragBooking}
+          overSlotData={overSlotData}
+          columnMode={columnMode}
+          shiftsByTherapist={shiftsByTherapist}
+          therapists={calendarData?.therapists}
+          enforce={enforceStaffAvailability}
+          canOverride={['manager', 'admin'].includes(profile?.role)}
+        />
       </DndContext>
 
       {/* Rebook floating cursor card */}
@@ -465,8 +476,15 @@ const OperationalCalendar = ({ branchId }) => {
           x={choiceMenuSlot.clientX}
           y={choiceMenuSlot.clientY}
           onClose={() => setChoiceMenuSlot(null)}
+          header={choiceMenuSlot.reason || null}
           options={[
-            ...(isOverallBranch(branchId) ? [] : [{ key: 'booking', label: 'Add booking', icon: 'CalendarPlus', onSelect: () => openQuickCreateForSlot(choiceMenuSlot) }]),
+            // On shaded time the slot is "not bookable" for staff (and for anyone when the reason can't be overridden, e.g. leave).
+            // Managers/admins can still open the form: it shows the amber notice and asks for a reason on save.
+            ...(isOverallBranch(branchId) ? [] : [{
+              key: 'booking', label: 'Add booking', icon: 'CalendarPlus', onSelect: () => openQuickCreateForSlot(choiceMenuSlot),
+              disabled: !!choiceMenuSlot.reason && enforceStaffAvailability && !(['manager', 'admin'].includes(profile?.role) && choiceMenuSlot.reasonOverridable),
+              note: 'not bookable',
+            }]),
             ...(isOverallBranch(branchId) ? [] : [{ key: 'block', label: 'Add block', icon: 'Ban', onSelect: () => openOnlyPanel(() => setAddBlockSlot(choiceMenuSlot)) }]),
             // Transfer is a therapist-column action for managers/admins only (the RPC enforces it too).
             ...(!isOverallBranch(branchId) && transfersAvailable && choiceMenuSlot.colType === 'therapist' && ['manager', 'admin'].includes(profile?.role) ? [{

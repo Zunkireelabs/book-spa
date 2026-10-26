@@ -3,6 +3,7 @@ import {
   getCalendarBookings,
   fetchBlocksForRange,
   fetchTransferOccurrences,
+  fetchShiftsForRange,
   isTransferFeatureMissing,
   fetchAttendance,
   LEAVE_LIKE_ATTENDANCE_STATUSES,
@@ -11,6 +12,7 @@ import {
   invalidateBookingDayCounts,
 } from '../../../../../services/api';
 import { getDateRange } from '../calendarDates';
+import { indexShifts } from '../../../../../services/availabilityShading';
 
 // Calendar data for the visible range: bookings/therapists/rooms, block + transfer occurrences, attendance, the
 // blocks/transfers availability flags, and the optimistic column-reorder handlers. Auto-refresh is wired by the
@@ -23,6 +25,8 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
 
   // Attendance indicators
   const [attendanceMap, setAttendanceMap] = useState({});
+  // Availability rule rows for the visible range, { [therapistId]: { [date]: row } } (therapist_shifts_for_range).
+  const [shiftsByTherapist, setShiftsByTherapist] = useState({});
 
   // False when the DB has no manual_blocks table yet (migration-001 not applied): hides "Add block".
   const [blocksAvailable, setBlocksAvailable] = useState(true);
@@ -37,11 +41,12 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
     setLoading(true);
     setError(null);
 
-    const [result, attResult, blocksResult, transferResult] = await Promise.all([
+    const [result, attResult, blocksResult, transferResult, shiftsResult] = await Promise.all([
       getCalendarBookings(branchId, startDate, endDate),
       fetchAttendance({ branchId, date: startDate }),
       fetchBlocksForRange(branchId, startDate, endDate),
       fetchTransferOccurrences(branchId, startDate, endDate),
+      fetchShiftsForRange({ branchId, startDate, endDate }),
     ]);
 
     if (result.error) {
@@ -65,6 +70,7 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
       }
     }
     setAttendanceMap(attMap);
+    setShiftsByTherapist(indexShifts(shiftsResult.data));
     setLoading(false);
   }, [branchId]);
 
@@ -134,7 +140,7 @@ export function useCalendarData({ branchId, currentDate, viewMode }) {
 
 
   return {
-    calendarData, setCalendarData, loading, error, attendanceMap, blocksAvailable, transfersAvailable,
+    calendarData, setCalendarData, loading, error, attendanceMap, shiftsByTherapist, blocksAvailable, transfersAvailable,
     fetchData, refreshCalendar, handleTherapistReorder, handleRoomReorder,
   };
 }

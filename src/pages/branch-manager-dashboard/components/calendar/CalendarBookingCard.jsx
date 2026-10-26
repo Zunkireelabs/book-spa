@@ -6,6 +6,7 @@ import Icon from '../../../../components/AppIcon';
 import { getBookingStatusColors, UNPAID_DOT_COLOR } from '../../../../utils/bookingStatusColors';
 import { useBookingHover, HOVER_CARD_ID } from './BookingHoverCard';
 import { formatClockTime } from './timeFormat';
+import { OUTSIDE_HOURS_OUTLINE } from '../../../../services/availabilityShading';
 
 // Compact range: "2:30–3:15pm", or "11:30am–12:15pm" when the period differs; "14:30–15:15" in 24h mode
 function compactRange12h(startStr, endStr, use24h = false) {
@@ -55,7 +56,7 @@ export function canDragBooking(booking) {
   return true;
 }
 
-const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false }) => {
+const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, isPanelSelected = false, isLinkedActive = false, onSharedActivate, onSharedDeactivate, hideSensitive = false, use24h = false, outsideHours = false }) => {
   const colors = getBookingStatusColors(booking.status);
   const isUnpaid = booking.paymentStatus === 'unpaid';
   const isPaid = booking.paymentStatus === 'paid';
@@ -151,6 +152,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
       } ${isSelected ? 'ring-2 ring-primary ring-offset-1' : ''} ${isPanelSelected ? 'ring-2 ring-primary z-[3]' : ''}`}
       data-booking-card="true"
       data-booking-key={booking.bookingId || booking.id}
+      data-outside-hours={outsideHours ? 'true' : undefined}
+      title={outsideHours ? 'Outside this staff member\'s hours' : undefined}
       data-booking-id={(booking.isShared || booking.isRoomShared || booking.isCombo) ? booking.bookingId : undefined}
       data-shared={(booking.isShared || booking.isRoomShared || booking.isCombo) ? 'true' : undefined}
       data-bar={(booking.isShared || booking.isRoomShared || booking.isCombo) ? colors.bar : undefined}
@@ -163,6 +166,8 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
         backgroundColor: booking._isFaded ? `color-mix(in srgb, ${colors.fill} 55%, white)` : colors.fill,
         borderLeft: `3px solid ${booking._isFaded ? `color-mix(in srgb, ${colors.bar} 50%, transparent)` : colors.bar}`,
         opacity: isDragging ? 0.3 : 1,
+        // Booked before the therapist's hours / break / leave changed: left where it is, flagged (ZNLY-100).
+        ...(outsideHours && !isDragging ? { boxShadow: `inset 0 0 0 1.5px ${OUTSIDE_HOURS_OUTLINE}` } : {}),
         // Linked highlight (all copies of the hovered/focused/open shared booking); the panel ring wins on the open card.
         ...(isLinkedActive && !isPanelSelected && !isDragging ? { outline: `1.5px solid ${colors.bar}`, outlineOffset: 1 } : {}),
       }}
@@ -232,6 +237,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
             </div>
             <div className="font-body text-[11px] text-text-secondary leading-tight truncate flex-shrink-0">
               {rangeLabel}{booking.serviceName ? ` · ${booking.serviceName}` : ''}
+              {outsideHours && <span className="font-medium" style={{ color: OUTSIDE_HOURS_OUTLINE }}> · outside hours</span>}
             </div>
             {isTall && columnMode === 'room' && booking.therapistName && (
               <div className="font-body text-[11px] text-text-tertiary leading-tight truncate flex-shrink-0">

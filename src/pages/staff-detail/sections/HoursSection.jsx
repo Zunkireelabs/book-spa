@@ -3,6 +3,7 @@ import WorkingHoursSection from '../components/WorkingHoursSection';
 import { Note, Loading, Problem } from './ui';
 import { changedHourDays } from '../profileModel';
 import { formatMinutes, dayWorkingMinutes, DB_DOW_LABELS } from '../../../utils/staffDay';
+import { SHADE_STYLES } from '../../../services/availabilityShading';
 
 const short = (t) => String(t || '').slice(0, 5);
 
@@ -24,7 +25,7 @@ const HoursView = ({ rows }) => {
           <div key={r.dayOfWeek} className={`grid grid-cols-[56px_1fr_auto] gap-3 py-2.5 border-b border-border/60 text-sm items-baseline ${working ? '' : 'text-text-secondary'}`}>
             <span className="font-medium">{DB_DOW_LABELS[r.dayOfWeek].slice(0, 3)}</span>
             <span className="tabular-nums">
-              {working ? <>{short(r.startTime)} – {short(r.endTime)}{breaks.length > 0 && <span className="text-text-secondary"> · {breaks.map((b) => `${(b.name || 'break').toLowerCase()} ${short(b.startTime)}–${short(b.endTime)}`).join(', ')}</span>}</> : 'Day off'}
+              {working ? <>{short(r.startTime)} – {short(r.endTime)}{breaks.length > 0 && <span style={{ color: SHADE_STYLES.break.color }}> · {breaks.map((b) => `${(b.name || 'break').toLowerCase()} ${short(b.startTime)}–${short(b.endTime)}`).join(', ')}</span>}</> : 'Day off'}
             </span>
             <span className="text-right text-text-secondary tabular-nums">{working ? formatMinutes(dayWorkingMinutes(r)) : ''}</span>
           </div>

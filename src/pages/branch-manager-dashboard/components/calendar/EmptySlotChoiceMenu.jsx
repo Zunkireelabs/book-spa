@@ -8,7 +8,7 @@ import Icon from '../../../../components/AppIcon';
 const MENU_WIDTH = 200;
 const ITEM_HEIGHT = 36;
 
-const EmptySlotChoiceMenu = ({ x, y, options, onClose }) => {
+const EmptySlotChoiceMenu = ({ x, y, options, onClose, header = null }) => {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -26,7 +26,7 @@ const EmptySlotChoiceMenu = ({ x, y, options, onClose }) => {
     };
   }, [onClose]);
 
-  const height = options.length * ITEM_HEIGHT + 8;
+  const height = options.length * ITEM_HEIGHT + 8 + (header ? 30 : 0);
   // No click coordinates (e.g. opened from the "+N" badge): centre it rather than pinning to 0,0.
   const hasPoint = x != null && y != null && (x > 0 || y > 0);
   const baseX = hasPoint ? x : (window.innerWidth - MENU_WIDTH) / 2;
@@ -41,17 +41,25 @@ const EmptySlotChoiceMenu = ({ x, y, options, onClose }) => {
       className="fixed z-dropdown bg-surface rounded-spa-lg border border-border shadow-spa-elevated py-1"
       style={{ left, top, width: MENU_WIDTH }}
     >
+      {header && (
+        <div className="px-3 pt-1 pb-1.5 mb-1 border-b border-border text-[12px] font-body leading-snug" style={{ color: '#B45309' }} data-menu-reason="true">
+          {header}
+        </div>
+      )}
       {options.map((opt) => (
         <button
           key={opt.key}
           type="button"
           role="menuitem"
-          onClick={() => { onClose(); opt.onSelect(); }}
-          className="w-full flex items-center gap-2 px-3 text-[13px] font-body text-text-primary hover:bg-background text-left"
+          disabled={opt.disabled}
+          aria-disabled={opt.disabled || undefined}
+          onClick={() => { if (opt.disabled) return; onClose(); opt.onSelect(); }}
+          className={`w-full flex items-center gap-2 px-3 text-[13px] font-body text-left ${opt.disabled ? 'text-text-tertiary cursor-not-allowed' : 'text-text-primary hover:bg-background'}`}
           style={{ height: ITEM_HEIGHT }}
         >
           <Icon name={opt.icon} size={15} className="text-text-secondary flex-shrink-0" />
           <span>{opt.label}</span>
+          {opt.disabled && opt.note && <span className="ml-auto text-[11px] text-text-tertiary">{opt.note}</span>}
         </button>
       ))}
     </div>

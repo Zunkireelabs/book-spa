@@ -22,6 +22,8 @@ import {
 } from './calendarLayout';
 import { PANEL_WIDTH } from '../../../../components/ui/SidePanel';
 import { findBlockOverlap, formatBlockRange } from '../../../../utils/blockOverlap';
+import { SHADE_STYLES, buildShadeSegments, shiftHeaderInfo, slotVerdict, isOutsideShift } from '../../../../services/availabilityShading';
+import { hhmmToMinutes } from '../../../../services/availability';
 
 // Export these constants for time calculation in parent
 export const SLOT_HEIGHT = 36; // px per 30-min slot (72px per hour) - for visual grid lines
@@ -135,16 +137,17 @@ const SortableColumnHeader = ({ id, children, minWidth }) => {
 // explicit difference, so unifying a view later is a one-line change here:
 //   gridLines         draw the hour/half-hour hairlines inside the column (otherwise the parent row draws them once)
 //   nowLine           draw the now-line inside the column, before or after the droppable zone (null: the parent row draws it)
+//   shading           per-therapist availability shading (off shift / break / leave / other branch), see renderShadeOverlays
 //   checkoutOverlay   grey "Checked out" shading for a therapist who has clocked out for the day
 //   transferOverlays  transferred-out / visiting shading (the data it needs is only attached to Day-view therapist columns)
 //   cardInteractions  shared-booking card resize + Cmd/Ctrl multi-select on the cards
 const COLUMN_BODY = {
   // Day view: therapist or room column
-  column: { gridLines: false, nowLine: null, checkoutOverlay: true, transferOverlays: true, cardInteractions: true },
+  column: { gridLines: false, nowLine: null, shading: true, checkoutOverlay: true, transferOverlays: true, cardInteractions: true },
   // Day view: pinned Unassigned column
-  unassigned: { gridLines: true, nowLine: 'before-droppable', checkoutOverlay: false, transferOverlays: false, cardInteractions: false },
+  unassigned: { gridLines: true, nowLine: 'before-droppable', shading: false, checkoutOverlay: false, transferOverlays: false, cardInteractions: false },
   // 4-Day view: one column per day, all therapists/rooms merged
-  multiDay: { gridLines: false, nowLine: 'after-droppable', checkoutOverlay: false, transferOverlays: false, cardInteractions: false },
+  multiDay: { gridLines: false, nowLine: 'after-droppable', shading: false, checkoutOverlay: false, transferOverlays: false, cardInteractions: false },
 };
 
 const CalendarGrid = ({
@@ -153,6 +156,7 @@ const CalendarGrid = ({
   bookings,
   branchHours,
   attendanceMap,
+  shiftsByTherapist = {},
   checkedOutByTherapistAndDate,
   onBookingClick,
   onBookingResize,
@@ -1089,13 +1093,14 @@ const CalendarGrid = ({
           ? 'Please allocate the customer to a dedicated room'
           : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a therapist and allocate the room`)
       : null;
+    const hdrShift = col.type === 'therapist' && viewMode === 'day' ? shiftHeaderInfo(shiftOf(col.id, currentDate)) : null;
     const initials = col.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
     return (
       <div
         key={col.id}
         className="relative flex-1 border-r border-border last:border-r-0 px-2 h-10 flex items-center justify-center"
         style={{ minWidth: minColWidth }}
-        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || col.name)}
+        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || (hdrShift ? `${col.name} · ${hdrShift.text}` : col.name))}
         onMouseLeave={hideHeaderTooltip}
       >
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1126,9 +1131,17 @@ const CalendarGrid = ({
               >
                 Transfer at {formatClockTime(col.scheduledTransfer.startTime, use24h)} · Cancel
               </button>
-            ) : activeBlock && (
+            ) : activeBlock ? (
               <span className="font-body text-[10px] leading-tight text-text-tertiary truncate">
                 back at {formatClockTime(activeBlock.toTime, use24h)}
+              </span>
+            ) : hdrShift && (
+              <span
+                data-shift-line={hdrShift.tone}
+                className="font-data text-[10px] leading-tight truncate text-text-tertiary"
+                style={{ color: hdrShift.tone === 'leave' ? SHADE_STYLES.leave.color : hdrShift.tone === 'shift' ? undefined : SHADE_STYLES.off.color }}
+              >
+                {hdrShift.text}
               </span>
             )}
           </span>
@@ -1194,10 +1207,7 @@ const CalendarGrid = ({
     const beforeHeight = Math.max(0, businessStartHour - openHour) * eHH;
     const afterTop = (Math.max(businessEndHour, openHour) - openHour) * eHH + TOP_PAD;
     const afterHeight = Math.max(0, closeHour - businessEndHour) * eHH;
-    const stripeStyle = {
-      backgroundImage: 'repeating-linear-gradient(45deg, var(--color-border) 0, var(--color-border) 1px, transparent 1px, transparent 9px)',
-      backgroundColor: 'var(--color-background)',
-    };
+    const stripeStyle = { background: SHADE_STYLES.off.background };   // plain off-hours grey; stripes are for blocks only
     return (
       <>
         {beforeHeight > 0 && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: TOP_PAD, height: beforeHeight, ...stripeStyle }} />}
@@ -1413,6 +1423,19 @@ const CalendarGrid = ({
     document.addEventListener('keydown', onKey, true);
   };
 
+  // ── Availability shading (ZNLY-100) ─────────────────────────
+  // Rows come from therapist_shifts_for_range; nothing here works out a shift. The 4-Day / Week columns are days with every
+  // therapist's bookings merged, so there is no per-therapist time axis to shade there: Day view only.
+  const shiftOf = (thId, day) => (thId ? shiftsByTherapist?.[thId]?.[day] || null : null);
+  const shadeTherapistId = (col) => (viewMode === 'day' && col.type === 'therapist' ? col.id : null);
+  const minToTop = (min) => (min - openHour * 60) / 60 * eHH + TOP_PAD;
+  const fmtHHMM = (t) => formatClockTime(t, use24h);
+  const openSlot = (info) => {
+    const start = info.hour * 60 + info.minute;
+    const v = info.colType === 'therapist' ? slotVerdict(shiftOf(info.colId, info.day), start, start + 30, { therapistName: info.colName }) : null;
+    onEmptySlotClick?.({ ...info, reason: v?.message || null, reasonOverridable: v ? v.overridable : null });
+  };
+
   const handleColumnClick = (e, day, col) => {
     if (activeDragId || !onEmptySlotClick) return;
     const relativeY = e.clientY - e.currentTarget.getBoundingClientRect().top - TOP_PAD;
@@ -1420,7 +1443,7 @@ const CalendarGrid = ({
     const hour = Math.floor(minutesFromTop / 60) + openHour;
     const minute = Math.floor((minutesFromTop % 60) / HOVER_SNAP_MIN) * HOVER_SNAP_MIN;
     if (hour < openHour || hour >= closeHour) return;
-    onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour, minute, clientX: e.clientX, clientY: e.clientY });
+    openSlot({ day, colId: col.id, colName: col.name, colType: col.type, hour, minute, clientX: e.clientX, clientY: e.clientY });
   };
 
   // Checked-out overlay: therapist has already clocked out for this specific day,
@@ -1428,6 +1451,39 @@ const CalendarGrid = ({
   // still reach the column's own onClick, separately blocked in
   // onEmptySlotClick/handleDragEnd. Sits below the booking cards (rendered
   // after) so cards stay visible.
+  // Plain grey = off shift, amber stripes = break, purple stripes = leave, grey stripes + label = at another branch.
+  // Blocks keep their own interactive layer (renderManualBlocks). Pointer-events stay on so the title tooltip works;
+  // clicks bubble to the column, so an empty-slot click on shaded time still reaches the menu (which explains why).
+  const renderShadeOverlays = (col, day) => {
+    const thId = shadeTherapistId(col);
+    const row = shiftOf(thId, day);
+    if (!row) return null;
+    const name = (therapists.find((t) => t.id === thId) || {}).name;
+    const lo = openHour * 60;
+    const hi = closeHour * 60;
+    return buildShadeSegments(row, fmtHHMM).map((seg, i) => {
+      const s0 = Math.max(seg.startMin, lo);
+      const e0 = Math.min(seg.endMin, hi);
+      if (e0 <= s0) return null;
+      const height = (e0 - s0) / 60 * eHH;
+      const look = SHADE_STYLES[seg.kind];
+      const tip = seg.label || slotVerdict(row, seg.startMin, seg.endMin, { therapistName: name })?.message || undefined;
+      return (
+        <div
+          key={`shade-${seg.kind}-${seg.startMin}-${i}`}
+          data-shade={seg.kind}
+          title={tip}
+          className="absolute inset-x-0 overflow-hidden"
+          style={{ top: minToTop(s0), height, background: look.background }}
+        >
+          {seg.label && height >= 28 && (
+            <span className="absolute left-2 top-1 font-body text-[11px] leading-tight truncate pr-2" style={{ color: look.color, maxWidth: '100%' }}>{seg.label}</span>
+          )}
+        </div>
+      );
+    });
+  };
+
   const renderCheckoutOverlay = (col, day) => {
     const range = getCheckoutBlockRange(col, day);
     if (!range) return null;
@@ -1480,6 +1536,12 @@ const CalendarGrid = ({
                 columnMode={columnMode}
                 hideSensitive={hideSensitive}
                 use24h={use24h}
+                outsideHours={(() => {
+                  const thId = viewMode === 'day' ? shadeTherapistId(col) : null;
+                  const row = shiftOf(thId, day);
+                  return !!row && !!booking.startTime && !!booking.endTime
+                    && isOutsideShift(row, hhmmToMinutes(booking.startTime), hhmmToMinutes(booking.endTime));
+                })()}
                 style={{
                   top: timeToTop(booking.startTime) - clusterTop,
                   height: timeToHeight(booking.startTime, booking.endTime),
@@ -1520,7 +1582,7 @@ const CalendarGrid = ({
                 // cluster.length > MAX_VISIBLE_OVERLAP, so hidden always has ≥1 item).
                 const anchorTime = hidden.length ? earliestStartTime(hidden) : cluster[0].startTime;
                 const [h, m] = anchorTime.split(':').map(Number);
-                onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
+                openSlot({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m });
               } : null}
               style={{
                 top: hiddenTop,
@@ -1548,7 +1610,7 @@ const CalendarGrid = ({
                 e.stopPropagation();
                 if (activeDragId) return;
                 const [h, m] = cluster[0].startTime.split(':').map(Number);
-                onEmptySlotClick({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m, clientX: e.clientX, clientY: e.clientY });
+                openSlot({ day, colId: col.id, colName: col.name, colType: col.type, hour: h, minute: m, clientX: e.clientX, clientY: e.clientY });
               }}
             >
               <Icon name="Plus" size={12} />
@@ -1575,6 +1637,7 @@ const CalendarGrid = ({
         isActive={!!activeDragId}
       />
       {v.nowLine === 'after-droppable' && renderNowIndicator(day, nowDot)}
+      {v.shading && renderShadeOverlays(col, day)}
       {v.checkoutOverlay && renderCheckoutOverlay(col, day)}
       {v.transferOverlays && renderTransferOverlays(col, day)}
       {renderManualBlocks(col, day)}

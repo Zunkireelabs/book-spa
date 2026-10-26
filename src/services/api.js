@@ -331,6 +331,19 @@ export async function fetchTherapistAvailabilityWindow(orgSlug, branchId, startD
   return { bookings: data || [] };
 }
 
+// The rule's own per-therapist, per-day shifts for the calendar's visible range (therapist_shifts_for_range). Best-effort:
+// the calendar still renders without shading if this fails (e.g. a database without migration-320).
+export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
+  try {
+    const { data, error } = await supabase.rpc('therapist_shifts_for_range', { p_branch_id: branchId, p_from_date: startDate, p_to_date: endDate });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchShiftsForRange error:', error.message);
+    return { data: [], error };
+  }
+}
+
 // Everything the live availability pre-check needs for one branch + date, in three reads and no write:
 // the rule's own shifts (therapist_shifts_for_range, migration-320: weekly/roster hours, breaks, leave, blocks,
 // transfer windows) plus the day's bookings (own and companion) to detect overlaps.
