@@ -9,6 +9,7 @@ import {
   upsertRosterOverrides,
   fetchBlocksForRange,
 } from '../../../../services/api';
+import { isoDayOfWeek } from '../../../../services/rosterSchedule';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -16,12 +17,6 @@ const AVATAR_PALETTE = ['bg-primary', 'bg-secondary', 'bg-accent', 'bg-blue-600'
 
 function toLocalISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-// JS Date#getDay() is 0=Sunday..6=Saturday; therapist_working_hours.day_of_week (migration-275)
-// is 0=Monday..6=Sunday. This converts between the two.
-function isoDayOfWeek(d) {
-  return (d.getDay() + 6) % 7;
 }
 
 function to12h(timeStr) {

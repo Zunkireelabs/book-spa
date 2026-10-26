@@ -40,6 +40,8 @@ import {
   revertStaffTransferNow,
   fetchServiceComboComponents,
   createComboBookingItems,
+  fetchBranchWorkingHours,
+  fetchRosterOverrides,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -1705,6 +1707,10 @@ const OperationalCalendar = ({ branchId }) => {
 
   // Attendance indicators
   const [attendanceMap, setAttendanceMap] = useState({});
+  // { weeklyByTherapist: Map<therapistId, weeklyRows[]>, overridesByKey: Map<`id_date`, row> }
+  // — recurring weekly hours + breaks (migration-275/278) and per-date roster
+  // overrides (migration-287), for the grid's per-column roster shading.
+  const [rosterLookup, setRosterLookup] = useState({ weeklyByTherapist: null, overridesByKey: null });
 
   // Available position options for filter (from service staff only)
   const calendarPositionOptions = useMemo(() => {
@@ -1914,10 +1920,12 @@ const OperationalCalendar = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const [result, attResult, blocksResult] = await Promise.all([
+    const [result, attResult, blocksResult, workingHoursResult, rosterResult] = await Promise.all([
       getCalendarBookings(branchId, startDate, endDate),
       fetchAttendance({ branchId, date: startDate }),
       fetchBlocksForRange(branchId, startDate, endDate),
+      fetchBranchWorkingHours(branchId),
+      fetchRosterOverrides({ branchId, startDate, endDate }),
     ]);
 
     if (result.error) {
@@ -1937,6 +1945,14 @@ const OperationalCalendar = ({ branchId }) => {
       }
     }
     setAttendanceMap(attMap);
+    // Roster lookup for the calendar's per-column working-hours/break shading.
+    // Display only — it never blocks a booking. Both halves are optional: a
+    // failed or empty fetch leaves every column rendering fully open, which is
+    // also what an unconfigured therapist looks like (see resolveEffectiveHours).
+    setRosterLookup({
+      weeklyByTherapist: workingHoursResult.data || null,
+      overridesByKey: rosterResult.data || null,
+    });
     setLoading(false);
   }, [branchId]);
 
@@ -3482,6 +3498,7 @@ const OperationalCalendar = ({ branchId }) => {
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
+                  rosterLookup={rosterLookup}
                   blockOccurrences={calendarData.blockOccurrences}
                   onDeleteManualBlock={handleDeleteManualBlock}
                   onResizeManualBlock={handleResizeManualBlock}

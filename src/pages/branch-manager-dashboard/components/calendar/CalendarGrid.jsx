@@ -6,6 +6,7 @@ import { useDroppable, useDraggable } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import CalendarBookingCard, { canDragBooking, BookingHoverPreview } from './CalendarBookingCard';
 import { formatClockTime, formatHourLabel } from './timeFormat';
+import { resolveEffectiveHours, getRosterShadingSegments } from '../../../../services/rosterSchedule';
 
 // SVG overlay: inverted-U bracket connectors between shared booking cards
 const SharedBookingLines = ({ containerRef, bookings }) => {
@@ -642,6 +643,7 @@ const CalendarGrid = ({
   branchHours,
   attendanceMap,
   checkedOutByTherapistAndDate,
+  rosterLookup,
   blockOccurrences,
   onDeleteManualBlock,
   onResizeManualBlock,
@@ -1244,6 +1246,23 @@ const CalendarGrid = ({
     return { fromTime: parts.time, toTime: closeHourStr };
   };
 
+  // Per-column roster shading: the bands outside this therapist's effective hours
+  // for THIS day, plus their configured breaks, resolved from the recurring weekly
+  // hours (migration-275/278) with that date's roster override (migration-287)
+  // taking precedence. Therapist columns only — rooms have no roster — and never
+  // the 'unassigned' column. Purely visual: see the overlay render below.
+  const getRosterShading = (col, day) => {
+    if (columnMode !== 'therapist' || col.type !== 'therapist') return [];
+    if (!rosterLookup?.weeklyByTherapist && !rosterLookup?.overridesByKey) return [];
+    const effective = resolveEffectiveHours({
+      therapistId: col.id,
+      date: day,
+      weeklyByTherapist: rosterLookup.weeklyByTherapist,
+      overridesByKey: rosterLookup.overridesByKey,
+    });
+    return getRosterShadingSegments({ effective, openTime: openHourStr, closeTime: closeHourStr });
+  };
+
   // Current time
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
@@ -1574,6 +1593,7 @@ const CalendarGrid = ({
     const droppableId = `drop-col-${day}-${col.id}`;
     const transferReasonText = getTransferReasonText(col);
     const manualBlockRanges = getManualBlockRanges(col, day, blockOccurrences);
+    const rosterShading = getRosterShading(col, day);
 
     return (
       <div
@@ -1691,6 +1711,42 @@ const CalendarGrid = ({
             </div>
           );
         })()}
+
+        {/* Roster overlay (migration-275/278/287) — the hours this therapist is NOT
+            rostered for on this day, plus their configured breaks. Two distinct colours
+            because the reasons are different and staff need to tell them apart at a
+            glance: off-roster/day-off is indigo, an in-shift break is violet (vs the
+            transfer teal, checkout slate and manual-block amber above). A therapist with
+            no roster configured yields no segments at all and renders fully open.
+            DISPLAY ONLY: pointer-events-none, nothing here rejects a booking — clicking
+            and dragging into a shaded band behaves exactly as before. Layers on top of
+            renderClosedHoursShading, which is branch-wide business hours and unchanged. */}
+        {rosterShading.map((seg, i) => {
+          const segTop = timeToTop(seg.fromTime);
+          const segHeight = Math.max(timeToHeight(seg.fromTime, seg.toTime), 8);
+          const isBreak = seg.kind === 'break';
+          return (
+            <div
+              key={`roster-${seg.kind}-${i}`}
+              title={seg.label}
+              className="absolute inset-x-0 pointer-events-none flex items-start justify-center pt-1.5 overflow-hidden"
+              style={{
+                top: segTop,
+                height: segHeight,
+                backgroundColor: isBreak ? 'rgba(124,58,237,0.28)' : 'rgba(79,70,229,0.18)',
+                backgroundImage: isBreak
+                  ? 'repeating-linear-gradient(45deg, rgba(124,58,237,0.22) 0, rgba(124,58,237,0.22) 4px, transparent 4px, transparent 10px)'
+                  : undefined,
+              }}
+            >
+              {segHeight >= 26 && (
+                <span className={`text-[9px] font-caption font-caption-semibold text-white uppercase tracking-wider px-1.5 py-0.5 rounded-spa shadow-spa-resting border ${isBreak ? 'bg-violet-600 border-violet-700/60' : 'bg-indigo-600 border-indigo-700/60'}`}>
+                  {seg.label}
+                </span>
+              )}
+            </div>
+          );
+        })}
 
         {/* Manual block overlay (migration-212) — a staff/room "time off" block, distinct
             amber color from the transfer (teal) and checkout (slate) overlays. Label shows

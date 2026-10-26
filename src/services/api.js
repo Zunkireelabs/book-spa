@@ -6704,6 +6704,15 @@ export async function fetchTherapistById(therapistId) {
 
 const WORKING_HOURS_DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+// therapist_working_hours_breaks rows -> UI shape. Module-scoped because both
+// fetchTherapistWorkingHours (one therapist, staff-edit screen) and
+// fetchBranchWorkingHours (whole branch, roster grid + calendar shading) return
+// the same break shape and must stay identical.
+const normalizeWorkingHourBreaks = (breaks) => (breaks || [])
+  .slice()
+  .sort((a, b) => a.sort_order - b.sort_order)
+  .map(b => ({ id: b.id, name: b.name || '', startTime: b.start_time, endTime: b.end_time }));
+
 export async function fetchTherapistWorkingHours(therapistId) {
   try {
     if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
@@ -6716,14 +6725,10 @@ export async function fetchTherapistWorkingHours(therapistId) {
     if (error) throw error;
 
     const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
-    const normalizeBreaks = (breaks) => (breaks || [])
-      .slice()
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map(b => ({ id: b.id, name: b.name || '', startTime: b.start_time, endTime: b.end_time }));
     const normalized = WORKING_HOURS_DAY_LABELS.map((label, dayOfWeek) => {
       const row = byDay.get(dayOfWeek);
       return row
-        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off, breaks: normalizeBreaks(row.therapist_working_hours_breaks) }
+        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off, breaks: normalizeWorkingHourBreaks(row.therapist_working_hours_breaks) }
         : { dayOfWeek, dayLabel: label, startTime: null, endTime: null, isDayOff: true, breaks: [] };
     });
 
@@ -6735,9 +6740,10 @@ export async function fetchTherapistWorkingHours(therapistId) {
 }
 
 // rows: [{ dayOfWeek, startTime, endTime, isDayOff, breaks: [{ name, startTime, endTime }] }, ...]
-// — one per weekday. Deliberate scope boundary: storage/display only, not
-// read by any booking availability/conflict check (see migration-275's
-// header comment).
+// — one per weekday. Deliberate scope boundary: display only. Rendered as the
+// calendar's per-column roster shading (fetchBranchWorkingHours ->
+// services/rosterSchedule -> calendar/CalendarGrid), but still not read by any
+// booking availability/conflict check (see migration-275's header comment).
 export async function upsertTherapistWorkingHours(therapistId, rows) {
   try {
     if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
@@ -6766,6 +6772,15 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
     }
 
+    // dayOfWeek -> that day's breaks in chronological order. The validation loop
+    // below already sorts each day's breaks to check them pairwise; the SAME sorted
+    // array is what gets written, keyed here so the insert further down can reuse it.
+    // Writing the caller's unsorted array with `sort_order: index` instead meant
+    // adding a 3pm break and then a 10am one persisted them in entry order, and
+    // fetchTherapistWorkingHours (which orders by sort_order) redisplayed them
+    // reversed.
+    const sortedBreaksByDay = new Map();
+
     for (const row of rows) {
       const breaks = row.breaks || [];
       const label = WORKING_HOURS_DAY_LABELS[row.dayOfWeek];
@@ -6778,6 +6793,7 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
       }
 
       const sortedBreaks = breaks.slice().sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+      sortedBreaksByDay.set(row.dayOfWeek, sortedBreaks);
       for (let i = 0; i < sortedBreaks.length; i++) {
         const brk = sortedBreaks[i];
         if (!brk.startTime || !brk.endTime || brk.startTime >= brk.endTime) {
@@ -6820,7 +6836,9 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
         .eq('working_hours_id', whRow.id);
       if (deleteError) throw deleteError;
 
-      const breaks = row.breaks || [];
+      // Chronologically sorted copy from the validation loop above — sort_order is
+      // what fetchTherapistWorkingHours orders by, so it must be chronological.
+      const breaks = sortedBreaksByDay.get(row.dayOfWeek) || [];
       if (breaks.length > 0) {
         const breakPayload = breaks.map((brk, index) => ({
           working_hours_id: whRow.id,
@@ -6845,14 +6863,18 @@ export async function upsertTherapistWorkingHours(therapistId, rows) {
 
 // All therapists' recurring weekly hours for a branch in one query (therapist_working_hours.
 // branch_id is denormalized — see migration-275), for the Roster grid's per-day defaults.
-// Returns { data: Map<therapistId, Array<{dayOfWeek, startTime, endTime, isDayOff}>>, error }
+// Breaks (migration-278) come along for the ride — the calendar's per-column roster
+// shading needs them in the same pass, and the join is the same one
+// fetchTherapistWorkingHours already uses.
+// Returns { data: Map<therapistId, Array<{dayOfWeek, startTime, endTime, isDayOff,
+//   breaks: [{id, name, startTime, endTime}]}>>, error }
 export async function fetchBranchWorkingHours(branchId) {
   try {
     if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
 
     const { data, error } = await supabase
       .from('therapist_working_hours')
-      .select('therapist_id, day_of_week, start_time, end_time, is_day_off')
+      .select('therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(id, name, start_time, end_time, sort_order)')
       .eq('branch_id', branchId);
 
     if (error) throw error;
@@ -6865,6 +6887,7 @@ export async function fetchBranchWorkingHours(branchId) {
         startTime: row.start_time,
         endTime: row.end_time,
         isDayOff: row.is_day_off,
+        breaks: normalizeWorkingHourBreaks(row.therapist_working_hours_breaks),
       });
     });
 
