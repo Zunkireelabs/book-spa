@@ -614,11 +614,8 @@ const CustomerBookingFlowV2 = () => {
       <footer className="bg-surface border-t border-border mt-16">
         <div className="max-w-4xl mx-auto px-4 py-8">
           <div className="text-center">
-            <div className="flex items-center justify-center space-x-2 mb-4">
+            <div className="flex items-center justify-center mb-4">
               <BrandMark className="h-8 w-auto" />
-              <span className="font-heading font-heading-semibold text-lg text-text-primary">
-                Zennly
-              </span>
             </div>
             <p className="font-body font-body-normal text-sm text-text-secondary mb-4">
               Nepal's premier spa booking platform

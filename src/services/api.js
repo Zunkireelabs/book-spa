@@ -11077,7 +11077,9 @@ export async function fetchBranchesByOrgId(orgId) {
   try {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url')
+      // online_booking_capacity feeds DateTimeSelection's slot graying (migration-301) —
+      // it's the same cap check_branch_online_capacity() enforces at insert time.
+      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url, online_booking_capacity')
       .eq('org_id', orgId)
       .eq('is_active', true)
       .order('name');
@@ -11086,6 +11088,45 @@ export async function fetchBranchesByOrgId(orgId) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchBranchesByOrgId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Per-branch cap on concurrent anonymous online bookings
+ * (branches.online_booking_capacity, migration-138; enforced by the
+ * check_branch_online_capacity() trigger). null = no cap.
+ */
+export async function fetchBranchOnlineCapacity(branchId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, online_booking_capacity')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchOnlineCapacity error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for the cap. Goes through an RPC, not a plain .update():
+ * `branches` has RLS enabled with SELECT-only policies, so a direct update would
+ * silently affect zero rows and report success. Pass null to clear the cap (uncapped).
+ */
+export async function updateBranchOnlineCapacity(branchId, capacity) {
+  try {
+    const { error } = await supabase.rpc('update_branch_online_capacity', {
+      p_branch_id: resolveBranchId(branchId),
+      p_capacity: capacity === null || capacity === '' ? null : Number(capacity),
+    });
+    if (error) throw error;
+    return { data: { capacity }, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchOnlineCapacity error:', error.message);
     return { data: null, error };
   }
 }

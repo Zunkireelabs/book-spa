@@ -6,6 +6,7 @@ import zennlyIcon from 'assets/brand/zennly-icon.png';
 import { useAuth } from 'contexts/AuthContext';
 import { useBranch } from 'contexts/BranchContext';
 import { useIndustry } from 'hooks/useIndustry';
+import { useOrg } from 'contexts/OrgContext';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { MEMBERSHIP_ENABLED, CUSTOMER_REFERRALS_ENABLED, VOUCHER_ENABLED, OUTREACH_ENABLED, PRODUCTS_ENABLED, CAMPAIGNS_ENABLED } from 'lib/featureFlags';
@@ -17,6 +18,11 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const { branchName: contextBranchName, branchId, isOverall } = useBranch();
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const { staffLabelPlural, locationLabelPlural, enableRooms } = useIndustry();
+  // Only orgs that hide staff during booking have a meaningful online-booking cap — when
+  // customers pick a person, every online booking carries a therapist_id and
+  // check_branch_online_capacity() exempts it. Waiting on orgLoading keeps the item from
+  // flashing in and back out for orgs that DO show staff (settings are null until loaded).
+  const { showStaffSelection, loading: orgLoading } = useOrg();
   const [isCollapsed, setIsCollapsed] = useState(false);
   // Lets a parent (e.g. Calendar's auto-collapse-for-width effect) push a collapsed
   // state in, while the toggle button below still owns it day-to-day — undefined
@@ -474,6 +480,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['admin'],
           overallHidden: true
         },
+        ...(orgLoading || showStaffSelection ? [] : [{
+          id: 'online-capacity',
+          label: 'Online Booking Limit',
+          icon: 'Gauge',
+          path: `${basePath}?view=online-capacity`,
+          roles: ['admin'],
+          overallHidden: true
+        }]),
         {
           id: 'provider-profile',
           label: 'Provider Profile',

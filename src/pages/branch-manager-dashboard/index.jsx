@@ -6,6 +6,7 @@ import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
+import { useOrg } from '../../contexts/OrgContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
 import NotificationBell from '../../components/ui/NotificationBell';
 import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
@@ -30,6 +31,7 @@ import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
 import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel';
 import RosterPanel from './components/MasterData/RosterPanel';
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
+import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCapacityPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
@@ -77,6 +79,11 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 const BranchManagerDashboard = () => {
   const { profile, signOut, user } = useAuth();
   const { branchId, branchName, isOverall } = useBranch();
+  // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a
+  // staff member (check_branch_online_capacity() exempts bookings with a therapist_id).
+  // orgLoading matters because settings are null until the org loads — rendering on that
+  // would briefly show the panel to orgs that have staff selection on.
+  const { showStaffSelection, loading: orgLoading } = useOrg();
   const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
@@ -688,6 +695,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
+              {viewMode === 'online-capacity' && !isOverall && !orgLoading && !showStaffSelection && profile?.role === 'admin' && <OnlineBookingCapacityPanel branchId={branchId} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
               {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}

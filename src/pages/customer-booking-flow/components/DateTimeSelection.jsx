@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import { supabase } from '../../../lib/supabase';
-import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, getRoomCapacity } from '../../../services/api';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchClosedDateRanges, getRoomCapacity } from '../../../services/api';
 import { useTenant } from '../../../contexts/TenantContext';
 import {
   START_HOUR,
@@ -11,6 +11,7 @@ import {
   minutesToTime24,
   minutesToTime12,
   buildOccupancy,
+  isDateInRanges,
 } from '../utils/availability';
 import { buildTherapistOccupancy, isTherapistFree, anyProfessionalFree } from '../../provider-profile-flow/utils/therapistAvailability';
 
@@ -34,6 +35,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   const [extendedTherapistWindowError, setExtendedTherapistWindowError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingExtended, setLoadingExtended] = useState(false);
+  const [closedRanges, setClosedRanges] = useState([]);
 
   // Fetch therapist counts for the selected branch — advisory gender signal only; real
   // availability is gated by room capacity below. Skipped while filtering by a specific
@@ -99,6 +101,16 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       .finally(() => setLoadingSlots(false));
   }, [selectedBranch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Staff-configured closed dates (holidays/maintenance) for this branch — blocks the
+  // whole day below regardless of room/gender availability, and independent of
+  // enableRooms (the capacity RPC only folds these in for room-based tenants).
+  useEffect(() => {
+    if (!selectedBranch?.id) { setClosedRanges([]); return; }
+    fetchClosedDateRanges(selectedBranch.id)
+      .then(({ data }) => setClosedRanges(data || []))
+      .catch((err) => console.error('[DateTimeSelection] closed-dates fetch failed:', err.message));
+  }, [selectedBranch?.id]);
+
   // Per-therapist busy rows — only fetched when filtering by a specific professional
   // or "any professional"; every other caller (every other tenant, and this tenant's
   // own gender-preference path) never triggers this at all.
@@ -160,13 +172,21 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
     const rooms = availabilityWindow.rooms || [];
     const allBookings = [...(availabilityWindow.bookings || []), ...(extendedWindow?.bookings || [])];
-    const { byRoom, byGender } = buildOccupancy(allBookings);
+    const { byRoom, byGender, byBranch } = buildOccupancy(allBookings);
 
     const therapistOccupancy = therapistFilter
       ? buildTherapistOccupancy([...(therapistWindow?.bookings || []), ...(extendedTherapistWindow?.bookings || [])])
       : null;
 
     const duration = selectedService?.durationMinutes || 60;
+    // Cap on concurrent anonymous online bookings for this branch (branches.
+    // online_booking_capacity) — null/undefined means uncapped. Only applies when no
+    // specific staff member will be assigned, which is exactly when
+    // check_branch_online_capacity() fires (therapist_id IS NULL). Note "Any
+    // professional" (therapistFilter.eligibleIds, no therapistId) still submits a NULL
+    // therapist_id, so the cap DOES apply there — hence the check is on therapistId, not
+    // on therapistFilter being set at all.
+    const onlineCapacity = therapistFilter?.therapistId ? null : (selectedBranch?.online_booking_capacity ?? null);
     const nepalToday = getNepalToday();
     const nepalNow = getNepalNow();
     const nowMinutes = nepalNow.getHours() * 60 + nepalNow.getMinutes();
@@ -174,6 +194,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
     return dayList.map((d) => {
       const isToday = d.fullDate === nepalToday;
+      const isClosed = isDateInRanges(d.fullDate, closedRanges);
       const slots = [];
 
       for (let start = START_HOUR * 60; start + duration <= END_HOUR * 60; start += 30) {
@@ -223,7 +244,19 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
           }
         }
 
-        const isAvailable = !isPast && roomAvailable && genderOk && therapistOk;
+        // Already at the branch's online cap for any half-hour this service would span —
+        // the DB trigger would reject this booking at submit, so grey it out now instead.
+        let branchCapacityOk = true;
+        if (onlineCapacity !== null) {
+          for (let offset = 0; offset < duration; offset += 30) {
+            if ((byBranch[d.fullDate]?.get(start + offset) || 0) >= onlineCapacity) {
+              branchCapacityOk = false;
+              break;
+            }
+          }
+        }
+
+        const isAvailable = !isPast && !isClosed && roomAvailable && genderOk && therapistOk && branchCapacityOk;
 
         slots.push({
           time24: minutesToTime24(start),
@@ -235,9 +268,15 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         });
       }
 
-      return { date: d.fullDate, slots };
+      return { date: d.fullDate, slots, isClosed };
     });
-  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, extendedTherapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates]);
+  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, extendedTherapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates, closedRanges, selectedBranch?.online_booking_capacity]);
+
+  const closedDatesSet = useMemo(() => {
+    const set = new Set();
+    dates.forEach((d) => { if (isDateInRanges(d.fullDate, closedRanges)) set.add(d.fullDate); });
+    return set;
+  }, [dates, closedRanges]);
 
   const timeSlots = useMemo(
     () => computedDays.find((d) => d.date === selectedDate)?.slots || [],
@@ -467,32 +506,36 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         </div>
         <div className="grid grid-cols-4 @2xl:grid-cols-7 gap-2">
           {dates.slice(0, 14).map((date) => {
-            const isFull = datesWithNoAvailability.has(date.fullDate);
-            const isPartial = !isFull && datesPartiallyBooked.has(date.fullDate);
+            const isClosed = closedDatesSet.has(date.fullDate);
+            const isFull = !isClosed && datesWithNoAvailability.has(date.fullDate);
+            const isPartial = !isClosed && !isFull && datesPartiallyBooked.has(date.fullDate);
             const isSelected = selectedDate === date.fullDate;
             return (
               <button
                 key={date.fullDate}
-                onClick={() => handleDateSelect(date.fullDate)}
+                onClick={() => !isClosed && handleDateSelect(date.fullDate)}
+                disabled={isClosed}
                 className={`relative flex flex-col items-center py-2 px-1 rounded-spa spa-transition-fast spa-touch-target ${
-                  isSelected
-                    ? 'bg-primary text-primary-foreground'
-                    : isFull
-                      ? 'bg-error/5 border border-error/20 text-text-secondary hover:bg-error/10'
-                      : isPartial
-                        ? 'bg-warning/5 border border-warning/20 text-text-secondary hover:bg-warning/10'
-                        : date.isToday
-                          ? 'bg-accent/10 text-accent hover:bg-accent/20' :'hover:bg-background text-text-secondary hover:text-text-primary'
+                  isClosed
+                    ? 'bg-background border border-border text-text-secondary/50 cursor-not-allowed opacity-70'
+                    : isSelected
+                      ? 'bg-primary text-primary-foreground'
+                      : isFull
+                        ? 'bg-error/5 border border-error/20 text-text-secondary hover:bg-error/10'
+                        : isPartial
+                          ? 'bg-warning/5 border border-warning/20 text-text-secondary hover:bg-warning/10'
+                          : date.isToday
+                            ? 'bg-accent/10 text-accent hover:bg-accent/20' :'hover:bg-background text-text-secondary hover:text-text-primary'
                 }`}
               >
-                {(isFull || isPartial) && (
+                {(isClosed || isFull || isPartial) && (
                   <span
-                    title={isFull ? 'Fully booked for this service' : 'Limited availability for this service'}
+                    title={isClosed ? 'Business closed on this date' : isFull ? 'Fully booked for this service' : 'Limited availability for this service'}
                     className={`absolute -top-1.5 -right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-caption font-caption-medium leading-none whitespace-nowrap text-white border ${
                       isSelected ? 'border-primary-foreground/40' : 'border-surface'
-                    } ${isFull ? 'bg-error' : 'bg-warning'}`}
+                    } ${isClosed ? 'bg-text-secondary' : isFull ? 'bg-error' : 'bg-warning'}`}
                   >
-                    {isFull ? 'Full' : 'Low'}
+                    {isClosed ? 'Closed' : isFull ? 'Full' : 'Low'}
                   </span>
                 )}
                 <span className="font-caption font-caption-normal text-[10px] mb-0.5">
@@ -560,9 +603,11 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
             <div className="text-center py-8">
               <Icon name="CalendarX" size={48} className="text-error/60 mx-auto mb-4" />
               <p className="font-body font-body-medium text-text-primary">
-                {datesWithNoAvailability.has(selectedDate)
-                  ? 'This day is fully booked for the selected service.'
-                  : `No available slots for the selected date${enableStaffGender ? ' and preference' : ''}.`}
+                {closedDatesSet.has(selectedDate)
+                  ? 'The business is closed on this date.'
+                  : datesWithNoAvailability.has(selectedDate)
+                    ? 'This day is fully booked for the selected service.'
+                    : `No available slots for the selected date${enableStaffGender ? ' and preference' : ''}.`}
               </p>
               <p className="font-caption font-caption-normal text-sm text-text-secondary mt-2">
                 Try a different date{enableStaffGender ? ' or gender preference' : ''} — or tap a Quick Pick above.

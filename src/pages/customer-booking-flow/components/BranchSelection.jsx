@@ -3,7 +3,8 @@ import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
 import { useTenant } from '../../../contexts/TenantContext';
-import { fetchBranchesByOrgId } from '../../../services/api';
+import { fetchBranchesByOrgId, fetchClosedDateRanges } from '../../../services/api';
+import { isDateInRanges, isBranchOpenNow, formatTime12, getNepalToday } from '../utils/availability';
 
 const INDUSTRY_IMAGES = {
   spa: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop',
@@ -50,11 +51,23 @@ const BranchSelection = ({ selectedBranch, onBranchSelect, showSingleBranchConti
         }
 
         const fallbackImage = INDUSTRY_IMAGES[industryType] || DEFAULT_IMAGE;
-        const activeBranches = (data || []).map((b) => ({
-          ...b,
-          openHours: DEFAULT_OPEN_HOURS,
-          image: BRANCH_IMAGES[b.name] || fallbackImage,
-        }));
+        const closedRangesByBranch = await Promise.all(
+          (data || []).map((b) => fetchClosedDateRanges(b.id).then(({ data: ranges }) => ranges || []))
+        );
+        const today = getNepalToday();
+        const activeBranches = (data || []).map((b, i) => {
+          const closedRanges = closedRangesByBranch[i];
+          const closedToday = isDateInRanges(today, closedRanges);
+          return {
+            ...b,
+            openHours: (b.open_time && b.close_time)
+              ? `${formatTime12(b.open_time)} - ${formatTime12(b.close_time)}`
+              : DEFAULT_OPEN_HOURS,
+            openNow: !closedToday && isBranchOpenNow(b.open_time, b.close_time),
+            closedToday,
+            image: BRANCH_IMAGES[b.name] || fallbackImage,
+          };
+        });
 
         setBranches(activeBranches);
 
@@ -153,9 +166,11 @@ const BranchSelection = ({ selectedBranch, onBranchSelect, showSingleBranchConti
                 <span className="text-xs text-text-secondary flex items-center gap-1">
                   <Icon name="Clock" size={12} /> {branch.openHours}
                 </span>
-                <div className="flex items-center gap-1 text-success">
-                  <div className="w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
-                  <span className="text-[10px] font-bold uppercase">Open Now</span>
+                <div className={`flex items-center gap-1 ${branch.openNow ? 'text-success' : 'text-error'}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${branch.openNow ? 'bg-success animate-pulse' : 'bg-error'}`} />
+                  <span className="text-[10px] font-bold uppercase">
+                    {branch.openNow ? 'Open Now' : branch.closedToday ? 'Closed Today' : 'Closed Now'}
+                  </span>
                 </div>
               </div>
             </div>
