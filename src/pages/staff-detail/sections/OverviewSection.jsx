@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { dbDowOfDate, DB_DOW_LABELS, formatMinutes, dayWorkingMinutes, NO_HOURS_LABEL } from '../../../utils/staffDay';
 import { buildTimeline } from '../profileModel';
 import { Loading, Problem, Fig, Figs, npr } from './ui';
+import { SHADE_STYLES } from '../../../services/availabilityShading';
 
 const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const short = (t) => String(t || '').slice(0, 5);
@@ -32,6 +33,13 @@ const TodayTimeline = ({ model, onOpenBooking, openCalendar }) => {
             style={{ left: `calc(${b.left}% + 2px)`, width: `calc(${b.width}% - 4px)` }}
           >{b.name || 'Break'}</div>
         ))}
+        {model.transferSlot && (
+          <div
+            data-transfer-slot title={model.transferSlot.title || model.transferSlot.label}
+            className="absolute top-2 bottom-2 rounded-lg border border-border px-2 py-1.5 text-xs text-text-secondary overflow-hidden whitespace-nowrap"
+            style={{ left: `calc(${model.transferSlot.left}% + 2px)`, width: `calc(${model.transferSlot.width}% - 4px)`, background: SHADE_STYLES.branch.background }}
+          >{model.transferSlot.label}</div>
+        )}
         {model.blocks.map((b) => (
           <button
             key={b.id + b.startTime} type="button" onClick={() => onOpenBooking(b)}
@@ -111,7 +119,7 @@ const WeekBars = ({ week, today }) => (
   </div>
 );
 
-const OverviewSection = ({ data, loading, error, onRetry, today, nowTime, isServiceStaff, attendanceRows, onOpenBooking, openCalendar, showCommission = true, hoursHidden = false }) => {
+const OverviewSection = ({ data, loading, error, onRetry, today, nowTime, isServiceStaff, attendanceRows, onOpenBooking, openCalendar, showCommission = true, hoursHidden = false, transferToday = null }) => {
   if (loading && !data) return <Loading />;
   if (error) return <Problem message={error} onRetry={onRetry} />;
   if (!data) return null;
@@ -141,7 +149,7 @@ const OverviewSection = ({ data, loading, error, onRetry, today, nowTime, isServ
     );
   }
 
-  const model = buildTimeline({ bookings: data.todayBookings, shift: week.find((d) => d.date === today)?.hours, nowTime });
+  const model = buildTimeline({ bookings: data.todayBookings, shift: week.find((d) => d.date === today)?.hours, nowTime, transfer: transferToday });
   const delta = m.bookingsLastMonthSameDays != null ? m.bookings - m.bookingsLastMonthSameDays : null;
   const avgVisit = m.paidVisits ? m.serviceRevenue / m.paidVisits : null;
   const top = data.topServices || [];

@@ -11,6 +11,9 @@ import { formatClockTime, formatHourLabel } from './timeFormat';
 import SharedBookingLines from './SharedBookingLines';
 import { STATUS_DOT_COLOR, isClosedByBlocks } from '../../../../utils/todayStatusLine';
 import OverflowBadge from './OverflowBadge';
+import { transferShadeSegments, dedupeAgainst } from '../../../../utils/transferShade';
+import TransferHeaderLine, { describeColumnTransfer, describeTransferOnDay } from './TransferHeaderLine';
+import { useIndustry } from '../../../../hooks/useIndustry';
 import ManualBlockOverlay from './ManualBlockOverlay';
 import {
   MAX_VISIBLE_OVERLAP,
@@ -140,15 +143,34 @@ const SortableColumnHeader = ({ id, children, minWidth }) => {
 //   nowLine           draw the now-line inside the column, before or after the droppable zone (null: the parent row draws it)
 //   shading           per-therapist availability shading (off shift / break / leave / other branch), see renderShadeOverlays
 //   checkoutOverlay   grey "Checked out" shading for a therapist who has clocked out for the day
-//   transferOverlays  transferred-out / visiting shading (the data it needs is only attached to Day-view therapist columns)
 //   cardInteractions  shared-booking card resize + Cmd/Ctrl multi-select on the cards
 const COLUMN_BODY = {
   // Day view: therapist or room column
-  column: { gridLines: false, nowLine: null, shading: true, checkoutOverlay: true, transferOverlays: true, cardInteractions: true },
+  column: { gridLines: false, nowLine: null, shading: true, checkoutOverlay: true, cardInteractions: true },
   // Day view: pinned Unassigned column
-  unassigned: { gridLines: true, nowLine: 'before-droppable', shading: false, checkoutOverlay: false, transferOverlays: false, cardInteractions: false },
+  unassigned: { gridLines: true, nowLine: 'before-droppable', shading: false, checkoutOverlay: false, cardInteractions: false },
   // 4-Day view: one column per day, all therapists/rooms merged
-  multiDay: { gridLines: false, nowLine: 'after-droppable', shading: false, checkoutOverlay: false, transferOverlays: false, cardInteractions: false },
+  multiDay: { gridLines: false, nowLine: 'after-droppable', shading: false, checkoutOverlay: false, cardInteractions: false },
+};
+
+// Black tooltip under a column header: centred on the cell, wrapped at 420px, and kept 8px inside the window on both sides.
+const HeaderTooltip = ({ tip }) => {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const w = el.offsetWidth;
+    el.style.left = `${Math.max(8, Math.min(tip.x - w / 2, window.innerWidth - 8 - w))}px`;
+  }, [tip]);
+  return (
+    <div
+      ref={ref}
+      className="fixed px-2 py-1 bg-text-primary text-white text-[10px] font-body rounded z-dropdown pointer-events-none"
+      style={{ left: tip.x, top: tip.y, maxWidth: 'min(420px, calc(100vw - 16px))', width: 'max-content' }}
+    >
+      {tip.name}
+    </div>
+  );
 };
 
 const CalendarGrid = ({
@@ -182,8 +204,6 @@ const CalendarGrid = ({
   onDragCreate,
   overlapOccurrences,
   onEditTransfer,
-  onCancelScheduledTransfer,
-  onCancelActiveTransfer,
   hideSensitive = false,
   startHour,
   endHour,
@@ -193,6 +213,7 @@ const CalendarGrid = ({
   zoomScale: zoomScaleProp,
   onZoomScaleChange,
 }) => {
+  const { locationLabel } = useIndustry();
   const scrollRef = useRef(null);
   const headerScrollRef = useRef(null);
   const gridBodyRef = useRef(null);
@@ -445,6 +466,11 @@ const CalendarGrid = ({
       transferStartAt: t.transferStartAt,
       fromBranch: t.fromBranch,
       scheduledTransfer: t.scheduledTransfer,
+      plannedRevertAt: t.plannedRevertAt,
+      transferReverted: t.transferReverted,
+      transferRevertedAt: t.transferRevertedAt,
+      transferFromBranch: t.transferFromBranch,
+      transferToBranch: t.transferToBranch,
     }));
     cols.push({ id: 'unassigned', name: 'Unassigned', type: 'unassigned', icon: 'AlertCircle', subtitle: null, attendance: null });
     return cols;
@@ -642,104 +668,6 @@ const CalendarGrid = ({
 
   const openHourStr = `${String(openHour).padStart(2, '0')}:00`;
   const closeHourStr = `${String(closeHour).padStart(2, '0')}:00`;
-
-  // ── Transfers ────────────────────────────────────────────
-  // Window of a transferred-out / visiting column on `day`. 'during' carries the shaded [from,to);
-  // 'before' / 'after' are kept distinct: a visitor is unavailable before arriving, never after returning.
-  const getTransferBlockRange = (col, day) => {
-    if (!col.transferredOut && !col.transferredIn) return null;
-    const start = toKathmanduParts(col.transferStartAt);
-    const end = toKathmanduParts(col.returnsAt);
-    const openStr = `${String(openHour).padStart(2, '0')}:00`;
-    const closeStr = `${String(closeHour).padStart(2, '0')}:00`;
-    if (!end) return { phase: 'during', fromTime: openStr, toTime: closeStr };
-    if (start && day < start.date) return { phase: 'before' };
-    if (day > end.date) return { phase: 'after' };
-    return {
-      phase: 'during',
-      fromTime: start && day === start.date ? start.time : openStr,
-      toTime: day === end.date ? end.time : closeStr,
-    };
-  };
-
-  // 'back 6:43pm' for a same-day return, 'back 14 Oct, 6:43pm' otherwise.
-  const returnsAtLabel = (col) => {
-    if (!col.returnsAt) return null;
-    const parts = toKathmanduParts(col.returnsAt);
-    if (!parts) return null;
-    const [h, m] = parts.time.split(':').map(Number);
-    const t = `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
-    if (parts.date === todayStr) return t;
-    const d = new Date(`${parts.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    return `${d}, ${t}`;
-  };
-
-  const getTransferReasonText = (col) => {
-    if (!col.transferredOut && !col.transferredIn) return null;
-    const back = returnsAtLabel(col);
-    return col.transferredOut
-      ? `Transferred${back ? ` · back ${back}` : ''}`
-      : `Visiting from ${col.fromBranch || 'another branch'}${back ? ` · until ${back}` : ''}`;
-  };
-
-  // Calm brand-tinted shading for a transfer window (distinct from the neutral striped block hatch).
-  const renderTransferShade = (key, top, height, text, onClick, cancelButton) => (
-    <div
-      key={key}
-      data-block-overlay="true"
-      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
-      className="group absolute inset-x-0.5 rounded-spa overflow-hidden px-2 py-1 cursor-pointer border border-primary/15"
-      style={{ top, height, backgroundColor: 'rgba(45,90,39,0.07)' }}
-    >
-      <div className="font-body text-[11px] leading-tight text-primary/80 truncate pr-4">{text}</div>
-      {cancelButton}
-    </div>
-  );
-
-  const renderTransferOverlays = (col, day) => {
-    const range = getTransferBlockRange(col, day);
-    if (!range) return null;
-    const text = getTransferReasonText(col) || 'Not available';
-    if (col.transferredOut) {
-      if (range.phase !== 'during') return null;
-      return renderTransferShade(
-        `tx-out-${col.id}-${day}`,
-        timeToTop(range.fromTime),
-        Math.max(timeToHeight(range.fromTime, range.toTime), 20),
-        text,
-        () => onEditTransfer?.(col),
-        onCancelActiveTransfer && col.transferId ? (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onCancelActiveTransfer(col); }}
-            onPointerDown={(e) => e.stopPropagation()}
-            title="Cancel this transfer — bring them back now"
-            aria-label="Cancel this transfer"
-            className="absolute top-1 right-1 w-4 h-4 rounded-full bg-surface border border-border text-text-secondary hover:text-error flex items-center justify-center opacity-0 group-hover:opacity-100 spa-transition-fast"
-          >
-            <Icon name="X" size={10} />
-          </button>
-        ) : null
-      );
-    }
-    // visiting: unavailable outside the visit window
-    const openStr = `${String(openHour).padStart(2, '0')}:00`;
-    const closeStr = `${String(closeHour).padStart(2, '0')}:00`;
-    const segments = [];
-    if (range.phase === 'before') segments.push({ from: openStr, to: closeStr });
-    else if (range.phase === 'during') {
-      if (range.fromTime > openStr) segments.push({ from: openStr, to: range.fromTime });
-      if (range.toTime < closeStr) segments.push({ from: range.toTime, to: closeStr });
-    }
-    return segments.map((seg, i) => renderTransferShade(
-      `tx-in-${col.id}-${day}-${i}`,
-      timeToTop(seg.from),
-      Math.max(timeToHeight(seg.from, seg.to), 20),
-      text,
-      () => onEditTransfer?.(col),
-      null
-    ));
-  };
 
   // ── Keep the draft ghost fully visible beside the open side panel ─────────────────────────────
   // The panel overlays the right ~420px of the screen (nothing underneath moves). When it opens, and whenever the draft
@@ -1096,13 +1024,15 @@ const CalendarGrid = ({
           : `${col.onlineUnassignedCount} new online booking${col.onlineUnassignedCount > 1 ? 's' : ''} — please assign to a therapist and allocate the room`)
       : null;
     const hdrShift = col.type === 'therapist' && viewMode === 'day' ? shiftHeaderInfo(shiftOf(col.id, currentDate), { isToday: currentDate === todayStr, nowMin: hhmmToMinutes(nowTime), attendance: attendanceByTherapist?.[col.id], branchClosed: isClosedByBlocks(blockOccurrences, currentDate) }) : null;
+    const trDesc = col.type === 'therapist' ? describeColumnTransfer(col, { day: currentDate, use24h, labels: { branch: (locationLabel || 'branch').toLowerCase() } }) : null;
     const initials = col.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
     return (
       <div
         key={col.id}
+        data-col-header
         className="relative flex-1 border-r border-border last:border-r-0 px-2 h-10 flex items-center justify-center"
         style={{ minWidth: minColWidth }}
-        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || (hdrShift ? `${col.name} · ${hdrShift.full}` : col.name))}
+        onMouseEnter={(e) => showHeaderTooltip(e, onlineUnassignedTooltip || [col.name, hdrShift?.full, trDesc?.sentence].filter(Boolean).join(' · '))}
         onMouseLeave={hideHeaderTooltip}
       >
         <div className="flex items-center gap-2 overflow-hidden min-w-0">
@@ -1115,24 +1045,8 @@ const CalendarGrid = ({
             >
               {col.name}
             </span>
-            {col.transferredOut || col.transferredIn ? (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onEditTransfer?.(col); }}
-                title="Manage this transfer"
-                className="font-body text-[10px] leading-tight text-primary truncate text-left hover:underline"
-              >
-                {getTransferReasonText(col)}
-              </button>
-            ) : col.scheduledTransfer ? (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onCancelScheduledTransfer?.(col); }}
-                title={`Scheduled transfer to ${col.scheduledTransfer.toBranch || 'another branch'} — click to cancel`}
-                className="font-body text-[10px] leading-tight text-text-tertiary truncate text-left hover:underline hover:text-error"
-              >
-                Transfer at {formatClockTime(col.scheduledTransfer.startTime, use24h)} · Cancel
-              </button>
+            {trDesc ? (
+              <TransferHeaderLine desc={trDesc} onOpen={() => onEditTransfer?.(col)} />
             ) : activeBlock ? (
               <span className="font-body text-[10px] leading-tight text-text-tertiary truncate">
                 back at {formatClockTime(activeBlock.toTime, use24h)}
@@ -1467,23 +1381,33 @@ const CalendarGrid = ({
   const renderShadeOverlays = (col, day) => {
     const thId = shadeTherapistId(col);
     const row = shiftOf(thId, day);
-    if (!row) return null;
     const name = (therapists.find((t) => t.id === thId) || {}).name;
     const lo = openHour * 60;
     const hi = closeHour * 60;
-    return buildShadeSegments(row, fmtHHMM).map((seg, i) => {
+    const rpcSegs = row ? buildShadeSegments(row, fmtHHMM) : [];
+    // An applied transfer moves branch_id, so the availability RPC no longer shades the branch they left: draw that window in the
+    // same 'branch' look, unless the RPC already did (upcoming transfer).
+    const transferSegs = thId ? dedupeAgainst(
+      transferShadeSegments(col, day, { openMin: lo, closeMin: hi, fmt: fmtHHMM }),
+      rpcSegs.filter((x) => x.kind === 'branch'),
+    ).map((x) => ({ ...x, kind: 'branch', code: 'OTHER_BRANCH' })) : [];
+    if (!rpcSegs.length && !transferSegs.length) return null;
+    return [...rpcSegs, ...transferSegs].map((seg, i) => {
       const s0 = Math.max(seg.startMin, lo);
       const e0 = Math.min(seg.endMin, hi);
       if (e0 <= s0) return null;
       const height = (e0 - s0) / 60 * eHH;
       const look = SHADE_STYLES[seg.kind];
-      const tip = seg.label || slotVerdict(row, seg.startMin, seg.endMin, { therapistName: name })?.message || undefined;
+      const tip = seg.label || (row && slotVerdict(row, seg.startMin, seg.endMin, { therapistName: name })?.message) || undefined;
       return (
         <div
           key={`shade-${seg.kind}-${seg.startMin}-${i}`}
           data-shade={seg.kind}
           title={tip}
-          className="absolute inset-x-0 overflow-hidden"
+          onClick={seg.kind === 'branch' && onEditTransfer && (col.transferredOut || col.transferredIn || col.scheduledTransfer)
+            ? (e) => { e.stopPropagation(); onEditTransfer(col); }
+            : undefined}
+          className={`absolute inset-x-0 overflow-hidden${seg.kind === 'branch' && onEditTransfer && (col.transferredOut || col.transferredIn || col.scheduledTransfer) ? ' cursor-pointer' : ''}`}
           style={{ top: minToTop(s0), height, background: look.background }}
         >
           {seg.label && height >= 28 && (
@@ -1644,7 +1568,6 @@ const CalendarGrid = ({
       {v.nowLine === 'after-droppable' && renderNowIndicator(day, nowDot)}
       {v.shading && renderShadeOverlays(col, day)}
       {v.checkoutOverlay && renderCheckoutOverlay(col, day)}
-      {v.transferOverlays && renderTransferOverlays(col, day)}
       {renderManualBlocks(col, day)}
       {renderDraftGhost(col.id, day, col.type)}
       {renderClusteredCards(col, day, colBookings, v)}
@@ -1825,6 +1748,18 @@ const CalendarGrid = ({
                   <span className={`font-heading text-xs font-semibold ${isCurrentDay ? 'text-primary' : 'text-text-secondary'}`}>
                     {formatShortDate(day)}
                   </span>
+                  {(() => {
+                    // One person on show: mark the days their transfer touches (the full sentence is in the tooltip).
+                    const only = therapists.length === 1 ? therapists[0] : null;
+                    const desc = only ? describeTransferOnDay(columns.find((c) => c.id === only.id) || only, day, { use24h, labels: { branch: (locationLabel || 'branch').toLowerCase() } }) : null;
+                    return desc ? (
+                      <button type="button" data-transfer-day-icon={desc.state} title={desc.sentence} aria-label={desc.sentence}
+                        onClick={(e) => { e.stopPropagation(); onEditTransfer?.(only); }}
+                        className={`ml-1 align-middle ${desc.state === 'now' ? 'text-primary' : 'text-text-tertiary'}`}>
+                        <Icon name="ArrowRightLeft" size={11} />
+                      </button>
+                    ) : null;
+                  })()}
                 </div>
               );
             })}
@@ -1889,14 +1824,7 @@ const CalendarGrid = ({
     <>
       {isMultiDay ? renderMultiDayView() : renderDayView()}
       <BookingHoverLayer />
-      {headerTooltip && (
-        <div
-          className="fixed px-2 py-1 bg-text-primary text-white text-[10px] font-body rounded whitespace-nowrap z-dropdown pointer-events-none"
-          style={{ left: headerTooltip.x, top: headerTooltip.y, transform: 'translateX(-50%)' }}
-        >
-          {headerTooltip.name}
-        </div>
-      )}
+      {headerTooltip && <HeaderTooltip tip={headerTooltip} />}
     </>
   );
 };

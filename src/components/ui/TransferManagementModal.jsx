@@ -6,6 +6,10 @@ import {
 import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm, validateExtension } from '../../utils/transferPreview';
 import { friendlyError } from '../../utils/friendlyError';
 import { useIndustry } from '../../hooks/useIndustry';
+import { useAuth } from '../../contexts/AuthContext';
+import TransferPill from './TransferPill';
+import { canAct } from '../../utils/transferPermissions';
+import { describeTransfer, toTransferInput, transferWindowLine, transferDurationText } from '../../utils/transferText';
 import { useAvailabilityConflictGuard } from '../../hooks/useAvailabilityConflictGuard';
 import { transferChange } from '../../services/availabilityConflicts';
 import {
@@ -15,6 +19,7 @@ import {
   rescheduleStaffTransferReturn,
   fetchAllBranches,
   fetchTherapistTransferStatus,
+  cancelScheduledTransfer,
 } from '../../services/api';
 
 function formatPrettyDate(d) {
@@ -41,14 +46,22 @@ function toLocalYMD(date) {
 // unlike AttendancePanel (which precomputes a branch-wide transferStatusByTherapist map), this
 // component fetches this one therapist's current transfer status itself on mount, so callers
 // only need to hand it a therapist + branch.
-const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName, currentBranchId, defaultStartDate, guardRef, onClose, onSuccess, onDraftChange }) => {
-  const { staffLabel } = useIndustry();
+const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName, currentBranchId, defaultStartDate, guardRef, onClose, onSuccess, onDraftChange, use24h = false }) => {
+  const { staffLabel, locationLabel } = useIndustry();
+  const { profile } = useAuth();
+  const role = profile?.role;
+  const can = (action, row) => canAct(action, { role, side: row.toBranchId === currentBranchId ? 'receiving' : 'home' });
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const today = new Date().toISOString().split('T')[0];
 
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [activeTransfer, setActiveTransfer] = useState(null);
   const [completedTransfer, setCompletedTransfer] = useState(null);
+  const [scheduledTransfer, setScheduledTransfer] = useState(null); // upcoming (not yet applied)
+  const [editingScheduled, setEditingScheduled] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [cancellingScheduled, setCancellingScheduled] = useState(false);
+  const [scheduledError, setScheduledError] = useState(null);
 
   const [orgBranches, setOrgBranches] = useState([]);
   const [transferMode, setTransferMode] = useState('temporary'); // 'temporary' | 'permanent'
@@ -102,8 +115,13 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
       const completed = !active && latest && latest.reverted && latest.fromBranchId === currentBranchId
         ? latest
         : null;
+      const scheduled = !active && latest && !latest.applied && !latest.reverted
+        && (latest.toBranchId === currentBranchId || latest.fromBranchId === currentBranchId)
+        ? latest
+        : null;
       setActiveTransfer(active);
       setCompletedTransfer(completed);
+      setScheduledTransfer(scheduled);
       setLoadingStatus(false);
     });
     return () => { cancelled = true; };
@@ -315,6 +333,14 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     if (!proceed) { setTransferring(false); return; }
 
     const isFuture = transferStartDate > today;
+    if (editingScheduled && scheduledTransfer) {
+      const cancelled = await cancelScheduledTransfer(scheduledTransfer.id);
+      if (cancelled.error) {
+        setTransferError(cancelled.error.message || 'Could not replace the scheduled transfer.');
+        setTransferring(false);
+        return;
+      }
+    }
     const result = await transferTherapist({
       therapistId,
       toBranchId: transferToBranch,
@@ -353,12 +379,11 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
   const fmtDT = (v) => formatRevert(new Date(v));
   const todayLocal = toLocalYMD(new Date());
   const nowHm = toHm(new Date());
-  const t12 = (hm) => { if (!hm) return ''; const [h, m] = hm.split(':').map(Number); return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`; };
   const staff = (staffLabel || 'Therapist');
 
   // Live shading preview of the transfer window (create view only).
   const revertDateObj = isPermanentTransfer ? null : computeRevertDateUtil(transferStartDate, transferStartTime, transferDurationValue, transferDurationUnit);
-  const showCreate = !loadingStatus && !activeTransfer;
+  const showCreate = !loadingStatus && !activeTransfer && (!scheduledTransfer || editingScheduled);
   useEffect(() => {
     if (!showCreate) { onDraftChange?.(null); return; }
     onDraftChange?.({
@@ -368,6 +393,60 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     });
   }, [showCreate, therapistId, transferStartDate, transferStartTime, isPermanentTransfer, revertDateObj && revertDateObj.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onDraftChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const viewpointOf = (row) => (row.toBranchId === currentBranchId ? 'receiving' : 'home');
+  // Pill + one sentence at the top of every view of a real transfer (same helper as the calendar, Attendance, profile).
+  const summaryFor = (row) => {
+    if (!row) return null;
+    const d = describeTransfer(toTransferInput(row), { viewpoint: viewpointOf(row), use24h, labels: { branch: (locationLabel || 'branch').toLowerCase() } });
+    return (
+      <div className="flex flex-col gap-2" data-transfer-summary>
+        <div><TransferPill state={d.state}>{d.pill}</TransferPill></div>
+        <p className={`rounded-spa px-3 py-2 font-body text-[13px] text-text-primary ${d.state === 'now' ? 'bg-primary/5 border border-primary/10' : 'bg-gray-100'}`}>{d.sentence}</p>
+      </div>
+    );
+  };
+
+  // Rows under the sentence: type, from -> to, window, who set it and when, note.
+  const infoRowsFor = (row) => {
+    const input = toTransferInput(row);
+    const dur = !row.isPermanent ? transferDurationText(input) : '';
+    const hours = dur ? ` · ${dur}` : '';
+    const setAt = row.transferredAt ? new Date(row.transferredAt).toLocaleString('en-GB', { timeZone: 'Asia/Kathmandu', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: !use24h }).replace(/,/g, '').replace(/\s([ap]m)$/i, '$1') : null;
+    return [
+      ['Type', row.isPermanent ? 'Permanent' : `Temporary${hours}`],
+      ['From → to', `${row.fromBranch} → ${row.toBranch}`],
+      ['Window', transferWindowLine({ ...input, fromBranch: null }, { use24h }).replace(/ · back at .*$/, '').replace(/^(\w+ \d+ \w+) /, '$1, ') || '—'],
+      row.transferredByName || setAt ? ['Set by', [row.transferredByName, setAt].filter(Boolean).join(' · ')] : null,
+      row.note ? ['Note', row.note] : null,
+    ];
+  };
+
+  const startEditScheduled = () => {
+    const r = scheduledTransfer;
+    setEditingScheduled(true);
+    setConfirmingCancel(false);
+    setTransferMode(r.isPermanent ? 'permanent' : 'temporary');
+    setTransferToBranch(r.toBranchId || '');
+    setTransferStartDate(r.effectiveDate || today);
+    setTransferStartTime(r.startTime ? r.startTime.slice(0, 5) : '');
+    setTransferDurationUnit(r.durationUnit || '');
+    setTransferDurationValue(r.durationValue ? String(r.durationValue) : '');
+    setTransferNote(r.note || '');
+  };
+
+  const handleCancelScheduled = async () => {
+    setCancellingScheduled(true);
+    setScheduledError(null);
+    const result = await cancelScheduledTransfer(scheduledTransfer.id);
+    if (result.error) {
+      setScheduledError(friendlyError(result.error, 'Failed to cancel transfer.'));
+      setCancellingScheduled(false);
+      return;
+    }
+    setCancellingScheduled(false);
+    onSuccess(`${therapistName}'s scheduled transfer cancelled.`);
+  };
 
   if (loadingStatus) {
     return (
@@ -382,7 +461,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
   }
 
   // Which of the four views we're in, and what each contributes to the shell.
-  let title; let dirty; let reason = ''; let primary; let cancelLabel = 'Close'; let body;
+  let title; let dirty; let reason = ''; let primary; let cancelLabel = 'Close'; let body; let hideFooter = false;
 
   const editDateTime = (
     <div className="grid grid-cols-2 gap-3">
@@ -446,33 +525,65 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     </div>
   );
 
-  if (activeTransfer && isOriginCancelView) {
+  if (scheduledTransfer && !editingScheduled) {
+    const mayAct = can('cancelScheduled', scheduledTransfer) && scheduledTransfer.fromBranchId === currentBranchId;
+    title = `Manage transfer · ${therapistName}`;
+    dirty = false;
+    hideFooter = true;
+    body = (
+      <FormBody>
+        {summaryFor(scheduledTransfer)}
+        <InfoRows rows={infoRowsFor(scheduledTransfer)} />
+        <InlineError message={scheduledError} />
+        {mayAct && (confirmingCancel ? (
+          <div className="border border-border rounded-spa p-3 space-y-3">
+            <p className="font-body text-[13px] text-text-primary">Cancel this scheduled transfer? {therapistName} stays at {scheduledTransfer.fromBranch}.</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setConfirmingCancel(false)} disabled={cancellingScheduled} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast">Keep it</button>
+              <button type="button" onClick={handleCancelScheduled} disabled={cancellingScheduled} className="h-9 px-3 text-[13px] font-body font-body-medium rounded-spa bg-error text-white hover:opacity-90 spa-transition-fast disabled:opacity-50">{cancellingScheduled ? 'Cancelling…' : 'Yes, cancel transfer'}</button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={startEditScheduled} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa hover:bg-background spa-transition-fast">Edit</button>
+            <button type="button" onClick={() => setConfirmingCancel(true)} className="h-9 px-3 text-[13px] font-body font-body-medium border border-border rounded-spa text-error hover:bg-background spa-transition-fast">Cancel transfer</button>
+          </div>
+        ))}
+      </FormBody>
+    );
+  } else if (activeTransfer && !can('revertNow', activeTransfer)) {
+    // Staff and admin_viewer: the words only, no actions.
+    title = `Transfer · ${therapistName}`;
+    dirty = false;
+    hideFooter = true;
+    body = (
+      <FormBody>
+        {summaryFor(activeTransfer)}
+        <InfoRows rows={infoRowsFor(activeTransfer)} />
+      </FormBody>
+    );
+  } else if (activeTransfer && isOriginCancelView) {
     title = `Manage transfer · ${therapistName}`;
     dirty = (originAction === 'edit' && (!!editReturnDate || !!editReturnTime)) || (originAction === 'cancel' && useCustomReturnTime);
     if (originAction === 'edit') {
       primary = { label: editing ? 'Saving…' : 'Save new return time', onClick: handleEditReturnTime, disabled: !editReturnDate || !editReturnTime, loading: editing };
       reason = !editReturnDate ? 'Pick a return date' : !editReturnTime ? 'Pick a return time' : '';
     } else {
-      primary = { label: cancellingActive ? 'Cancelling…' : 'Cancel transfer', onClick: handleCancelTransferNow, disabled: reverting, loading: cancellingActive };
+      primary = { label: cancellingActive ? 'Bringing back…' : 'Bring back now', onClick: handleCancelTransferNow, disabled: reverting, loading: cancellingActive };
     }
     body = (
       <>
         <TabBar
-          tabs={[{ id: 'cancel', label: 'Cancel transfer', icon: 'Undo2' }, { id: 'edit', label: 'Edit transfer', icon: 'CalendarClock' }]}
+          tabs={[{ id: 'cancel', label: 'Bring back now', icon: 'Undo2' }, { id: 'edit', label: 'Change return time', icon: 'CalendarClock' }]}
           value={originAction}
           onChange={(id) => { if (busy) return; if (id === 'cancel') { setOriginAction('cancel'); setEditError(null); } else { setOriginAction('edit'); setCancelActiveError(null); setRevertError(null); } }}
         />
         <FormBody>
-          <p className="font-body text-[13px] text-text-secondary">
-            {therapistName} is currently transferred to <span className="font-body-medium text-text-primary">{activeTransfer.toBranch}</span>.
-          </p>
-          <InfoRows rows={[
-            ['Since', `${formatPrettyDate(activeTransfer.effectiveDate)} ${t12(activeTransfer.startTime?.slice(0, 5))}`],
-            ['Scheduled return', fmtDT(activeTransfer.revertAt), 'amber'],
-          ]} />
+          {summaryFor(activeTransfer)}
+          <InfoRows rows={infoRowsFor(activeTransfer)} />
           {originAction === 'edit' ? (
             <>
-              <p className="text-xs text-text-secondary">Push {therapistName}'s return further out — the transfer stays active until the new time.</p>
+              <p className="text-xs text-text-secondary">Change when {therapistName} is back at {activeTransfer.fromBranch}. The transfer stays active until then.</p>
               <InlineError message={editError} />
               {editDateTime}
             </>
@@ -480,7 +591,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
             <>
               <InlineError message={cancelActiveError} />
               <p className="text-xs text-text-secondary">
-                Cancelling brings {therapistName} back to this branch right now. If they're still booked at {activeTransfer.toBranch}, cancelling will
+                This brings {therapistName} back to {activeTransfer.fromBranch} right now. If they're still booked at {activeTransfer.toBranch}, it will
                 tell you so — you'll then need to wait until that booking finishes, or pick the exact time it did below.
               </p>
               {customReturnBlock(true)}
@@ -492,19 +603,12 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
   } else if (activeTransfer) {
     title = `Manage transfer · ${therapistName}`;
     dirty = isExtendFormComplete || useCustomReturnTime || !!extendDurationUnit || !!extendDurationValue;
-    primary = { label: extending ? 'Adding…' : 'Add extra time', onClick: handleExtendTransfer, disabled: !isExtendFormComplete || reverting, loading: extending };
+    primary = { label: extending ? 'Extending…' : 'Extend', onClick: handleExtendTransfer, disabled: !isExtendFormComplete || reverting, loading: extending };
     reason = !extendDurationUnit ? 'Pick a unit' : !(Number(extendDurationValue) > 0) ? 'Enter an amount' : '';
     body = (
       <FormBody>
-        <p className="font-body text-[13px] text-text-secondary">
-          {therapistName} is currently transferred here from <span className="font-body-medium text-text-primary">{activeTransfer.fromBranch}</span>.
-        </p>
-        <InfoRows rows={[
-          ['Destination branch', activeTransfer.toBranch],
-          ['Start', `${formatPrettyDate(activeTransfer.effectiveDate)} ${t12(activeTransfer.startTime?.slice(0, 5))}`],
-          ['Current return', fmtDT(activeTransfer.revertAt), 'amber'],
-          ['Status', 'Active'],
-        ]} />
+        {summaryFor(activeTransfer)}
+        <InfoRows rows={infoRowsFor(activeTransfer)} />
         <InlineError message={extendValidationError || extendError || (!useCustomReturnTime ? revertError : null)} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Add extra time">
@@ -533,13 +637,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
     body = (
       <FormBody>
         {completedTransfer && (
-          <div className="border border-border rounded-spa px-3 py-2 text-[13px] space-y-0.5">
-            <p className="font-body-medium text-text-primary">Transfer completed</p>
-            <p className="text-text-secondary">
-              Returned to {completedTransfer.fromBranch} from {completedTransfer.toBranch}
-              {completedTransfer.revertedAt ? ` at ${fmtDT(completedTransfer.revertedAt)}` : ''}.
-            </p>
-          </div>
+          <div className="border border-border rounded-spa px-3 py-2">{summaryFor(completedTransfer)}</div>
         )}
         <Segmented options={[['temporary', 'Temporary'], ['permanent', 'Permanent']]} value={transferMode} onChange={setTransferMode} />
         <p className="font-body text-[13px] text-text-secondary">
@@ -593,6 +691,7 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
       reason={reason}
       cancelLabel={cancelLabel}
       primary={primary}
+      hideFooter={hideFooter}
     >
       {body}
     </PanelShell>

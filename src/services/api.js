@@ -1,3 +1,4 @@
+import { toTransferInput } from '../utils/transferText';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay } from './payrollCalc';
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
@@ -5502,7 +5503,7 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
     const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
     const [outRes, inRes, schedRes] = await Promise.all([
       supabase.from('staff_transfers')
-        .select(`${cols}, ${therapistCols}`)
+        .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
         .eq('from_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
         .not('revert_at', 'is', null).or(windowFilter)
         .order('effective_date').order('start_time'),
@@ -5512,7 +5513,7 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
         .not('revert_at', 'is', null).or(windowFilter)
         .order('effective_date').order('start_time'),
       supabase.from('staff_transfers')
-        .select('id, therapist_id, effective_date, start_time, toBranch:branches!staff_transfers_to_branch_id_fkey(name)')
+        .select('id, therapist_id, effective_date, start_time, revert_at, is_permanent, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name)')
         .eq('from_branch_id', branchId).eq('applied', false)
         .gte('effective_date', startDate).lte('effective_date', endDate)
         .order('effective_date').order('start_time'),
@@ -5525,11 +5526,17 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
 
     const activeIds = new Set(therapists.map(d => d.id));
     // A transfer ended early ends at reverted_at, not the originally scheduled revert_at.
-    const windowOf = (t) => ({ returnsAt: t.reverted && t.reverted_at ? t.reverted_at : t.revert_at, transferStartAt: kathmanduInstant(t.effective_date, t.start_time) });
+    const windowOf = (t) => ({
+      returnsAt: t.reverted && t.reverted_at ? t.reverted_at : t.revert_at,
+      transferStartAt: kathmanduInstant(t.effective_date, t.start_time),
+      // raw facts for the transfer sentence (utils/transferText.js): the planned return and whether/when it ended early
+      plannedRevertAt: t.revert_at, transferReverted: !!t.reverted, transferRevertedAt: t.reverted_at || null,
+      transferFromBranch: t.fromBranch?.name || null, transferToBranch: t.toBranch?.name || null,
+    });
 
     const scheduledByTherapist = {};
     (schedRes.data || []).forEach(r => {
-      scheduledByTherapist[r.therapist_id] ??= { id: r.id, effectiveDate: r.effective_date, startTime: r.start_time, toBranch: r.toBranch?.name || null };
+      scheduledByTherapist[r.therapist_id] ??= { id: r.id, effectiveDate: r.effective_date, startTime: r.start_time, revertAt: r.revert_at, isPermanent: r.is_permanent, toBranch: r.toBranch?.name || null, fromBranch: r.fromBranch?.name || null };
     });
 
     const outRows = dedupeTransfersByKey(sortTransfersByTime(outRes.data || []), t => t.therapist?.id);
@@ -7223,8 +7230,42 @@ export async function fetchTherapistsOverview(branchId, date) {
     for (const r of [therapists, shifts, attendance, bookings, services, comp]) if (r.error) throw r.error;
     const closed = await fetchClosedDateRanges(scopeBranch); // best effort: a failure just means "not closed"
 
+    // Home staff whose temporary transfer has APPLIED (branch_id now points elsewhere) still belong to this list: they stay listed with
+    // the transfer in their Today cell. Best effort: any failure (including missing transfer tables) just leaves them out.
+    const awayById = new Map();
+    try {
+      const awayRes = await supabase.from('staff_transfers')
+        .select(`id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
+          fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name),
+          therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years)`)
+        .eq('from_branch_id', scopeBranch).eq('applied', true).eq('reverted', false).eq('is_permanent', false).eq('is_return_leg', false)
+        .not('revert_at', 'is', null).gt('revert_at', new Date().toISOString());
+      if (!awayRes.error) {
+        for (const r of awayRes.data || []) {
+          if (r.therapist && !awayById.has(r.therapist.id)) awayById.set(r.therapist.id, { row: r, input: toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }) });
+        }
+      }
+    } catch { /* fail open */ }
+    // Visitors: temporary transfers that applied INTO this branch. They are already in the list (branch_id points here) but must read
+    // "Visiting" with the transfer, not as this branch's own staff.
+    const visitingById = new Map();
+    try {
+      const visRes = await supabase.from('staff_transfers')
+        .select(`therapist_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
+          fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)`)
+        .eq('to_branch_id', scopeBranch).eq('applied', true).eq('reverted', false).eq('is_permanent', false).eq('is_return_leg', false)
+        .not('revert_at', 'is', null).gt('revert_at', new Date().toISOString());
+      if (!visRes.error) {
+        for (const r of visRes.data || []) {
+          if (!visitingById.has(r.therapist_id)) visitingById.set(r.therapist_id, toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }));
+        }
+      }
+    } catch { /* fail open */ }
+    const here = new Set((therapists.data || []).map((t) => t.id));
+    const awayTherapists = [...awayById.values()].filter((a) => !here.has(a.row.therapist.id)).map((a) => a.row.therapist);
+
     const data = buildTherapistsOverview({
-      therapists: therapists.data || [],
+      therapists: [...(therapists.data || []), ...awayTherapists],
       shiftRows: shifts.data || [],
       attendanceRows: attendance.data || [],
       bookingRows: bookings.data || [],
@@ -7234,6 +7275,11 @@ export async function fetchTherapistsOverview(branchId, date) {
       branchClosedToday: isClosedDate(closed.data, date),
     }, { date, nowTime: nepalNow().hm, canSeeRates });
     // admin_viewer has no SELECT policy on therapist_working_hours / staff_roster_overrides, so for them "no hours" means "can't read them".
+    data.therapists = data.therapists.map((t) => {
+      if (awayById.has(t.id)) return { ...t, transfer: { input: awayById.get(t.id).input, viewpoint: 'home' } };
+      if (visitingById.has(t.id)) return { ...t, transfer: { input: visitingById.get(t.id), viewpoint: 'receiving' } };
+      return t;
+    });
     return { data: { ...data, canSeeRates, rosterReadable }, error: null };
   } catch (error) {
     console.error('[API] fetchTherapistsOverview error:', error.message);
@@ -8554,7 +8600,8 @@ export async function fetchTherapistTransferStatus(branchId) {
         start_time, duration_value, duration_unit, revert_at, applied, reverted, reverted_at, is_permanent, note,
         therapist:therapists!staff_transfers_therapist_id_fkey(name),
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name),
-        toBranch:branches!staff_transfers_to_branch_id_fkey(name)
+        toBranch:branches!staff_transfers_to_branch_id_fkey(name),
+        transferredBy:users!staff_transfers_transferred_by_fkey(full_name)
       `)
       .or(`from_branch_id.eq.${branchId},to_branch_id.eq.${branchId}`)
       .order('transferred_at', { ascending: false });
@@ -8584,6 +8631,7 @@ export async function fetchTherapistTransferStatus(branchId) {
         reverted: t.reverted,
         revertedAt: t.reverted_at,
         note: t.note,
+        transferredByName: t.transferredBy?.full_name || null,
       };
     });
 

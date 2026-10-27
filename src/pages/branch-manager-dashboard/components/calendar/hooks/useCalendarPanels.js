@@ -6,8 +6,6 @@ import {
   createComboBookingItems,
   rescheduleBookingAsNewBooking,
   fetchBookingById,
-  cancelScheduledTransfer,
-  revertStaffTransferNow,
   deleteBlock,
   updateBlock,
 } from '../../../../../services/api';
@@ -55,7 +53,6 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   const lastBlockWasRoomOnly = useRef(false);
   const [transferModalTarget, setTransferModalTarget] = useState(null);   // create (from empty-slot menu)
   const [editingTransferTherapist, setEditingTransferTherapist] = useState(null); // manage (header badge / shading)
-  const [transferCancelRequest, setTransferCancelRequest] = useState(null);   // { kind: 'scheduled'|'active', col }
   // Block / transfer forms live in the docked SidePanel (one panel at a time, like quick-create and booking details).
   const blockPanelOpen = !!(addBlockSlot || editingBlock || transferModalTarget || editingTransferTherapist);
   const blockPanelOpenRef = useRef(false);
@@ -343,22 +340,6 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     setChoiceMenuSlot(slotInfo);
   }, [rebookSource, branchId, refreshCalendar, calendarData, blocksAvailable, openQuickCreateForSlot, quickCreateSlot, modalOpen, addBlockSlot, editingBlock, transferModalTarget, editingTransferTherapist, guard]);
 
-  // Transfers: cancel a scheduled transfer / bring an active one back now, via an in-app confirm.
-  const handleConfirmTransferCancel = useCallback(async () => {
-    const req = transferCancelRequest;
-    setTransferCancelRequest(null);
-    if (!req) return;
-    const result = req.kind === 'scheduled'
-      ? await cancelScheduledTransfer(req.col.scheduledTransfer.id)
-      : await revertStaffTransferNow({ transferId: req.col.transferId });
-    if (result.error) {
-      showToast(result.error.message || 'Failed to cancel transfer.', 'error');
-      return;
-    }
-    showToast(req.kind === 'scheduled' ? 'Scheduled transfer cancelled.' : `${req.col.name} is back at this branch.`);
-    refreshCalendar();
-  }, [transferCancelRequest, refreshCalendar]);
-
   // Block management from the calendar overlay: resize, and delete (via the in-app scope dialog).
   const handleDeleteManualBlock = useCallback(async ({ blockId, day, scope = 'this' }) => {
     const result = await deleteBlock({ blockId, scope, occurrenceDate: day });
@@ -628,9 +609,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
     choiceMenuSlot, setChoiceMenuSlot, addBlockSlot, setAddBlockSlot, editingBlock, setEditingBlock,
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
-    transferCancelRequest, setTransferCancelRequest, blockPanelOpen, blockRetarget,
+    blockPanelOpen, blockRetarget,
     servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
-    openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick, handleConfirmTransferCancel,
+    openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   };

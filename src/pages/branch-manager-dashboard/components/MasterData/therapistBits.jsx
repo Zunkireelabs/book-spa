@@ -1,6 +1,9 @@
 import React from 'react';
 import { todayLabels } from '../../../../utils/staffDay';
 import { STATUS_DOT_COLOR } from '../../../../utils/todayStatusLine';
+import TransferFitText from '../../../../components/ui/TransferFitText';
+import TransferPill from '../../../../components/ui/TransferPill';
+import { describeTransfer } from '../../../../utils/transferText';
 
 // Small shared bits of the Therapists list + peek (V28).
 
@@ -17,6 +20,16 @@ const TONE = {
 export { todayLabels };
 
 export const TodayCell = ({ t, pill = false, rosterReadable = true }) => {
+  // Away on a transfer: the same pill + short sentence as Attendance and the calendar.
+  if (t.transfer) {
+    const d = describeTransfer(t.transfer.input, { viewpoint: t.transfer.viewpoint, short: true });
+    return (
+      <div className="min-w-0 flex items-center gap-2" data-today-key="transfer" title={d.sentence}>
+        <TransferPill state={d.state}>{d.pill}</TransferPill>
+        {!pill && <TransferFitText candidates={d.afterPills} className="text-[12px] text-[#8A8A90] flex-1 min-w-0 overflow-hidden" />}
+      </div>
+    );
+  }
   // Support staff are not rostered for bookings, so "no shift set" is noise for them; a role that cannot read rosters sees "—", not a false "no shift".
   if (!pill && (t.status.key === 'no-roster' || t.status.key === 'no-hours-open') && (!t.isServiceStaff || (t.status.key === 'no-roster' && !rosterReadable))) return <span className="text-[13px] text-[#8A8A90]">—</span>;
   const base = TONE[t.status.key] || TONE['no-roster'];

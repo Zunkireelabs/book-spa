@@ -39,6 +39,11 @@ import HoursSection from './sections/HoursSection';
 import PaySection from './sections/PaySection';
 import HistorySection from './sections/HistorySection';
 import TodayBookingPanel from './sections/TodayBookingPanel';
+import TransferManagementModal from '../../components/ui/TransferManagementModal';
+import TransferPill from '../../components/ui/TransferPill';
+import { describeTransfer, transferState } from '../../utils/transferText';
+import { toKathmanduParts } from '../branch-manager-dashboard/components/calendar/calendarDates';
+import { formatClockTime } from '../branch-manager-dashboard/components/calendar/timeFormat';
 import { Problem, Loading, Section, EditBar } from './sections/ui';
 
 const EMPTY_FORM = { name: '', gender: 'Male', positions: [], specialties: '', isServiceStaff: true, photoUrl: '', bio: '', experienceYears: '', rating: '', phone: '', countryCode: '+977', address: '', city: '', email: '', pronouns: '' };
@@ -70,7 +75,7 @@ const StaffDetailPage = () => {
   const { profile } = useAuth();
   const { branchId, branches } = useBranch();
   const { enableStaffRatings } = useOrg();
-  const { staffLabel, staffLabelPlural } = useIndustry();
+  const { staffLabel, staffLabelPlural, locationLabel } = useIndustry();
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const role = profile?.role || 'staff';
   const isEdit = !!staffId;
@@ -261,13 +266,23 @@ const StaffDetailPage = () => {
     setAttendanceLoading(false);
   }, [isEdit, staffId, periodMonth]);
 
+  // Transfers: the open one drives the banner and Today's slot; the panel is the same docked panel as the calendar's.
+  const [transfers, setTransfers] = useState([]);
+  const [transferPanel, setTransferPanel] = useState(false);
+  const use24h = (() => { try { return localStorage.getItem(`bookspa_calendar_use24h_${profile?.org_id}_${profile?.id}`) === '1'; } catch { return false; } })();
+  const loadTransfers = useCallback(async () => {
+    if (!isEdit) return;
+    const r = await profileApi.fetchTherapistTransfers({ therapistId: staffId });
+    if (!r.error) setTransfers(r.data || []);
+  }, [isEdit, staffId]);
+
   const loadActivity = useCallback(async () => {
     if (!isEdit) return;
     setActivityLoading(true); setActivityError(null);
-    const r = await profileApi.fetchTherapistActivity({ therapistId: staffId, filter: activityFilter, limit: 50, role });
+    const r = await profileApi.fetchTherapistActivity({ therapistId: staffId, filter: activityFilter, limit: 50, role, labels: { branch: (locationLabel || 'branch').toLowerCase() }, use24h });
     if (r.error) setActivityError(r.error.message || 'Could not load activity.'); else setActivity(r.data);
     setActivityLoading(false);
-  }, [isEdit, staffId, activityFilter, role]);
+  }, [isEdit, staffId, activityFilter, role, locationLabel, use24h]);
 
   // Everything the header / menu needs loads once the record is here; heavier sections load when opened.
   useEffect(() => {
@@ -276,6 +291,7 @@ const StaffDetailPage = () => {
   }, [therapist, loadOverview, loadMatrix, loadPay, loadOverrides]);
   useEffect(() => { if (therapist) { loadEarnings(); loadAttendance(); } }, [therapist, loadEarnings, loadAttendance]);
   useEffect(() => { if (therapist) loadActivity(); }, [therapist, loadActivity]);
+  useEffect(() => { if (therapist) loadTransfers(); }, [therapist, loadTransfers]);
 
   // A saved filter chip that the role may not see (Pay) falls back to All.
   useEffect(() => { if (!canSeePay && activityFilter === 'pay') setActivityFilter('all'); }, [canSeePay, activityFilter]);
@@ -569,6 +585,23 @@ const StaffDetailPage = () => {
     hours: 'The usual week',
     pay: canEditPay ? 'Admins only · the same numbers Payroll uses' : 'View only · the same numbers Payroll uses',
   };
+  const transferLabels = { branch: (locationLabel || 'branch').toLowerCase() };
+  const openTransfer = transfers.find((t) => !t.isReturnLeg && ['upcoming', 'now', 'permanent-upcoming'].includes(transferState(t.input)));
+  const openTransferDesc = openTransfer ? describeTransfer(openTransfer.input, { viewpoint: 'home', use24h, labels: transferLabels }) : null;
+  // The window as minutes of today (Nepal), for Today's timeline.
+  const transferToday = (() => {
+    const endOf = (i) => (i.reverted && i.revertedAt ? i.revertedAt : i.revertAt);
+    const t = transfers.find((x) => {
+      if (x.isReturnLeg || !x.input.revertAt) return false;   // upcoming (not yet applied) windows draw too
+      const a = toKathmanduParts(x.input.startAt); const b = toKathmanduParts(endOf(x.input));
+      return a && b && a.date <= today && b.date >= today;
+    });
+    if (!t) return null;
+    const a = toKathmanduParts(t.input.startAt); const b = toKathmanduParts(endOf(t.input));
+    const m = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
+    const from = a.date < today ? '00:00' : a.time; const to = b.date > today ? '24:00' : b.time;
+    return { startMin: m(from), endMin: m(to), label: `At ${t.input.toBranch || 'another branch'}`, title: describeTransfer(t.input, { viewpoint: 'home', use24h, labels: transferLabels }).sentence };
+  })();
   const monthLabel = new Date(`${today}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   const todayCount = (overview?.todayBookings || []).filter((b) => !['Cancelled', 'No Show'].includes(b.status)).length;
   const overviewSub = form.isServiceStaff ? `${monthLabel} · ${todayCount} booking${todayCount === 1 ? '' : 's'}` : new Date(`${today}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' }) + ' so far';
@@ -627,6 +660,14 @@ const StaffDetailPage = () => {
                 <HeaderActions />
               </header>
 
+              {isEdit && openTransferDesc && (
+                <div data-transfer-banner className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-spa border border-border bg-surface px-4 py-3">
+                  <TransferPill state={openTransferDesc.state}>{openTransferDesc.pill}</TransferPill>
+                  <span className="flex-1 min-w-[200px] text-sm text-text-primary">{openTransferDesc.sentence}</span>
+                  <button type="button" onClick={() => setTransferPanel(true)} className="text-sm font-medium text-primary hover:underline">View</button>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-[180px_minmax(0,1fr)] gap-x-12 border-t border-border pt-7">
                 <nav aria-label="Profile sections" className="hidden lg:block sticky top-20 self-start pl-3.5">
                   <span aria-hidden className="absolute left-0 top-1 bottom-1 w-px bg-border" />
@@ -650,7 +691,7 @@ const StaffDetailPage = () => {
                       right={form.isServiceStaff ? <button type="button" onClick={() => go(dash('calendar') + `&therapist=${staffId}`)} className="text-sm font-medium text-primary hover:underline">Open calendar</button> : null}>
                       <OverviewSection data={overview} loading={overviewLoading} error={overviewError} onRetry={loadOverview} today={today} nowTime={nowTime}
                         isServiceStaff={form.isServiceStaff} attendanceRows={(attendance || []).map((r) => ({ ...r, status: r.status }))}
-                        onOpenBooking={setOpenBooking} openCalendar={() => go(dash('calendar') + `&therapist=${staffId}`)} showCommission={canSeePay} />
+                        onOpenBooking={setOpenBooking} openCalendar={() => go(dash('calendar') + `&therapist=${staffId}`)} showCommission={canSeePay} transferToday={transferToday} />
                       {!form.isServiceStaff && (
                         <p className="mt-4 flex items-start gap-2 text-sm text-text-secondary"><Icon name="AlertTriangle" size={14} className="mt-0.5 flex-shrink-0" />
                           <span>{firstName || 'This person'} is support staff, so bookings, revenue and commission don't apply.{canEdit && <> <button type="button" onClick={() => requestEdit('profile', 'type')} className="text-primary font-medium hover:underline">Make bookable</button></>}</span>
@@ -710,6 +751,17 @@ const StaffDetailPage = () => {
 
         {conflictModal}
 
+        {transferPanel && openTransfer && (
+          <TransferManagementModal
+            variant="panel"
+            therapistId={staffId}
+            therapistName={displayName}
+            currentBranchId={openTransfer.fromBranchId}
+            use24h={use24h}
+            onClose={() => setTransferPanel(false)}
+            onSuccess={() => { setTransferPanel(false); loadTransfers(); loadActivity(); loadOverview(); }}
+          />
+        )}
         <TodayBookingPanel booking={openBooking} branchId={effectiveBranchId} onClose={() => setOpenBooking(null)} onChanged={loadOverview} />
       </div>
     </AppShell>

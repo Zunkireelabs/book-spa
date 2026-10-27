@@ -6,7 +6,7 @@ fix this file.
 
 *Generated from Plane by `/project-pm sync`. Don't hand-edit; change Plane, then re-sync.*
 
-Last synced: **2026-10-26** by bookx-79 (lead)
+Last synced: **2026-10-27** by bookx-d5 (lead)
 
 ---
 
@@ -49,6 +49,8 @@ Last synced: **2026-10-26** by bookx-79 (lead)
 | ZNLY-76 | Sadin | medium | UI-10 (V20–V21): Packages + Memberships redesign |
 | ZNLY-79 | Sadin | medium | UI-13 (V25): Products + Inventory with variants |
 | ZNLY-97 | Sadin | medium | UI-18: Therapists redesign |
+| ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+. Done locally in 847a5c9; ships with the UI-port PR |
+| ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere. Mockup first |
 
 ## In review / on stage
 
@@ -65,7 +67,7 @@ Last synced: **2026-10-26** by bookx-79 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
-| ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+ |
+| ZNLY-112 | Sadin | high | Therapists page "Overall" fails (uuid "__overall__"); prod lists all with Branch column. Blocks UI-port PR |
 | ZNLY-13 | unassigned | high | Renumber colliding migration-289 (PR #413 vs #415) |
 | ZNLY-26 | unassigned | high | Verify 503 "Reconnecting" screen + login banner against a real failure |
 | ZNLY-94 | Anish | high | Get onboarded to the Plane workflow |
@@ -78,6 +80,7 @@ Last synced: **2026-10-26** by bookx-79 (lead)
 | ZNLY-84 | Sadin | medium | A-2: admin_viewer sees write actions on customer-detail. Hand to Anish or fix here? |
 | ZNLY-85 | Sadin | medium | V-4: staff voucher limits. Match booking limits? |
 | ZNLY-89 | Sadin | medium | V-9: win-back emails already-booked guests. Align with At-risk rule? |
+| ZNLY-108 | Sadin | low | DECIDE: keep cancelled staff transfers in History (soft-cancel migration)? |
 | ZNLY-86 | Sadin | low | V-6: staff issuing vouchers get no member discount / wallet. Intended? |
 | ZNLY-87 | Sadin | low | V-7: let admins edit existing membership tiers? |
 | ZNLY-88 | Sadin | low | V-8: room active/deactivate switch? |
@@ -86,6 +89,10 @@ Last synced: **2026-10-26** by bookx-79 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-109 | Sadin | low | Calendar header tooltip mixes 24h and 12h ("Shift started 09:00" next to "12:00pm") |
+| ZNLY-110 | Sadin | low | Calendar shading labels cut mid-time: wrap instead of truncate |
+| ZNLY-111 | Sadin | low | Calendar grid has no right gutter: last column runs flush to the window edge |
+| ZNLY-113 | Sadin | high | One home-branch model for temporary transfers: who sees, edits and pays a lent therapist |
 | ZNLY-15 | unassigned | high | Rotate/remove accounts exposed by deleted dev-info.html |
 | ZNLY-18 | unassigned | high | Supabase Auth URL config / allowlists for the new domain |
 | ZNLY-82 | Sadin | high | UI-16: release prep, regression pass, stage re-merge, PR to stage |
@@ -100,7 +107,6 @@ Last synced: **2026-10-26** by bookx-79 (lead)
 | ZNLY-83 | Sadin | medium | UI-17: next pages (Reports, Dashboard, Calendar polish, Settings lists) |
 | ZNLY-90 | Sadin | medium | V19 security follow-ups |
 | ZNLY-96 | Sadin | medium | GitHub → Plane automation + CI check for ZNLY id in PR title |
-| ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere |
 | ZNLY-102 | unassigned | medium | Falls-outside list: block drag, transfer extend/return, recurring blocks |
 | ZNLY-103 | unassigned | medium | One shared modal overlay for every centred popup |
 | ZNLY-104 | unassigned | medium | Calendar address-bar date doesn't follow navigation |

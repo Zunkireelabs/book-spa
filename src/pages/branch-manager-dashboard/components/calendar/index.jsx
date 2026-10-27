@@ -161,9 +161,9 @@ const OperationalCalendar = ({ branchId }) => {
     choiceMenuSlot, setChoiceMenuSlot, addBlockSlot, setAddBlockSlot, editingBlock, setEditingBlock,
     blockDeleteRequest, setBlockDeleteRequest, lastBlockWasRoomOnly,
     transferModalTarget, setTransferModalTarget, editingTransferTherapist, setEditingTransferTherapist,
-    transferCancelRequest, setTransferCancelRequest, blockPanelOpen, blockRetarget,
+    blockPanelOpen, blockRetarget,
     servicesCache, servicesLoading, rebookSource, rebookFallback, rebookCardRef, reschedulePending,
-    openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick, handleConfirmTransferCancel,
+    openQuickCreateForSlot, handleNewBooking, handleDragCreate, handleEmptySlotClick,
     handleDeleteManualBlock, handleResizeManualBlock, handleQuickCreateClose, handleQuickCreateSubmit, handleRebookStart, handleRescheduleStart,
     runThroughPanelGuard, openOnlyPanel, handleBookingClick, refreshOpenBooking, handleModalClose,
   } = useCalendarPanels({ branchId, currentDate, calendarData, refreshCalendar, blocksAvailable, showToast, gridRef });
@@ -177,7 +177,7 @@ const OperationalCalendar = ({ branchId }) => {
   // so scroll position, popovers and the hover label are untouched.
   const autoRefreshPaused = modalOpen || blockPanelOpen || !!activeDragId || isRescheduling || !!quickCreateSlot
     || !!pendingReassign || !!rebookSource || !!choiceMenuSlot || !!addBlockSlot || !!editingBlock || !!blockDeleteRequest
-    || !!transferModalTarget || !!editingTransferTherapist || !!transferCancelRequest;
+    || !!transferModalTarget || !!editingTransferTherapist;
   useAutoRefresh(refreshCalendar, { intervalMs: 60000, enabled: !!branchId && !autoRefreshPaused });
 
   // ── Navigation ─────────────────────────────────────────────
@@ -339,8 +339,6 @@ const OperationalCalendar = ({ branchId }) => {
                   selectedBookingId={modalOpen ? (selectedBooking?.bookingId || previewBooking?.bookingId || previewBooking?.id || null) : null}
                   onEditManualBlock={(range) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingBlock({ blockId: range.blockId, day: range.day })))}
                   onEditTransfer={transfersAvailable ? (col) => runThroughPanelGuard(() => openOnlyPanel(() => setEditingTransferTherapist({ id: col.id, name: col.name }))) : undefined}
-                  onCancelScheduledTransfer={transfersAvailable ? (col) => setTransferCancelRequest({ kind: 'scheduled', col }) : undefined}
-                  onCancelActiveTransfer={transfersAvailable ? (col) => setTransferCancelRequest({ kind: 'active', col }) : undefined}
                   hideSensitive={hideSensitive}
                   startHour={calendarStartHour}
                   endHour={calendarEndHour}
@@ -534,6 +532,7 @@ const OperationalCalendar = ({ branchId }) => {
           therapistId={editingTransferTherapist.id}
           therapistName={editingTransferTherapist.name}
           currentBranchId={branchId}
+          use24h={use24h}
           defaultStartDate={currentDate}
           onClose={() => setEditingTransferTherapist(null)}
           onSuccess={(message) => {
@@ -541,18 +540,6 @@ const OperationalCalendar = ({ branchId }) => {
             if (message) showToast(message);
             refreshCalendar();
           }}
-        />
-      )}
-
-      {transferCancelRequest && (
-        <BlockScopeDialog
-          title={transferCancelRequest.kind === 'scheduled'
-            ? `Cancel ${transferCancelRequest.col.name}'s scheduled transfer?`
-            : `Cancel ${transferCancelRequest.col.name}'s transfer and bring them back now?`}
-          recurring={false}
-          confirmLabel={transferCancelRequest.kind === 'scheduled' ? 'Cancel transfer' : 'Bring back now'}
-          onCancel={() => setTransferCancelRequest(null)}
-          onChoose={handleConfirmTransferCancel}
         />
       )}
 

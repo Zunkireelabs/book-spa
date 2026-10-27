@@ -3,7 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
-import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
+import RowBoundary from '../../../../components/ui/RowBoundary';
+import TransferFitText from '../../../../components/ui/TransferFitText';
+import TransferPill from '../../../../components/ui/TransferPill';
+import { describeTransfer, toTransferInput, transferState } from '../../../../utils/transferText';
+import { useAuth } from '../../../../contexts/AuthContext';
 import FilterBar from '../../../../components/ui/FilterBar';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh';
@@ -13,9 +17,7 @@ import {
   fetchAttendanceSummary,
   markAttendance,
   fetchPendingTransfers,
-  cancelScheduledTransfer,
   fetchTherapistTransferStatus,
-  revertStaffTransferNow,
   fetchShiftsForRange,
 } from '../../../../services/api';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
@@ -90,7 +92,10 @@ function SummaryCard({ icon, iconBg, iconColor, label, value, highlight }) {
 
 const AttendancePanel = ({ branchId }) => {
   const today = new Date().toISOString().split('T')[0];
-  const { staffLabel } = useIndustry();
+  const { staffLabel, locationLabel } = useIndustry();
+  const { profile } = useAuth();
+  // Same per-user 12h/24h display preference the calendar uses.
+  const use24h = (() => { try { return localStorage.getItem(`bookspa_calendar_use24h_${profile?.org_id}_${profile?.id}`) === '1'; } catch { return false; } })();
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
   const [shiftByTherapist, setShiftByTherapist] = useState({});   // that date's shift per person (therapist_shifts_for_range)
 
@@ -110,8 +115,6 @@ const AttendancePanel = ({ branchId }) => {
   const [pendingByTherapist, setPendingByTherapist] = useState({});
   const [transferStatusByTherapist, setTransferStatusByTherapist] = useState({});
   const [transferTarget, setTransferTarget] = useState(null); // { therapistId, therapistName }
-  const [cancellingTransfer, setCancellingTransfer] = useState(null);
-  const [confirmRevert, setConfirmRevert] = useState(null); // the active transfer row awaiting "cancel and bring back now" confirmation
 
   // Track local edits per therapist: { [therapistId]: { status, checkInTime, checkOutTime, notes, dirty } }
   const [edits, setEdits] = useState({});
@@ -141,26 +144,26 @@ const AttendancePanel = ({ branchId }) => {
     );
   }, [transferStatusByTherapist, branchId]);
 
-  const filteredTherapists = useMemo(() => {
-    if (staffTypeFilter === 'transferred') return [];
-    return therapists.filter((t) => {
-      if (focusTherapistId) return t.therapistId === focusTherapistId;
-      if (isIncomingTransferOverdue(t.therapistId)) return false;
-      const matchesSearch = !searchQuery.trim()
-        || (t.therapistName || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
-      const currentStatus = edits[t.therapistId]?.status ?? (t.status || '');
-      const matchesStatus = statusFilter === 'all' || currentStatus === statusFilter;
-      const matchesType = staffTypeFilter === 'all'
-        || (staffTypeFilter === 'service' ? t.isServiceStaff : !t.isServiceStaff);
-      return matchesSearch && matchesStatus && matchesType;
-    });
-  }, [therapists, edits, searchQuery, statusFilter, staffTypeFilter, isIncomingTransferOverdue]);
-
   const isTransferredTherapist = useCallback((therapistId) => {
     const status = transferStatusByTherapist[therapistId];
     const activeIncomingTransfer = status?.applied && !status?.reverted && status?.revertAt && status?.toBranchId === branchId;
     return !!pendingByTherapist[therapistId] || !!activeIncomingTransfer;
   }, [pendingByTherapist, transferStatusByTherapist, branchId]);
+
+  const filteredTherapists = useMemo(() => {
+    return therapists.filter((t) => {
+      if (focusTherapistId) return t.therapistId === focusTherapistId;
+      if (staffTypeFilter === 'transferred' && !isTransferredTherapist(t.therapistId)) return false;
+      if (isIncomingTransferOverdue(t.therapistId)) return false;
+      const matchesSearch = !searchQuery.trim()
+        || (t.therapistName || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
+      const currentStatus = edits[t.therapistId]?.status ?? (t.status || '');
+      const matchesStatus = statusFilter === 'all' || currentStatus === statusFilter;
+      const matchesType = staffTypeFilter === 'all' || staffTypeFilter === 'transferred'
+        || (staffTypeFilter === 'service' ? t.isServiceStaff : !t.isServiceStaff);
+      return matchesSearch && matchesStatus && matchesType;
+    });
+  }, [therapists, edits, searchQuery, statusFilter, staffTypeFilter, isIncomingTransferOverdue, isTransferredTherapist, focusTherapistId]);
 
   // Staff transferred (or being transferred) AWAY from this branch — both already-active
   // transfers (branch_id has moved, so they're absent from `therapists`) and scheduled-but-
@@ -206,15 +209,18 @@ const AttendancePanel = ({ branchId }) => {
     [transferredOutBase, transferredAttendance]
   );
 
+  // Staff whose transfer has APPLIED are no longer on this branch's roster, but keep their place in the list (sorted with everyone).
+  // Scheduled ones are still on the roster, so they already have their own row.
   const filteredTransferredOut = useMemo(() => {
-    if (staffTypeFilter !== 'transferred') return [];
-    if (!searchQuery.trim()) return transferredOutList;
+    if (focusTherapistId || statusFilter !== 'all' || !['all', 'transferred'].includes(staffTypeFilter)) return [];
+    const active = transferredOutList.filter((s) => !s.isPending);
+    if (!searchQuery.trim()) return active;
     const q = searchQuery.toLowerCase().trim();
-    return transferredOutList.filter((s) => (s.therapistName || '').toLowerCase().includes(q));
-  }, [transferredOutList, searchQuery, staffTypeFilter]);
+    return active.filter((s) => (s.therapistName || '').toLowerCase().includes(q));
+  }, [transferredOutList, searchQuery, staffTypeFilter, statusFilter, focusTherapistId]);
 
   const transferredCount = useMemo(
-    () => therapists.filter((t) => isTransferredTherapist(t.therapistId)).length + transferredOutList.length,
+    () => therapists.filter((t) => isTransferredTherapist(t.therapistId)).length + transferredOutList.filter((s) => !s.isPending).length,
     [therapists, isTransferredTherapist, transferredOutList]
   );
 
@@ -547,33 +553,36 @@ const AttendancePanel = ({ branchId }) => {
     setTransferTarget({ therapistId: t.therapistId, therapistName: t.therapistName });
   };
 
-  const handleCancelTransfer = async (transferId) => {
-    setCancellingTransfer(transferId);
-    const { error: cancelError } = await cancelScheduledTransfer(transferId);
-    setCancellingTransfer(null);
-    if (cancelError) {
-      showToast(cancelError.message || 'Failed to cancel transfer.', 'error');
-      return;
+  // One look for a transfer everywhere: pill + short sentence + chevron, opening the same side panel as the calendar.
+  const renderTransferCell = (row, viewpoint, t) => {
+    const open = row && ['upcoming', 'now', 'permanent-upcoming'].includes(transferState(toTransferInput(row)));
+    if (!open) {
+      return (
+        <button
+          type="button"
+          onClick={() => openTransfer(t)}
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-spa border border-border bg-surface text-text-secondary hover:bg-background spa-transition-fast font-body font-body-medium text-xs whitespace-nowrap w-fit"
+          title={`Transfer ${staffLabel.toLowerCase()}`}
+        >
+          <Icon name="ArrowRightLeft" size={14} />
+          Transfer
+        </button>
+      );
     }
-    showToast('Scheduled transfer cancelled.');
-    await loadPendingTransfers();
-  };
-
-  // Undo an already-applied (active) transfer directly, same one-click-with-confirm pattern
-  // as the scheduled case above, for the common "created it by mistake" case — extending or
-  // rescheduling the return date still goes through the full TransferManagementModal (opened
-  // via the staff name), since those aren't "undo" actions.
-  const handleCancelActiveTransfer = async (s) => {
-    setConfirmRevert(null);
-    setCancellingTransfer(s.id);
-    const { error: cancelError } = await revertStaffTransferNow({ transferId: s.id, revertedAt: null });
-    setCancellingTransfer(null);
-    if (cancelError) {
-      showToast(cancelError.message?.replace(/^revert_staff_transfer_now:\s*/, '') || 'Failed to cancel transfer.', 'error');
-      return;
-    }
-    showToast(`${s.therapistName}'s transfer cancelled — back at this branch now.`);
-    await loadData();
+    const d = describeTransfer(toTransferInput(row), { viewpoint, use24h, short: true, day: selectedDate, labels: { branch: (locationLabel || 'branch').toLowerCase() } });
+    return (
+      <button
+        type="button"
+        onClick={() => openTransfer(t)}
+        title={d.sentence}
+        data-transfer-cell={d.state}
+        className="flex items-center gap-2 h-8 w-full min-w-0 text-left hover:bg-background rounded-spa px-1 -mx-1 spa-transition-fast"
+      >
+        <TransferPill state={d.state}>{d.pill}</TransferPill>
+        <TransferFitText candidates={d.state === 'now' ? d.afterPills : viewpoint === 'receiving' ? [d.sentence, d.short, d.tiny] : [d.full, d.short, d.tiny]} className="font-body text-xs text-text-secondary flex-1 min-w-0 overflow-hidden" />
+        <Icon name="ChevronRight" size={14} className="text-text-tertiary flex-shrink-0" />
+      </button>
+    );
   };
 
   const dirtyCount = Object.values(edits).filter(e => e.dirty && e.status).length;
@@ -614,6 +623,192 @@ const AttendancePanel = ({ branchId }) => {
       </div>
     );
   }
+
+  const renderAwayRow = (s) => (
+    <div
+                key={`away-${s.id}`}
+                className="grid grid-cols-1 md:grid-cols-[1fr_140px_100px_100px_minmax(120px,1fr)_278px_56px] gap-3 px-5 py-3 items-center"
+              >
+                <button
+                  type="button"
+                  onClick={() => openTransfer({ therapistId: s.therapistId, therapistName: s.therapistName })}
+                  className="flex items-center space-x-2 min-w-0 text-left"
+                >
+                  <span className="w-4 h-4 flex-shrink-0" />
+                  <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Icon name="User" size={14} className="text-primary" />
+                  </div>
+                  <span className="font-body font-body-medium text-sm text-text-primary truncate hover:underline">{s.therapistName}</span>
+                </button>
+                <span className="font-body text-xs text-text-tertiary">Away</span>
+                {/* Attendance is global per day, so it still shows though they're no longer in this branch's roster */}
+                <span className="font-data text-sm text-text-primary">{s.attendance?.checkInTime || '—'}</span>
+                <span className="font-data text-sm text-text-primary">{s.attendance?.checkOutTime || '—'}</span>
+                <span />
+                {renderTransferCell(s.isPending ? { ...transferStatusByTherapist[s.therapistId], ...s, applied: false, reverted: false } : s, 'home', { therapistId: s.therapistId, therapistName: s.therapistName })}
+                <span />
+              </div>
+  );
+
+  const renderOwnRow = (t) => {
+              const edit = edits[t.therapistId] || {};
+              const isSaving = saving[t.therapistId];
+              const isDirty = edit.dirty;
+              const isDisabled = dayLocked || isSaving;
+
+              return (
+                <div
+                  key={t.therapistId}
+                  className={`grid grid-cols-1 md:grid-cols-[1fr_140px_100px_100px_minmax(120px,1fr)_278px_56px] gap-3 px-5 py-3 items-center ${
+                    isDirty ? 'bg-primary/5' : ''
+                  }`}
+                >
+                  {/* Therapist name */}
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(t.therapistId)}
+                      onChange={() => toggleSelect(t.therapistId)}
+                      disabled={dayLocked}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
+                    />
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      'bg-primary/10'
+                    }`}>
+                      <Icon name="User" size={14} className="text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
+                        {(() => {
+                          // Late = checked in after that date's shift start (the same shift the calendar uses).
+                          const sh = shiftOf(t.therapistId);
+                          const late = sh && edit.checkInTime ? hhmmToMinutes(edit.checkInTime) - hhmmToMinutes(sh.start) : 0;
+                          return late > 0 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-warning/10 text-warning" title={`Shift starts ${sh.start}`}>
+                              Late {late} min
+                            </span>
+                          ) : null;
+                        })()}
+                        {edit.status && (
+                          <span className={`md:hidden inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium ${
+                            edit.status === 'Present' ? 'bg-success/10 text-success' :
+                            edit.status === 'Absent' ? 'bg-error/10 text-error' :
+                            (edit.status === 'Annual Leave' || edit.status === 'Sick Leave') ? 'bg-warning/10 text-warning' :
+                            'bg-accent/10 text-accent'
+                          }`}>
+                            {edit.status}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status dropdown */}
+                  <CustomSelect
+                    value={edit.status || ''}
+                    onChange={(val) => handleFieldChange(t.therapistId, 'status', val)}
+                    options={ATTENDANCE_OPTIONS}
+                    disabled={isDisabled}
+                    size="sm"
+                    valueClassName={
+                      edit.status === 'Present' ? 'text-success' :
+                      edit.status === 'Absent' ? 'text-error' :
+                      (edit.status === 'Annual Leave' || edit.status === 'Sick Leave') ? 'text-warning' :
+                      edit.status === 'Day Off' ? 'text-accent' :
+                      'text-text-tertiary'
+                    }
+                  />
+
+                  {/* Check-in */}
+                  <input
+                    type="time"
+                    value={edit.checkInTime || ''}
+                    onChange={(e) => handleFieldChange(t.therapistId, 'checkInTime', e.target.value)}
+                    disabled={isDisabled}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  />
+
+                  {/* Check-out */}
+                  <input
+                    type="time"
+                    value={edit.checkOutTime || ''}
+                    onChange={(e) => handleFieldChange(t.therapistId, 'checkOutTime', e.target.value)}
+                    disabled={isDisabled}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  />
+
+                  {/* Notes */}
+                  <input
+                    type="text"
+                    placeholder="Optional notes..."
+                    value={edit.notes || ''}
+                    onChange={(e) => handleFieldChange(t.therapistId, 'notes', e.target.value)}
+                    disabled={isDisabled}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  />
+
+                  {/* Transfer: the button, or the pill + short sentence when one exists */}
+                  {renderTransferCell(transferStatusByTherapist[t.therapistId], transferStatusByTherapist[t.therapistId]?.toBranchId === branchId ? 'receiving' : 'home', t)}
+
+                  {/* Actions */}
+                  <div className="flex justify-center items-center gap-1.5">
+                    <button
+                      onClick={() => handleSave(t.therapistId)}
+                      disabled={isDisabled || !isDirty || !!halfDayError(t.therapistId, edit)}
+                      className={`inline-flex items-center justify-center w-8 h-8 rounded-spa spa-transition-fast ${
+                        isDirty && !isDisabled && !halfDayError(t.therapistId, edit)
+                          ? 'bg-primary text-white hover:bg-primary/90'
+                          : 'bg-background text-text-tertiary cursor-not-allowed'
+                      }`}
+                      title={halfDayError(t.therapistId, edit) ? 'Fix the half-day times first' : isDirty ? 'Save' : 'No changes'}
+                    >
+                      {isSaving ? (
+                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                      ) : (
+                        <Icon name="Check" size={16} />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Half day: editable off times, prefilled by the split rule, validated inside that day's shift */}
+                  {isHalfDay(edit.status) && (
+                    <div className="md:col-span-full flex items-center flex-wrap gap-2 pl-9" data-testid={`half-day-${t.therapistId}`}>
+                      <span className="font-caption text-xs text-text-secondary">Off</span>
+                      <input
+                        type="time"
+                        aria-label="Off from"
+                        value={edit.offStart || ''}
+                        onChange={(e) => handleFieldChange(t.therapistId, 'offStart', e.target.value)}
+                        disabled={isDisabled}
+                        className={`px-2 py-1 rounded-spa border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${halfDayError(t.therapistId, edit) ? 'border-error' : 'border-border'}`}
+                      />
+                      <span className="font-caption text-xs text-text-secondary">to</span>
+                      <input
+                        type="time"
+                        aria-label="Off until"
+                        value={edit.offEnd || ''}
+                        onChange={(e) => handleFieldChange(t.therapistId, 'offEnd', e.target.value)}
+                        disabled={isDisabled}
+                        className={`px-2 py-1 rounded-spa border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${halfDayError(t.therapistId, edit) ? 'border-error' : 'border-border'}`}
+                      />
+                      {shiftOf(t.therapistId) && (
+                        <span className="font-caption text-xs text-text-tertiary">Shift {shiftOf(t.therapistId).start}–{shiftOf(t.therapistId).end === '23:59:59' ? '24:00' : shiftOf(t.therapistId).end}</span>
+                      )}
+                      {halfDayError(t.therapistId, edit) && (
+                        <span role="alert" className="font-caption text-xs text-error">{halfDayError(t.therapistId, edit)}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            };
+
+  // One list, sorted with everyone: on-roster staff and staff whose transfer has applied (away).
+  const orderedRows = [
+    ...filteredTherapists.map((t) => ({ t, name: t.therapistName || '' })),
+    ...filteredTransferredOut.map((s) => ({ s, away: true, name: s.therapistName || '' })),
+  ].sort((x, y) => x.name.localeCompare(y.name));
 
   return (
     <div className="space-y-6">
@@ -721,7 +916,7 @@ const AttendancePanel = ({ branchId }) => {
         ]}
         resultCount={hasActiveFilters ? {
           filtered: filteredTherapists.length + filteredTransferredOut.length,
-          total: therapists.length + transferredOutList.length,
+          total: therapists.length + transferredOutList.filter((s) => !s.isPending).length,
         } : undefined}
         hasActiveFilters={hasActiveFilters}
         onClear={() => { setSearchQuery(''); setStatusFilter('all'); setStaffTypeFilter('all'); }}
@@ -761,7 +956,7 @@ const AttendancePanel = ({ branchId }) => {
       {/* Therapist Table */}
       <div className="bg-surface rounded-spa-lg border border-border">
         {/* Table header */}
-        <div className="hidden md:grid md:grid-cols-[1fr_140px_110px_110px_1fr_120px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
+        <div className="hidden md:grid md:grid-cols-[1fr_140px_100px_100px_minmax(120px,1fr)_278px_56px] gap-3 px-5 py-3 bg-background/50 border-b border-border rounded-t-spa-lg">
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide flex items-center gap-2">
             <input
               type="checkbox"
@@ -777,6 +972,7 @@ const AttendancePanel = ({ branchId }) => {
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Check-in</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Check-out</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Notes</span>
+          <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Transfer</span>
           <span className="font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide text-center">Action</span>
         </div>
 
@@ -792,227 +988,9 @@ const AttendancePanel = ({ branchId }) => {
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {filteredTransferredOut.map(s => (
-              <div
-                key={s.id}
-                className="grid grid-cols-1 md:grid-cols-[1fr_140px_110px_110px_1fr_120px] gap-3 px-5 py-3 items-center bg-[#B45309]/5"
-              >
-                {/* Staff name + transfer badge — clicking opens the full management modal
-                    (extend/reschedule the return date); the Action button below is the
-                    quick one-click undo instead. */}
-                <button
-                  type="button"
-                  onClick={() => openTransfer({ therapistId: s.therapistId, therapistName: s.therapistName })}
-                  className="flex items-center space-x-2 min-w-0 text-left"
-                  title={s.isPending ? 'Manage this scheduled transfer' : 'Manage this transfer (extend/reschedule return)'}
-                >
-                  <span className="w-4 h-4 flex-shrink-0" />
-                  <div className="w-7 h-7 rounded-full bg-[#B45309]/10 flex items-center justify-center flex-shrink-0">
-                    <Icon name="ArrowRightLeft" size={14} className="text-[#B45309]" />
-                  </div>
-                  <div className="min-w-0">
-                    <span className="font-body font-body-medium text-sm text-text-primary truncate block hover:underline">{s.therapistName}</span>
-                    <span className="font-caption text-[11px] text-[#B45309]">
-                      {s.isPending
-                        ? `Transfer → ${s.toBranch} on ${formatPrettyDate(s.effectiveDate)}`
-                        : <>Transferred to {s.toBranch} · back {new Date(s.revertAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</>}
-                    </span>
-                  </div>
-                </button>
-
-                {/* Status */}
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium bg-[#B45309]/10 text-[#B45309] w-fit">
-                  {s.isPending ? 'Scheduled' : 'Transferred'}
-                </span>
-
-                {/* Check-in / Check-out — attendance is global per day, so it still shows even
-                    though they're no longer in this branch's own therapist roster */}
-                <span className="font-data text-sm text-text-primary">{s.attendance?.checkInTime || '—'}</span>
-                <span className="font-data text-sm text-text-primary">{s.attendance?.checkOutTime || '—'}</span>
-
-                {/* Notes */}
-                <span className="font-body text-sm text-text-tertiary truncate">
-                  {s.isPending ? `Not yet started` : `At ${s.toBranch} since ${formatPrettyDate(s.effectiveDate)}`}
-                </span>
-
-                {/* Action */}
-                <div className="flex justify-center items-center">
-                  <button
-                    onClick={() => s.isPending
-                      ? handleCancelTransfer(s.id)
-                      : setConfirmRevert(s)}
-                    disabled={cancellingTransfer === s.id}
-                    className="inline-flex items-center justify-center h-8 px-3 rounded-spa bg-surface border border-[#B45309]/30 text-[#B45309] hover:bg-[#B45309]/10 spa-transition-fast font-body font-body-medium text-xs whitespace-nowrap disabled:opacity-50"
-                  >
-                    Cancel Transfer
-                  </button>
-                </div>
-              </div>
+            {orderedRows.map((r) => (
+              <RowBoundary key={r.away ? `away-${r.s.id}` : r.t.therapistId}>{r.away ? renderAwayRow(r.s) : renderOwnRow(r.t)}</RowBoundary>
             ))}
-            {filteredTherapists.map(t => {
-              const edit = edits[t.therapistId] || {};
-              const isSaving = saving[t.therapistId];
-              const isDirty = edit.dirty;
-              const isDisabled = dayLocked || isSaving;
-
-              return (
-                <div
-                  key={t.therapistId}
-                  className={`grid grid-cols-1 md:grid-cols-[1fr_140px_110px_110px_1fr_120px] gap-3 px-5 py-3 items-center ${
-                    isDirty ? 'bg-primary/5' : ''
-                  }`}
-                >
-                  {/* Therapist name */}
-                  <div className="flex items-center space-x-2 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(t.therapistId)}
-                      onChange={() => toggleSelect(t.therapistId)}
-                      disabled={dayLocked}
-                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30 cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
-                    />
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      isTransferredTherapist(t.therapistId) ? 'bg-[#B45309]/10' : 'bg-primary/10'
-                    }`}>
-                      <Icon name="User" size={14} className={isTransferredTherapist(t.therapistId) ? 'text-[#B45309]' : 'text-primary'} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-body font-body-medium text-sm text-text-primary truncate">{t.therapistName}</span>
-                        {(() => {
-                          // Late = checked in after that date's shift start (the same shift the calendar uses).
-                          const sh = shiftOf(t.therapistId);
-                          const late = sh && edit.checkInTime ? hhmmToMinutes(edit.checkInTime) - hhmmToMinutes(sh.start) : 0;
-                          return late > 0 ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-warning/10 text-warning" title={`Shift starts ${sh.start}`}>
-                              Late {late} min
-                            </span>
-                          ) : null;
-                        })()}
-                        {edit.status && (
-                          <span className={`md:hidden inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium ${
-                            edit.status === 'Present' ? 'bg-success/10 text-success' :
-                            edit.status === 'Absent' ? 'bg-error/10 text-error' :
-                            (edit.status === 'Annual Leave' || edit.status === 'Sick Leave') ? 'bg-warning/10 text-warning' :
-                            'bg-accent/10 text-accent'
-                          }`}>
-                            {edit.status}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Status dropdown */}
-                  <CustomSelect
-                    value={edit.status || ''}
-                    onChange={(val) => handleFieldChange(t.therapistId, 'status', val)}
-                    options={ATTENDANCE_OPTIONS}
-                    disabled={isDisabled}
-                    size="sm"
-                    valueClassName={
-                      edit.status === 'Present' ? 'text-success' :
-                      edit.status === 'Absent' ? 'text-error' :
-                      (edit.status === 'Annual Leave' || edit.status === 'Sick Leave') ? 'text-warning' :
-                      edit.status === 'Day Off' ? 'text-accent' :
-                      'text-text-tertiary'
-                    }
-                  />
-
-                  {/* Check-in */}
-                  <input
-                    type="time"
-                    value={edit.checkInTime || ''}
-                    onChange={(e) => handleFieldChange(t.therapistId, 'checkInTime', e.target.value)}
-                    disabled={isDisabled}
-                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-
-                  {/* Check-out */}
-                  <input
-                    type="time"
-                    value={edit.checkOutTime || ''}
-                    onChange={(e) => handleFieldChange(t.therapistId, 'checkOutTime', e.target.value)}
-                    disabled={isDisabled}
-                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-
-                  {/* Notes */}
-                  <input
-                    type="text"
-                    placeholder="Optional notes..."
-                    value={edit.notes || ''}
-                    onChange={(e) => handleFieldChange(t.therapistId, 'notes', e.target.value)}
-                    disabled={isDisabled}
-                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-body text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-
-                  {/* Actions */}
-                  <div className="flex justify-center items-center gap-1.5">
-                    <button
-                      onClick={() => handleSave(t.therapistId)}
-                      disabled={isDisabled || !isDirty || !!halfDayError(t.therapistId, edit)}
-                      className={`inline-flex items-center justify-center w-8 h-8 rounded-spa spa-transition-fast ${
-                        isDirty && !isDisabled && !halfDayError(t.therapistId, edit)
-                          ? 'bg-primary text-white hover:bg-primary/90'
-                          : 'bg-background text-text-tertiary cursor-not-allowed'
-                      }`}
-                      title={halfDayError(t.therapistId, edit) ? 'Fix the half-day times first' : isDirty ? 'Save' : 'No changes'}
-                    >
-                      {isSaving ? (
-                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                      ) : (
-                        <Icon name="Check" size={16} />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => openTransfer(t)}
-                      disabled={!!pendingByTherapist[t.therapistId]}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-spa bg-background text-text-secondary hover:bg-accent/10 hover:text-accent spa-transition-fast disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-text-secondary"
-                      title={
-                        pendingByTherapist[t.therapistId]
-                          ? 'A transfer is already scheduled'
-                          : transferStatusByTherapist[t.therapistId]?.applied && !transferStatusByTherapist[t.therapistId]?.reverted && transferStatusByTherapist[t.therapistId]?.toBranchId === branchId
-                            ? 'View active transfer / add extra time'
-                            : `Transfer ${staffLabel.toLowerCase()}`
-                      }
-                    >
-                      <Icon name="ArrowRightLeft" size={16} />
-                    </button>
-                  </div>
-
-                  {/* Half day: editable off times, prefilled by the split rule, validated inside that day's shift */}
-                  {isHalfDay(edit.status) && (
-                    <div className="md:col-span-full flex items-center flex-wrap gap-2 pl-9" data-testid={`half-day-${t.therapistId}`}>
-                      <span className="font-caption text-xs text-text-secondary">Off</span>
-                      <input
-                        type="time"
-                        aria-label="Off from"
-                        value={edit.offStart || ''}
-                        onChange={(e) => handleFieldChange(t.therapistId, 'offStart', e.target.value)}
-                        disabled={isDisabled}
-                        className={`px-2 py-1 rounded-spa border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${halfDayError(t.therapistId, edit) ? 'border-error' : 'border-border'}`}
-                      />
-                      <span className="font-caption text-xs text-text-secondary">to</span>
-                      <input
-                        type="time"
-                        aria-label="Off until"
-                        value={edit.offEnd || ''}
-                        onChange={(e) => handleFieldChange(t.therapistId, 'offEnd', e.target.value)}
-                        disabled={isDisabled}
-                        className={`px-2 py-1 rounded-spa border bg-surface font-data text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${halfDayError(t.therapistId, edit) ? 'border-error' : 'border-border'}`}
-                      />
-                      {shiftOf(t.therapistId) && (
-                        <span className="font-caption text-xs text-text-tertiary">Shift {shiftOf(t.therapistId).start}–{shiftOf(t.therapistId).end === '23:59:59' ? '24:00' : shiftOf(t.therapistId).end}</span>
-                      )}
-                      {halfDayError(t.therapistId, edit) && (
-                        <span role="alert" className="font-caption text-xs text-error">{halfDayError(t.therapistId, edit)}</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
           </div>
         )}
       </div>
@@ -1033,17 +1011,6 @@ const AttendancePanel = ({ branchId }) => {
             if (message) showToast(message);
             loadData();
           }}
-        />
-      )}
-
-      {confirmRevert && (
-        <ConfirmDialog
-          title="Cancel transfer?"
-          message={`Cancel ${confirmRevert.therapistName}'s transfer and bring them back to this branch now?`}
-          confirmLabel="Cancel transfer"
-          requireReason={false}
-          onConfirm={() => handleCancelActiveTransfer(confirmRevert)}
-          onClose={() => setConfirmRevert(null)}
         />
       )}
 

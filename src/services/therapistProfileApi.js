@@ -8,6 +8,7 @@ import { payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, total
 import { dbDowOfDate, effectiveHoursForDate, hoursFromShiftRow, timeToMinutes, DB_DOW_LABELS } from '../utils/staffDay';
 import { nextWorkingDay, isClosedDate } from '../utils/todayStatusLine';
 import { nepalNow } from '../utils/customerDirectory';
+import { describeTransfer, toTransferInput, transferTitle, transferWindowLine, transferDurationText } from '../utils/transferText';
 
 const PAY_ROLES = ['admin', 'admin_viewer'];
 export const canSeePay = (role) => PAY_ROLES.includes(role);
@@ -521,7 +522,56 @@ export async function saveTherapistServices({ therapistId, serviceIds }) {
  * `since` = when migration 314 was applied (history is recorded from then on; nothing is back-filled), or null.
  * Pay events never come back for staff / admin_viewer (checked here, in get_therapist_activity and in audit_logs RLS).
  */
-export async function fetchTherapistActivity({ therapistId, filter = 'all', limit = 50, role, labels }) {
+/**
+ * Every staff_transfers row for ONE person (read-only), as describeTransfer() inputs. The History feed RPC only carries a
+ * few columns of each transfer, so the profile reads the rest (window, applied/reverted) here.
+ */
+export async function fetchTherapistTransfers({ therapistId }) {
+  try {
+    const { data, error } = await supabase
+      .from('staff_transfers')
+      .select(`id, from_branch_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent, is_return_leg, note, transferred_at,
+        fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)`)
+      .eq('therapist_id', therapistId)
+      .order('transferred_at', { ascending: false });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        id: r.id, fromBranchId: r.from_branch_id, isReturnLeg: !!r.is_return_leg, note: r.note || null, transferredAt: r.transferred_at,
+        input: toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }),
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchTherapistTransfers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Give History's transfer rows their real wording: title = what happened and where, line 2 = the window (not the date it was
+ * created), pill = state. Return legs (the automatic way back) are folded into the temporary transfer they close.
+ * Transfer rows sort by window start, newest first, among the rest by time.
+ */
+export function enrichTransferItems(items = [], transfers = [], { labels = {}, use24h = false, now = new Date() } = {}) {
+  const byId = new Map((transfers || []).map((t) => [t.id, t]));
+  const out = [];
+  for (const it of items) {
+    const t = it.category === 'transfers' ? byId.get(it.id) : null;
+    if (!t) { out.push(it); continue; }
+    if (t.isReturnLeg) continue;
+    const d = describeTransfer(t.input, { viewpoint: 'home', now, use24h, labels });
+    out.push({
+      ...it,
+      text: transferTitle(t.input, { labels, now }),
+      transfer: { state: d.state, pill: d.pill, windowLine: transferWindowLine(t.input, { use24h, now }), duration: transferDurationText(t.input), note: t.note },
+      sortAt: t.input.startAt || it.at,
+    });
+  }
+  return out.sort((a, b) => new Date(b.sortAt || b.at) - new Date(a.sortAt || a.at));
+}
+
+export async function fetchTherapistActivity({ therapistId, filter = 'all', limit = 50, role, labels, use24h }) {
   try {
     const f = filter === 'pay' && !canSeePay(role) ? 'none' : filter;
     const [feedRes, sinceRes] = await Promise.all([
@@ -530,7 +580,10 @@ export async function fetchTherapistActivity({ therapistId, filter = 'all', limi
     ]);
     if (feedRes.error) throw feedRes.error;
     const rows = (feedRes.data || []).filter((r) => canSeePay(role) || r.category !== 'pay');
-    return { data: { items: buildActivityItems(rows, labels), since: sinceRes.error ? null : (sinceRes.data || null) }, error: null };
+    const items = buildActivityItems(rows, labels);
+    const hasTransfers = items.some((i) => i.category === 'transfers');
+    const tr = hasTransfers ? await fetchTherapistTransfers({ therapistId }) : { data: [] };
+    return { data: { items: tr.data ? enrichTransferItems(items, tr.data, { labels, use24h }) : items, since: sinceRes.error ? null : (sinceRes.data || null) }, error: null };
   } catch (error) {
     console.error('[API] fetchTherapistActivity error:', error.message);
     return { data: null, error };

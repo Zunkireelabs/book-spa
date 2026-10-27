@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
 import { Card, Loading, Problem } from './ui';
+import TransferPill from '../../../components/ui/TransferPill';
 import { attendanceTone, attendanceSummary } from '../profileModel';
 
 const TONE_CLASS = { 'on-time': 'bg-primary/70', late: 'bg-warning', leave: 'bg-blue-300', off: 'bg-border', absent: 'bg-error/70', none: 'bg-border/40' };
@@ -54,12 +55,22 @@ const HistorySection = ({
             <Card className="divide-y divide-border">
               {items.map((it) => (
                 <div key={it.id} className="flex items-center gap-3 px-4 py-3">
-                  <span className="w-8 h-8 rounded-full border border-border flex items-center justify-center flex-shrink-0 text-text-secondary"><Icon name={CAT_ICON[it.category] || 'Circle'} size={14} /></span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text-primary">{it.text}</p>
-                    {it.actorName && <p className="text-xs text-text-secondary">{it.actorName}</p>}
-                  </div>
-                  <span className="text-xs text-text-tertiary whitespace-nowrap">{fmtDate(it.at)}</span>
+                  <span className="w-8 h-8 rounded-full border border-border flex items-center justify-center flex-shrink-0 text-text-secondary"><Icon name={it.transfer && !it.transfer.state.startsWith('permanent') ? 'ArrowRightLeft' : (CAT_ICON[it.category] || 'Circle')} size={14} /></span>
+                  {it.transfer ? (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-text-primary flex flex-wrap items-center gap-2">{it.text}<TransferPill state={it.transfer.state}>{it.transfer.pill}</TransferPill></p>
+                      {it.transfer.windowLine && <p className="text-xs text-text-secondary">{it.transfer.windowLine}{it.transfer.duration ? ` · ${it.transfer.duration}` : ''}</p>}
+                      <p className="text-xs text-text-tertiary">{[`Set by ${it.actorName || 'someone'} · ${fmtDate(it.at)}`, it.transfer.note ? `“${it.transfer.note}”` : null].filter(Boolean).join(' · ')}</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-text-primary">{it.text}</p>
+                        {it.actorName && <p className="text-xs text-text-secondary">{it.actorName}</p>}
+                      </div>
+                      <span className="text-xs text-text-tertiary whitespace-nowrap">{fmtDate(it.at)}</span>
+                    </>
+                  )}
                 </div>
               ))}
             </Card>

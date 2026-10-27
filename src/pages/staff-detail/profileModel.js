@@ -127,7 +127,7 @@ const GONE = ['Cancelled', 'No Show'];
  * Lay today's bookings on the shift track. The track spans the shift (or the bookings if they run outside it), rounded to whole hours.
  * Overlapping slices (companion / combo) go to lane 0 or 1; a third overlapping slice is not drawn but counted in `hidden`.
  */
-export function buildTimeline({ bookings = [], shift = null, nowTime = '00:00' }) {
+export function buildTimeline({ bookings = [], shift = null, nowTime = '00:00', transfer = null }) {
   const list = bookings.filter((b) => !GONE.includes(b.status) && b.startTime && b.endTime)
     .map((b) => ({ ...b, s: toMin(b.startTime), e: Math.max(toMin(b.endTime), toMin(b.startTime) + 5) }))
     .sort((a, b) => a.s - b.s || a.e - b.e);
@@ -154,7 +154,8 @@ export function buildTimeline({ bookings = [], shift = null, nowTime = '00:00' }
   // Next free gap: the first stretch of 30+ minutes from now (or the shift start) to the shift end with no booking or break in it.
   let gap = null;
   if (working) {
-    const busy = [...list.map((b) => [b.s, b.e]), ...(shift.breaks || []).map((br) => [toMin(br.startTime), toMin(br.endTime)])].sort((a, b) => a[0] - b[0]);
+    // bookings, breaks and today's transfer window (away from this branch) all take the person out of the free time
+    const busy = [...list.map((b) => [b.s, b.e]), ...(shift.breaks || []).map((br) => [toMin(br.startTime), toMin(br.endTime)]), ...(transfer ? [[transfer.startMin, transfer.endMin]] : [])].sort((a, b) => a[0] - b[0]);
     let cursor = Math.max(toMin(shift.startTime), toMin(nowTime)); const end = toMin(shift.endTime);
     for (const [bs, be] of busy) {
       if (be <= cursor) continue;
@@ -163,10 +164,14 @@ export function buildTimeline({ bookings = [], shift = null, nowTime = '00:00' }
     }
     if (!gap && end - cursor >= 30) gap = { from: cursor, to: end };
   }
+  // Today's transfer window (minutes of the day) clamped to the track: { startMin, endMin, label }
+  const transferSlot = transfer && transfer.endMin > from && transfer.startMin < to
+    ? { label: transfer.label, title: transfer.title, left: ((Math.max(transfer.startMin, from) - from) / span) * 100, width: ((Math.min(transfer.endMin, to) - Math.max(transfer.startMin, from)) / span) * 100 }
+    : null;
   const nowPct = toMin(nowTime) >= from && toMin(nowTime) <= to ? ((toMin(nowTime) - from) / span) * 100 : null;
   const bookedMinutes = list.reduce((n, b) => n + (b.e - b.s), 0);
   return {
-    from, to, blocks, hidden, lanes, breaks, gap, nowPct, bookedMinutes,
+    from, to, blocks, hidden, lanes, breaks, gap, nowPct, bookedMinutes, transferSlot,
     done: list.filter((b) => DONE.includes(b.status)).length,
     toCome: list.filter((b) => !DONE.includes(b.status)).length,
     next: next ? { startTime: next.startTime } : null,

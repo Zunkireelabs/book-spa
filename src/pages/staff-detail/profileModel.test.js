@@ -103,3 +103,16 @@ describe('buildTimeline', () => {
     expect(buildTimeline({ shift: { isDayOff: true }, bookings: [bk('a', '10:00', '11:00', 'Cancelled')] })).toBeNull();
   });
 });
+
+describe('buildTimeline with a transfer window', () => {
+  const shift = { isDayOff: false, startTime: '09:00', endTime: '18:00', breaks: [] };
+  it('does not count the time away as free', () => {
+    const t = buildTimeline({ shift, nowTime: '11:54', bookings: [], transfer: { startMin: 12 * 60, endMin: 16 * 60, label: 'At Sanepa' } });
+    expect(t.gap).toEqual({ from: 16 * 60, to: 18 * 60 });
+    expect(t.transferSlot).toMatchObject({ label: 'At Sanepa' });
+  });
+  it('without a transfer the whole stretch is free', () => {
+    const t = buildTimeline({ shift, nowTime: '11:54', bookings: [] });
+    expect(t.gap).toEqual({ from: 11 * 60 + 54, to: 18 * 60 });
+  });
+});

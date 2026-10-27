@@ -183,6 +183,7 @@ export function segmentOf(t) {
 /** Does this person belong under a strip pick? ('notin' is a subset of working). */
 export function inSegment(t, seg) {
   if (!seg) return true;
+  if (t.transfer && t.transfer.viewpoint !== 'receiving') return false;   // away on a transfer: not part of today's availability counts
   if (seg === 'notin') return t.isServiceStaff && t.status.key === 'not-checked-in';
   return segmentOf(t) === seg;
 }

@@ -3,6 +3,8 @@ import Icon from '../../../components/AppIcon';
 import FilterBar from '../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO, toISO } from '../../../utils/periodPresets';
 import { useIndustry } from '../../../hooks/useIndustry';
+import TransferPill from '../../../components/ui/TransferPill';
+import { describeTransfer, toTransferInput } from '../../../utils/transferText';
 import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { fetchStaffTransfers } from '../../../services/api';
 
@@ -52,22 +54,8 @@ function isReturnLeg(t) {
   return t.isReturnLeg ?? RETURN_LEG_NOTES.includes(t.note);
 }
 
-// Status shown for a transfer row: Active (not yet returned — either still scheduled
-// to apply, or applied and currently at the destination branch) -> Returned (this leg
-// has ended, whether by the return-leg row itself, or the original row once reverted).
-function transferStatus(t) {
-  if (isReturnLeg(t)) return 'Returned';
-  if (t.applied && t.reverted) return 'Returned';
-  return 'Active';
-}
-
-const STATUS_STYLES = {
-  Active: { className: 'bg-success/10 text-success', icon: 'PlayCircle' },
-  Returned: { className: 'bg-[#B45309]/10 text-[#B45309]', icon: 'CheckCircle' },
-};
-
 const TransferReportPanel = () => {
-  const { staffLabel } = useIndustry();
+  const { staffLabel, locationLabel } = useIndustry();
   const today = getTodayISO();
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -159,7 +147,7 @@ const TransferReportPanel = () => {
         esc(t.toBranch),
         esc(formatDateOnly(t.effectiveDate)),
         esc(t.isPermanent ? 'Permanent' : 'Temporary'),
-        esc(transferStatus(t)),
+        esc(isReturnLeg(t) ? 'Returned' : describeTransfer(toTransferInput(t), { viewpoint: 'home' }).pill),
         esc(t.revertAt ? formatDateTime(t.revertAt) : '—'),
         esc(t.reverted
           ? `${formatDateTime(t.revertedAt)}${earlyLabel}`
@@ -278,14 +266,10 @@ const TransferReportPanel = () => {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {(() => {
-                        const status = transferStatus(t);
-                        const style = STATUS_STYLES[status];
-                        return (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-caption font-caption-medium ${style.className}`}>
-                            <Icon name={style.icon} size={12} />
-                            {status}
-                          </span>
-                        );
+                        // Return legs are the automatic way back: they read as the ended state.
+                        if (isReturnLeg(t)) return <TransferPill state="ended">Returned</TransferPill>;
+                        const d = describeTransfer(toTransferInput(t), { viewpoint: 'home', labels: { branch: (locationLabel || 'branch').toLowerCase() } });
+                        return <span title={d.sentence}><TransferPill state={d.state}>{d.pill}</TransferPill></span>;
                       })()}
                     </td>
                     <td className="px-4 py-3 font-body text-sm text-text-secondary whitespace-nowrap">

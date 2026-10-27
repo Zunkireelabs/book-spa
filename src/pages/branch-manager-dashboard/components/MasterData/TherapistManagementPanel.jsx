@@ -162,9 +162,11 @@ const TherapistManagementPanel = ({
   const loading = !ov && !error;
   const all = useMemo(() => (ov ? ov.therapists : []), [ov]);
   const tabList = useMemo(() => all.filter((t) => t.isActive === active), [all, active]);
-  const stats = useMemo(() => (active && ov ? stripStats(tabList, { nowTime }) : {}), [active, ov, tabList, nowTime]);
+  // Staff away on a transfer stay listed but are not part of today's availability counts.
+  const presentList = useMemo(() => tabList.filter((t) => !t.transfer), [tabList]);
+  const stats = useMemo(() => (active && ov ? stripStats(presentList, { nowTime }) : {}), [active, ov, presentList, nowTime]);
   const segments = useMemo(() => STRIP_SEGMENTS.filter((s) => (s.id !== 'noroster' && s.id !== 'support') || (stats[s.id]?.count || 0) > 0).filter((s) => s.id !== 'noroster' || ov?.rosterReadable !== false), [stats, ov]);
-  const needs = useMemo(() => (active && ov && !isOverall ? needsYouNow(tabList, { nowTime }) : null), [active, ov, isOverall, tabList, nowTime]);
+  const needs = useMemo(() => (active && ov && !isOverall ? needsYouNow(presentList, { nowTime }) : null), [active, ov, isOverall, presentList, nowTime]);
 
   const positionOptions = useMemo(() => [...new Set(tabList.flatMap((t) => positionParts(t.position)).concat(customPositions))].sort().map((p) => ({ id: p, label: p })), [tabList, customPositions]);
   const genderOptions = useMemo(() => [...new Set(tabList.map((t) => t.gender).filter(Boolean))].sort().map((g) => ({ id: g, label: g })), [tabList]);
