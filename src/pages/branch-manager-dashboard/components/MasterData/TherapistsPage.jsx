@@ -74,17 +74,17 @@ const TherapistsPage = ({ view }) => {
     const service = activeList.filter((t) => t.isServiceStaff);
     const working = service.filter((t) => ['checked-in', 'not-checked-in', 'upcoming'].includes(t.status.key));
     const checkedIn = service.filter((t) => t.status.key === 'checked-in').length;
-    const where = isOverall ? 'across all branches' : `at ${branchName || 'this branch'}`;
+    const where = isOverall ? `across ${branches.length} branch${branches.length === 1 ? '' : 'es'}` : `at ${branchName || 'this branch'}`;
     const parts = [{ strong: String(activeList.length) }, { text: ` ${(activeList.length === 1 ? staffLabel : staffLabelPlural).toLowerCase()} ${where}` }];
     if (working.length > 0 || checkedIn > 0) parts.push({ text: ' · ' }, { strong: String(working.length) }, { text: ' working today, ' }, { strong: String(checkedIn) }, { text: ' checked in' });
     parts.push({ text: ' · ' }, { strong: String(ov.bookingsToday) }, { text: ` booking${ov.bookingsToday === 1 ? '' : 's'} on the calendar` });
     return leadNodes(parts);
-  }, [ov, activeList, isOverall, branchName, staffLabel, staffLabelPlural]);
+  }, [ov, activeList, isOverall, branches.length, branchName, staffLabel, staffLabelPlural]);
 
   const header = (
     <>
       {isList && <ExportButton onClick={runExport} disabled={!exportReady} />}
-      {canManage && !isOverall && <PrimaryButton onClick={() => navigate(`/${orgSlug}/staff/new`)} data-add-therapist>{`Add ${staffLabel.toLowerCase()}`}</PrimaryButton>}
+      {canManage && <PrimaryButton onClick={() => navigate(`/${orgSlug}/staff/new`)} data-add-therapist>{`Add ${staffLabel.toLowerCase()}`}</PrimaryButton>}
     </>
   );
 

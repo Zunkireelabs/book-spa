@@ -140,8 +140,10 @@ const TherapistManagementPanel = ({
 
   const seg = active && STRIP_SEGMENTS.some((s) => s.id === sp.get('seg')) ? sp.get('seg') : null;
   const query = sp.get('q') || '';
-  const sort = SORTS[sp.get('sort')] ? sp.get('sort') : 'calendar';
-  const filters = { position: sp.get('position') || '', type: sp.get('type') || '', gender: sp.get('gender') || '' };
+  const sortParam = sp.get('sort');
+  const sort = sortParam && SORTS[sortParam] && (sortParam !== 'branch' || isOverall) ? sortParam : (isOverall ? 'branch' : 'calendar'); // Overall defaults to branch, then name
+  const sorts = useMemo(() => (isOverall ? SORTS : Object.fromEntries(Object.entries(SORTS).filter(([id]) => id !== 'branch'))), [isOverall]);
+  const filters = { position: sp.get('position') || '', type: sp.get('type') || '', gender: sp.get('gender') || '', branch: isOverall ? sp.get('branch') || '' : '' };
   const spRef = useRef(sp);
   spRef.current = sp;
   const patch = useCallback((obj, { push = false } = {}) => {
@@ -170,6 +172,7 @@ const TherapistManagementPanel = ({
 
   const positionOptions = useMemo(() => [...new Set(tabList.flatMap((t) => positionParts(t.position)).concat(customPositions))].sort().map((p) => ({ id: p, label: p })), [tabList, customPositions]);
   const genderOptions = useMemo(() => [...new Set(tabList.map((t) => t.gender).filter(Boolean))].sort().map((g) => ({ id: g, label: g })), [tabList]);
+  const branchOptions = useMemo(() => Object.entries(branchNameById || {}).map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)), [branchNameById]);
   const typeOptions = [{ id: 'service', label: 'Service staff' }, { id: 'support', label: 'Support staff' }];
 
   const filtered = useMemo(() => sortTherapists(tabList.filter((t) => {
@@ -177,11 +180,12 @@ const TherapistManagementPanel = ({
     if (filters.position && !positionParts(t.position).includes(filters.position)) return false;
     if (filters.type && (filters.type === 'service') !== t.isServiceStaff) return false;
     if (filters.gender && t.gender !== filters.gender) return false;
+    if (filters.branch && t.branchId !== filters.branch) return false;
     return matchesSearch(t, query);
-  }), sort), [tabList, seg, filters.position, filters.type, filters.gender, query, sort]);
-  const anyFilter = !!(seg || query || filters.position || filters.type || filters.gender);
+  }), sort, branchNameById), [tabList, seg, filters.position, filters.type, filters.gender, filters.branch, query, sort, branchNameById]);
+  const anyFilter = !!(seg || query || filters.position || filters.type || filters.gender || filters.branch);
   const sortable = active && canManage && !isOverall && sort === 'calendar' && !anyFilter;
-  const clearAll = () => { setSearchText(''); patch({ q: '', position: '', type: '', gender: '', seg: '' }, { push: true }); };
+  const clearAll = () => { setSearchText(''); patch({ q: '', position: '', type: '', gender: '', branch: '', seg: '' }, { push: true }); };
 
   // ── actions ──────────────────────────────────────────────────────────────────────────────────────────────────
   const [confirmToggle, setConfirmToggle] = useState(null);
@@ -270,7 +274,7 @@ const TherapistManagementPanel = ({
 
   // ── layout ───────────────────────────────────────────────────────────────────────────────────────────────────
   const { blockRef, sentinelRef, blockH, stuck, scrollToListTop } = useStickyBlock(stickyTop);
-  const listKey = `${tab}|${seg}|${query}|${sort}|${filters.position}|${filters.type}|${filters.gender}`;
+  const listKey = `${tab}|${seg}|${query}|${sort}|${filters.position}|${filters.type}|${filters.gender}|${filters.branch}`;
   const firstKey = useRef(true);
   useEffect(() => {
     if (firstKey.current) { firstKey.current = false; return; }
@@ -294,13 +298,14 @@ const TherapistManagementPanel = ({
   const searchBox = <SearchBox ref={searchRef} value={searchText} onChange={setSearchText} placeholder="Search name or phone" ariaLabel={`Search ${staffLabelPlural.toLowerCase()}`} />;
   const chips = (
     <>
+      {isOverall && <FilterChip label="Branch" value={filters.branch} options={branchOptions} onChange={(v) => patch({ branch: v })} selectedLabel={chipLabel(branchOptions, filters.branch)} />}
       <FilterChip label="Position" value={filters.position} options={positionOptions} onChange={(v) => patch({ position: v })} selectedLabel={chipLabel(positionOptions, filters.position)} />
       <FilterChip label="Type" value={filters.type} options={typeOptions} onChange={(v) => patch({ type: v })} selectedLabel={chipLabel(typeOptions, filters.type)} />
       <FilterChip label="Gender" value={filters.gender} options={genderOptions} onChange={(v) => patch({ gender: v })} selectedLabel={chipLabel(genderOptions, filters.gender)} />
       {seg && <ClearableChip label={STRIP_SEGMENTS.find((s) => s.id === seg).label} onClear={() => patch({ seg: '' })} />}
     </>
   );
-  const sortMenu = <SortMenu sorts={SORTS} value={sort} onChange={(id) => patch({ sort: id === 'calendar' ? '' : id })} />;
+  const sortMenu = <SortMenu sorts={sorts} value={sort} onChange={(id) => patch({ sort: id === (isOverall ? 'branch' : 'calendar') ? '' : id })} />;
   const toolbar = isSm
     ? <div className="flex items-center gap-2 pt-3.5 pb-2 flex-wrap">{searchBox}{chips}<div className="ml-auto">{sortMenu}</div></div>
     : <div className="pt-2.5 pb-2">{searchBox}</div>;

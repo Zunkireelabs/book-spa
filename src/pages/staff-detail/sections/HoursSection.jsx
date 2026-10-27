@@ -39,11 +39,12 @@ const HoursView = ({ rows }) => {
 };
 
 const HoursSection = ({
-  editing, rows, savedRows, onChange, readOnly, overrides, overridesLoading, overridesError, canOpenRoster, openRoster, isCreate, hidden = false,
+  editing, rows, savedRows, onChange, readOnly, overrides, overridesLoading, overridesError, canOpenRoster, openRoster, isCreate, hidden = false, locked = false,
 }) => {
   const { enforceStaffAvailability } = useOrg();
   const { staffLabel } = useIndustry();
   if (hidden) return <div className="mt-4"><Note icon="Lock">Working hours aren't shown to view-only accounts.</Note></div>;
+  if (locked) return <div className="mt-4"><Note icon="Lock">Pick a branch first. Working hours are set against that branch's opening hours.</Note></div>;
   return (
     <div>
       {editing ? (

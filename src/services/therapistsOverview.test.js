@@ -194,3 +194,13 @@ describe('sort + search', () => {
     expect(matchesSearch(ov.therapists[1], 'zzz')).toBe(false);
   });
 });
+
+describe('sortTherapists: branch, then name (Overall)', () => {
+  it('groups by branch name, then name; unknown branches sort first', () => {
+    const list = [
+      { id: 'a', name: 'Zara', branchId: 'b2' }, { id: 'b', name: 'Amit', branchId: 'b2' },
+      { id: 'c', name: 'Maya', branchId: 'b1' }, { id: 'd', name: 'Ben', branchId: 'zz' },
+    ];
+    expect(sortTherapists(list, 'branch', { b1: 'Lazimpat', b2: 'Sanepa' }).map((t) => t.id)).toEqual(['d', 'c', 'b', 'a']);
+  });
+});

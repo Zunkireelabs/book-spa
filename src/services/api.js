@@ -7203,6 +7203,14 @@ export async function fetchTherapistsOverview(branchId, date) {
     }
     const scopeBranch = profile.role === 'manager' ? profile.branch_id : branchId;
     if (!scopeBranch) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    // Overall: the per-branch reads (shift RPC, closed dates, transfers) cannot take the sentinel, so they run once per branch of the org.
+    const overall = isOverallBranch(scopeBranch);
+    let branchIds = [scopeBranch];
+    if (overall) {
+      const { data: orgBranches, error: branchesError } = await fetchAllBranches();
+      if (branchesError) throw branchesError;
+      branchIds = (orgBranches || []).map((b) => b.id);
+    }
     // Pay rates follow Payroll's rule: admin (and admin_viewer, read-only) only. Managers and staff never get them, and staff_compensation is not even read for them.
     const canSeeRates = profile.role === 'admin' || profile.role === 'admin_viewer';
     const week = weekDatesOf(date);
@@ -7215,7 +7223,8 @@ export async function fetchTherapistsOverview(branchId, date) {
         .select('id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years')
         .order('display_order').order('name'), scopeBranch),
       rosterReadable
-        ? supabase.rpc('therapist_shifts_for_range', { p_branch_id: scopeBranch, p_from_date: week[0], p_to_date: rangeEnd })
+        ? Promise.all(branchIds.map((id) => supabase.rpc('therapist_shifts_for_range', { p_branch_id: id, p_from_date: week[0], p_to_date: rangeEnd })))
+          .then((rs) => ({ data: rs.flatMap((r) => r.data || []), error: rs.find((r) => r.error)?.error || null }))
         : Promise.resolve({ data: [], error: null }),
       withBranch(supabase.from('therapist_attendance').select('therapist_id, status, check_in_time, check_out_time').eq('date', date), scopeBranch),
       withBranch(supabase.from('bookings')
@@ -7228,18 +7237,26 @@ export async function fetchTherapistsOverview(branchId, date) {
         : Promise.resolve({ data: [], error: null }),
     ]);
     for (const r of [therapists, shifts, attendance, bookings, services, comp]) if (r.error) throw r.error;
-    const closed = await fetchClosedDateRanges(scopeBranch); // best effort: a failure just means "not closed"
+    // best effort: a failure just means "not closed"
+    const closedBranchIds = new Set();
+    await Promise.all(branchIds.map(async (id) => {
+      const res = await fetchClosedDateRanges(id);
+      if (isClosedDate(res.data, date)) closedBranchIds.add(id);
+    }));
 
     // Home staff whose temporary transfer has APPLIED (branch_id now points elsewhere) still belong to this list: they stay listed with
     // the transfer in their Today cell. Best effort: any failure (including missing transfer tables) just leaves them out.
     const awayById = new Map();
     try {
-      const awayRes = await supabase.from('staff_transfers')
-        .select(`id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
+      let awayQuery = supabase.from('staff_transfers')
+        .select(`id, from_branch_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
           fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name),
           therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years)`)
-        .eq('from_branch_id', scopeBranch).eq('applied', true).eq('reverted', false).eq('is_permanent', false).eq('is_return_leg', false)
+        .eq('applied', true).eq('reverted', false).eq('is_permanent', false).eq('is_return_leg', false)
         .not('revert_at', 'is', null).gt('revert_at', new Date().toISOString());
+      // Overall already lists everyone, so the "away" lookup is skipped there (the home branch comes from the transfer below).
+      if (!overall) awayQuery = awayQuery.eq('from_branch_id', scopeBranch);
+      const awayRes = await awayQuery;
       if (!awayRes.error) {
         for (const r of awayRes.data || []) {
           if (r.therapist && !awayById.has(r.therapist.id)) awayById.set(r.therapist.id, { row: r, input: toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }) });
@@ -7250,6 +7267,7 @@ export async function fetchTherapistsOverview(branchId, date) {
     // "Visiting" with the transfer, not as this branch's own staff.
     const visitingById = new Map();
     try {
+      if (overall) throw new Error('skip'); // Overall shows every transfer once, from the home branch (above)
       const visRes = await supabase.from('staff_transfers')
         .select(`therapist_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
           fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)`)
@@ -7262,7 +7280,7 @@ export async function fetchTherapistsOverview(branchId, date) {
       }
     } catch { /* fail open */ }
     const here = new Set((therapists.data || []).map((t) => t.id));
-    const awayTherapists = [...awayById.values()].filter((a) => !here.has(a.row.therapist.id)).map((a) => a.row.therapist);
+    const awayTherapists = overall ? [] : [...awayById.values()].filter((a) => !here.has(a.row.therapist.id)).map((a) => a.row.therapist);
 
     const data = buildTherapistsOverview({
       therapists: [...(therapists.data || []), ...awayTherapists],
@@ -7272,11 +7290,13 @@ export async function fetchTherapistsOverview(branchId, date) {
       links: links || [],
       services: services.data || [],
       compRows: comp.data || [],
-      branchClosedToday: isClosedDate(closed.data, date),
+      branchClosedToday: closedBranchIds.has(scopeBranch),
+      closedBranchIds,
     }, { date, nowTime: nepalNow().hm, canSeeRates });
     // admin_viewer has no SELECT policy on therapist_working_hours / staff_roster_overrides, so for them "no hours" means "can't read them".
     data.therapists = data.therapists.map((t) => {
-      if (awayById.has(t.id)) return { ...t, transfer: { input: awayById.get(t.id).input, viewpoint: 'home' } };
+      // Overall: a temporarily transferred therapist is listed once, under the home branch (the transfer's origin).
+      if (awayById.has(t.id)) return { ...t, ...(overall && { branchId: awayById.get(t.id).row.from_branch_id }), transfer: { input: awayById.get(t.id).input, viewpoint: 'home' } };
       if (visitingById.has(t.id)) return { ...t, transfer: { input: visitingById.get(t.id), viewpoint: 'receiving' } };
       return t;
     });
@@ -7314,8 +7334,8 @@ export async function createTherapist({ name, gender, specialties, position, isS
     }
 
     const effectiveBranchId = profile.role === 'manager' ? profile.branch_id : branchId;
-    if (!effectiveBranchId) {
-      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    if (!effectiveBranchId || isOverallBranch(effectiveBranchId)) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Pick a branch to add this therapist to.' } };
     }
 
     // Check for duplicate name within branch

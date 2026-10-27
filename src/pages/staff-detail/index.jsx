@@ -7,6 +7,7 @@ import AppShell from '../../components/ui/AppShell';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
+import TransferFromCalendarModal from '../branch-manager-dashboard/components/calendar/TransferFromCalendarModal';
 import { useOrg } from '../../contexts/OrgContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import {
@@ -73,7 +74,7 @@ const StaffDetailPage = () => {
   const location = useLocation();
   const { orgSlug, staffId } = useParams();
   const { profile } = useAuth();
-  const { branchId, branches } = useBranch();
+  const { branchId, branches, isOverall } = useBranch();
   const { enableStaffRatings } = useOrg();
   const { staffLabel, staffLabelPlural, locationLabel } = useIndustry();
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
@@ -135,7 +136,14 @@ const StaffDetailPage = () => {
   const [activityError, setActivityError] = useState(null);
   const [activityFilter, setActivityFilter] = useState('all');
 
-  const effectiveBranchId = isEdit ? (therapist?.branch_id || null) : (role === 'manager' ? profile?.branch_id : branchId);
+  // Create: admin picks the branch (pre-filled from the switcher, empty on Overall); a manager or a one-branch tenant has no choice.
+  const [pickedBranch, setPickedBranch] = useState(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const singleBranch = (branches || []).length <= 1;
+  const createBranchId = role === 'manager' ? profile?.branch_id
+    : singleBranch && branches?.[0] ? branches[0].id
+      : (pickedBranch ?? (isOverall ? '' : branchId));
+  const effectiveBranchId = isEdit ? (therapist?.branch_id || null) : (createBranchId || null);
   const branchName = (branches || []).find((b) => b.id === effectiveBranchId)?.name || profile?.branches?.name || '';
   const firstName = (form.name || '').trim().split(/\s+/)[0] || '';
 
@@ -148,7 +156,7 @@ const StaffDetailPage = () => {
 
   // ── loading ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!effectiveBranchId) return;
+    if (!effectiveBranchId) { setAllPositionNames([]); return; }
     (async () => {
       const { data } = await fetchTherapistsForManagement(effectiveBranchId);
       const names = new Set();
@@ -415,6 +423,7 @@ const StaffDetailPage = () => {
     if (!form.name.trim()) { fail('profile', `${staffLabel} name is required.`); return; }
     setSaving(true); setSectionError(null);
     try {
+      if (!effectiveBranchId) { setSaving(false); fail('profile', `Pick a branch for this ${staffLabel.toLowerCase()}.`); return; }
       const created = await createTherapist({ ...(await profilePayload()), branchId: effectiveBranchId });
       if (created.error) throw new Error(created.error.message || 'Operation failed.');
       const h = await upsertTherapistWorkingHours(created.data.id, workingHours);
@@ -514,6 +523,12 @@ const StaffDetailPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageLoading, therapist, requestedSlug]);
 
+  // A temporary transfer in its window (applied, not reverted): therapists.branch_id already points at the receiving branch, so the
+  // profile shows the HOME branch and the transfer instead, like the Overall list and the side panel.
+  const activeTemp = isEdit ? transfers.find((x) => !x.isReturnLeg && !x.input.isPermanent && transferState(x.input) === 'now') : null;
+  const activeTempDesc = activeTemp ? describeTransfer(activeTemp.input, { viewpoint: 'home', use24h, labels: { branch: 'branch' } }) : null;
+  const shownBranchName = activeTemp?.input.fromBranch || branchName;
+
   // ── header status line ────────────────────────────────────────────────────
   const todayWeek = overview?.week?.find((d) => d.date === today);
   // The one "today" line (utils/todayStatusLine), the same wording as the Therapists list, the calendar header and Free now.
@@ -524,11 +539,11 @@ const StaffDetailPage = () => {
     branchClosed: !!overview?.branchClosedToday,
     back: overview?.nextWork || null,
   }) : null;
-  const statusText = statusLine ? statusLine.full : null;
+  const statusText = activeTempDesc ? activeTempDesc.short : statusLine ? statusLine.full : null;
   const th = todayWeek?.hours;
   const working = th && !th.isDayOff && th.startTime && th.endTime && th.source !== 'none' && !['closed', 'leave', 'off', 'absent'].includes(statusLine?.key);
-  const shiftText = working && statusLine?.key === 'finished' && !/shift/i.test(statusText || '') ? `shift ${th.startTime.slice(0, 5)} – ${th.endTime.slice(0, 5)}` : null;
-  const nextBreak = working ? (th.breaks || []).find((b) => String(b.endTime).slice(0, 5) > nowTime) : null;
+  const shiftText = !activeTemp && working && statusLine?.key === 'finished' && !/shift/i.test(statusText || '') ? `shift ${th.startTime.slice(0, 5)} – ${th.endTime.slice(0, 5)}` : null;
+  const nextBreak = working && !activeTemp ? (th.breaks || []).find((b) => String(b.endTime).slice(0, 5) > nowTime) : null;
   const breakText = nextBreak ? `${(nextBreak.name || 'break').toLowerCase()} ${String(nextBreak.startTime).slice(0, 5)} – ${String(nextBreak.endTime).slice(0, 5)}` : null;
   const checkedIn = !!todayWeek?.checkInTime && statusLine?.key !== 'finished';
 
@@ -546,7 +561,9 @@ const StaffDetailPage = () => {
   );
   const StatusPill = () => statusText ? (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${therapist?.is_active === false ? 'bg-background text-text-secondary border border-border' : 'bg-primary/10 text-primary'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine && therapist?.is_active !== false ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{therapist?.is_active === false ? 'Inactive' : statusText}
+      {activeTemp && therapist?.is_active !== false
+        ? <Icon name="ArrowRightLeft" size={11} className="flex-shrink-0" />
+        : <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine && therapist?.is_active !== false ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />}{therapist?.is_active === false ? 'Inactive' : statusText}
     </span>
   ) : null;
   const HeaderActions = ({ small }) => isEdit ? (
@@ -606,10 +623,14 @@ const StaffDetailPage = () => {
   const todayCount = (overview?.todayBookings || []).filter((b) => !['Cancelled', 'No Show'].includes(b.status)).length;
   const overviewSub = form.isServiceStaff ? `${monthLabel} · ${todayCount} booking${todayCount === 1 ? '' : 's'}` : new Date(`${today}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' }) + ' so far';
 
+  // Same rule as the Therapists list menu: admin, or a manager for their own branch.
+  const canTransfer = isEdit && therapist?.is_active !== false && (role === 'admin' || (role === 'manager' && therapist?.branch_id === profile?.branch_id));
   const profileEl = (
     <ProfileSection editing={isOpen('profile')} form={form} setForm={setForm} changed={changedFormKeys} readOnly={!canEdit} isAdmin={isAdmin} enableStaffRatings={enableStaffRatings}
       allPositionNames={allPositionNames} staffLabel={staffLabel} photoPreview={photoPreview} uploadingPhoto={uploadingPhoto}
-      onPhotoChange={handlePhotoChange} onRemovePhoto={handleRemovePhoto} isCreate={!isEdit} onAdd={(field) => requestEdit('profile', field)} />
+      onPhotoChange={handlePhotoChange} onRemovePhoto={handleRemovePhoto} isCreate={!isEdit} onAdd={(field) => requestEdit('profile', field)}
+      branchField={{ label: 'Branch', name: shownBranchName, value: effectiveBranchId || '', options: (branches || []).filter((b) => b.is_active !== false).map((b) => ({ value: b.id, label: b.name })),
+        editable: !isEdit && role !== 'manager' && !singleBranch, onChange: setPickedBranch, onTransfer: isEdit && canTransfer && !activeTemp ? () => setTransferOpen(true) : null }} />
   );
   const servicesEl = (
     <ServicesSection editing={isOpen('services')} matrix={matrix} loading={matrixLoading} error={matrixError} onRetry={loadMatrix} tickedSet={ticked} setTicked={setTicked}
@@ -617,7 +638,8 @@ const StaffDetailPage = () => {
   );
   const hoursEl = (
     <HoursSection editing={isOpen('hours')} rows={workingHours} savedRows={isEdit ? saved.hours : DEFAULT_WORKING_HOURS} onChange={setWorkingHours} readOnly={!canEdit}
-      overrides={overrides} overridesLoading={overridesLoading} overridesError={overridesError} canOpenRoster={canEdit} openRoster={() => go(dash('roster'))} isCreate={!isEdit} />
+      overrides={overrides} overridesLoading={overridesLoading} overridesError={overridesError} canOpenRoster={canEdit} openRoster={() => go(dash('roster'))} isCreate={!isEdit}
+      locked={!isEdit && !effectiveBranchId} />
   );
 
   return (
@@ -646,11 +668,12 @@ const StaffDetailPage = () => {
                 <div className="flex-1 min-w-[220px]">
                   <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">{displayName}</h1>
                   <p className="mt-1 text-sm text-text-secondary">
-                    {[positionText, branchName, isEdit && sinceText(therapist?.created_at) ? `Since ${sinceText(therapist.created_at)}` : null].filter(Boolean).join(' · ')}
+                    {[positionText, shownBranchName || (!isEdit ? 'pick a branch' : null), isEdit && sinceText(therapist?.created_at) ? `Since ${sinceText(therapist.created_at)}` : null].filter(Boolean).join(' · ')}
                   </p>
                   {isEdit && (statusText || shiftText) && (
                     <p className="mt-2 text-sm text-text-secondary flex flex-wrap items-center gap-x-2">
-                      {statusText && <span className="inline-flex items-center gap-1.5 text-text-primary font-medium"><span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{statusText}</span>}
+                      {statusText && activeTemp && <TransferPill state="now">{statusText}</TransferPill>}
+                      {statusText && !activeTemp && <span className="inline-flex items-center gap-1.5 text-text-primary font-medium"><span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{statusText}</span>}
                       {shiftText && <span>· {shiftText}</span>}
                       {breakText && <span>· next break {breakText}</span>}
                       {therapist?.is_active === false && <span className="font-medium text-text-primary">· Inactive</span>}
@@ -730,7 +753,7 @@ const StaffDetailPage = () => {
                   )}
 
                   {!isEdit && canEdit && (
-                    <EditBar message={form.name.trim() ? `New ${staffLabel.toLowerCase()}` : `Add a name to create this ${staffLabel.toLowerCase()}`} hint={false} onSave={handleCreate} saving={saving} canSave={!!form.name.trim()} saveLabel={`Create ${staffLabel.toLowerCase()}`} />
+                    <EditBar message={!effectiveBranchId ? `Pick a branch and add a name to create this ${staffLabel.toLowerCase()}` : form.name.trim() ? `New ${staffLabel.toLowerCase()}` : `Add a name to create this ${staffLabel.toLowerCase()}`} hint={false} onSave={handleCreate} saving={saving} canSave={!!form.name.trim() && !!effectiveBranchId} saveLabel={`Create ${staffLabel.toLowerCase()}`} />
                   )}
                 </div>
               </div>
@@ -761,6 +784,10 @@ const StaffDetailPage = () => {
             onClose={() => setTransferPanel(false)}
             onSuccess={() => { setTransferPanel(false); loadTransfers(); loadActivity(); loadOverview(); }}
           />
+        )}
+        {transferOpen && therapist && (
+          <TransferFromCalendarModal variant="panel" therapistId={therapist.id} therapistName={therapist.name} currentBranchId={therapist.branch_id} defaultDate={today} defaultTime=""
+            onClose={() => setTransferOpen(false)} onSuccess={() => { setTransferOpen(false); loadTherapist(); loadOverview(); }} />
         )}
         <TodayBookingPanel booking={openBooking} branchId={effectiveBranchId} onClose={() => setOpenBooking(null)} onChanged={loadOverview} />
       </div>

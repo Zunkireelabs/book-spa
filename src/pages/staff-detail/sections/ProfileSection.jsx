@@ -55,7 +55,7 @@ const SpecialtyChips = ({ value, onChange, disabled }) => {
 
 const ProfileEdit = ({
   form, setForm, changed, readOnly, isAdmin, enableStaffRatings, allPositionNames, staffLabel,
-  photoPreview, uploadingPhoto, onPhotoChange, onRemovePhoto, isCreate,
+  photoPreview, uploadingPhoto, onPhotoChange, onRemovePhoto, isCreate, branchField,
 }) => {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const ch = (k) => changed.includes(k);
@@ -64,6 +64,17 @@ const ProfileEdit = ({
   return (
     <div className="mt-2">
       <div>
+        {branchField && (isCreate || branchField.name) && (
+          <FormRow title={branchField.label} hint={isCreate ? 'Where they work. Their hours and bookings follow this branch.' : null}>
+            {branchField.editable ? (
+              <div className="max-w-xs"><Select options={branchField.options} value={branchField.value} onChange={branchField.onChange} placeholder={`Pick a ${branchField.label.toLowerCase()}`} /></div>
+            ) : (
+              <p className="text-sm text-text-primary">{branchField.name}
+                {branchField.onTransfer && <> · <button type="button" onClick={branchField.onTransfer} className="text-primary font-medium hover:underline">Transfer to branch…</button></>}
+              </p>
+            )}
+          </FormRow>
+        )}
         <FormRow title="Type" hint={`Service staff can be booked. Support staff (front desk, cleaning) can't.`}>
           <Changed on={ch('isServiceStaff')} field="type">
             <div className={readOnly ? 'pointer-events-none opacity-70' : ''}>
@@ -85,7 +96,7 @@ const ProfileEdit = ({
               <Select label="Pronouns" options={PRONOUN_OPTIONS} value={form.pronouns} onChange={(v) => set({ pronouns: v })} placeholder="Select pronouns" disabled={readOnly} />
             </Changed>
             <Changed on={ch('positions')} className="sm:col-span-2" field="positions">
-              <PositionSpecialtiesFields formData={form} setFormData={setForm} allPositionNames={allPositionNames} showSpecialties={false} />
+              <PositionSpecialtiesFields formData={form} setFormData={setForm} allPositionNames={allPositionNames} showSpecialties={false} needsBranch={isCreate && !!branchField && !branchField.value} />
             </Changed>
           </fieldset>
         </FormRow>

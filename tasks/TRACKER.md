@@ -51,6 +51,7 @@ Last synced: **2026-10-27** by bookx-d5 (lead)
 | ZNLY-97 | Sadin | medium | UI-18: Therapists redesign |
 | ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+. Done locally in 847a5c9; ships with the UI-port PR |
 | ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere. Mockup first |
+| ZNLY-112 | Sadin | high | Therapists "Overall" fails (uuid "__overall__") + Add with a Branch field + no Overall for one-branch tenants. Built and owner-checked (V31), committed locally; ships with the UI-port PR |
 
 ## In review / on stage
 
@@ -67,7 +68,6 @@ Last synced: **2026-10-27** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
-| ZNLY-112 | Sadin | high | Therapists page "Overall" fails (uuid "__overall__"); prod lists all with Branch column. Blocks UI-port PR |
 | ZNLY-13 | unassigned | high | Renumber colliding migration-289 (PR #413 vs #415) |
 | ZNLY-26 | unassigned | high | Verify 503 "Reconnecting" screen + login banner against a real failure |
 | ZNLY-94 | Anish | high | Get onboarded to the Plane workflow |
@@ -89,6 +89,10 @@ Last synced: **2026-10-27** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-114 | Sadin | low | Overall: transferred therapist's Today hours merge shift rows from both branches (likely fixed by ZNLY-113) |
+| ZNLY-115 | Sadin | low | Working hours editor doesn't check against branch opening hours (mockup first) |
+| ZNLY-116 | Sadin | medium | Therapist History says "room" for branch transfers (locationLabel used as the branch word) |
+| ZNLY-117 | Sadin | low | Transfer banner repeats the time ("until 3:30pm, back at Lazimpat 3:30pm") |
 | ZNLY-109 | Sadin | low | Calendar header tooltip mixes 24h and 12h ("Shift started 09:00" next to "12:00pm") |
 | ZNLY-110 | Sadin | low | Calendar shading labels cut mid-time: wrap instead of truncate |
 | ZNLY-111 | Sadin | low | Calendar grid has no right gutter: last column runs flush to the window edge |

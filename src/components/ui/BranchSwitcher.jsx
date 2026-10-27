@@ -15,7 +15,7 @@ const BranchSwitcher = () => {
   const close = useCallback(() => setIsOpen(false), []);
   useMenuNav({ open: isOpen, onClose: close, menuRef, triggerRef });
 
-  const withOverall = isAdmin && branches.length > 0;
+  const withOverall = isAdmin && branches.length > 1;
   const switchable = withOverall || (isManager && branches.length > 1);
   const selectedName = isOverall ? 'Overall' : (branches.find((b) => b.id === branchId)?.name || branchName || 'Select branch');
 

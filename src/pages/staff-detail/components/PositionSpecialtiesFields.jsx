@@ -6,7 +6,7 @@ import Input from '../../../components/ui/Input';
 // though it's stored/loaded as a 1-element array in formData.positions — that
 // array shape is kept so the save/load '/'-join conversion in the parent page
 // doesn't need touching beyond always writing a single value now.
-const PositionSpecialtiesFields = ({ formData, setFormData, allPositionNames, showSpecialties = true }) => {
+const PositionSpecialtiesFields = ({ formData, setFormData, allPositionNames, showSpecialties = true, needsBranch = false }) => {
   const [positionSearchQuery, setPositionSearchQuery] = useState('');
   const selectedPosition = formData.positions[0] || null;
 
@@ -39,7 +39,7 @@ const PositionSpecialtiesFields = ({ formData, setFormData, allPositionNames, sh
         )}
         <div className="border border-border rounded-spa bg-background max-h-[160px] overflow-y-auto p-2 space-y-1">
           {allPositionNames.length === 0 ? (
-            <p className="text-xs text-text-secondary px-2 py-1">No positions yet. Use "Add Position" from the staff list to create one.</p>
+            <p className="text-xs text-text-secondary px-2 py-1">{needsBranch ? 'Pick a branch to see its positions.' : 'No positions yet. Use "Add Position" from the staff list to create one.'}</p>
           ) : filteredPositions.length === 0 ? (
             <p className="text-xs text-text-secondary px-2 py-1">No positions match "{positionSearchQuery}".</p>
           ) : (
