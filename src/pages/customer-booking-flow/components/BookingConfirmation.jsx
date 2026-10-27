@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
-import { createBooking, createBookingGroup, fetchRooms, lookupReferrerByPhone } from '../../../services/api';
+import { createBooking, createBookingGroup, lookupReferrerByPhone } from '../../../services/api';
 import { toE164 } from '../../../utils/phone';
 import { formatNPR } from '../../../services/bookingTransformers';
 
@@ -25,20 +25,6 @@ const BookingConfirmation = ({
   const [isConfirming, setIsConfirming] = useState(false);
   const [bookingError, setBookingError] = useState(null);
   const [showQRCode, setShowQRCode] = useState(false);
-  const [amenities, setAmenities] = useState([]);
-
-  useEffect(() => {
-    async function loadAmenities() {
-      if (selectedBranch?.id) {
-        const { data } = await fetchRooms(selectedBranch.id);
-        if (data) {
-          const unique = [...new Set(data.flatMap(r => r.amenities || []))];
-          setAmenities(unique);
-        }
-      }
-    }
-    loadAmenities();
-  }, [selectedBranch?.id]);
 
   const formatDateTime = () => {
     if (!selectedDateTime?.date || !selectedDateTime?.time) return '';
@@ -233,22 +219,6 @@ const BookingConfirmation = ({
           </div>
         </div>
       </div>
-
-      {amenities.length > 0 && (
-        <div className="bg-primary/5 border border-primary/10 rounded-spa-lg p-5">
-          <div className="flex items-center gap-2 mb-3 text-primary">
-            <Icon name="Sparkles" size={18} />
-            <h3 className="font-heading font-semibold">Facilities at {selectedBranch?.name}</h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {amenities.map((a, i) => (
-              <span key={i} className="px-3 py-1 bg-white border border-primary/20 text-primary rounded-full text-xs font-medium uppercase">
-                {a}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {bookingError && (
         <div className="bg-error/10 border border-error/20 rounded-spa p-4 flex items-center gap-3 text-error">
