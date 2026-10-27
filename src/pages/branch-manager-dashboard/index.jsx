@@ -690,14 +690,32 @@ const BranchManagerDashboard = () => {
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
               {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
               {viewMode === 'payment-methods' && profile?.role === 'admin' && <PaymentMethodsPanel />}
-              {viewMode === 'booking-settings' && profile?.role === 'admin' && <BookingSettingsPanel />}
+              {viewMode === 'booking-settings' && profile?.role === 'admin' && (
+                <div className="space-y-8">
+                  <BookingSettingsPanel />
+                  {!isOverall && !orgLoading ? (
+                    <>
+                      {!showStaffSelection && (
+                        <div className="border-t border-border pt-8">
+                          <OnlineBookingCapacityPanel branchId={branchId} />
+                        </div>
+                      )}
+                      <div className="border-t border-border pt-8">
+                        <AdvanceBookingWindowPanel branchId={branchId} />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="border-t border-border pt-8 font-body text-sm text-text-secondary">
+                      Select a specific branch to configure the online booking limit and advance booking window.
+                    </div>
+                  )}
+                </div>
+              )}
               {viewMode === 'calendar-settings' && profile?.role === 'admin' && <CalendarSettingsPanel />}
               {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
-              {viewMode === 'online-capacity' && !isOverall && !orgLoading && !showStaffSelection && profile?.role === 'admin' && <OnlineBookingCapacityPanel branchId={branchId} />}
-              {viewMode === 'advance-booking-window' && !isOverall && !orgLoading && profile?.role === 'admin' && <AdvanceBookingWindowPanel branchId={branchId} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
               {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}

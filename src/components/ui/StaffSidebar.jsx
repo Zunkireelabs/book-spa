@@ -480,27 +480,19 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['admin'],
           overallHidden: true
         },
-        ...(orgLoading || showStaffSelection ? [] : [{
-          id: 'online-capacity',
-          label: 'Online Booking Limit',
-          icon: 'Gauge',
-          path: `${basePath}?view=online-capacity`,
-          roles: ['admin'],
-          overallHidden: true
-        }]),
-        ...(orgLoading ? [] : [{
-          id: 'advance-booking-window',
-          label: 'Advance Booking Window',
-          icon: 'CalendarRange',
-          path: `${basePath}?view=advance-booking-window`,
-          roles: ['admin'],
-          overallHidden: true
-        }]),
         {
           id: 'provider-profile',
           label: 'Provider Profile',
           icon: 'Image',
           path: `${basePath}?view=provider-profile`,
+          roles: ['admin'],
+          overallHidden: true
+        },
+        {
+          id: 'branch-photo',
+          label: 'Branch Photo',
+          icon: 'ImagePlus',
+          path: `${basePath}?view=branch-photo`,
           roles: ['admin'],
           overallHidden: true
         },
