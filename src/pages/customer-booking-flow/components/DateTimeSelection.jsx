@@ -15,7 +15,7 @@ import {
 } from '../utils/availability';
 import { buildTherapistOccupancy, isTherapistFree, anyProfessionalFree } from '../../provider-profile-flow/utils/therapistAvailability';
 
-const WINDOW_DAYS = 14; // matches the 14 date-chips rendered below — one fetch covers all of them
+const WINDOW_DAYS = 14; // max first-page size (clickable date-chips) — shrunk per-branch via firstPageSize when advance_booking_days is less than this
 
 // Memoized — this renders a full calendar + time-slot grid, and its parent (the "Book
 // Your Visit" drawer / booking flow page) re-renders on every scroll animation frame to
@@ -28,14 +28,21 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   const [selectedTime, setSelectedTime] = useState(selectedDateTime?.time || '');
   const [therapistCounts, setTherapistCounts] = useState({ male: 0, female: 0 });
   const [availabilityWindow, setAvailabilityWindow] = useState(null); // days 0..13
-  const [extendedWindow, setExtendedWindow] = useState(null); // days 14..29, fetched on demand
+  const [extendedWindow, setExtendedWindow] = useState(null); // days firstPageSize..effectiveWindow-1, fetched on demand
   const [therapistWindow, setTherapistWindow] = useState(null); // days 0..13, only when therapistFilter is set
-  const [extendedTherapistWindow, setExtendedTherapistWindow] = useState(null); // days 14..29
+  const [extendedTherapistWindow, setExtendedTherapistWindow] = useState(null); // days firstPageSize..effectiveWindow-1
   const [therapistWindowError, setTherapistWindowError] = useState(null);
   const [extendedTherapistWindowError, setExtendedTherapistWindowError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingExtended, setLoadingExtended] = useState(false);
   const [closedRanges, setClosedRanges] = useState([]);
+
+  // Per-branch cap on how far ahead customers can book online (branches.
+  // advance_booking_days, migration-303; enforced server-side by
+  // check_branch_advance_booking_window()). null/undefined (not yet customized) defers to
+  // the same 30-day default the frontend has always hardcoded.
+  const effectiveWindow = selectedBranch?.advance_booking_days ?? 30;
+  const firstPageSize = Math.min(WINDOW_DAYS, effectiveWindow);
 
   // Fetch therapist counts for the selected branch — advisory gender signal only; real
   // availability is gated by room capacity below. Skipped while filtering by a specific
@@ -61,12 +68,12 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     fetchTherapistCounts();
   }, [selectedBranch?.id, !!therapistFilter]);
 
-  // Generate next 30 days (date-chip strip)
+  // Generate the branch's effective advance-booking window (date-chip strip)
   const dates = useMemo(() => {
     const result = [];
     const today = new Date();
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < effectiveWindow; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() + i);
 
@@ -86,7 +93,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     }
 
     return result;
-  }, []);
+  }, [effectiveWindow]);
 
   // Fetch the rolling 14-day real-availability window once per branch — replaces the old
   // per-date-click fetch. Duration/service changes don't need a refetch; they only change which
@@ -95,7 +102,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     if (!selectedBranch?.id) return;
     setLoadingSlots(true);
     setExtendedWindow(null);
-    fetchBranchAvailabilityWindow(selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
+    fetchBranchAvailabilityWindow(selectedBranch.id, dates[0].fullDate, dates[firstPageSize - 1].fullDate)
       .then(setAvailabilityWindow)
       .catch((err) => console.error('[DateTimeSelection] availability fetch failed:', err.message))
       .finally(() => setLoadingSlots(false));
@@ -125,13 +132,13 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     setTherapistWindow(null);
     setExtendedTherapistWindow(null);
     setExtendedTherapistWindowError(null);
-    // Reset the extended (14-29) window too — a Retry should put the component back
+    // Reset the extended window too — a Retry should put the component back
     // into its day-0-13 state so loadFurtherAhead (guarded by `|| extendedWindow`)
     // becomes callable again, instead of leaving stale days 14-29 with no occupancy
     // rows to check against (which reads as every slot there being free, forever).
     setExtendedWindow(null);
     setLoadingExtended(false);
-    fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[WINDOW_DAYS - 1].fullDate)
+    fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[firstPageSize - 1].fullDate)
       .then(setTherapistWindow)
       .catch((err) => {
         console.error('[DateTimeSelection] therapist availability fetch failed:', err.message);
@@ -144,10 +151,10 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   }, [selectedBranch?.id, !!therapistFilter, orgSlug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadFurtherAhead = () => {
-    if (!selectedBranch?.id || loadingExtended || extendedWindow) return;
+    if (!selectedBranch?.id || loadingExtended || extendedWindow || firstPageSize >= effectiveWindow) return;
     setLoadingExtended(true);
     const tasks = [
-      fetchBranchAvailabilityWindow(selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+      fetchBranchAvailabilityWindow(selectedBranch.id, dates[firstPageSize].fullDate, dates[effectiveWindow - 1].fullDate)
         .then(setExtendedWindow)
         .catch((err) => {
           console.error('[DateTimeSelection] extended room/gender availability fetch failed:', err.message);
@@ -155,7 +162,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     ];
     if (therapistFilter) {
       tasks.push(
-        fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[WINDOW_DAYS].fullDate, dates[29].fullDate)
+        fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[firstPageSize].fullDate, dates[effectiveWindow - 1].fullDate)
           .then(setExtendedTherapistWindow)
           .catch((err) => {
             console.error('[DateTimeSelection] extended therapist availability fetch failed:', err.message);
@@ -190,7 +197,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     const nepalToday = getNepalToday();
     const nepalNow = getNepalNow();
     const nowMinutes = nepalNow.getHours() * 60 + nepalNow.getMinutes();
-    const dayList = extendedWindow ? dates.slice(0, 30) : dates.slice(0, WINDOW_DAYS);
+    const dayList = extendedWindow ? dates.slice(0, effectiveWindow) : dates.slice(0, firstPageSize);
 
     return dayList.map((d) => {
       const isToday = d.fullDate === nepalToday;
@@ -229,9 +236,9 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         let therapistOk = true;
         if (therapistFilter) {
           // Each half of the fetched window carries its own error flag — a failure on
-          // the days-0-13 fetch doesn't mean the days-14-29 extended fetch also failed
+          // the first-page fetch doesn't mean the extended fetch also failed
           // (or vice versa), so only the half whose fetch actually failed is blocked.
-          const isExtendedDay = d.fullDate >= dates[WINDOW_DAYS].fullDate;
+          const isExtendedDay = d.fullDate >= dates[firstPageSize]?.fullDate;
           const windowFetchFailed = isExtendedDay ? extendedTherapistWindowError : therapistWindowError;
           if (windowFetchFailed) {
             // Fetch failed and we have no busy-row data to check against — treat as
@@ -270,7 +277,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
       return { date: d.fullDate, slots, isClosed };
     });
-  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, extendedTherapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates, closedRanges, selectedBranch?.online_booking_capacity]);
+  }, [availabilityWindow, extendedWindow, therapistWindow, extendedTherapistWindow, therapistWindowError, extendedTherapistWindowError, therapistFilter, selectedService?.durationMinutes, genderPreference, enableRooms, therapistCounts, dates, closedRanges, selectedBranch?.online_booking_capacity, effectiveWindow, firstPageSize]);
 
   const closedDatesSet = useMemo(() => {
     const set = new Set();
@@ -505,7 +512,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
           )}
         </div>
         <div className="grid grid-cols-4 @2xl:grid-cols-7 gap-2">
-          {dates.slice(0, 14).map((date) => {
+          {dates.slice(0, firstPageSize).map((date) => {
             const isClosed = closedDatesSet.has(date.fullDate);
             const isFull = !isClosed && datesWithNoAvailability.has(date.fullDate);
             const isPartial = !isClosed && !isFull && datesPartiallyBooked.has(date.fullDate);
@@ -622,20 +629,22 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
         <div className="bg-background rounded-spa p-4 text-center">
           {extendedWindow ? (
             <p className="font-body font-body-normal text-sm text-text-secondary">
-              No openings found in the next 30 days for this service.
+              No openings found in the next {effectiveWindow} days for this service.
             </p>
           ) : (
             <>
               <p className="font-body font-body-normal text-sm text-text-secondary mb-3">
-                No openings in the next {WINDOW_DAYS} days.
+                No openings in the next {firstPageSize} days.
               </p>
-              <button
-                onClick={loadFurtherAhead}
-                disabled={loadingExtended}
-                className="text-sm font-body font-body-medium text-primary hover:text-primary/80 spa-transition-fast"
-              >
-                {loadingExtended ? 'Checking further out…' : 'Check further ahead (up to 30 days)'}
-              </button>
+              {firstPageSize < effectiveWindow && (
+                <button
+                  onClick={loadFurtherAhead}
+                  disabled={loadingExtended}
+                  className="text-sm font-body font-body-medium text-primary hover:text-primary/80 spa-transition-fast"
+                >
+                  {loadingExtended ? 'Checking further out…' : `Check further ahead (up to ${effectiveWindow} days)`}
+                </button>
+              )}
             </>
           )}
         </div>

@@ -11079,7 +11079,7 @@ export async function fetchBranchesByOrgId(orgId) {
       .from('branches')
       // online_booking_capacity feeds DateTimeSelection's slot graying (migration-301) —
       // it's the same cap check_branch_online_capacity() enforces at insert time.
-      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url, online_booking_capacity')
+      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url, online_booking_capacity, advance_booking_days')
       .eq('org_id', orgId)
       .eq('is_active', true)
       .order('name');
@@ -11127,6 +11127,45 @@ export async function updateBranchOnlineCapacity(branchId, capacity) {
     return { data: { capacity }, error: null };
   } catch (error) {
     console.error('[API] updateBranchOnlineCapacity error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * How many days ahead customers can book online for this branch
+ * (branches.advance_booking_days, migration-303). null = unset, defers to the
+ * 30-day default enforced by check_branch_advance_booking_window().
+ */
+export async function fetchBranchAdvanceBookingWindow(branchId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, advance_booking_days')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchAdvanceBookingWindow error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for the window. Goes through an RPC, not a plain .update():
+ * `branches` has RLS enabled with SELECT-only policies, so a direct update would
+ * silently affect zero rows. Pass null to clear back to the 30-day default.
+ */
+export async function updateBranchAdvanceBookingWindow(branchId, days) {
+  try {
+    const { error } = await supabase.rpc('update_branch_advance_booking_window', {
+      p_branch_id: resolveBranchId(branchId),
+      p_days: days === null || days === '' ? null : Number(days),
+    });
+    if (error) throw error;
+    return { data: { days }, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchAdvanceBookingWindow error:', error.message);
     return { data: null, error };
   }
 }

@@ -488,6 +488,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['admin'],
           overallHidden: true
         }]),
+        ...(orgLoading ? [] : [{
+          id: 'advance-booking-window',
+          label: 'Advance Booking Window',
+          icon: 'CalendarRange',
+          path: `${basePath}?view=advance-booking-window`,
+          roles: ['admin'],
+          overallHidden: true
+        }]),
         {
           id: 'provider-profile',
           label: 'Provider Profile',
