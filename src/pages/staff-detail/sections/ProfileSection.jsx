@@ -70,6 +70,8 @@ const ProfileEdit = ({
               <div className="max-w-xs"><Select options={branchField.options} value={branchField.value} onChange={branchField.onChange} placeholder={`Pick a ${branchField.label.toLowerCase()}`} /></div>
             ) : (
               <p className="text-sm text-text-primary">{branchField.name}
+                {branchField.window && <span className="text-text-secondary"> · {branchField.window}</span>}
+                {branchField.onReturn && <> · <button type="button" onClick={branchField.onReturn} className="text-primary font-medium hover:underline">{branchField.returnLabel || 'Return now'}</button></>}
                 {branchField.onTransfer && <> · <button type="button" onClick={branchField.onTransfer} className="text-primary font-medium hover:underline">Transfer to branch…</button></>}
               </p>
             )}
@@ -184,13 +186,19 @@ const ProfileEdit = ({
 
 
 
-const ProfileView = ({ form, canEdit, onAdd, isAdmin, enableStaffRatings, staffLabel }) => {
+const ProfileView = ({ form, canEdit, onAdd, isAdmin, enableStaffRatings, staffLabel, branchField }) => {
   const add = (field, label) => (canEdit ? { add: label, onAdd: () => onAdd(field) } : {});
   const chips = form.specialties.split(',').map((s) => s.trim()).filter(Boolean);
   const showRating = form.isServiceStaff && enableStaffRatings;
   return (
     <KV items={[
       { group: 'Basics' },
+      ...(branchField?.name ? [{ label: branchField.label, value: (
+        <>{branchField.name}
+          {branchField.window && <span className="text-text-secondary"> · {branchField.window}</span>}
+          {branchField.onReturn && <> · <button type="button" onClick={branchField.onReturn} className="text-primary font-medium hover:underline">{branchField.returnLabel || 'Return now'}</button></>}
+          {branchField.onTransfer && <> · <button type="button" onClick={branchField.onTransfer} className="text-primary font-medium hover:underline">Transfer to branch…</button></>}
+        </>) }] : []),
       { label: 'Type', value: form.isServiceStaff ? 'Service staff · takes bookings' : `Support staff · not bookable` },
       { label: 'Position', value: form.positions[0] || null, ...add('positions', 'Add position') },
       { label: 'Gender', value: form.gender },
@@ -212,6 +220,6 @@ const ProfileView = ({ form, canEdit, onAdd, isAdmin, enableStaffRatings, staffL
 
 const ProfileSection = ({ editing, ...props }) => (editing
   ? <ProfileEdit {...props} />
-  : <ProfileView form={props.form} canEdit={!props.readOnly} onAdd={props.onAdd} isAdmin={props.isAdmin} enableStaffRatings={props.enableStaffRatings} staffLabel={props.staffLabel} />);
+  : <ProfileView form={props.form} canEdit={!props.readOnly} onAdd={props.onAdd} isAdmin={props.isAdmin} enableStaffRatings={props.enableStaffRatings} staffLabel={props.staffLabel} branchField={props.branchField} />);
 
 export default ProfileSection;

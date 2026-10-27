@@ -11,7 +11,8 @@ import CountryCodeSelect, { parsePhone } from '../../../../components/ui/Country
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useDayBlocks } from '../../../../hooks/useBlockOverlap';
 import { findBlockOverlap, describeBlockOverlap } from '../../../../utils/blockOverlap';
-import { getCustomerOutstandingBalance, fetchServiceComboComponents } from '../../../../services/api';
+import { getCustomerOutstandingBalance, fetchServiceComboComponents, fetchServices, fetchServiceEligibility } from '../../../../services/api';
+import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import { todayStr } from './calendarDates';
 
@@ -192,6 +193,23 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Compute which therapists & rooms are busy during the selected time slot
   const selectedService = (services || []).find((s) => s.id === serviceId);
+  // ZNLY-113: a visiting therapist can be booked here only for services they already do at their home branch (matched by name) that this
+  // branch also offers. Anyone else: the branch's full list.
+  const visitorTherapist = bookingMode === 'individual' ? (allTherapists.length ? allTherapists : therapists || []).find((t) => t.id === selectedTherapistIds[0] && t.transferredIn && t.branch_id && t.branch_id !== branchId) : null;
+  const [visitorServiceNames, setVisitorServiceNames] = useState(null);
+  useEffect(() => {
+    if (!visitorTherapist) { setVisitorServiceNames(null); return undefined; }
+    let live = true;
+    Promise.all([fetchServices(visitorTherapist.branch_id), fetchServiceEligibility()]).then(([svc, elig]) => {
+      if (!live) return;
+      setVisitorServiceNames(homeServiceNameSet(svc?.data, elig?.data, visitorTherapist.id));
+    }).catch(() => { if (live) setVisitorServiceNames(null); });
+    return () => { live = false; };
+  }, [visitorTherapist?.id, visitorTherapist?.branch_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickerServices = useMemo(
+    () => (visitorTherapist && visitorServiceNames ? servicesBookableHere(services, visitorServiceNames) : (services || [])),
+    [visitorTherapist, visitorServiceNames, services],
+  );
   // Gate the section AND the submitted payload on the same condition, so switching away from a couple service never
   // ships hidden companion data.
   const isComboService = !!selectedService?.is_combo;
@@ -532,7 +550,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // ── Ghost block on the grid: report the draft (date, time, length, column) to the calendar ──
   const draftDuration = (services || []).find((t) => t.id === (bookingMode === 'group' ? groupServiceId : serviceId))?.duration_minutes || dragMinutes || 30;
   // Staff-availability pre-check (ZNLY-100): the guard's verdict for the first selected therapist, before Save.
-  const { staffLabel } = useIndustry();
+  const { staffLabel, locationLabel } = useIndustry();
   const precheck = useAvailabilityPrecheck({
     branchId, date: bookingDate, startTime: bookingTime, durationMin: draftDuration,
     therapistId: bookingMode === 'individual' ? selectedTherapistIds[0] : null, enabled: !!slotInfo,
@@ -765,7 +783,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   onChange={(val) => setServiceId(val)}
                   options={[
                     { value: '', label: 'Select a service' },
-                    ...(services || []).map((s) => ({
+                    ...pickerServices.map((s) => ({
                       value: s.id,
                       label: `${s.name} — ${s.duration_minutes}min — Rs.${s.effective_price_npr ?? s.price_npr}`,
                     })),
@@ -774,6 +792,11 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                   size="md"
                   searchable
                 />
+              )}
+              {visitorTherapist && visitorServiceNames && (
+                <p className="mt-1.5 text-xs text-text-secondary" data-visitor-services-help>
+                  Showing the {pickerServices.length} service{pickerServices.length === 1 ? '' : 's'} {visitorTherapist.name} does at the home {(locationLabel || 'branch').toLowerCase()} that this one also offers.
+                </p>
               )}
             </div>
 

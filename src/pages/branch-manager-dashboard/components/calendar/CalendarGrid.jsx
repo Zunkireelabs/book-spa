@@ -1392,7 +1392,16 @@ const CalendarGrid = ({
       rpcSegs.filter((x) => x.kind === 'branch'),
     ).map((x) => ({ ...x, kind: 'branch', code: 'OTHER_BRANCH' })) : [];
     if (!rpcSegs.length && !transferSegs.length) return null;
-    return [...rpcSegs, ...transferSegs].map((seg, i) => {
+    // ZNLY-113: a visitor's column is shaded outside their window here: "Not at <this branch>" before it, "Back at <home>" after it.
+    const winStart = col.transferredIn ? toKathmanduParts(col.transferStartAt) : null;
+    const visitorLabel = (seg) => {
+      if (!winStart || seg.kind !== 'branch') return seg;
+      const startMin = (Number(winStart.time.slice(0, 2)) * 60) + Number(winStart.time.slice(3, 5));
+      const sameDay = winStart.date === day;
+      const before = sameDay && seg.startMin < startMin;
+      return { ...seg, label: before ? `Not at ${col.transferToBranch || 'this branch'}` : `Back at ${col.transferFromBranch || col.fromBranch || 'home'}` };
+    };
+    return [...rpcSegs, ...transferSegs].map(visitorLabel).map((seg, i) => {
       const s0 = Math.max(seg.startMin, lo);
       const e0 = Math.min(seg.endMin, hi);
       if (e0 <= s0) return null;

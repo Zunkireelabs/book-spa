@@ -76,6 +76,8 @@ const TherapistsPage = ({ view }) => {
     const checkedIn = service.filter((t) => t.status.key === 'checked-in').length;
     const where = isOverall ? `across ${branches.length} branch${branches.length === 1 ? '' : 'es'}` : `at ${branchName || 'this branch'}`;
     const parts = [{ strong: String(activeList.length) }, { text: ` ${(activeList.length === 1 ? staffLabel : staffLabelPlural).toLowerCase()} ${where}` }];
+    const visiting = (ov.visitors || []).length;
+    if (visiting > 0 && !isOverall) parts.push({ text: ' · ' }, { strong: String(visiting) }, { text: ' visiting' });
     if (working.length > 0 || checkedIn > 0) parts.push({ text: ' · ' }, { strong: String(working.length) }, { text: ' working today, ' }, { strong: String(checkedIn) }, { text: ' checked in' });
     parts.push({ text: ' · ' }, { strong: String(ov.bookingsToday) }, { text: ` booking${ov.bookingsToday === 1 ? '' : 's'} on the calendar` });
     return leadNodes(parts);

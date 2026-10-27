@@ -5492,13 +5492,13 @@ export async function fetchTransferOccurrences(branchId, startDate, endDate) {
 // Applies transfer data to a branch's calendar therapists for [startDate, endDate]:
 //  - tags therapists currently visiting this branch (transferredIn + window),
 //  - tags therapists with a scheduled (not yet applied) transfer out (scheduledTransfer),
-//  - adds grey "transferred out" columns for therapists who are away (or were, within the range),
-//  - adds a "visiting" column for a visitor who already returned home in the range.
+//  - tags home therapists lent out in the range (transferredOut + window; they never leave the list),
+//  - adds a "visiting" column for every visitor whose window touches the range.
 // Fails open: on any error (including missing tables) returns the therapists unchanged.
 async function applyCalendarTransfers(branchId, startDate, endDate, therapists) {
   try {
     const cols = 'id, therapist_id, revert_at, effective_date, start_time, from_display_order, reverted, reverted_at';
-    const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order)';
+    const therapistCols = 'therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, specialties, position, is_service_staff, display_order, branch_id)';
     // Temporary, applied, non-return-leg windows; still-active ones plus ones that ended within the range.
     const windowFilter = `reverted.eq.false,and(effective_date.gte.${startDate},effective_date.lte.${endDate})`;
     const [outRes, inRes, schedRes] = await Promise.all([
@@ -5508,7 +5508,7 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
         .not('revert_at', 'is', null).or(windowFilter)
         .order('effective_date').order('start_time'),
       supabase.from('staff_transfers')
-        .select(`${cols}, fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
+        .select(`${cols}, toBranch:branches!staff_transfers_to_branch_id_fkey(name), fromBranch:branches!staff_transfers_from_branch_id_fkey(name), ${therapistCols}`)
         .eq('to_branch_id', branchId).eq('applied', true).eq('is_permanent', false).eq('is_return_leg', false)
         .not('revert_at', 'is', null).or(windowFilter)
         .order('effective_date').order('start_time'),
@@ -5544,28 +5544,23 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
     const inById = {};
     inRows.forEach(t => { inById[t.therapist_id] = { fromBranch: t.fromBranch?.name || null, ...windowOf(t) }; });
 
+    const outById = {};
+    outRows.forEach(t => { if (t.therapist) outById[t.therapist.id] = t; });
+
+    // ZNLY-113: branch_id is the HOME branch for the whole window, so a lent-out therapist is still one of `therapists`: tag the column
+    // with the window instead of rebuilding a separate "away" column.
     const tagged = therapists.map(d => {
       const withIn = inById[d.id] ? { ...d, transferredIn: true, ...inById[d.id] } : d;
-      return scheduledByTherapist[d.id] ? { ...withIn, scheduledTransfer: scheduledByTherapist[d.id] } : withIn;
+      const withOut = outById[d.id] ? { ...withIn, transferredOut: true, transferId: outById[d.id].id, ...windowOf(outById[d.id]) } : withIn;
+      return scheduledByTherapist[d.id] ? { ...withOut, scheduledTransfer: scheduledByTherapist[d.id] } : withOut;
     });
 
-    // Away therapists: their therapists.branch_id is elsewhere, so they're not in `therapists`.
-    const awayColumns = outRows
-      .filter(t => t.therapist && !activeIds.has(t.therapist.id))
-      .map(t => ({
-        ...t.therapist,
-        display_order: t.from_display_order ?? t.therapist.display_order,
-        transferredOut: true,
-        transferId: t.id,
-        ...windowOf(t),
-      }));
-    // A visitor who already returned home within the range: keep a column recording the visit.
-    const awayIds = new Set(awayColumns.map(c => c.id));
+    // Visitors: not in the home list, so each gets a column for the window (current, upcoming, or ended within the range).
     const visitedColumns = inRows
-      .filter(t => t.therapist && !activeIds.has(t.therapist.id) && !awayIds.has(t.therapist.id))
+      .filter(t => t.therapist && !activeIds.has(t.therapist.id))
       .map(t => ({ ...t.therapist, transferredIn: true, fromBranch: t.fromBranch?.name || null, ...windowOf(t) }));
 
-    return [...tagged, ...awayColumns, ...visitedColumns]
+    return [...tagged, ...visitedColumns]
       .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
   } catch (error) {
     console.warn('[API] applyCalendarTransfers failed open:', error.message);
@@ -7224,7 +7219,7 @@ export async function fetchTherapistsOverview(branchId, date) {
         .order('display_order').order('name'), scopeBranch),
       rosterReadable
         ? Promise.all(branchIds.map((id) => supabase.rpc('therapist_shifts_for_range', { p_branch_id: id, p_from_date: week[0], p_to_date: rangeEnd })))
-          .then((rs) => ({ data: rs.flatMap((r) => r.data || []), error: rs.find((r) => r.error)?.error || null }))
+          .then((rs) => ({ data: rs.flatMap((r, i) => (r.data || []).map((row) => ({ ...row, _branchId: branchIds[i] }))), error: rs.find((r) => r.error)?.error || null }))
         : Promise.resolve({ data: [], error: null }),
       withBranch(supabase.from('therapist_attendance').select('therapist_id, status, check_in_time, check_out_time').eq('date', date), scopeBranch),
       withBranch(supabase.from('bookings')
@@ -7244,47 +7239,65 @@ export async function fetchTherapistsOverview(branchId, date) {
       if (isClosedDate(res.data, date)) closedBranchIds.add(id);
     }));
 
-    // Home staff whose temporary transfer has APPLIED (branch_id now points elsewhere) still belong to this list: they stay listed with
-    // the transfer in their Today cell. Best effort: any failure (including missing transfer tables) just leaves them out.
-    const awayById = new Map();
+    // ZNLY-113: branch_id is the HOME branch and never flips for a temporary transfer, so the list is simply the home staff. Who is lent out
+    // today / visiting today comes from the transfer windows (therapists_at_branch, one call per branch in scope).
+    const dayStart = `${date}T00:00:00+05:45`;
+    const dayEnd = `${addDaysStr(date, 1)}T00:00:00+05:45`;
+    const nowMs = Date.now();
+    const winRows = [];
     try {
-      let awayQuery = supabase.from('staff_transfers')
-        .select(`id, from_branch_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
-          fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name),
-          therapist:therapists!staff_transfers_therapist_id_fkey(id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years)`)
-        .eq('applied', true).eq('reverted', false).eq('is_permanent', false).eq('is_return_leg', false)
-        .not('revert_at', 'is', null).gt('revert_at', new Date().toISOString());
-      // Overall already lists everyone, so the "away" lookup is skipped there (the home branch comes from the transfer below).
-      if (!overall) awayQuery = awayQuery.eq('from_branch_id', scopeBranch);
-      const awayRes = await awayQuery;
-      if (!awayRes.error) {
-        for (const r of awayRes.data || []) {
-          if (r.therapist && !awayById.has(r.therapist.id)) awayById.set(r.therapist.id, { row: r, input: toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }) });
-        }
+      const rs = await Promise.all(branchIds.map((id) => supabase.rpc('therapists_at_branch', { p_branch_id: id, p_from: dayStart, p_to: dayEnd })));
+      rs.forEach((r, i) => (r.data || []).forEach((w) => winRows.push({ ...w, branchId: branchIds[i] })));
+    } catch { /* fail open: no windows, everyone reads as at home */ }
+    // Windows that are open now or start later today; a window that already ended today is not shown.
+    const live = winRows.filter((w) => w.transfer_id && w.window_to && new Date(w.window_to).getTime() > nowMs);
+    const transferById = new Map();
+    try {
+      const ids = [...new Set(live.map((w) => w.transfer_id))];
+      if (ids.length > 0) {
+        const tr = await supabase.from('staff_transfers')
+          .select(`id, from_branch_id, to_branch_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
+            fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)`)
+          .in('id', ids);
+        if (!tr.error) (tr.data || []).forEach((r) => transferById.set(r.id, r));
       }
     } catch { /* fail open */ }
-    // Visitors: temporary transfers that applied INTO this branch. They are already in the list (branch_id points here) but must read
-    // "Visiting" with the transfer, not as this branch's own staff.
-    const visitingById = new Map();
-    try {
-      if (overall) throw new Error('skip'); // Overall shows every transfer once, from the home branch (above)
-      const visRes = await supabase.from('staff_transfers')
-        .select(`therapist_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent,
-          fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)`)
-        .eq('to_branch_id', scopeBranch).eq('applied', true).eq('reverted', false).eq('is_permanent', false).eq('is_return_leg', false)
-        .not('revert_at', 'is', null).gt('revert_at', new Date().toISOString());
-      if (!visRes.error) {
-        for (const r of visRes.data || []) {
-          if (!visitingById.has(r.therapist_id)) visitingById.set(r.therapist_id, toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }));
-        }
-      }
-    } catch { /* fail open */ }
-    const here = new Set((therapists.data || []).map((t) => t.id));
-    const awayTherapists = overall ? [] : [...awayById.values()].filter((a) => !here.has(a.row.therapist.id)).map((a) => a.row.therapist);
+    const transferOf = (w) => {
+      const r = transferById.get(w.transfer_id);
+      if (!r) return null;
+      // The window decides "now": a scheduled row is not applied yet, but its window may already be open, and vice versa.
+      const input = toTransferInput({ ...r, applied: new Date(w.window_from).getTime() <= nowMs, reverted: false, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null });
+      return { r, input };
+    };
+    const lentById = new Map();     // home therapist -> their lent-out window
+    const visitingIds = [];
+    for (const w of live) {
+      const tf = transferOf(w);
+      if (!tf) continue;
+      if (w.role_here === 'visiting') { if (!visitingIds.includes(w.therapist_id)) visitingIds.push(w.therapist_id); }
+      else if (!lentById.has(w.therapist_id)) lentById.set(w.therapist_id, { w, ...tf });
+    }
+    const startedMs = (w) => new Date(w.window_from).getTime();
+    const awayNow = (w) => startedMs(w) <= nowMs;
+    // Visitors (non-Overall): their rows are not in the home list. RLS lets managers read other branches' therapists.
+    let visitorRows = [];
+    if (!overall && visitingIds.length > 0) {
+      const vr = await supabase.from('therapists')
+        .select('id, name, gender, position, is_service_staff, is_active, branch_id, display_order, phone, photo_url, rating, experience_years')
+        .in('id', visitingIds);
+      if (!vr.error) visitorRows = vr.data || [];
+    }
+    const visitingW = new Map(live.filter((w) => w.role_here === 'visiting').map((w) => [w.therapist_id, w]));
+    // Shift rows: a visitor also comes back from the receiving branch's call. Overall must key HOME rows by therapist and never let a
+    // visitor row replace the home row (ZNLY-114), so each branch's call only contributes the people whose home it is.
+    const homeOf = new Map((therapists.data || []).map((t) => [t.id, t.branch_id]));
+    const shiftRows = overall
+      ? (shifts.data || []).filter((r) => homeOf.get(r.therapist_id) === r._branchId)
+      : (shifts.data || []);
 
     const data = buildTherapistsOverview({
-      therapists: [...(therapists.data || []), ...awayTherapists],
-      shiftRows: shifts.data || [],
+      therapists: [...(therapists.data || []), ...visitorRows.map((v) => ({ ...v, _visiting: true, now_at_branch_id: scopeBranch }))],
+      shiftRows,
       attendanceRows: attendance.data || [],
       bookingRows: bookings.data || [],
       links: links || [],
@@ -7294,12 +7307,18 @@ export async function fetchTherapistsOverview(branchId, date) {
       closedBranchIds,
     }, { date, nowTime: nepalNow().hm, canSeeRates });
     // admin_viewer has no SELECT policy on therapist_working_hours / staff_roster_overrides, so for them "no hours" means "can't read them".
-    data.therapists = data.therapists.map((t) => {
-      // Overall: a temporarily transferred therapist is listed once, under the home branch (the transfer's origin).
-      if (awayById.has(t.id)) return { ...t, ...(overall && { branchId: awayById.get(t.id).row.from_branch_id }), transfer: { input: awayById.get(t.id).input, viewpoint: 'home' } };
-      if (visitingById.has(t.id)) return { ...t, transfer: { input: visitingById.get(t.id), viewpoint: 'receiving' } };
-      return t;
+    const shaped = data.therapists.map((t) => {
+      if (t.visiting) {
+        const tf = transferOf(visitingW.get(t.id));
+        return tf ? { ...t, transfer: { input: tf.input, viewpoint: 'receiving', away: false } } : t;
+      }
+      const lent = lentById.get(t.id);
+      if (!lent) return { ...t, nowAtBranchId: t.branchId };
+      const away = awayNow(lent.w);
+      return { ...t, nowAtBranchId: away ? lent.r.to_branch_id : t.branchId, transfer: { input: lent.input, viewpoint: 'home', away } };
     });
+    data.therapists = shaped.filter((t) => !t.visiting);
+    data.visitors = shaped.filter((t) => t.visiting);
     return { data: { ...data, canSeeRates, rosterReadable }, error: null };
   } catch (error) {
     console.error('[API] fetchTherapistsOverview error:', error.message);
@@ -7468,6 +7487,24 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
   }
 }
 
+// The temporary window of `therapistId` into one of the manager's branches (home + user_branches) that touches today, or null.
+async function findVisitWindowForManager(profile, therapistId) {
+  try {
+    const ids = new Set([profile.branch_id].filter(Boolean));
+    const ub = await supabase.from('user_branches').select('branch_id').eq('user_id', profile.id);
+    (ub.data || []).forEach((r) => ids.add(r.branch_id));
+    const day = nepalNow().today;
+    const from = `${day}T00:00:00+05:45`;
+    const to = `${addDaysStr(day, 1)}T00:00:00+05:45`;
+    for (const branchId of ids) {
+      const { data } = await supabase.rpc('therapists_at_branch', { p_branch_id: branchId, p_from: from, p_to: to });
+      const w = (data || []).find((r) => r.therapist_id === therapistId && r.role_here === 'visiting');
+      if (w) return { branchId, window: { from: w.window_from, to: w.window_to }, transferId: w.transfer_id };
+    }
+  } catch { /* fail closed */ }
+  return null;
+}
+
 export async function fetchTherapistById(therapistId) {
   try {
     if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
@@ -7493,7 +7530,10 @@ export async function fetchTherapistById(therapistId) {
     }
 
     if (profile.role === 'manager' && data.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot view therapists outside your branch.' } };
+      // ZNLY-113: a manager may read (never edit) a therapist visiting one of their branches today. Anything else stays an error.
+      const visit = await findVisitWindowForManager(profile, data.id);
+      if (!visit) return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot view therapists outside your branch.' } };
+      return { data: { ...data, visitingHere: visit }, error: null };
     }
 
     return { data, error: null };

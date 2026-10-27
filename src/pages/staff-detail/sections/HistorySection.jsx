@@ -13,7 +13,7 @@ const monthTitle = (ym) => new Date(`${ym}-01T00:00:00Z`).toLocaleDateString('en
 
 const HistorySection = ({
   month, attendance, attendanceLoading, attendanceError, activity, activityLoading, activityError, onRetry,
-  filter, setFilter, canSeePay, firstName, openAttendance,
+  filter, setFilter, canSeePay, firstName, openAttendance, hideChanges,
 }) => {
   const chips = [['all', 'All'], ['profile', 'Profile'], ...(canSeePay ? [['pay', 'Pay']] : []), ['hours', 'Hours'], ['transfers', 'Transfers']];
   const items = activity?.items || [];
@@ -39,7 +39,7 @@ const HistorySection = ({
         )}
       </div>
 
-      <div>
+      {!hideChanges && <div>
         <p className="text-sm font-medium text-text-primary mb-3">Changes <span className="font-normal text-text-secondary">· to {firstName}'s record, transfers and status, newest first</span></p>
         <div className="flex flex-wrap gap-2 mb-3">
           {chips.map(([id, label]) => (
@@ -77,7 +77,7 @@ const HistorySection = ({
             {activity?.since && <p className="mt-2 text-xs text-text-tertiary">History is recorded from {fmtDate(activity.since)}.</p>}
           </>
         )}
-      </div>
+      </div>}
     </div>
   );
 };

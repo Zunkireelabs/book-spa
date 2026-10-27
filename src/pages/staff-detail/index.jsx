@@ -82,9 +82,6 @@ const StaffDetailPage = () => {
   const isEdit = !!staffId;
   const isAdmin = role === 'admin';
   const isViewer = role === 'admin_viewer';
-  const canEdit = !isViewer;                          // manager + admin
-  const canSeePay = role === 'admin' || role === 'admin_viewer'; // same rule as Payroll: admins edit, view-only admins read; managers and staff never see pay
-  const canEditPay = isAdmin;
 
   const { today, hm: nowTime } = nepalNow();
   const periodMonth = monthOf(today);
@@ -93,6 +90,13 @@ const StaffDetailPage = () => {
   const [pageLoading, setPageLoading] = useState(isEdit);
   const [loadError, setLoadError] = useState(null);
   const [therapist, setTherapist] = useState(null);
+  // ZNLY-113: a manager of ANOTHER branch opening a visitor's profile reads it: the home branch owns the profile, hours and pay.
+  // `visitor` (set once the person has loaded, below) is the viewer-is-not-home case; admins are never read-only because of it.
+  const [visitorHome, setVisitorHome] = useState(false);
+  const isVisitor = (visitorHome || !!therapist?.visitingHere) && !isAdmin;
+  const canEdit = !isViewer && !isVisitor;                          // manager + admin
+  const canSeePay = !isVisitor && (role === 'admin' || role === 'admin_viewer'); // same rule as Payroll: admins edit, view-only admins read; managers and staff never see pay
+  const canEditPay = isAdmin;
   const [allPositionNames, setAllPositionNames] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saved, setSaved] = useState({ form: EMPTY_FORM, hours: DEFAULT_WORKING_HOURS, pay: EMPTY_PAY, serviceIds: [] });
@@ -153,6 +157,7 @@ const StaffDetailPage = () => {
     if (s.id === 'services') return form.isServiceStaff;
     return true;
   }), [isEdit, canSeePay, form.isServiceStaff]);
+  useEffect(() => { setVisitorHome(!!(isEdit && therapist?.branch_id && branchId && !isOverall && therapist.branch_id !== branchId)); }, [isEdit, therapist?.branch_id, branchId, isOverall]);
 
   // ── loading ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -215,10 +220,11 @@ const StaffDetailPage = () => {
   const loadOverview = useCallback(async () => {
     if (!isEdit || !effectiveBranchId) return;
     setOverviewLoading(true); setOverviewError(null);
-    const r = await profileApi.fetchTherapistOverview({ therapistId: staffId, branchId: effectiveBranchId, today, role });
+    // A visitor's home rows are not readable from here: ask the branch they are visiting (its shift call returns them too).
+    const r = await profileApi.fetchTherapistOverview({ therapistId: staffId, branchId: therapist?.visitingHere?.branchId || effectiveBranchId, today, role });
     if (r.error) setOverviewError(r.error.message || 'Could not load the overview.'); else setOverview(r.data);
     setOverviewLoading(false);
-  }, [isEdit, staffId, effectiveBranchId, today, role]);
+  }, [isEdit, staffId, effectiveBranchId, today, role, therapist?.visitingHere?.branchId]);
 
   const loadMatrix = useCallback(async () => {
     if (!isEdit || !effectiveBranchId) return;
@@ -285,7 +291,7 @@ const StaffDetailPage = () => {
   }, [isEdit, staffId]);
 
   const loadActivity = useCallback(async () => {
-    if (!isEdit) return;
+    if (!isEdit || therapistRef.current?.visitingHere) return;   // a visitor's change log is the home branch's business (the RPC refuses it)
     setActivityLoading(true); setActivityError(null);
     const r = await profileApi.fetchTherapistActivity({ therapistId: staffId, filter: activityFilter, limit: 50, role, labels: { branch: (locationLabel || 'branch').toLowerCase() }, use24h });
     if (r.error) setActivityError(r.error.message || 'Could not load activity.'); else setActivity(r.data);
@@ -523,11 +529,12 @@ const StaffDetailPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageLoading, therapist, requestedSlug]);
 
-  // A temporary transfer in its window (applied, not reverted): therapists.branch_id already points at the receiving branch, so the
-  // profile shows the HOME branch and the transfer instead, like the Overall list and the side panel.
+  // A temporary transfer in its window (applied, not reverted): branch_id stays the HOME branch (ZNLY-113), the window only drives the pill.
   const activeTemp = isEdit ? transfers.find((x) => !x.isReturnLeg && !x.input.isPermanent && transferState(x.input) === 'now') : null;
   const activeTempDesc = activeTemp ? describeTransfer(activeTemp.input, { viewpoint: 'home', use24h, labels: { branch: 'branch' } }) : null;
-  const shownBranchName = activeTemp?.input.fromBranch || branchName;
+  const visitorWindow = isVisitor ? transfers.find((x) => !x.isReturnLeg && !x.input.isPermanent && x.toBranchId === (therapist?.visitingHere?.branchId || branchId) && ['now', 'upcoming'].includes(transferState(x.input))) : null;
+  const shownBranchName = isVisitor ? (visitorWindow?.input.fromBranch || (branches || []).find((b) => b.id === effectiveBranchId)?.name || '') : branchName;
+  const visitorDesc = visitorWindow ? describeTransfer(visitorWindow.input, { viewpoint: 'receiving', use24h, labels: { branch: 'branch' } }) : null;
 
   // ── header status line ────────────────────────────────────────────────────
   const todayWeek = overview?.week?.find((d) => d.date === today);
@@ -539,11 +546,13 @@ const StaffDetailPage = () => {
     branchClosed: !!overview?.branchClosedToday,
     back: overview?.nextWork || null,
   }) : null;
-  const statusText = activeTempDesc ? activeTempDesc.short : statusLine ? statusLine.full : null;
+  // A visitor reads "Visiting from <home> · until <time>" (receiving viewpoint); their own today line would come from rows we can't see.
+  const visitorText = isVisitor && visitorDesc ? (visitorDesc.state === 'now' ? `Visiting ${visitorDesc.short.replace(/^From/, 'from')}` : visitorDesc.short) : null;
+  const statusText = isVisitor ? visitorText : activeTempDesc ? activeTempDesc.short : statusLine ? statusLine.full : null;
   const th = todayWeek?.hours;
   const working = th && !th.isDayOff && th.startTime && th.endTime && th.source !== 'none' && !['closed', 'leave', 'off', 'absent'].includes(statusLine?.key);
-  const shiftText = !activeTemp && working && statusLine?.key === 'finished' && !/shift/i.test(statusText || '') ? `shift ${th.startTime.slice(0, 5)} – ${th.endTime.slice(0, 5)}` : null;
-  const nextBreak = working && !activeTemp ? (th.breaks || []).find((b) => String(b.endTime).slice(0, 5) > nowTime) : null;
+  const shiftText = !activeTemp && !isVisitor && working && statusLine?.key === 'finished' && !/shift/i.test(statusText || '') ? `shift ${th.startTime.slice(0, 5)} – ${th.endTime.slice(0, 5)}` : null;
+  const nextBreak = working && !activeTemp && !isVisitor ? (th.breaks || []).find((b) => String(b.endTime).slice(0, 5) > nowTime) : null;
   const breakText = nextBreak ? `${(nextBreak.name || 'break').toLowerCase()} ${String(nextBreak.startTime).slice(0, 5)} – ${String(nextBreak.endTime).slice(0, 5)}` : null;
   const checkedIn = !!todayWeek?.checkInTime && statusLine?.key !== 'finished';
 
@@ -561,7 +570,7 @@ const StaffDetailPage = () => {
   );
   const StatusPill = () => statusText ? (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${therapist?.is_active === false ? 'bg-background text-text-secondary border border-border' : 'bg-primary/10 text-primary'}`}>
-      {activeTemp && therapist?.is_active !== false
+      {(activeTemp || isVisitor) && therapist?.is_active !== false
         ? <Icon name="ArrowRightLeft" size={11} className="flex-shrink-0" />
         : <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine && therapist?.is_active !== false ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />}{therapist?.is_active === false ? 'Inactive' : statusText}
     </span>
@@ -576,6 +585,7 @@ const StaffDetailPage = () => {
           <div className="fixed inset-0 z-dropdown" onClick={() => setMenuOpen(false)} />
           <div className="absolute right-0 top-full mt-1 w-48 bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown py-1 text-sm">
             {canEdit && <button type="button" className="w-full text-left px-3 py-2 hover:bg-background" onClick={() => { setMenuOpen(false); go(dash('roster')); }}>Open roster</button>}
+            {canTransfer && <button type="button" data-menu-item="transfer" className="w-full text-left px-3 py-2 hover:bg-background" onClick={() => { setMenuOpen(false); if (openTransfer) setTransferPanel(true); else setTransferOpen(true); }}>{activeTemp ? 'Return now' : openTransfer ? 'Manage transfer' : 'Transfer to branch…'}</button>}
             <button type="button" className="w-full text-left px-3 py-2 hover:bg-background" onClick={() => { setMenuOpen(false); go(dash('therapists')); }}>Back to {staffLabel.toLowerCase()} list</button>
           </div>
         </>
@@ -617,7 +627,7 @@ const StaffDetailPage = () => {
     const a = toKathmanduParts(t.input.startAt); const b = toKathmanduParts(endOf(t.input));
     const m = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
     const from = a.date < today ? '00:00' : a.time; const to = b.date > today ? '24:00' : b.time;
-    return { startMin: m(from), endMin: m(to), label: `At ${t.input.toBranch || 'another branch'}`, title: describeTransfer(t.input, { viewpoint: 'home', use24h, labels: transferLabels }).sentence };
+    return { startMin: m(from), endMin: m(to), label: t.input.toBranch || 'Away', title: describeTransfer(t.input, { viewpoint: 'home', use24h, labels: transferLabels }).sentence };
   })();
   const monthLabel = new Date(`${today}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   const todayCount = (overview?.todayBookings || []).filter((b) => !['Cancelled', 'No Show'].includes(b.status)).length;
@@ -630,13 +640,16 @@ const StaffDetailPage = () => {
       allPositionNames={allPositionNames} staffLabel={staffLabel} photoPreview={photoPreview} uploadingPhoto={uploadingPhoto}
       onPhotoChange={handlePhotoChange} onRemovePhoto={handleRemovePhoto} isCreate={!isEdit} onAdd={(field) => requestEdit('profile', field)}
       branchField={{ label: 'Branch', name: shownBranchName, value: effectiveBranchId || '', options: (branches || []).filter((b) => b.is_active !== false).map((b) => ({ value: b.id, label: b.name })),
-        editable: !isEdit && role !== 'manager' && !singleBranch, onChange: setPickedBranch, onTransfer: isEdit && canTransfer && !activeTemp ? () => setTransferOpen(true) : null }} />
+        editable: !isEdit && role !== 'manager' && !singleBranch, onChange: setPickedBranch, onTransfer: isEdit && canTransfer && !openTransfer ? () => setTransferOpen(true) : null,
+        window: isEdit && !isVisitor && openTransferDesc ? openTransferDesc.short : null,
+        onReturn: isEdit && canTransfer && openTransfer ? () => setTransferPanel(true) : null, returnLabel: activeTemp ? 'Return now' : 'Manage transfer' }} />
   );
-  const servicesEl = (
+  const servicesEl = isVisitor && matrixError ? homeLine('Services') : (
     <ServicesSection editing={isOpen('services')} matrix={matrix} loading={matrixLoading} error={matrixError} onRetry={loadMatrix} tickedSet={ticked} setTicked={setTicked}
       readOnly={!canEdit} form={form} isCreate={!isEdit} staffLabel={staffLabel} />
   );
-  const hoursEl = (
+  const homeLine = (what) => <p className="text-sm text-text-secondary">{what} {shownBranchName ? `are set by ${shownBranchName}` : 'are set by the home branch'}.</p>;
+  const hoursEl = isVisitor ? homeLine('Working hours') : (
     <HoursSection editing={isOpen('hours')} rows={workingHours} savedRows={isEdit ? saved.hours : DEFAULT_WORKING_HOURS} onChange={setWorkingHours} readOnly={!canEdit}
       overrides={overrides} overridesLoading={overridesLoading} overridesError={overridesError} canOpenRoster={canEdit} openRoster={() => go(dash('roster'))} isCreate={!isEdit}
       locked={!isEdit && !effectiveBranchId} />
@@ -668,12 +681,12 @@ const StaffDetailPage = () => {
                 <div className="flex-1 min-w-[220px]">
                   <h1 className="font-heading font-heading-semibold text-2xl text-text-primary">{displayName}</h1>
                   <p className="mt-1 text-sm text-text-secondary">
-                    {[positionText, shownBranchName || (!isEdit ? 'pick a branch' : null), isEdit && sinceText(therapist?.created_at) ? `Since ${sinceText(therapist.created_at)}` : null].filter(Boolean).join(' · ')}
+                    {[positionText, (shownBranchName || (!isEdit ? 'pick a branch' : null)), isEdit && sinceText(therapist?.created_at) ? `Since ${sinceText(therapist.created_at)}` : null].filter(Boolean).join(' · ')}
                   </p>
                   {isEdit && (statusText || shiftText) && (
                     <p className="mt-2 text-sm text-text-secondary flex flex-wrap items-center gap-x-2">
-                      {statusText && activeTemp && <TransferPill state="now">{statusText}</TransferPill>}
-                      {statusText && !activeTemp && <span className="inline-flex items-center gap-1.5 text-text-primary font-medium"><span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{statusText}</span>}
+                      {statusText && (activeTemp || isVisitor) && <TransferPill state="now">{statusText}</TransferPill>}
+                      {statusText && !activeTemp && !isVisitor && <span className="inline-flex items-center gap-1.5 text-text-primary font-medium"><span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={statusLine ? { background: STATUS_DOT_COLOR[statusLine.dot] } : undefined} />{statusText}</span>}
                       {shiftText && <span>· {shiftText}</span>}
                       {breakText && <span>· next break {breakText}</span>}
                       {therapist?.is_active === false && <span className="font-medium text-text-primary">· Inactive</span>}
@@ -683,7 +696,20 @@ const StaffDetailPage = () => {
                 <HeaderActions />
               </header>
 
-              {isEdit && openTransferDesc && (
+              {isEdit && isVisitor && (
+                <div data-visitor-banner className="mb-5 rounded-spa border border-border bg-surface px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {visitorDesc && <TransferPill state={visitorDesc.state}>{visitorDesc.pill}</TransferPill>}
+                    <span className="text-sm font-medium text-text-primary">You're viewing a visitor</span>
+                    {visitorDesc && <span className="text-sm text-text-secondary">{visitorDesc.sentence}</span>}
+                  </div>
+                  <p className="mt-1 text-sm text-text-secondary">
+                    {shownBranchName || `The home ${(locationLabel || 'branch').toLowerCase()}`} manages their hours, pay and profile. You can book {firstName || 'them'} and mark today's attendance here. To change anything else, ask the {shownBranchName || 'home'} manager.
+                  </p>
+                </div>
+              )}
+
+              {isEdit && !isVisitor && openTransferDesc && (
                 <div data-transfer-banner className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-spa border border-border bg-surface px-4 py-3">
                   <TransferPill state={openTransferDesc.state}>{openTransferDesc.pill}</TransferPill>
                   <span className="flex-1 min-w-[200px] text-sm text-text-primary">{openTransferDesc.sentence}</span>
@@ -742,12 +768,12 @@ const StaffDetailPage = () => {
                     </Section>
                   )}
 
-                  {isEdit && (
+                  {isEdit && !(isVisitor && attendanceError) && (
                     <Section id="history" title="History" sub={attendance?.length ? attendanceSummary(attendance) || null : null} dimmed={!!editing}>
                       <div className="mt-4">
                         <HistorySection month={periodMonth} attendance={attendance} attendanceLoading={attendanceLoading} attendanceError={attendanceError}
                           activity={activity} activityLoading={activityLoading} activityError={activityError} onRetry={loadActivity}
-                          filter={activityFilter} setFilter={setActivityFilter} canSeePay={canSeePay} firstName={firstName || `this ${staffLabel.toLowerCase()}`} openAttendance={() => go(dash('attendance') + `&therapist=${staffId}`)} />
+                          filter={activityFilter} setFilter={setActivityFilter} hideChanges={isVisitor} canSeePay={canSeePay} firstName={firstName || `this ${staffLabel.toLowerCase()}`} openAttendance={() => go(dash('attendance') + `&therapist=${staffId}`)} />
                       </div>
                     </Section>
                   )}

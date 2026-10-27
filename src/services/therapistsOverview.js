@@ -119,6 +119,7 @@ export function buildTherapistsOverview(raw, { date, nowTime, canSeeRates = fals
       isServiceStaff: t.is_service_staff !== false,
       isActive: !!t.is_active,
       branchId: t.branch_id,
+      visiting: !!t._visiting,
       phone: t.phone || '',
       photoUrl: t.photo_url || null,
       rating: t.rating != null ? Number(t.rating) : null,
@@ -133,7 +134,7 @@ export function buildTherapistsOverview(raw, { date, nowTime, canSeeRates = fals
         hours: todayHours,
         attendance: att ? { status: att.status, checkInTime: nepalClock(att.checkInTime) || null, checkOutTime: nepalClock(att.checkOutTime) || null } : null,
         nowMin: timeToMinutes(nowTime) ?? 0,
-        branchClosed: raw.closedBranchIds ? raw.closedBranchIds.has(t.branch_id) : !!raw.branchClosedToday,
+        branchClosed: raw.closedBranchIds ? raw.closedBranchIds.has(t.now_at_branch_id || t.branch_id) : !!raw.branchClosedToday,
         back: nextWorkingDay(date, hoursOn),
       }),
       status: { ...status, checkedInAt: status.checkedInAt ? nepalClock(status.checkedInAt) : undefined },
@@ -183,7 +184,7 @@ export function segmentOf(t) {
 /** Does this person belong under a strip pick? ('notin' is a subset of working). */
 export function inSegment(t, seg) {
   if (!seg) return true;
-  if (t.transfer && t.transfer.viewpoint !== 'receiving') return false;   // away on a transfer: not part of today's availability counts
+  if (t.transfer?.away) return false;   // away on a transfer: not part of today's availability counts
   if (seg === 'notin') return t.isServiceStaff && t.status.key === 'not-checked-in';
   return segmentOf(t) === seg;
 }
@@ -240,12 +241,14 @@ export const SORTS = {
   calendar: { label: 'Calendar order' },
   name: { label: 'Name' },
   busiest: { label: 'Busiest today' },
-  branch: { label: 'Branch, then name' }, // Overall only
+  branch: { label: 'Branch, then name' }, // Overall only (home branch)
+  nowat: { label: 'Now at, then name' }, // Overall only
 };
 
 export function sortTherapists(list, sort, branchNameById = {}) {
   const copy = list.slice();
   if (sort === 'branch') return copy.sort((a, b) => (branchNameById[a.branchId] || '').localeCompare(branchNameById[b.branchId] || '') || a.name.localeCompare(b.name));
+  if (sort === 'nowat') return copy.sort((a, b) => (branchNameById[a.nowAtBranchId] || '').localeCompare(branchNameById[b.nowAtBranchId] || '') || a.name.localeCompare(b.name));
   if (sort === 'name') return copy.sort((a, b) => a.name.localeCompare(b.name));
   if (sort === 'busiest') return copy.sort((a, b) => (b.bookings.count - a.bookings.count) || a.name.localeCompare(b.name));
   return copy.sort((a, b) => a.index - b.index); // the order the server returned = calendar order (display_order, name)

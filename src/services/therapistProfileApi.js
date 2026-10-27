@@ -530,14 +530,14 @@ export async function fetchTherapistTransfers({ therapistId }) {
   try {
     const { data, error } = await supabase
       .from('staff_transfers')
-      .select(`id, from_branch_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent, is_return_leg, note, transferred_at,
+      .select(`id, from_branch_id, to_branch_id, effective_date, start_time, revert_at, applied, reverted, reverted_at, is_permanent, is_return_leg, note, transferred_at,
         fromBranch:branches!staff_transfers_from_branch_id_fkey(name), toBranch:branches!staff_transfers_to_branch_id_fkey(name)`)
       .eq('therapist_id', therapistId)
       .order('transferred_at', { ascending: false });
     if (error) throw error;
     return {
       data: (data || []).map((r) => ({
-        id: r.id, fromBranchId: r.from_branch_id, isReturnLeg: !!r.is_return_leg, note: r.note || null, transferredAt: r.transferred_at,
+        id: r.id, fromBranchId: r.from_branch_id, toBranchId: r.to_branch_id, isReturnLeg: !!r.is_return_leg, note: r.note || null, transferredAt: r.transferred_at,
         input: toTransferInput({ ...r, fromBranch: r.fromBranch?.name || null, toBranch: r.toBranch?.name || null }),
       })),
       error: null,

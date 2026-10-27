@@ -94,8 +94,9 @@ function describeTransferUnsafe(t, opts) {
   const endTxt = end ? (end.date === todayNp ? clock(end.time) : `${dayLabel(end.date)} ${clock(end.time)}`) : '';
   const sameDayEnd = end && end.date === todayNp;
   // short forms drop the date when it's the day being shown
-  const startShort = start ? (day && start.date === day ? clock(start.time) : `${dayNoWeekday(start.date)} ${clock(start.time)}`) : '';
-  const endShort = end ? (!day || end.date === day ? clock(end.time) : `${dayNoWeekday(end.date)} ${clock(end.time)}`) : '';
+  const shown = day || todayNp; // no day given = today
+  const startShort = start ? (start.date === shown ? clock(start.time) : `${dayNoWeekday(start.date)} ${clock(start.time)}`) : '';
+  const endShort = end ? (end.date === shown ? clock(end.time) : `${dayNoWeekday(end.date)} ${clock(end.time)}`) : '';
 
   let pill = PILLS[state];
   let sentence = '';
@@ -105,6 +106,7 @@ function describeTransferUnsafe(t, opts) {
   let full = '';
   let afterPill = '';
   let afterLadder = null;
+  let upcomingLine = '';
 
   switch (state) {
     case 'upcoming': {
@@ -116,6 +118,8 @@ function describeTransferUnsafe(t, opts) {
       tiny = home ? `To ${to}` : `From ${from}`;
       word = home ? `Out ${startShort}` : `In ${startShort}`;
       full = end && (!day || end.date === day) ? `${home ? `To ${to}` : `From ${from}`} ${startShort}–${endShort}` : '';
+      // ZNLY-120: the whole pill text for a transfer later today, e.g. 'To Sanepa at 4:20 pm · back 6:20 pm'
+      upcomingLine = `${home ? `To ${to}` : `From ${from}`} at ${startShort}${end ? ` · ${home ? 'back' : 'until'} ${endShort}` : ''}`;
       break;
     }
     case 'now': {
@@ -162,7 +166,7 @@ function describeTransferUnsafe(t, opts) {
       word = 'Moved';
     }
   }
-  return { state, pill, sentence: sentence.replace(/\s+/g, ' ').trim(), short: shortTxt.replace(/\s+/g, ' ').trim(), tiny, word, afterPill: (afterPill || shortTxt).replace(/\s+/g, ' ').trim(), afterPills: (afterLadder || [shortTxt, tiny]).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean), full: (full || shortTxt).replace(/\s+/g, ' ').trim() };
+  return { upcomingLine: upcomingLine.replace(/\s+/g, ' ').trim(), state, pill, sentence: sentence.replace(/\s+/g, ' ').trim(), short: shortTxt.replace(/\s+/g, ' ').trim(), tiny, word, afterPill: (afterPill || shortTxt).replace(/\s+/g, ' ').trim(), afterPills: (afterLadder || [shortTxt, tiny]).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean), full: (full || shortTxt).replace(/\s+/g, ' ').trim() };
 }
 
 // '3 h 30 min' / '4 h' / '45 min' / '2 d 4 h': the real length of a temporary transfer (start -> planned return, or the early return).

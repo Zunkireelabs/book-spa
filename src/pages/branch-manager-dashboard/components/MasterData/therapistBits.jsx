@@ -22,7 +22,13 @@ export { todayLabels };
 export const TodayCell = ({ t, pill = false, rosterReadable = true }) => {
   // Away on a transfer: the same pill + short sentence as Attendance and the calendar.
   if (t.transfer) {
-    const d = describeTransfer(t.transfer.input, { viewpoint: t.transfer.viewpoint, short: true });
+    const d = describeTransfer(t.transfer.input, { viewpoint: t.transfer.viewpoint, short: true, day: t.transfer.day });
+    // ZNLY-120: a transfer starting later today is one neutral pill with the start and return time (turns into "At X until ..." when it starts).
+    if (d.state === 'upcoming' && d.upcomingLine) {
+      return (
+        <div className="min-w-0" data-today-key="transfer" title={d.sentence}><TransferPill state="upcoming">{d.upcomingLine}</TransferPill></div>
+      );
+    }
     return (
       <div className="min-w-0 flex items-center gap-2" data-today-key="transfer" title={d.sentence}>
         <TransferPill state={d.state}>{d.pill}</TransferPill>

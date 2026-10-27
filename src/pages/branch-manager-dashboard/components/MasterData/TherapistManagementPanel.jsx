@@ -20,14 +20,21 @@ import {
   EmptyBlock, ErrorBlock,
 } from '../Area/listKit';
 import TransferFromCalendarModal from '../calendar/TransferFromCalendarModal';
+import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { useBranch } from '../../../../contexts/BranchContext';
 import TherapistPeekPanel from './TherapistPeekPanel';
+import { toKathmanduParts } from '../calendar/calendarDates';
+import { formatClockTime } from '../calendar/timeFormat';
 import { TodayCell, BookingsCell, todayLabels } from './therapistBits';
 
 const positionParts = (p) => (p ? p.split('/').map((x) => x.trim()).filter(Boolean) : []);
+const NAME_MIN = 230;
 const CELL = 'h-[58px] border-b border-[#F1F1EF] pr-3';
 
 // One row. Sortable only in "Calendar order" with no filters (the grip appears on hover); clicking the row opens the peek.
-const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, branchName, menuItems, onOpen, onToggle, stickyOffset }) => {
+const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, branchName, nowAtName, menuItems, onOpen, onToggle, stickyOffset }) => {
+  const visitor = !!t.visiting;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id, disabled: !sortable });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1, scrollMarginTop: stickyOffset };
   const dim = !t.isActive ? 'opacity-[.55]' : '';
@@ -36,7 +43,7 @@ const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, bra
       onClick={() => onOpen(t.id)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(t.id); }}
       className={`group cursor-pointer focus:outline-none ${selected ? 'bg-[#F2F6F0]' : 'hover:bg-[#FAFAF9] focus-visible:bg-[#FAFAF9]'}`}>
       <td className={`${CELL} pr-0 ${selected ? 'shadow-[inset_3px_0_0_0_#2D5A27]' : ''}`}>
-        {sortable && (
+        {sortable && !visitor && (
           <button type="button" {...attributes} {...listeners} onClick={(e) => e.stopPropagation()} aria-label={`Drag ${t.name} to reorder`} title="Drag to change the Calendar order"
             className="ml-1 p-1 rounded cursor-grab active:cursor-grabbing text-[#B4B4BA] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-text-primary">
             <Icon name="GripVertical" size={15} />
@@ -52,12 +59,13 @@ const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, bra
               {!t.isServiceStaff && <span className="h-[18px] px-1.5 rounded bg-[#F1F1EF] text-[10px] font-semibold uppercase text-[#8A8A90] inline-flex items-center flex-shrink-0">Support</span>}
             </div>
             <div className="text-[12.5px] text-[#8A8A90] mt-0.5 truncate">
-              {subLine(t) || '—'}{!cols.today && t.isActive ? ` · ${todayLabels(t).title}` : ''}
+              {visitor && t.transfer ? `From ${t.transfer.input.fromBranch || 'another branch'}` : (subLine(t) || '—')}{!cols.today && t.isActive ? ` · ${todayLabels(t).title}` : ''}
             </div>
           </div>
         </div>
       </td>
       {cols.branch && <td className={`${CELL} text-[13px] text-text-primary truncate`}>{branchName || '—'}</td>}
+      {cols.nowAt && <td className={`${CELL} text-[13px] truncate ${t.nowAtBranchId && t.nowAtBranchId === t.branchId ? 'text-[#8A8A90]' : 'text-text-primary'}`} data-now-at>{nowAtName || '—'}{t.nowAtBranchId && t.nowAtBranchId !== t.branchId && t.transfer?.input?.revertAt ? ` until ${formatClockTime(toKathmanduParts(t.transfer.input.revertAt)?.time, false)}` : ''}</td>}
       {cols.today && <td className={CELL}>{t.isActive ? <TodayCell t={t} rosterReadable={rosterReadable} /> : <span className="text-[13px] text-[#8A8A90]">Inactive</span>}</td>}
       {cols.bookings && <td className={CELL}>{t.isActive ? <BookingsCell t={t} /> : <span className="text-[13px] text-[#8A8A90]">—</span>}</td>}
       {cols.services && (
@@ -67,14 +75,14 @@ const Row = ({ t, cols, rosterReadable, selected, sortable, canManage, busy, bra
       )}
       {cols.commission && (
         <td className={`${CELL} text-[13px] tabular-nums`} data-commission>
-          {t.rates && t.rates.servicePct != null ? (
+          {!visitor && t.rates && t.rates.servicePct != null ? (
             <><div className="font-medium">{t.rates.servicePct}%</div><div className="text-[12px] text-[#8A8A90]">{t.rates.productPct ? `${t.rates.productPct}% products` : '—'}</div></>
           ) : <span className="text-[#8A8A90]">—</span>}
         </td>
       )}
       {cols.phone && <td className={`${CELL} text-[13px] tabular-nums text-text-primary truncate`}>{t.phone || <span className="text-[#8A8A90]">—</span>}</td>}
       <td className={`${CELL} pr-2`} onClick={(e) => e.stopPropagation()}>
-        {canManage ? <RowSwitch checked={t.isActive} busy={busy} onChange={() => onToggle(t)} label={`${t.isActive ? 'Deactivate' : 'Activate'} ${t.name}`} />
+        {visitor ? <span className="text-[12px] text-[#8A8A90]">—</span> : canManage ? <RowSwitch checked={t.isActive} busy={busy} onChange={() => onToggle(t)} label={`${t.isActive ? 'Deactivate' : 'Activate'} ${t.name}`} />
           : <span className={`text-[12px] ${t.isActive ? 'text-primary' : 'text-[#8A8A90]'}`}>{t.isActive ? 'Active' : 'Inactive'}</span>}
       </td>
       <td className={`${CELL} pr-1`} onClick={(e) => e.stopPropagation()}>
@@ -131,18 +139,30 @@ const TherapistManagementPanel = ({
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const { staffLabel, staffLabelPlural } = useIndustry();
+  const { profile } = useAuth();
+  const { branchId: scopeBranchId } = useBranch();
+  const isAdmin = profile?.role === 'admin';
   const [sp, setSp] = useSearchParams();
   const isSm = useMinWidth(640);
   const isMd = useMinWidth(768);
   const isLg = useMinWidth(1024);
   const isXl = useMinWidth(1280);
+  const [tableW, setTableW] = useState(0);
+  const [wrapEl, wrapRef] = useState(null);
+  useEffect(() => {
+    if (!wrapEl || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setTableW(Math.round(wrapEl.getBoundingClientRect().width)));
+    ro.observe(wrapEl);
+    setTableW(Math.round(wrapEl.getBoundingClientRect().width));
+    return () => ro.disconnect();
+  }, [wrapEl]);
   const active = tab === 'active';
 
   const seg = active && STRIP_SEGMENTS.some((s) => s.id === sp.get('seg')) ? sp.get('seg') : null;
   const query = sp.get('q') || '';
   const sortParam = sp.get('sort');
-  const sort = sortParam && SORTS[sortParam] && (sortParam !== 'branch' || isOverall) ? sortParam : (isOverall ? 'branch' : 'calendar'); // Overall defaults to branch, then name
-  const sorts = useMemo(() => (isOverall ? SORTS : Object.fromEntries(Object.entries(SORTS).filter(([id]) => id !== 'branch'))), [isOverall]);
+  const sort = sortParam && SORTS[sortParam] && ((sortParam !== 'branch' && sortParam !== 'nowat') || isOverall) ? sortParam : (isOverall ? 'branch' : 'calendar'); // Overall defaults to branch, then name
+  const sorts = useMemo(() => (isOverall ? SORTS : Object.fromEntries(Object.entries(SORTS).filter(([id]) => id !== 'branch' && id !== 'nowat'))), [isOverall]);
   const filters = { position: sp.get('position') || '', type: sp.get('type') || '', gender: sp.get('gender') || '', branch: isOverall ? sp.get('branch') || '' : '' };
   const spRef = useRef(sp);
   spRef.current = sp;
@@ -165,7 +185,7 @@ const TherapistManagementPanel = ({
   const all = useMemo(() => (ov ? ov.therapists : []), [ov]);
   const tabList = useMemo(() => all.filter((t) => t.isActive === active), [all, active]);
   // Staff away on a transfer stay listed but are not part of today's availability counts.
-  const presentList = useMemo(() => tabList.filter((t) => !t.transfer), [tabList]);
+  const presentList = useMemo(() => tabList.filter((t) => !t.transfer?.away), [tabList]);
   const stats = useMemo(() => (active && ov ? stripStats(presentList, { nowTime }) : {}), [active, ov, presentList, nowTime]);
   const segments = useMemo(() => STRIP_SEGMENTS.filter((s) => (s.id !== 'noroster' && s.id !== 'support') || (stats[s.id]?.count || 0) > 0).filter((s) => s.id !== 'noroster' || ov?.rosterReadable !== false), [stats, ov]);
   const needs = useMemo(() => (active && ov && !isOverall ? needsYouNow(presentList, { nowTime }) : null), [active, ov, isOverall, presentList, nowTime]);
@@ -183,6 +203,9 @@ const TherapistManagementPanel = ({
     if (filters.branch && t.branchId !== filters.branch) return false;
     return matchesSearch(t, query);
   }), sort, branchNameById), [tabList, seg, filters.position, filters.type, filters.gender, filters.branch, query, sort, branchNameById]);
+  // Visiting today (ZNLY-113): listed apart under the home rows, not counted, read-only. Search narrows them; the other filters are home-list filters.
+  const visitors = useMemo(() => (active && !isOverall && !seg && !filters.position && !filters.type && !filters.gender ? (ov?.visitors || []).filter((t) => matchesSearch(t, query)) : []),
+    [active, isOverall, seg, filters.position, filters.type, filters.gender, ov, query]);
   const anyFilter = !!(seg || query || filters.position || filters.type || filters.gender || filters.branch);
   const sortable = active && canManage && !isOverall && sort === 'calendar' && !anyFilter;
   const clearAll = () => { setSearchText(''); patch({ q: '', position: '', type: '', gender: '', branch: '', seg: '' }, { push: true }); };
@@ -193,6 +216,7 @@ const TherapistManagementPanel = ({
   const [cannotDelete, setCannotDelete] = useState(null); // { t, counts }
   const [busy, setBusy] = useState(false);
   const [transferFor, setTransferFor] = useState(null);
+  const [returnFor, setReturnFor] = useState(null); // admin: end a visitor's stay early (the same panel the profile uses)
   const [rowError, setRowError] = useState(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -234,6 +258,15 @@ const TherapistManagementPanel = ({
 
   const goCalendar = (t) => navigate({ search: `?view=calendar${t?.id ? `&therapist=${t.id}` : ''}` });
   const menuItems = (t) => {
+    if (t.visiting) {
+      // A visitor belongs to their home branch: never transfer / deactivate / delete here. Only the stay itself can be ended (admin).
+      return [
+        { key: 'profile', label: 'View profile', icon: 'User', run: () => navigate(`/${orgSlug}/staff/${t.id}`) },
+        { key: 'calendar', label: 'See on calendar', icon: 'Calendar', run: () => goCalendar(t) },
+        ...(canManage ? [{ key: 'attendance', label: 'Mark attendance', icon: 'Clock', run: () => navigate({ search: `?view=attendance&therapist=${t.id}` }) }] : []),
+        ...(isAdmin && t.transfer ? [{ key: 'return', label: 'Return now', icon: 'ArrowRightLeft', run: () => { onCloseOpen(); setReturnFor(t); } }] : []),
+      ];
+    }
     const manage = canManage && !isOverall;
     return [
       { key: 'profile', label: 'Open full profile', icon: 'User', run: () => navigate(`/${orgSlug}/staff/${t.id}`) },
@@ -263,8 +296,8 @@ const TherapistManagementPanel = ({
 
   // ── export ───────────────────────────────────────────────────────────────────────────────────────────────────
   const exportCsv = useCallback(() => {
-    const head = ['Name', 'Position', 'Gender', 'Type', ...(isOverall ? ['Branch'] : []), 'Today', 'Bookings today', 'Services', ...(canSeeRates ? ['Service commission %', 'Product commission %'] : []), 'Phone', 'Active'];
-    const rows = filtered.map((t) => [t.name, t.position, t.gender, t.isServiceStaff ? 'Service' : 'Support', ...(isOverall ? [branchNameById?.[t.branchId] || ''] : []),
+    const head = ['Name', 'Position', 'Gender', 'Type', ...(isOverall ? ['Branch', 'Now at'] : []), 'Today', 'Bookings today', 'Services', ...(canSeeRates ? ['Service commission %', 'Product commission %'] : []), 'Phone', 'Active'];
+    const rows = filtered.map((t) => [t.name, t.position, t.gender, t.isServiceStaff ? 'Service' : 'Support', ...(isOverall ? [branchNameById?.[t.branchId] || '', branchNameById?.[t.nowAtBranchId] || ''] : []),
       t.isActive ? todayLabels(t).title : 'Inactive', t.bookings.count, t.isServiceStaff ? `${t.serviceCount} of ${ov.totalServices}` : '',
       ...(canSeeRates ? [t.rates?.servicePct ?? '', t.rates?.productPct ?? ''] : []), t.phone, t.isActive ? 'Yes' : 'No']);
     csvDownload(`${staffLabelPlural}-${isOverall ? 'all-branches' : branchName || 'branch'}-${active ? 'active' : 'inactive'}.csv`.toLowerCase().replace(/\s+/g, '-'), head, rows);
@@ -281,16 +314,17 @@ const TherapistManagementPanel = ({
     if (stuck) scrollToListTop();
   }, [listKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cols = {
-    branch: isOverall,
-    today: active && isSm,
-    bookings: active && isMd,
-    services: isLg,
-    commission: isLg && canSeeRates,
-    phone: isXl,
-    totalServices: ov?.totalServices ?? 0,
-  };
-  const colCount = 3 + (cols.branch ? 1 : 0) + (cols.today ? 1 : 0) + (cols.bookings ? 1 : 0) + (cols.services ? 1 : 0) + (cols.commission ? 1 : 0) + (cols.phone ? 1 : 0) + 1;
+  // Table is table-fixed with Name as the only flexible column, so optional columns are added by the width actually available (Name keeps >= NAME_MIN):
+  // a viewport breakpoint can't know the sidebar and page padding, which is how Name collapsed to zero on a wide Overall window.
+  const OPT = [ // in the order they are given up room, first = kept longest
+    ['today', active && isSm, isLg ? 210 : 170], ['bookings', active && isMd, isLg ? 190 : 150], ['nowAt', isOverall && isMd, 150],
+    ['services', isLg, 90], ['commission', isLg && canSeeRates, 120], ['phone', isXl, 130],
+  ];
+  const fit = {};
+  let room = (tableW || (typeof window !== 'undefined' ? window.innerWidth : 1280)) - NAME_MIN - 28 - 70 - 40 - (isOverall ? 120 : 0);
+  OPT.forEach(([id, want, w]) => { fit[id] = !!want && room >= w; if (fit[id]) room -= w; });
+  const cols = { branch: isOverall, ...fit, totalServices: ov?.totalServices ?? 0 };
+  const colCount = 3 + (cols.branch ? 1 : 0) + (cols.nowAt ? 1 : 0) + (cols.today ? 1 : 0) + (cols.bookings ? 1 : 0) + (cols.services ? 1 : 0) + (cols.commission ? 1 : 0) + (cols.phone ? 1 : 0) + 1;
   const th = thClass(stuck);
   const thTop = { top: stickyTop + blockH };
   const chipLabel = (opts, v) => opts.find((o) => o.id === v)?.label;
@@ -310,7 +344,7 @@ const TherapistManagementPanel = ({
     ? <div className="flex items-center gap-2 pt-3.5 pb-2 flex-wrap">{searchBox}{chips}<div className="ml-auto">{sortMenu}</div></div>
     : <div className="pt-2.5 pb-2">{searchBox}</div>;
 
-  const peekT = openId ? all.find((t) => t.id === openId) : null;
+  const peekT = openId ? (all.find((t) => t.id === openId) || (ov?.visitors || []).find((t) => t.id === openId)) : null;
 
   let body = null;
   if (loading) {
@@ -318,12 +352,16 @@ const TherapistManagementPanel = ({
   } else if (!error) {
     const rows = filtered.map((t) => (
       <Row key={t.id} t={t} cols={cols} rosterReadable={ov.rosterReadable !== false} selected={t.id === openId} sortable={sortable} canManage={canManage && !isOverall} busy={busy} menuItems={menuItems}
-        branchName={branchNameById?.[t.branchId]} onOpen={onOpen} onToggle={onToggle} stickyOffset={stickyTop + blockH + 40} />
+        branchName={branchNameById?.[t.branchId]} nowAtName={branchNameById?.[t.nowAtBranchId]} onOpen={onOpen} onToggle={onToggle} stickyOffset={stickyTop + blockH + 40} />
     ));
     body = sortable
       ? <SortableContext items={filtered.map((t) => t.id)} strategy={verticalListSortingStrategy}>{rows}</SortableContext>
       : rows;
   }
+  const visitorRows = visitors.map((t) => (
+    <Row key={t.id} t={t} cols={cols} rosterReadable={ov.rosterReadable !== false} selected={t.id === openId} sortable={false} canManage={false} busy={false} menuItems={menuItems}
+      branchName={branchNameById?.[t.branchId]} onOpen={onOpen} onToggle={() => {}} stickyOffset={stickyTop + blockH + 40} />
+  ));
 
   return (
     <div>
@@ -348,12 +386,13 @@ const TherapistManagementPanel = ({
       )}
 
       {error ? <ErrorBlock error={error} onRetry={onRetry} /> : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <div ref={wrapRef}><DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <table className="w-full border-collapse table-fixed">
             <colgroup>
               <col style={{ width: 28 }} />
               <col />
               {cols.branch && <col style={{ width: 120 }} />}
+              {cols.nowAt && <col style={{ width: 150 }} />}
               {cols.today && <col style={{ width: isLg ? 210 : 170 }} />}
               {cols.bookings && <col style={{ width: isLg ? 190 : 150 }} />}
               {cols.services && <col style={{ width: 90 }} />}
@@ -367,6 +406,7 @@ const TherapistManagementPanel = ({
                 <th scope="col" className={th} style={thTop}><span className="sr-only">Reorder</span></th>
                 <th scope="col" className={`${th} text-left`} style={thTop}>Name</th>
                 {cols.branch && <th scope="col" className={`${th} text-left`} style={thTop}>Branch</th>}
+                {cols.nowAt && <th scope="col" className={`${th} text-left`} style={thTop}>Now at</th>}
                 {cols.today && <th scope="col" className={`${th} text-left`} style={thTop}>Today</th>}
                 {cols.bookings && <th scope="col" className={`${th} text-left`} style={thTop}>Bookings today</th>}
                 {cols.services && <th scope="col" className={`${th} text-left`} style={thTop}>Services</th>}
@@ -377,8 +417,14 @@ const TherapistManagementPanel = ({
               </tr>
             </thead>
             <tbody>{body}</tbody>
+            {!loading && !error && visitors.length > 0 && (
+              <tbody data-visiting-group>
+                <tr><td colSpan={colCount} className="h-9 pt-3 border-b border-[#F1F1EF] text-[11.5px] font-medium uppercase tracking-[.05em] text-[#8A8A90]">Visiting today · {visitors.length}</td></tr>
+                {visitorRows}
+              </tbody>
+            )}
           </table>
-        </DndContext>
+        </DndContext></div>
       )}
 
       {!loading && !error && filtered.length === 0 && (tabList.length === 0
@@ -393,14 +439,19 @@ const TherapistManagementPanel = ({
         </div>
       )}
 
-      {peekT && !transferFor && (
-        <TherapistPeekPanel key={peekT.id} t={peekT} branchName={branchNameById?.[peekT.branchId] || branchName} totalServices={ov.totalServices} canSeeRates={canSeeRates}
+      {peekT && !transferFor && !returnFor && (
+        <TherapistPeekPanel key={peekT.id} t={peekT} branchName={peekT.visiting ? branchName : (branchNameById?.[peekT.branchId] || branchName)} totalServices={ov.totalServices} canSeeRates={canSeeRates}
           ratesReadable={ov.ratesReadable} rosterReadable={ov.rosterReadable !== false} nowTime={nowTime} today={today} menuItems={menuItems(peekT)} onOpenCalendar={() => goCalendar(peekT)} onClose={onCloseOpen} />
       )}
 
       {transferFor && (
         <TransferFromCalendarModal variant="panel" therapistId={transferFor.id} therapistName={transferFor.name} currentBranchId={transferFor.branchId} defaultDate={today} defaultTime=""
           onClose={() => setTransferFor(null)} onSuccess={() => { setTransferFor(null); notify(`${transferFor.name} transferred`); onChanged(); }} />
+      )}
+
+      {returnFor && (
+        <TransferManagementModal variant="panel" therapistId={returnFor.id} therapistName={returnFor.name} currentBranchId={scopeBranchId}
+          onClose={() => setReturnFor(null)} onSuccess={(msg) => { setReturnFor(null); notify(msg || `${returnFor.name} returned`); onChanged(); }} />
       )}
 
       {confirmToggle && (
