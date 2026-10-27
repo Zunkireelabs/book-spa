@@ -17,11 +17,10 @@ import MobileBookingBar from './components/MobileBookingBar';
 import BookingView from './components/BookingView';
 import './zennly-theme.css';
 
-// Profile-page-style alternative to the default step-wizard customer booking flow
-// (CustomerBookingFlowV2), gated behind organizations.settings.use_provider_profile_layout.
-// Reuses the v1 DateTimeSelection/CustomerForm/BookingConfirmation/BookingSuccess
-// components unchanged — only the surrounding page chrome (hero, scroll-spy category
-// pills, full-page booking view) is net-new.
+// The customer booking flow for every tenant: scroll-spy category pills + hero +
+// full-page booking drawer. Reuses the v1 DateTimeSelection/CustomerForm/
+// BookingConfirmation/BookingSuccess components unchanged — only the surrounding
+// page chrome (hero, scroll-spy category pills, full-page booking view) is net-new.
 const ProviderProfileFlow = () => {
   const { orgSlug } = useParams();
   const {

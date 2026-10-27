@@ -52,8 +52,12 @@ BEGIN
   RAISE NOTICE 'Staff terminology: %', industry_record.staff_label_plural;
   RAISE NOTICE 'Rooms enabled: %', industry_record.enable_rooms;
 
-  -- Create the new organization
-  INSERT INTO organizations (name, code, slug, owner_email, timezone, currency, industry_type)
+  -- Create the new organization. REMINDER: before launch, also supply
+  -- organizations.logo_url / hero_image_url and each branches.photo_url (Step 5) —
+  -- without them the provider-profile customer booking layout falls back to a
+  -- generic icon tile + stock photo instead of real branding. See
+  -- src/pages/provider-profile-flow/ for the layout.
+  INSERT INTO organizations (name, code, slug, owner_email, timezone, currency, industry_type, settings)
   VALUES (
     :'org_name',
     :'org_code',
@@ -61,7 +65,8 @@ BEGIN
     :'owner_email',
     :'timezone',
     :'currency',
-    :'industry_type'
+    :'industry_type',
+    '{}'::jsonb
   )
   RETURNING id INTO new_org_id;
 
@@ -71,6 +76,10 @@ BEGIN
 -- STEP 2: Create Initial Branch
 -- ============================================================
 
+  -- REMINDER: this branch has no photo_url yet. Set it as part of onboarding
+  -- (UPDATE branches SET photo_url = '...' WHERE id = new_branch_id) before the
+  -- provider-profile-flow goes live for this tenant, or the branch card falls
+  -- back to a generic icon tile instead of a real storefront photo.
   INSERT INTO branches (name, address, phone, org_id, is_active)
   VALUES (
     :'branch_name',
@@ -112,6 +121,7 @@ BEGIN
   RAISE NOTICE 'NEXT STEPS:';
   RAISE NOTICE '1. Create admin user in Supabase Auth';
   RAISE NOTICE '2. Insert user record with org_id = %', new_org_id;
+  RAISE NOTICE '2a. Set organizations.logo_url / hero_image_url (org %) and branches.photo_url (branch %) — without these the customer booking page shows a generic icon tile instead of real branding.', new_org_id, new_branch_id;
 
   IF industry_record.enable_rooms THEN
     RAISE NOTICE '3. Add % for branch %', industry_record.location_label_plural, new_branch_id;

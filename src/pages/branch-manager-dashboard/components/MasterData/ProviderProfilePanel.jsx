@@ -142,7 +142,6 @@ const ProviderProfilePanel = () => {
   const [logoFile, setLogoFile] = useState(null);
   const [heroPreview, setHeroPreview] = useState(org.org?.hero_image_url ?? '');
   const [heroFile, setHeroFile] = useState(null);
-  const useProviderProfileLayout = org.org?.settings?.use_provider_profile_layout === true;
 
   // OrgContext loads org asynchronously, so useState's one-time initializer above
   // mounts with org.org === null on a hard reload and seeds every field to '' — the
@@ -240,27 +239,6 @@ const ProviderProfilePanel = () => {
           <button onClick={() => setError(null)} className="ml-auto"><Icon name="X" size={14} /></button>
         </div>
       )}
-
-      <label className="flex items-center justify-between p-3 border border-border rounded-spa cursor-pointer hover:bg-background">
-        <div className="pr-4">
-          <span className="font-body font-body-medium text-sm text-text-primary">Use provider-profile layout</span>
-          <p className="font-caption text-xs text-text-secondary">
-            Switches /book from the default step wizard to the profile-page-style layout (scroll-spy tabs + booking drawer).
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={saving === 'use_provider_profile_layout'}
-          onClick={() => saveSetting('use_provider_profile_layout', !useProviderProfileLayout)}
-          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
-            useProviderProfileLayout ? 'bg-success' : 'bg-border'
-          } ${saving === 'use_provider_profile_layout' ? 'opacity-50' : ''}`}
-        >
-          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
-            useProviderProfileLayout ? 'translate-x-6' : 'translate-x-1'
-          }`} />
-        </button>
-      </label>
 
       <div className="space-y-4 p-4 border border-border rounded-spa">
         <span className="font-body font-body-medium text-sm text-text-primary">Branding</span>

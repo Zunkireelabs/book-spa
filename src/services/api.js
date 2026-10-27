@@ -519,9 +519,9 @@ export async function updateOrgBookingSetting(key, enabled) {
 }
 
 // Admin-only org profile-settings (settings.about, settings.amenities,
-// settings.included_with_visit, settings.optional_extras, settings.cancellation_policy,
-// settings.use_provider_profile_layout). p_key is allow-listed server-side in
-// update_org_profile_settings (migration-251). p_value is jsonb — strings/arrays alike.
+// settings.included_with_visit, settings.optional_extras, settings.cancellation_policy).
+// p_key is allow-listed server-side in update_org_profile_settings (migration-251).
+// p_value is jsonb — strings/arrays alike.
 export async function updateOrgProfileSetting(key, value) {
   const { data, error } = await supabase.rpc('update_org_profile_settings', { p_key: key, p_value: value });
   if (error) {
