@@ -48,6 +48,7 @@ const ProviderProfileFlow = () => {
   // "untouched" (null), which plain boolean/undefined can't express.
   const [selectedProfessional, setSelectedProfessional] = useState(null);
   const [selectedDateTime, setSelectedDateTime] = useState({ date: '', time: '' });
+  const [genderPreference, setGenderPreference] = useState('no-preference');
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingData, setBookingData] = useState(null);
   const [customerInfo, setCustomerInfo] = useState({
@@ -104,6 +105,7 @@ const ProviderProfileFlow = () => {
     setSelectedServices([]);
     setSelectedProfessional(null);
     setSelectedDateTime({ date: '', time: '' });
+    setGenderPreference('no-preference');
   }, []);
 
   // Pushes history so browser Back returns here instead of leaving the site — the
@@ -143,6 +145,7 @@ const ProviderProfileFlow = () => {
     setSelectedServices([]);
     setSelectedProfessional(null);
     setSelectedDateTime({ date: '', time: '' });
+    setGenderPreference('no-preference');
   }, []);
 
   const handleProfessionalSelect = useCallback((professional) => {
@@ -273,6 +276,8 @@ const ProviderProfileFlow = () => {
         onProfessionalSelect={handleProfessionalSelect}
         selectedDateTime={selectedDateTime}
         onDateTimeSelect={setSelectedDateTime}
+        genderPreference={genderPreference}
+        onGenderPreferenceChange={setGenderPreference}
         customerInfo={customerInfo}
         onCustomerInfoChange={setCustomerInfo}
         customerAccountId={customerProfile?.id}

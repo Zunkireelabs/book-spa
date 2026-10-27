@@ -112,6 +112,7 @@ const BookingConfirmation = ({
         customerPhone: toE164(customerInfo.phone, customerInfo.phoneCountryCode || '+977'),
         customerGender: customerInfo.gender || null,
         specialRequests: customerInfo.specialRequests || null,
+        genderPreference: genderPreference || 'no-preference',
         referringCustomerId,
         orgSlug,
         referralSource: customerInfo.referralSource || null,

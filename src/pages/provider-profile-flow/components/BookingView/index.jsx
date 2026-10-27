@@ -33,6 +33,8 @@ const BookingView = ({
   onProfessionalSelect,
   selectedDateTime,
   onDateTimeSelect,
+  genderPreference,
+  onGenderPreferenceChange,
   customerInfo,
   onCustomerInfoChange,
   customerAccountId,
@@ -203,6 +205,8 @@ const BookingView = ({
                 totalMinutes={totalMinutes}
                 selectedDateTime={selectedDateTime}
                 onDateTimeSelect={onDateTimeSelect}
+                genderPreference={genderPreference}
+                onGenderPreferenceChange={onGenderPreferenceChange}
                 therapistFilter={therapistFilter}
               />
             )}
@@ -213,6 +217,7 @@ const BookingView = ({
                 selectedBranch={selectedBranch}
                 selectedServices={selectedServices}
                 selectedDateTime={selectedDateTime}
+                genderPreference={genderPreference}
                 selectedProfessional={selectedProfessional}
                 customerInfo={customerInfo}
                 onCustomerInfoChange={onCustomerInfoChange}

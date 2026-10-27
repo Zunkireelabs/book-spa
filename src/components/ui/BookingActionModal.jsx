@@ -1586,6 +1586,14 @@ const BookingActionModal = ({
                   </div>
                 )}
 
+                {/* Gender Preference — read-only, customer-submitted at booking time */}
+                {booking.genderPreference && booking.genderPreference !== 'no-preference' && (
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Gender Preference</label>
+                    <p className="font-body font-body-normal text-sm text-text-primary capitalize">{booking.genderPreference}</p>
+                  </div>
+                )}
+
                 {/* Special Requests */}
                 <div className="space-y-1.5 sm:space-y-2">
                   <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Special Requests</label>
