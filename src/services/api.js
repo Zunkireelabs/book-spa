@@ -8033,6 +8033,48 @@ export async function uploadOrgBrandingImage(kind, file) {
   }
 }
 
+// Admin-only branch storefront photo upload (BranchGate's multi-branch picker tile,
+// Setup → "Branch Photo"). Same bucket + validation as uploadOrgBrandingImage, but
+// path-prefixed per branch within the org's branding folder since a branch's photo is
+// distinct from the org-level logo/hero. Persist the returned URL via updateBranchPhoto.
+export async function uploadBranchPhoto(branchId, file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can upload branch photos.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `branch-${resolveBranchId(branchId)}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `branding/${profile.org_id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadBranchPhoto error:', error.message);
+    return { url: null, error };
+  }
+}
+
 /**
  * Upload a staff photo to Supabase Storage.
  * Returns the public URL of the uploaded image.
@@ -11168,6 +11210,45 @@ export async function updateBranchAdvanceBookingWindow(branchId, days) {
     return { data: { days }, error: null };
   } catch (error) {
     console.error('[API] updateBranchAdvanceBookingWindow error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Branch storefront photo (branches.photo_url) — shown on BranchGate's multi-branch
+ * picker tile for the customer booking flow. Falls back to a generic icon tile when empty.
+ */
+export async function fetchBranchPhoto(branchId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, photo_url')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for the branch photo. Goes through an RPC, not a plain
+ * .update(): `branches` has RLS enabled with SELECT-only policies (see
+ * update_branch_online_capacity's comment, migration-301), so a direct update would
+ * silently affect zero rows and report success. Pass null/'' to clear the photo.
+ */
+export async function updateBranchPhoto(branchId, photoUrl) {
+  try {
+    const { error } = await supabase.rpc('update_branch_photo', {
+      p_branch_id: resolveBranchId(branchId),
+      p_photo_url: photoUrl || null,
+    });
+    if (error) throw error;
+    return { data: { photoUrl: photoUrl || null }, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchPhoto error:', error.message);
     return { data: null, error };
   }
 }
