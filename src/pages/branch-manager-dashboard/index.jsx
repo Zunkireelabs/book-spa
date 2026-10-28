@@ -27,6 +27,7 @@ import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
 import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
 import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel';
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
+import AttendanceSettingsPanel from './components/MasterData/AttendanceSettingsPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
@@ -497,6 +498,7 @@ const BranchManagerDashboard = () => {
       case 'reward-catalog': return <RewardCatalogPanel />;
       case 'booking-settings': return <BookingSettingsPanel />;
       case 'calendar-settings': return profile?.role === 'admin' ? <CalendarSettingsPanel /> : null;
+      case 'attendance-settings': return !isOverall && ['admin', 'manager'].includes(profile?.role) ? <AttendanceSettingsPanel branchId={branchId} /> : null;
       case 'closed-dates': return !isOverall && profile?.role === 'admin' ? <ClosedDatesPanel branchId={branchId} /> : null;
       case 'provider-profile': return <ProviderProfilePanel />;
       case 'audit': return <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />;

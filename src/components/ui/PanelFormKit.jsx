@@ -335,12 +335,12 @@ export const DateField = ({ value, onChange, label, required, disabled, hint, mi
 };
 
 // 12-hour time picker: type ("6:50pm", "18:50") or pick from the list, snapped to `step` minutes.
-export const TimeField = ({ value, onChange, label, required, disabled, hint, step = 10, fromTime = '06:00', toTime = '23:50' }) => {
-  const [text, setText] = useState(value ? format12h(value) : '');
+export const TimeField = ({ value, onChange, label, required, disabled, hint, step = 10, fromTime = '06:00', toTime = '23:50', formatTime = format12h }) => {
+  const [text, setText] = useState(value ? formatTime(value) : '');
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const listRef = useRef(null);
-  useEffect(() => { setText(value ? format12h(value) : ''); }, [value]);
+  useEffect(() => { setText(value ? formatTime(value) : ''); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   const options = useMemo(() => {
     const [fh, fm] = fromTime.split(':').map(Number);
     const [th, tm] = toTime.split(':').map(Number);
@@ -373,7 +373,7 @@ export const TimeField = ({ value, onChange, label, required, disabled, hint, st
           value={text}
           onChange={(e) => { setText(e.target.value); const p = parseTimeInput(e.target.value); if (p) onChange(p); }}
           onFocus={(e) => { e.target.select(); setOpen(true); }}
-          onBlur={() => setText(value ? format12h(value) : '')}
+          onBlur={() => setText(value ? formatTime(value) : '')}
           placeholder="--:--"
           autoComplete="off"
           className={`${CONTROL} pl-9`}
@@ -386,10 +386,10 @@ export const TimeField = ({ value, onChange, label, required, disabled, hint, st
                 type="button"
                 data-selected={t === value}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => { onChange(t); setText(format12h(t)); setOpen(false); }}
+                onClick={() => { onChange(t); setText(formatTime(t)); setOpen(false); }}
                 className={`w-full text-left px-3 py-1.5 text-[13px] font-body hover:bg-background ${t === value ? 'bg-background font-body-medium text-text-primary' : 'text-text-primary'}`}
               >
-                {format12h(t)}
+                {formatTime(t)}
               </button>
             ))}
           </div>

@@ -96,7 +96,8 @@ function describeTransferUnsafe(t, opts) {
   // short forms drop the date when it's the day being shown
   const shown = day || todayNp; // no day given = today
   const startShort = start ? (start.date === shown ? clock(start.time) : `${dayNoWeekday(start.date)} ${clock(start.time)}`) : '';
-  const endShort = end ? (end.date === shown ? clock(end.time) : `${dayNoWeekday(end.date)} ${clock(end.time)}`) : '';
+  // a whole-day return (back at midnight) names just the day: 'back 29 Oct', never '29 Oct 12:00am'
+  const endShort = end ? (end.time === '00:00' && end.date !== shown ? dayNoWeekday(end.date) : end.date === shown ? clock(end.time) : `${dayNoWeekday(end.date)} ${clock(end.time)}`) : '';
 
   let pill = PILLS[state];
   let sentence = '';

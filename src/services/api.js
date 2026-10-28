@@ -10972,8 +10972,8 @@ export const LEAVE_LIKE_ATTENDANCE_STATUSES = ['Leave', 'Annual Leave', 'Sick Le
 // is deducted like Absent. Legacy 'Leave' rows and 'Day Off' are uncapped (always paid) — we
 // can't retroactively split old 'Leave' rows into sick/annual, and Day Off has no cap per the
 // 2026-09-03 spec. Bump these two numbers if the policy changes.
-const SICK_LEAVE_PAID_CAP_DAYS = 14;
-const ANNUAL_LEAVE_PAID_CAP_DAYS = 18;
+export const SICK_LEAVE_PAID_CAP_DAYS = 14;
+export const ANNUAL_LEAVE_PAID_CAP_DAYS = 18;
 
 // therapist_attendance.check_in_time/check_out_time are timestamptz columns, but the UI only
 // ever deals with a plain "HH:MM" clock time (a native <input type="time">, no date picker of
@@ -11011,7 +11011,7 @@ export async function fetchAttendance({ branchId, date }) {
     // still shows up here) and joined in-memory against the branch-scoped therapist list below.
     let therapistsQuery = supabase
       .from('therapists')
-      .select('id, name, is_service_staff')
+      .select('id, name, is_service_staff, position')
       .eq('is_active', true)
       .order('name');
     therapistsQuery = withBranch(therapistsQuery, branchId);
@@ -11039,6 +11039,7 @@ export async function fetchAttendance({ branchId, date }) {
         therapistId: t.id,
         therapistName: t.name,
         isServiceStaff: t.is_service_staff !== false,
+        position: t.position || null,
         status: att?.status || null,
         checkInTime: formatTimeKathmandu(att?.check_in_time),
         checkOutTime: formatTimeKathmandu(att?.check_out_time),
@@ -11063,7 +11064,7 @@ export async function fetchVisitingAttendanceToday({ branchId }) {
     if (error) throw error;
     const map = {};
     (data || []).forEach((r) => {
-      map[r.therapist_id] = { therapistId: r.therapist_id, therapistName: r.therapist_name, checkInTime: formatTimeKathmandu(r.check_in_time), checkOutTime: formatTimeKathmandu(r.check_out_time), workedAtBranchId: r.worked_at_branch_id, windowFrom: r.window_from, windowTo: r.window_to };
+      map[r.therapist_id] = { therapistId: r.therapist_id, therapistName: r.therapist_name, checkInTime: formatTimeKathmandu(r.check_in_time), checkOutTime: formatTimeKathmandu(r.check_out_time), workedAtBranchId: r.worked_at_branch_id, windowFrom: r.window_from, windowTo: r.window_to, punchCount: r.punch_count || 0, openPunchId: r.open_punch_id || null };
     });
     return { data: map, error: null };
   } catch (error) {
@@ -11073,14 +11074,18 @@ export async function fetchVisitingAttendanceToday({ branchId }) {
 }
 
 // The receiving manager's check-in / check-out for a visitor: today only, nothing else (the RPC enforces it).
-export async function markVisitorAttendance({ therapistId, branchId, checkInTime, checkOutTime }) {
+export async function markVisitorAttendance({ therapistId, branchId, checkInTime, checkOutTime, reason = null }) {
   try {
     const today = nepalNow().today;
     const { error } = await supabase.rpc('mark_visitor_attendance', {
       p_therapist_id: therapistId, p_branch_id: branchId,
       p_check_in: combineDateTimeKathmandu(today, checkInTime), p_check_out: combineDateTimeKathmandu(today, checkOutTime),
+      p_reason: reason,
     });
     if (error) {
+      if (error.code === 'P0007' || (error.message || '').includes('ATTENDANCE_REASON_REQUIRED')) {
+        return { data: null, error: { code: 'ATTENDANCE_REASON_REQUIRED', message: 'A reason is required to change this record.' } };
+      }
       if (error.code === 'P0004' || (error.message || '').includes('ATTENDANCE_DAY_LOCKED')) {
         return { data: null, error: { code: 'ATTENDANCE_DAY_LOCKED', message: 'This day has been closed. Attendance cannot be modified.' } };
       }
@@ -11090,6 +11095,235 @@ export async function markVisitorAttendance({ therapistId, branchId, checkInTime
   } catch (error) {
     console.error('[API] markVisitorAttendance error:', error.message);
     return { data: null, error: { code: 'UNKNOWN_ERROR', message: error.message } };
+  }
+}
+
+// ── Attendance redesign (V34a/V34b, migration 330): every write goes through save_attendance / delete_attendance /
+// mark_visitor_attendance, so the reason rule and the change history can't be skipped. ──
+const attendanceRpcError = (error) => {
+  const msg = error?.message || '';
+  if (error?.code === 'P0007' || msg.includes('ATTENDANCE_REASON_REQUIRED')) return { code: 'ATTENDANCE_REASON_REQUIRED', message: 'A reason is required to change this record.' };
+  if (error?.code === 'P0004' || msg.includes('ATTENDANCE_DAY_LOCKED')) return { code: 'ATTENDANCE_DAY_LOCKED', message: 'This day has been closed. Attendance cannot be modified.' };
+  if (msg.includes('PUNCH_OPEN_EXISTS')) return { code: 'PUNCH_OPEN_EXISTS', message: 'This person is already checked in. Check them out first.' };
+  if (msg.includes('PUNCH_OVERLAP')) return { code: 'PUNCH_OVERLAP', message: 'That time overlaps another check-in for this person.' };
+  if (msg.includes('PUNCH_BAD_TIMES')) return { code: 'PUNCH_BAD_TIMES', message: 'Check-out must be after check-in.' };
+  if (msg.includes('not working at this branch')) return { code: 'NOT_AT_BRANCH', message: 'This person is not working at this branch that day.' };
+  if (msg.includes('cannot be in the future')) return { code: 'PUNCH_FUTURE', message: msg.includes('check-out') ? "A check-out can't be later than now." : "A check-in can't be later than now." };
+  if (msg.includes('must stay on the same day')) return { code: 'PUNCH_OTHER_DAY', message: 'A check-in has to stay on the same day.' };
+  if (msg.includes('no open check-in')) return { code: 'PUNCH_NONE_OPEN', message: 'There is no open check-in to close.' };
+  if (msg.includes('still has punches')) return { code: 'DAY_HAS_PUNCHES', message: 'This day still has check-ins. Delete them first.' };
+  if (error?.code === 'P0010' || msg.includes('ATTENDANCE_TIMES_DERIVED')) return { code: 'TIMES_DERIVED', message: 'Check-in and check-out times are set from the check-ins list.' };
+  if (error?.code === '42501' || msg.includes('not allowed')) return { code: 'NOT_ALLOWED', message: "You don't have access to change this." };
+  if (msg.includes('unknown person')) return { code: 'UNKNOWN_PERSON', message: "That person wasn't found." };
+  if (msg) console.error('[API] attendance rpc error:', msg);
+  return { code: 'UNKNOWN_ERROR', message: 'Could not save attendance. Please try again.' };
+};
+
+/**
+ * The DAY (status / half-day off times / notes): keys present are applied, null clears: { status, offStart, offEnd, notes } (off times 'HH:MM').
+ * Check-in / check-out are punches: punchIn / punchOut / savePunch / deletePunch below.
+ * source: 'button' | 'panel' | 'bulk'. Reason is needed to change a saved status/time, delete, or touch any day before today.
+ */
+export async function saveAttendanceRecord({ therapistId, date, patch, reason = null, source = 'panel' }) {
+  try {
+    const body = {};
+    if ('status' in patch) body.status = patch.status;
+    if ('offStart' in patch) body.off_start = patch.offStart || null;
+    if ('offEnd' in patch) body.off_end = patch.offEnd || null;
+    if ('notes' in patch) body.notes = patch.notes || null;
+    const { data, error } = await supabase.rpc('save_attendance', {
+      p_therapist_id: therapistId, p_date: date, p_patch: body, p_reason: reason, p_source: source,
+    });
+    if (error) return { data: null, error: attendanceRpcError(error) };
+    return { data: { id: data }, error: null };
+  } catch (error) {
+    return { data: null, error: attendanceRpcError(error) };
+  }
+}
+
+// ── Punches (V34a2): any number of clock punches per person-day, each at the branch where it happened. ──
+const punchRow = (r) => ({
+  id: r.id, therapistId: r.therapist_id, branchId: r.branch_id, date: r.date, source: r.source,
+  checkIn: formatTimeKathmandu(r.check_in), checkInIso: r.check_in, checkOut: r.check_out ? formatTimeKathmandu(r.check_out) : null, checkOutIso: r.check_out || null,
+});
+
+export async function fetchAttendancePunches({ date, therapistId = null }) {
+  try {
+    let q = supabase.from('attendance_punches').select('id, therapist_id, branch_id, date, check_in, check_out, source').eq('date', date).order('check_in');
+    if (therapistId) q = q.eq('therapist_id', therapistId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { data: (data || []).map(punchRow), error: null };
+  } catch (error) {
+    console.error('[API] fetchAttendancePunches error:', error.message);
+    return { data: [], error };
+  }
+}
+
+const iso = (v) => (v instanceof Date ? v.toISOString() : v || null);
+
+/** A check-in at `branchId` (the person's home, or the branch they are visiting). `out` makes it a complete punch (adding a missed one). */
+export async function punchIn({ therapistId, branchId, at = new Date(), source = 'button', reason = null, out = null }) {
+  try {
+    const { data, error } = await supabase.rpc('punch_in', { p_therapist_id: therapistId, p_branch_id: branchId, p_at: iso(at), p_source: source, p_reason: reason, p_out: iso(out) });
+    if (error) return { data: null, error: attendanceRpcError(error) };
+    return { data: { id: data }, error: null };
+  } catch (error) { return { data: null, error: attendanceRpcError(error) }; }
+}
+
+/** Close a punch: by id, or the open one of a person at a branch. */
+export async function punchOut({ punchId = null, therapistId = null, branchId = null, at = new Date(), source = 'button', reason = null }) {
+  try {
+    const { data, error } = await supabase.rpc('punch_out', { p_punch_id: punchId, p_therapist_id: therapistId, p_branch_id: branchId, p_at: iso(at), p_reason: reason, p_source: source });
+    if (error) return { data: null, error: attendanceRpcError(error) };
+    return { data: { id: data }, error: null };
+  } catch (error) { return { data: null, error: attendanceRpcError(error) }; }
+}
+
+/** Edit a saved punch (reason required). checkOut null re-opens it. Times are ISO strings. */
+export async function savePunch({ punchId, checkIn, checkOut = null, reason, source = 'panel' }) {
+  try {
+    const { error } = await supabase.rpc('save_punch', { p_punch_id: punchId, p_in: iso(checkIn), p_out: iso(checkOut), p_reason: reason, p_source: source });
+    if (error) return { data: null, error: attendanceRpcError(error) };
+    return { data: { success: true }, error: null };
+  } catch (error) { return { data: null, error: attendanceRpcError(error) }; }
+}
+
+export async function deletePunch({ punchId, reason }) {
+  try {
+    const { error } = await supabase.rpc('delete_punch', { p_punch_id: punchId, p_reason: reason });
+    if (error) return { data: null, error: attendanceRpcError(error) };
+    return { data: { success: true }, error: null };
+  } catch (error) { return { data: null, error: attendanceRpcError(error) }; }
+}
+
+/** 'HH:MM' on a Kathmandu date -> ISO timestamp (for the panel's time fields). */
+export const punchTimeIso = (date, hm) => combineDateTimeKathmandu(date, hm);
+
+export async function deleteAttendanceRecord({ therapistId, date, reason }) {
+  try {
+    const { error } = await supabase.rpc('delete_attendance', { p_therapist_id: therapistId, p_date: date, p_reason: reason });
+    if (error) return { data: null, error: attendanceRpcError(error) };
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    return { data: null, error: attendanceRpcError(error) };
+  }
+}
+
+export async function fetchAttendanceDayStatus({ branchId, date }) {
+  try {
+    const { data, error } = await supabase.rpc('attendance_day_status', { p_branch_id: branchId, p_date: date });
+    if (error) throw error;
+    const row = (data || [])[0] || {};
+    return { data: { isClosed: !!row.is_closed, closedAt: row.closed_at || null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchAttendanceDayStatus error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Unmarked days + open check-outs at a branch (kind 'unmarked' | 'open_checkout'); times come back as 'HH:MM'.
+export async function fetchAttendanceGaps({ branchId, from, to }) {
+  try {
+    const { data, error } = await supabase.rpc('attendance_gaps', { p_branch_id: branchId, p_from: from, p_to: to });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        kind: r.kind, date: r.date, therapistId: r.therapist_id, therapistName: r.therapist_name,
+        shiftStart: r.shift_start, shiftEnd: r.shift_end, checkInTime: formatTimeKathmandu(r.check_in_time), workedAtBranchId: r.worked_at_branch_id, punchId: r.punch_id || null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAttendanceGaps error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Transfer rows for a few people (to work out where they were working on a past date).
+export async function fetchTransfersForTherapists(therapistIds) {
+  try {
+    if (!therapistIds?.length) return { data: [], error: null };
+    const { data, error } = await supabase.from('staff_transfers')
+      .select('therapist_id, from_branch_id, to_branch_id, effective_date, start_time, revert_at, reverted, reverted_at, is_return_leg, is_permanent')
+      .in('therapist_id', therapistIds).order('effective_date');
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchTransfersForTherapists error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// One person's history for a date, newest first, with who changed it.
+export async function fetchAttendanceChanges({ therapistId, date }) {
+  try {
+    const { data, error } = await supabase
+      .from('attendance_changes')
+      .select('id, field, old_value, new_value, reason, changed_by, changed_at, source, punch_id')
+      .eq('therapist_id', therapistId).eq('date', date)
+      .order('changed_at', { ascending: false });
+    if (error) throw error;
+    const ids = [...new Set((data || []).map((r) => r.changed_by).filter(Boolean))];
+    let names = {};
+    if (ids.length) {
+      const { data: users } = await supabase.from('users').select('id, full_name, email').in('id', ids);
+      names = Object.fromEntries((users || []).map((u) => [u.id, u.full_name || u.email]));
+    }
+    return { data: (data || []).map((r) => ({ ...r, changedByName: names[r.changed_by] || null })), error: null };
+  } catch (error) {
+    console.error('[API] fetchAttendanceChanges error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchAttendanceSettings(branchId) {
+  try {
+    const { data, error } = await supabase.from('branches').select('late_grace_minutes, open_checkout_hours, expect_check_in, open_time, close_time').eq('id', branchId).single();
+    if (error) throw error;
+    return { data: { lateGraceMinutes: data.late_grace_minutes ?? 10, openCheckoutHours: data.open_checkout_hours ?? 4, expectCheckIn: !!data.expect_check_in, openTime: data.open_time ? String(data.open_time).slice(0, 5) : null, closeTime: data.close_time ? String(data.close_time).slice(0, 5) : null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchAttendanceSettings error:', error.message);
+    return { data: { lateGraceMinutes: 10, openCheckoutHours: 4, expectCheckIn: false }, error };
+  }
+}
+
+export async function setAttendanceSettings({ branchId, lateGraceMinutes, openCheckoutHours, expectCheckIn = null }) {
+  try {
+    const { error } = await supabase.rpc('set_attendance_settings', {
+      p_branch_id: branchId, p_late_grace_minutes: lateGraceMinutes, p_open_checkout_hours: openCheckoutHours, p_expect_check_in: expectCheckIn,
+    });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    return { data: null, error: { code: error.code, message: error.message } };
+  }
+}
+
+// What the panel needs to show "pay effect": the person's salary (null when this login can't read it), days in the date's month,
+// and how many Sick / Annual days they already used in the calendar year before the date (same year rule and caps as Payroll).
+export async function fetchAttendancePayContext({ therapistId, date }) {
+  try {
+    const [y, m] = date.split('-').map(Number);
+    const [{ data: comp }, { data: leave }] = await Promise.all([
+      supabase.from('staff_compensation').select('monthly_salary').eq('therapist_id', therapistId).maybeSingle(),
+      supabase.from('therapist_attendance').select('status').eq('therapist_id', therapistId)
+        .in('status', ['Sick Leave', 'Annual Leave']).gte('date', `${y}-01-01`).lt('date', date),
+    ]);
+    const used = { 'Sick Leave': 0, 'Annual Leave': 0 };
+    (leave || []).forEach((r) => { used[r.status] += 1; });
+    return {
+      data: {
+        monthlySalary: comp?.monthly_salary != null ? Number(comp.monthly_salary) : null,
+        daysInMonth: new Date(y, m, 0).getDate(),
+        sickUsed: used['Sick Leave'], annualUsed: used['Annual Leave'],
+        sickCap: SICK_LEAVE_PAID_CAP_DAYS, annualCap: ANNUAL_LEAVE_PAID_CAP_DAYS,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchAttendancePayContext error:', error.message);
+    return { data: null, error };
   }
 }
 
@@ -11127,113 +11361,6 @@ export async function fetchAttendanceByTherapistIds({ therapistIds, date }) {
   } catch (error) {
     console.error('[API] fetchAttendanceByTherapistIds error:', error.message);
     return { data: null, error };
-  }
-}
-
-/**
- * Create or update attendance for a therapist on a date.
- * Uses INSERT-first, UPDATE on UNIQUE violation.
- * Lets DB trigger enforce closed-day lock (P0004).
- */
-export async function markAttendance({ therapistId, date, status, checkInTime, checkOutTime, notes, offStart = null, offEnd = null }) {
-  try {
-    // 1. Validate status
-    if (!VALID_ATTENDANCE_STATUSES.includes(status)) {
-      return { data: null, error: { code: 'INVALID_STATUS', message: `Status must be one of: ${VALID_ATTENDANCE_STATUSES.join(', ')}` } };
-    }
-
-    // 2. Auth + role check
-    const { user, profile, error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
-
-    if (profile.role === 'staff') {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Staff cannot mark attendance.' } };
-    }
-
-    // 3. Resolve therapist's branch for branch isolation
-    const { data: therapist, error: therapistError } = await supabase
-      .from('therapists')
-      .select('id, branch_id')
-      .eq('id', therapistId)
-      .single();
-
-    if (therapistError) {
-      if (therapistError.code === 'PGRST116') {
-        return { data: null, error: { code: 'THERAPIST_NOT_FOUND', message: 'Therapist not found.' } };
-      }
-      throw therapistError;
-    }
-
-    // 4. Branch isolation: manager can only mark in own branch
-    if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
-      return { data: null, error: { code: 'UNAUTHORIZED', message: 'You can only mark attendance for therapists in your branch.' } };
-    }
-
-    const targetDate = date || new Date().toISOString().split('T')[0];
-
-    const row = {
-      branch_id: therapist.branch_id,
-      therapist_id: therapistId,
-      date: targetDate,
-      status,
-      check_in_time: combineDateTimeKathmandu(targetDate, checkInTime),
-      check_out_time: combineDateTimeKathmandu(targetDate, checkOutTime),
-      notes: notes || null,
-      marked_by: user.id,
-      // exact off times only mean something for a half day; any other status clears them
-      off_start: isHalfDayStatus(status) && offStart && offEnd ? offStart : null,
-      off_end: isHalfDayStatus(status) && offStart && offEnd ? offEnd : null,
-    };
-
-    // 5. Try INSERT first
-    const { data: inserted, error: insertError } = await supabase
-      .from('therapist_attendance')
-      .insert(row)
-      .select('id')
-      .single();
-
-    if (!insertError) {
-      return { data: { success: true, id: inserted.id }, error: null };
-    }
-
-    // 6. UNIQUE violation → UPDATE existing row
-    if (insertError.code === '23505') {
-      const { data: updated, error: updateError } = await supabase
-        .from('therapist_attendance')
-        .update({
-          status,
-          check_in_time: combineDateTimeKathmandu(targetDate, checkInTime),
-          check_out_time: combineDateTimeKathmandu(targetDate, checkOutTime),
-          notes: notes || null,
-          marked_by: user.id,
-          off_start: row.off_start,
-          off_end: row.off_end,
-        })
-        .eq('therapist_id', therapistId)
-        .eq('date', targetDate)
-        .select('id')
-        .single();
-
-      if (updateError) {
-        // Check for day-locked trigger
-        if (updateError.code === 'P0004' || (updateError.message && updateError.message.includes('ATTENDANCE_DAY_LOCKED'))) {
-          return { data: null, error: { code: 'ATTENDANCE_DAY_LOCKED', message: 'This day has been closed. Attendance cannot be modified.' } };
-        }
-        throw updateError;
-      }
-
-      return { data: { success: true, id: updated.id }, error: null };
-    }
-
-    // 7. Check for day-locked trigger on INSERT
-    if (insertError.code === 'P0004' || (insertError.message && insertError.message.includes('ATTENDANCE_DAY_LOCKED'))) {
-      return { data: null, error: { code: 'ATTENDANCE_DAY_LOCKED', message: 'This day has been closed. Attendance cannot be modified.' } };
-    }
-
-    throw insertError;
-  } catch (error) {
-    console.error('[API] markAttendance error:', error.message);
-    return { data: null, error: { code: 'UNKNOWN_ERROR', message: error.message || 'An unexpected error occurred.' } };
   }
 }
 
