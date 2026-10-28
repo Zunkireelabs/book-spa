@@ -389,6 +389,9 @@ const ProviderProfileFlow = () => {
       <GroupBookingView
         onClose={closeBooking}
         orgSlug={orgSlug}
+        orgName={orgName}
+        logoUrl={logoUrl}
+        heroImageUrl={heroImageUrl}
         selectedBranch={selectedBranch}
         services={services}
         people={groupPeople}

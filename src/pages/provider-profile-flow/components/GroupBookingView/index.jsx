@@ -2,6 +2,7 @@ import React, { useState, useLayoutEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import DiscardDialog from '../BookingView/DiscardDialog';
+import GroupSummaryCard from './GroupSummaryCard';
 import GuestsStep from './GuestsStep';
 import GroupProfessionalStep from './GroupProfessionalStep';
 import GroupTimeStep from './GroupTimeStep';
@@ -32,6 +33,9 @@ const STEPS = [
 const GroupBookingView = ({
   onClose,
   orgSlug,
+  orgName,
+  logoUrl,
+  heroImageUrl,
   selectedBranch,
   services,
   people,
@@ -205,45 +209,8 @@ const GroupBookingView = ({
           {STEP_HEADINGS[currentStep]}
         </h1>
 
-        <div className="max-w-2xl">
-          {currentStep === 'guests' && (
-            <GuestsStep
-              people={people}
-              services={services}
-              activeGuestId={activeGuestId}
-              onSelectActiveGuest={setActiveGuestId}
-              onServiceChosenForActiveGuest={handleServiceChosenForActiveGuest}
-              onAddGuest={handleAddGuest}
-              onRemoveGuest={handleRemoveGuest}
-            />
-          )}
-
-          {currentStep === 'professional' && (
-            <GroupProfessionalStep
-              people={people}
-              therapists={therapists}
-              loading={loadingTherapists}
-              error={therapistsError}
-              onRetry={onRetryTherapists}
-              mode={professionalMode}
-              onSelectAnyForAll={handleSelectAnyForAll}
-              onSelectPerGuestMode={handleSelectPerGuestMode}
-              onPersonProfessionalSelect={handlePersonProfessionalSelect}
-            />
-          )}
-
-          {currentStep === 'time' && (
-            <GroupTimeStep
-              selectedBranch={selectedBranch}
-              orgSlug={orgSlug}
-              people={people}
-              therapists={therapists}
-              selectedDateTime={selectedDateTime}
-              onDateTimeSelect={setSelectedDateTime}
-            />
-          )}
-
-          {currentStep === 'confirm' && (
+        {currentStep === 'confirm' ? (
+          <div className="max-w-2xl">
             <GroupConfirmStep
               people={people}
               leadContact={leadContact}
@@ -258,8 +225,65 @@ const GroupBookingView = ({
               submitting={submitting}
               submitError={submitError}
             />
-          )}
-        </div>
+          </div>
+        ) : (
+          // Mirrors BookingView's grid + sticky SummaryCard — guests/professional/time
+          // previously had no summary at all, just a step's content with a plain
+          // Continue button below a potentially very long service list (Anish: "why
+          // group booking doesn't have similar UI like individual bookings"). confirm
+          // stays full-width/no sidebar since GroupConfirmStep already renders its own
+          // equivalent per-person breakdown + total inline as the final review.
+          <div className="grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
+            <div className="min-w-0 max-w-2xl">
+              {currentStep === 'guests' && (
+                <GuestsStep
+                  people={people}
+                  services={services}
+                  activeGuestId={activeGuestId}
+                  onSelectActiveGuest={setActiveGuestId}
+                  onServiceChosenForActiveGuest={handleServiceChosenForActiveGuest}
+                  onAddGuest={handleAddGuest}
+                  onRemoveGuest={handleRemoveGuest}
+                />
+              )}
+
+              {currentStep === 'professional' && (
+                <GroupProfessionalStep
+                  people={people}
+                  therapists={therapists}
+                  loading={loadingTherapists}
+                  error={therapistsError}
+                  onRetry={onRetryTherapists}
+                  mode={professionalMode}
+                  onSelectAnyForAll={handleSelectAnyForAll}
+                  onSelectPerGuestMode={handleSelectPerGuestMode}
+                  onPersonProfessionalSelect={handlePersonProfessionalSelect}
+                />
+              )}
+
+              {currentStep === 'time' && (
+                <GroupTimeStep
+                  selectedBranch={selectedBranch}
+                  orgSlug={orgSlug}
+                  people={people}
+                  therapists={therapists}
+                  selectedDateTime={selectedDateTime}
+                  onDateTimeSelect={setSelectedDateTime}
+                />
+              )}
+            </div>
+
+            <GroupSummaryCard
+              orgName={orgName}
+              logoUrl={logoUrl}
+              heroImageUrl={heroImageUrl}
+              people={people}
+              onContinue={handleContinue}
+              continueLabel="Continue"
+              disabled={!canContinue[currentStep]}
+            />
+          </div>
+        )}
       </div>
 
       {currentStep !== 'confirm' && (
@@ -279,17 +303,6 @@ const GroupBookingView = ({
         </div>
       )}
 
-      {currentStep !== 'confirm' && (
-        <div className="hidden lg:block max-w-7xl mx-auto px-4 sm:px-6 pb-16">
-          <Button
-            variant="primary"
-            onClick={handleContinue}
-            disabled={!canContinue[currentStep]}
-          >
-            Continue
-          </Button>
-        </div>
-      )}
     </div>
   );
 };
