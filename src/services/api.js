@@ -11434,8 +11434,14 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
  * Fetch bookable staff for the provider-profile "Select professional" step
  * (public_get_bookable_therapists, migration-252) — org-scoped (the raw anon RLS
  * policy on `therapists` is not) and allow-list-aware when p_service_id is passed.
+ *
+ * forGroupBooking (migration-305) bypasses the tenant's show_staff_selection=true
+ * requirement server-side: that flag only governs whether a SOLO customer is offered
+ * a staff-picker on the profile page, unrelated to group booking's need for the same
+ * roster to compute per-person availability. Defaults to false so every existing
+ * (solo-flow) caller is unaffected.
  */
-export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
+export async function fetchBookableTherapists(orgSlug, branchId, serviceIds, forGroupBooking = false) {
   try {
     // Accepts one id or an array — a multi-service visit is covered by a single
     // professional, so the roster must be narrowed to staff eligible for every
@@ -11448,6 +11454,7 @@ export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
       p_org_slug: orgSlug,
       p_branch_id: branchId,
       p_service_ids: ids.length > 0 ? ids : null,
+      p_for_group_booking: forGroupBooking,
     });
 
     if (error) throw error;

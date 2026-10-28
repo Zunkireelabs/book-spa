@@ -188,7 +188,11 @@ const ProviderProfileFlow = () => {
     let cancelled = false;
     setLoadingTherapists(true);
     setTherapistsError(null);
-    fetchBookableTherapists(orgSlug, selectedBranch.id, selectedServices.map((s) => s.id)).then(({ data, error }) => {
+    // forGroupBooking (migration-305) bypasses the tenant's show_staff_selection
+    // requirement server-side when fetching for group mode — that flag only governs
+    // whether a solo customer is offered a staff-picker, unrelated to group booking's
+    // need for the roster to compute per-person availability (see the comment above).
+    fetchBookableTherapists(orgSlug, selectedBranch.id, selectedServices.map((s) => s.id), groupModeOpen).then(({ data, error }) => {
       if (cancelled) return;
       if (error) {
         setTherapistsError(error);
