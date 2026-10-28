@@ -259,6 +259,17 @@ const ProviderProfileFlow = () => {
     window.history.pushState({ providerBooking: true }, '');
   };
 
+  // SummaryCard/MobileBookingBar's "Continue" only enables once a service is
+  // already ticked in the cart -- by that point the solo/group choice has already
+  // been asked and answered (right after branch select, GROUP_BOOKING_ENABLED),
+  // so re-asking it here would show the same "Select an option" screen twice for
+  // one visit. Goes straight to solo booking, same as openBooking() used to
+  // before the choice screen existed.
+  const continueSoloBooking = () => {
+    setBookingOpen(true);
+    window.history.pushState({ providerBooking: true }, '');
+  };
+
   const chooseSoloEntry = () => {
     setEntryChoiceOpen(false);
     // Solo booking has no "pick a service" step of its own -- that's this profile
@@ -510,7 +521,7 @@ const ProviderProfileFlow = () => {
             selectedServices={selectedServices}
             totalMinutes={totalMinutes}
             selectedProfessional={selectedProfessional}
-            onContinue={openBooking}
+            onContinue={continueSoloBooking}
             disabled={selectedServices.length === 0}
             stickyTop="calc(var(--customer-header-h, 64px) + 1.5rem)"
           />
@@ -521,7 +532,7 @@ const ProviderProfileFlow = () => {
         total={selectedServices.reduce((sum, s) => sum + Number(s.effective_price_npr ?? s.price_npr ?? 0), 0)}
         count={selectedServices.length}
         totalMinutes={totalMinutes}
-        onContinue={openBooking}
+        onContinue={continueSoloBooking}
         disabled={selectedServices.length === 0}
       />
 
