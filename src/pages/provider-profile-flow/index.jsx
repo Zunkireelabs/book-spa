@@ -360,15 +360,18 @@ const ProviderProfileFlow = () => {
     return <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} onBookAnother={handleBookAnother} />;
   }
 
-  if (entryChoiceOpen) {
-    return (
-      <GroupEntryChoice
-        onChooseSolo={chooseSoloEntry}
-        onChooseGroup={chooseGroupEntry}
-        onClose={closeBooking}
-      />
-    );
-  }
+  // entryChoiceOpen renders as a modal (below, layered over whichever of
+  // BranchGate/profile page is current) rather than its own full-page takeover —
+  // unlike BookingView/GroupBookingView, this screen is a quick either/or prompt,
+  // not a multi-step flow, so a lightweight overlay reads better than swapping the
+  // whole page out from under the customer.
+  const entryChoiceModal = entryChoiceOpen ? (
+    <GroupEntryChoice
+      onChooseSolo={chooseSoloEntry}
+      onChooseGroup={chooseGroupEntry}
+      onClose={closeBooking}
+    />
+  ) : null;
 
   if (groupModeOpen) {
     return (
@@ -430,18 +433,22 @@ const ProviderProfileFlow = () => {
 
   if (branches.length > 1 && !selectedBranch) {
     return (
-      <BranchGate
-        orgName={orgName}
-        heroImageUrl={heroImageUrl}
-        logoUrl={logoUrl}
-        branches={branches}
-        onSelect={handleBranchGateSelect}
-      />
+      <>
+        <BranchGate
+          orgName={orgName}
+          heroImageUrl={heroImageUrl}
+          logoUrl={logoUrl}
+          branches={branches}
+          onSelect={handleBranchGateSelect}
+        />
+        {entryChoiceModal}
+      </>
     );
   }
 
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+      {entryChoiceModal}
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
 
