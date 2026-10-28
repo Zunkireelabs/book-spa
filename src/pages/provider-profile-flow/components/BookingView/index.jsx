@@ -133,10 +133,14 @@ const BookingView = ({
     // fix (dd7d6ed1) introduced it without updating what sticks below it.
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
       {/* sticky, not static -- same fix as GroupBookingView's identical row: it scrolled
-          away with the page on any step with enough content to scroll. Both buttons
-          carry their own opaque circular background, so the row itself needs none to
-          stay legible pinned over whatever's beneath it. */}
-      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
+          away with the page on any step with enough content to scroll. An opaque
+          full-width background (not just the buttons' own circles) so scrolled
+          content/headings never show through behind it either -- Anish caught a
+          service-list heading peeking out from under the back button mid-scroll;
+          transparent-row-with-floating-icons read as a bug, not a deliberate "icons
+          float over the hero photo" design. */}
+      <div className="sticky top-0 z-header bg-[var(--zn-background)] border-b border-[var(--zn-border)]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
         <button
           onClick={handleBack}
           aria-label="Back"
@@ -152,6 +156,7 @@ const BookingView = ({
         >
           <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
         </button>
+      </div>
       </div>
 
       {confirmingClose && (

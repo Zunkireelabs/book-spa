@@ -191,12 +191,12 @@ const GroupBookingView = ({
     // row, same collision, same fix.
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
       {/* sticky, not static -- was plain flow, so it scrolled away with the page the
-          moment any step had enough content to scroll (made far worse once the hero
-          image pushed everything down further). Anish: "this going back arrow in left
-          side and cross right side goes away while scrolling down." Both buttons carry
-          their own opaque circular background already, so this needs no background of
-          its own to stay legible pinned over the hero photo or page content beneath it. */}
-      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
+          moment any step had enough content to scroll. Opaque full-width background
+          (not just the buttons' own circles) -- Anish caught the "Services" heading
+          peeking out from behind the back button mid-scroll; a transparent row with
+          floating icons read as a bug once content/headings showed through it. */}
+      <div className="sticky top-0 z-header bg-[var(--zn-background)] border-b border-[var(--zn-border)]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
         <button
           onClick={handleBack}
           aria-label="Back"
@@ -212,6 +212,7 @@ const GroupBookingView = ({
         >
           <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
         </button>
+      </div>
       </div>
 
       {confirmingClose && (
