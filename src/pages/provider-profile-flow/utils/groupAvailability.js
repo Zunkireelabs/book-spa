@@ -23,10 +23,6 @@ import {
 import { buildTherapistOccupancy, isTherapistFree } from './therapistAvailability';
 import { getRoomCapacity } from '../../../services/api';
 
-function personFree(occupancy, therapistId, date, startMin, durationMinutes) {
-  return isTherapistFree(occupancy, therapistId, date, startMin, durationMinutes);
-}
-
 function spanSlots(startMin, durationMinutes) {
   const slots = [];
   for (let offset = 0; offset < durationMinutes; offset += 30) slots.push(startMin + offset);
@@ -54,7 +50,7 @@ function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, b
     if (person.professional?.mode === 'specific') {
       const candidateId = person.professional.therapist?.id;
       if (!candidateId || claimedTherapistIds.has(candidateId)) return false;
-      if (!personFree(therapistOccupancy, candidateId, date, startMin, duration)) return false;
+      if (!isTherapistFree(therapistOccupancy, candidateId, date, startMin, duration)) return false;
       therapistId = candidateId;
     } else {
       // 'any' — same reserve anyProfessionalFree (solo flow) enforces: don't let
@@ -64,7 +60,7 @@ function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, b
       const reserveCount = Math.max(0, ...spans.map((m) => therapistOccupancy.unassigned[date]?.get(m) || 0), 0);
       const freeCandidates = allTherapists
         .map((t) => t.id)
-        .filter((id) => !claimedTherapistIds.has(id) && personFree(therapistOccupancy, id, date, startMin, duration));
+        .filter((id) => !claimedTherapistIds.has(id) && isTherapistFree(therapistOccupancy, id, date, startMin, duration));
       if (freeCandidates.length <= reserveCount) return false;
       therapistId = freeCandidates[0];
     }
