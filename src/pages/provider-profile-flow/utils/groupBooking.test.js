@@ -25,4 +25,14 @@ describe('groupBooking person-list helpers', () => {
     expect(next[1].name).toBe('Priya');
     expect(next[0]).toBe(people[0]); // untouched person, same reference
   });
+
+  it('guest ids stay unique after removing a middle guest and adding a new one (no position-derived collision)', () => {
+    let people = [createLeadPerson()];
+    people = addGuest(people); // Guest 2
+    people = addGuest(people); // Guest 3
+    people = removeGuest(people, people[1].id); // remove the first guest -> [lead, old-Guest-3 relabeled "Guest 2"]
+    people = addGuest(people); // appended as new "Guest 3" -- must NOT reuse the removed id
+    const ids = people.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });

@@ -17,6 +17,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
   const [selectedDate, setSelectedDate] = useState(selectedDateTime?.date || '');
   const [availabilityWindow, setAvailabilityWindow] = useState(null);
   const [therapistWindow, setTherapistWindow] = useState(null);
+  const [therapistWindowError, setTherapistWindowError] = useState(null);
   const [closedRanges, setClosedRanges] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -48,11 +49,20 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
       .finally(() => setLoadingSlots(false));
   }, [selectedBranch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
+  const loadTherapistWindow = () => {
     if (!selectedBranch?.id) return;
+    setTherapistWindowError(null);
+    setTherapistWindow(null);
     fetchTherapistAvailabilityWindow(orgSlug, selectedBranch.id, dates[0].fullDate, dates[effectiveWindow - 1].fullDate)
       .then(setTherapistWindow)
-      .catch((err) => console.error('[GroupTimeStep] therapist availability fetch failed:', err.message));
+      .catch((err) => {
+        console.error('[GroupTimeStep] therapist availability fetch failed:', err.message);
+        setTherapistWindowError(err.message || 'Could not load availability.');
+      });
+  };
+
+  useEffect(() => {
+    loadTherapistWindow();
   }, [selectedBranch?.id, orgSlug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -70,8 +80,14 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
 
   const onlineCapacity = selectedBranch?.online_booking_capacity ?? null;
 
+  // Waiting on either fetch (or the therapist fetch having failed) must render as "no
+  // slots yet", never as "everything's free" — computeGroupSlots given an empty/null
+  // therapistWindow would otherwise read as zero busy therapists anywhere, same trap
+  // the solo DateTimeSelection.jsx already guards against for the same reason.
+  const stillLoadingTherapistWindow = !therapistWindow && !therapistWindowError;
+
   const computedDays = useMemo(() => {
-    if (!availabilityWindow) return [];
+    if (!availabilityWindow || stillLoadingTherapistWindow || therapistWindowError) return [];
     return computeGroupSlots({
       dates,
       availabilityWindow,
@@ -82,7 +98,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
       people: resolvedPeople,
       allTherapists: therapists || [],
     });
-  }, [availabilityWindow, therapistWindow, closedRanges, enableRooms, onlineCapacity, resolvedPeople, therapists, dates]);
+  }, [availabilityWindow, therapistWindow, therapistWindowError, stillLoadingTherapistWindow, closedRanges, enableRooms, onlineCapacity, resolvedPeople, therapists, dates]);
 
   const closedDatesSet = useMemo(() => {
     const set = new Set();
@@ -119,6 +135,20 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
         </span>
       </div>
 
+      {therapistWindowError && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2 bg-error/5 border border-error/20 rounded-[var(--zn-radius-lg)] text-sm">
+          <span className="text-[var(--zn-muted-foreground)]">
+            Could not load availability. No slots are shown until this is retried.
+          </span>
+          <button
+            onClick={loadTherapistWindow}
+            className="font-medium text-[var(--zn-primary)] hover:text-[var(--zn-primary-hover)] shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="@container bg-[var(--zn-card)] rounded-[var(--zn-radius-lg)] border border-[var(--zn-border)] p-6">
         <h3 className="font-medium text-lg text-[var(--zn-foreground)] mb-4">Select date</h3>
         <div className="grid grid-cols-4 @2xl:grid-cols-7 gap-2">
@@ -153,7 +183,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
       {selectedDate && (
         <div className="@container bg-[var(--zn-card)] rounded-[var(--zn-radius-lg)] border border-[var(--zn-border)] p-6">
           <h3 className="font-medium text-lg text-[var(--zn-foreground)] mb-4">Available time slots</h3>
-          {loadingSlots ? (
+          {loadingSlots || stillLoadingTherapistWindow ? (
             <div className="text-center py-8">
               <div className="animate-spin w-8 h-8 border-2 border-[var(--zn-primary)] border-t-transparent rounded-full mx-auto mb-4" />
               <p className="text-sm text-[var(--zn-muted-foreground)]">Checking availability…</p>
@@ -180,7 +210,7 @@ const GroupTimeStep = ({ selectedBranch, orgSlug, people, therapists, selectedDa
             </div>
           )}
 
-          {!loadingSlots && timeSlots.filter((s) => s.isAvailable).length === 0 && (
+          {!loadingSlots && !stillLoadingTherapistWindow && !therapistWindowError && timeSlots.filter((s) => s.isAvailable).length === 0 && (
             <div className="text-center py-8">
               <Icon name="CalendarX" size={48} className="text-error/60 mx-auto mb-4" />
               <p className="text-[var(--zn-foreground)] font-medium">

@@ -8,8 +8,16 @@ export const createLeadPerson = () => ({
   professional: null,
 });
 
-export const createGuestPerson = (n) => ({
-  id: `guest-${n}`,
+const generateGuestId = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
+  ? crypto.randomUUID()
+  : `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+// id is independent of label/position — addGuest/removeGuest relabel guests by
+// position on every change, but ids must stay stable so a later addGuest (which
+// also derives its *label* from position) can never mint an id that collides with
+// a still-present person's id.
+export const createGuestPerson = (n, id = generateGuestId()) => ({
+  id,
   label: `Guest ${n}`,
   isLead: false,
   service: null,

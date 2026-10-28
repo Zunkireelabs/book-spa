@@ -25,6 +25,20 @@ export const mapBookingError = (error) => {
 
 const priceOf = (service) => Number(service?.effective_price_npr ?? service?.price_npr ?? 0);
 
+// Mirrors BookingView/index.jsx's isCustomerInfoValid, plus a required-phone check:
+// createBooking() hard-rejects a missing phone ("Phone number is required", with no
+// `code`, so mapBookingError can't recognise it) and every guest row inherits this
+// phone — gating here is strictly better than the solo flow's gap, not a regression.
+export const isLeadContactValid = (leadContact) => {
+  if (!leadContact.firstName.trim()) return false;
+  if (leadContact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadContact.email)) return false;
+  if (!leadContact.phone.trim()) return false;
+  const isNepal = (leadContact.phoneCountryCode || '+977') === '+977';
+  const digits = leadContact.phone.replace(/\D/g, '');
+  const phoneValid = isNepal ? /^[0-9]{10}$/.test(digits) : digits.length >= 6 && digits.length <= 15;
+  return phoneValid;
+};
+
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestNameChange, onSubmit, submitting, submitError }) => {
   const total = people.reduce((sum, p) => sum + priceOf(p.service), 0);
 
@@ -80,7 +94,12 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
         </div>
       )}
 
-      <Button variant="primary" onClick={onSubmit} disabled={submitting} className="w-full justify-center">
+      <Button
+        variant="primary"
+        onClick={onSubmit}
+        disabled={submitting || !isLeadContactValid(leadContact)}
+        className="w-full justify-center"
+      >
         {submitting ? 'Booking…' : `Confirm group booking — ${formatNPR(total)}`}
       </Button>
     </div>

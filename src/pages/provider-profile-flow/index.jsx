@@ -221,7 +221,11 @@ const ProviderProfileFlow = () => {
 
   const chooseGroupEntry = () => {
     setEntryChoiceOpen(false);
-    setGroupPeople([createLeadPerson()]);
+    // Carry the service already selected on the profile page over to the lead, rather
+    // than silently emptying the cart the "Book group appointment" CTA was clicked
+    // from — v1 group booking caps everyone (including the lead) at one service each,
+    // so only the first already-selected service survives if more than one was picked.
+    setGroupPeople([{ ...createLeadPerson(), service: selectedServices[0] || null }]);
     setGroupModeOpen(true);
   };
 

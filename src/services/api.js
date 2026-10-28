@@ -5945,7 +5945,30 @@ export async function createBookingGroup({ services, date, startTime, therapistI
 // copied from createBookingGroup's since both serve the same anonymous-customer RLS
 // shape (no anon SELECT/UPDATE on bookings, so compensation goes through the same
 // narrow public_cancel_booking_group RPC).
-export async function submitGroupBooking({ branchId, orgSlug, date, startTime, genderPreference, specialRequests, leadContact, people, createBookingFn = createBooking }) {
+export async function submitGroupBooking({ branchId, orgSlug, date, startTime, genderPreference, specialRequests, leadContact, people, customerAccountId = null, createBookingFn = createBooking }) {
+  // Referral resolution mirrors BookingConfirmation.jsx's handleConfirmBooking exactly
+  // (lead-only — guests have no account of their own to credit a referral against).
+  let referringCustomerId = null;
+  let referralSourceDetail = null;
+  const referralSource = leadContact.referralSource || null;
+
+  if (referralSource === 'client') {
+    const namePart = leadContact.referralClientName?.trim() || '';
+    const dialCode = leadContact.referralCountryCode || '+977';
+    const referralE164 = toE164(leadContact.referralPhone, dialCode);
+    const phonePart = referralE164 ? `(${referralE164})` : '';
+    referralSourceDetail = [namePart, phonePart].filter(Boolean).join(' ') || null;
+
+    if (referralE164 && referralE164 !== leadContact.phone) {
+      const { data: referrer } = await lookupReferrerByPhone(orgSlug, leadContact.referralPhone, dialCode);
+      referringCustomerId = referrer?.id || null;
+    }
+  } else if (referralSource === 'social_media') {
+    referralSourceDetail = leadContact.referralSocialPlatform || null;
+  } else if (referralSource === 'staff') {
+    referralSourceDetail = leadContact.referralStaffName?.trim() || null;
+  }
+
   const rowArgs = (person) => ({
     branchId,
     orgSlug,
@@ -5959,6 +5982,7 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
     customerEmail: leadContact.email,
     customerPhone: leadContact.phone,
     customerGender: person.isLead ? leadContact.gender : null,
+    ...(person.isLead ? { customerAccountId, referringCustomerId, referralSource, referralSourceDetail } : {}),
   });
 
   // Single person: no group, no compensation path — behave exactly like a plain booking.

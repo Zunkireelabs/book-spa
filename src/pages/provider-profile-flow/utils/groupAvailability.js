@@ -27,15 +27,28 @@ function personFree(occupancy, therapistId, date, startMin, durationMinutes) {
   return isTherapistFree(occupancy, therapistId, date, startMin, durationMinutes);
 }
 
+function spanSlots(startMin, durationMinutes) {
+  const slots = [];
+  for (let offset = 0; offset < durationMinutes; offset += 30) slots.push(startMin + offset);
+  return slots;
+}
+
 // Attempts to reserve every person for this candidate slot, in order, against
 // the real occupancy plus whatever earlier people in this same slot already
-// claimed. Returns true only if every person could be placed.
-function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, rooms, enableRooms, onlineCapacity, date, startMin }) {
+// claimed. Returns true only if every person could be placed. Three resources
+// are tracked incrementally as people are claimed (not just checked and
+// discarded): the therapist each person is assigned, the branch's online-
+// capacity counter (seeded from EXISTING online bookings, not just this
+// group's own members), and room usage per room per 30-min slot (seeded from
+// existing bookings the same way).
+function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, byBranch, rooms, enableRooms, onlineCapacity, date, startMin }) {
   const claimedTherapistIds = new Set();
+  const roomUsage = new Map(); // `${roomId}:${slotMin}` -> extra claimed count
   let onlineClaimedCount = 0;
 
   for (const person of people) {
     const duration = person.service?.duration_minutes || 60;
+    const spans = spanSlots(startMin, duration);
     let therapistId = null;
 
     if (person.professional?.mode === 'specific') {
@@ -44,30 +57,42 @@ function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, r
       if (!personFree(therapistOccupancy, candidateId, date, startMin, duration)) return false;
       therapistId = candidateId;
     } else {
-      // 'any' — pick the first eligible therapist not already claimed in this slot.
-      therapistId = allTherapists
+      // 'any' — same reserve anyProfessionalFree (solo flow) enforces: don't let
+      // more unassigned-pending bookings exist than there are free therapists
+      // left to eventually cover them. Reserve the max backlog seen across this
+      // person's span, then pick the first free-and-unclaimed therapist beyond it.
+      const reserveCount = Math.max(0, ...spans.map((m) => therapistOccupancy.unassigned[date]?.get(m) || 0), 0);
+      const freeCandidates = allTherapists
         .map((t) => t.id)
-        .find((id) => !claimedTherapistIds.has(id) && personFree(therapistOccupancy, id, date, startMin, duration));
-      if (!therapistId) return false;
+        .filter((id) => !claimedTherapistIds.has(id) && personFree(therapistOccupancy, id, date, startMin, duration));
+      if (freeCandidates.length <= reserveCount) return false;
+      therapistId = freeCandidates[0];
     }
 
     claimedTherapistIds.add(therapistId);
 
     if (person.professional?.mode !== 'specific') {
       onlineClaimedCount += 1;
-      if (onlineCapacity !== null && onlineClaimedCount > onlineCapacity) return false;
+      if (onlineCapacity !== null) {
+        const existingMax = Math.max(0, ...spans.map((m) => byBranch[date]?.get(m) || 0));
+        if (existingMax + onlineClaimedCount > onlineCapacity) return false;
+      }
     }
 
     if (enableRooms) {
-      const roomId = rooms.find((room) => {
-        const capacity = getRoomCapacity(room);
-        for (let offset = 0; offset < duration; offset += 30) {
-          const occupied = byRoom[date]?.[room.id]?.get(startMin + offset) || 0;
-          if (occupied >= capacity) return false;
-        }
-        return true;
-      })?.id;
-      if (!roomId) return false;
+      const room = rooms.find((r) => {
+        const capacity = getRoomCapacity(r);
+        return spans.every((m) => {
+          const existing = byRoom[date]?.[r.id]?.get(m) || 0;
+          const claimed = roomUsage.get(`${r.id}:${m}`) || 0;
+          return existing + claimed < capacity;
+        });
+      });
+      if (!room) return false;
+      spans.forEach((m) => {
+        const key = `${room.id}:${m}`;
+        roomUsage.set(key, (roomUsage.get(key) || 0) + 1);
+      });
     }
   }
 
@@ -76,7 +101,7 @@ function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, r
 
 export function computeGroupSlots({ dates, availabilityWindow, therapistWindow, closedRanges, enableRooms, onlineCapacity, people, allTherapists }) {
   const rooms = availabilityWindow?.rooms || [];
-  const { byRoom } = buildOccupancy(availabilityWindow?.bookings || []);
+  const { byRoom, byBranch } = buildOccupancy(availabilityWindow?.bookings || []);
   const therapistOccupancy = buildTherapistOccupancy(therapistWindow?.bookings || []);
 
   const nepalToday = getNepalToday();
@@ -98,6 +123,7 @@ export function computeGroupSlots({ dates, availabilityWindow, therapistWindow, 
         allTherapists,
         therapistOccupancy,
         byRoom,
+        byBranch,
         rooms,
         enableRooms,
         onlineCapacity,

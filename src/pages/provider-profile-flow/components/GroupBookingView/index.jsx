@@ -74,26 +74,32 @@ const GroupBookingView = ({
   const handleBack = stepIndex > 0 ? goBack : onClose;
   const handleContinue = goNext;
 
-  const handleAddGuest = () => onPeopleChange(addGuest(people));
+  // Functional updates throughout — onPeopleChange is the parent's raw setState
+  // setter, and several of ProfessionalStep's own child instances (per-guest mode)
+  // can call back in the same commit (e.g. its own "empty roster" auto-select effect
+  // firing for every person at once); computing the next array from the `people`
+  // closure instead of the updater's own `prev` would let later calls in the same
+  // batch silently overwrite earlier ones.
+  const handleAddGuest = () => onPeopleChange((prev) => addGuest(prev));
   const handleRemoveGuest = (guestId) => {
-    onPeopleChange(removeGuest(people, guestId));
+    onPeopleChange((prev) => removeGuest(prev, guestId));
     if (activeGuestId === guestId) setActiveGuestId('lead');
   };
   const handleServiceChosenForActiveGuest = (service) => {
-    onPeopleChange(updateGuestField(people, activeGuestId, 'service', service));
+    onPeopleChange((prev) => updateGuestField(prev, activeGuestId, 'service', service));
   };
 
   const handleSelectAnyForAll = () => {
-    onPeopleChange(people.map((p) => ({ ...p, professional: { mode: 'any' } })));
+    onPeopleChange((prev) => prev.map((p) => ({ ...p, professional: { mode: 'any' } })));
     setProfessionalMode('any');
   };
   const handleSelectPerGuestMode = () => setProfessionalMode('per-guest');
   const handlePersonProfessionalSelect = (personId, selection) => {
-    onPeopleChange(updateGuestField(people, personId, 'professional', selection));
+    onPeopleChange((prev) => updateGuestField(prev, personId, 'professional', selection));
   };
 
   const handleGuestNameChange = (guestId, name) => {
-    onPeopleChange(updateGuestField(people, guestId, 'name', name));
+    onPeopleChange((prev) => updateGuestField(prev, guestId, 'name', name));
   };
 
   const handleSubmit = async () => {
@@ -122,8 +128,15 @@ const GroupBookingView = ({
         email: leadContact.email || null,
         phone: toE164(leadContact.phone, leadContact.phoneCountryCode || '+977'),
         gender: leadContact.gender || null,
+        referralSource: leadContact.referralSource || null,
+        referralClientName: leadContact.referralClientName || null,
+        referralPhone: leadContact.referralPhone || null,
+        referralCountryCode: leadContact.referralCountryCode || '+977',
+        referralSocialPlatform: leadContact.referralSocialPlatform || null,
+        referralStaffName: leadContact.referralStaffName || null,
       },
       people: resolvedPeople,
+      customerAccountId,
     });
 
     setSubmitting(false);
@@ -238,6 +251,7 @@ const GroupBookingView = ({
               selectedBranch={selectedBranch}
               selectedDateTime={selectedDateTime}
               orgSlug={orgSlug}
+              genderPreference="no-preference"
               customerAccountId={customerAccountId}
               onGuestNameChange={handleGuestNameChange}
               onSubmit={handleSubmit}
