@@ -261,6 +261,22 @@ const ProviderProfileFlow = () => {
     setBookingOpen(false);
   };
 
+  // GroupBookingView owns its own date/time and people selections (not lifted here,
+  // same split as the rest of the group flow) — carried in the payload so BookingSuccess
+  // renders identically for solo and group without a second source of truth for either.
+  const handleGroupBookingComplete = ({ bookings, selectedDateTime: groupDateTime, people: groupedPeople, leadContact }) => {
+    setBookingData({
+      bookingId: bookings[0]?.booking_number,
+      selectedBranch,
+      selectedServices: groupedPeople.map((p) => p.service).filter(Boolean),
+      selectedDateTime: groupDateTime,
+      customerInfo: leadContact,
+      bookingDate: new Date().toISOString(),
+      status: 'confirmed',
+    });
+    setGroupModeOpen(false);
+  };
+
   if (tenantError) {
     return (
       <div className="zn-scope min-h-screen bg-[var(--zn-background)] flex items-center justify-center">
@@ -308,6 +324,7 @@ const ProviderProfileFlow = () => {
         therapistsError={therapistsError}
         onRetryTherapists={() => setFetchNonce((n) => n + 1)}
         customerAccountId={customerProfile?.id}
+        onGroupBookingComplete={handleGroupBookingComplete}
       />
     );
   }

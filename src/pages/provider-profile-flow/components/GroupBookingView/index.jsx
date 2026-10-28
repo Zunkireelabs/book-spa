@@ -1,13 +1,14 @@
-import React, { useState, useLayoutEffect, useMemo } from 'react';
+import React, { useState, useLayoutEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import DiscardDialog from '../BookingView/DiscardDialog';
 import GuestsStep from './GuestsStep';
 import GroupProfessionalStep from './GroupProfessionalStep';
 import GroupTimeStep from './GroupTimeStep';
-import GroupConfirmStep from './GroupConfirmStep';
+import GroupConfirmStep, { mapBookingError } from './GroupConfirmStep';
 import { addGuest, removeGuest, updateGuestField } from '../../utils/groupBooking';
-
+import { submitGroupBooking } from '../../../../services/api';
+import { toE164 } from '../../../../utils/phone';
 import { scrollToTopInstant } from '../../../../utils/scroll';
 
 const STEP_HEADINGS = {
@@ -40,17 +41,19 @@ const GroupBookingView = ({
   therapistsError,
   onRetryTherapists,
   customerAccountId,
-  onSubmit,
-  submitting,
-  submitError,
+  onGroupBookingComplete,
 }) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [activeGuestId, setActiveGuestId] = useState('lead');
   const [confirmingClose, setConfirmingClose] = useState(false);
   const [professionalMode, setProfessionalMode] = useState(null); // null | 'any' | 'per-guest'
   const [selectedDateTime, setSelectedDateTime] = useState({ date: '', time: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [leadContact, setLeadContact] = useState({
     firstName: '', lastName: '', email: '', phone: '', phoneCountryCode: '+977', gender: '',
+    referralSource: '', referralClientName: '', referralPhone: '', referralCountryCode: '+977',
+    referralSocialPlatform: '', referralStaffName: '', specialRequests: '', agreeToTerms: false,
   });
 
   useLayoutEffect(() => {
@@ -87,6 +90,54 @@ const GroupBookingView = ({
   const handleSelectPerGuestMode = () => setProfessionalMode('per-guest');
   const handlePersonProfessionalSelect = (personId, selection) => {
     onPeopleChange(updateGuestField(people, personId, 'professional', selection));
+  };
+
+  const handleGuestNameChange = (guestId, name) => {
+    onPeopleChange(updateGuestField(people, guestId, 'name', name));
+  };
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+
+    const resolvedPeople = people.map((p) => ({
+      isLead: p.isLead,
+      label: p.label,
+      name: p.name,
+      service: p.service,
+      therapistId: p.professional?.mode === 'specific' ? (p.professional.therapist?.id || null) : null,
+    }));
+
+    const { data, error } = await submitGroupBooking({
+      branchId: selectedBranch?.id,
+      orgSlug,
+      date: selectedDateTime.date,
+      startTime: selectedDateTime.time,
+      // v1 group booking has no gender-preference or special-requests UI of its own —
+      // every row gets the branch default / the lead's shared special request text.
+      genderPreference: 'no-preference',
+      specialRequests: leadContact.specialRequests || null,
+      leadContact: {
+        name: `${leadContact.firstName} ${leadContact.lastName}`.trim(),
+        email: leadContact.email || null,
+        phone: toE164(leadContact.phone, leadContact.phoneCountryCode || '+977'),
+        gender: leadContact.gender || null,
+      },
+      people: resolvedPeople,
+    });
+
+    setSubmitting(false);
+
+    if (error) {
+      console.error('[GroupBookingView] submitGroupBooking failed:', error.code, error.message);
+      setSubmitError(mapBookingError(error));
+      return;
+    }
+
+    // Parent (index.jsx) doesn't track this view's own date/time or people selections —
+    // they're carried along here so handleGroupBookingComplete can build BookingSuccess's
+    // bookingData shape without needing a second source of truth for them.
+    onGroupBookingComplete({ bookings: data.bookings, selectedDateTime, people, leadContact });
   };
 
   return (
@@ -186,8 +237,10 @@ const GroupBookingView = ({
               onLeadContactChange={setLeadContact}
               selectedBranch={selectedBranch}
               selectedDateTime={selectedDateTime}
+              orgSlug={orgSlug}
               customerAccountId={customerAccountId}
-              onSubmit={onSubmit}
+              onGuestNameChange={handleGuestNameChange}
+              onSubmit={handleSubmit}
               submitting={submitting}
               submitError={submitError}
             />
