@@ -7,6 +7,7 @@ import GroupProfessionalStep from './GroupProfessionalStep';
 import GroupTimeStep from './GroupTimeStep';
 import GroupConfirmStep from './GroupConfirmStep';
 import { addGuest, removeGuest, updateGuestField } from '../../utils/groupBooking';
+
 import { scrollToTopInstant } from '../../../../utils/scroll';
 
 const STEP_HEADINGS = {
@@ -79,6 +80,15 @@ const GroupBookingView = ({
     onPeopleChange(updateGuestField(people, activeGuestId, 'service', service));
   };
 
+  const handleSelectAnyForAll = () => {
+    onPeopleChange(people.map((p) => ({ ...p, professional: { mode: 'any' } })));
+    setProfessionalMode('any');
+  };
+  const handleSelectPerGuestMode = () => setProfessionalMode('per-guest');
+  const handlePersonProfessionalSelect = (personId, selection) => {
+    onPeopleChange(updateGuestField(people, personId, 'professional', selection));
+  };
+
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
@@ -147,13 +157,14 @@ const GroupBookingView = ({
           {currentStep === 'professional' && (
             <GroupProfessionalStep
               people={people}
-              onPeopleChange={onPeopleChange}
               therapists={therapists}
               loading={loadingTherapists}
               error={therapistsError}
               onRetry={onRetryTherapists}
               mode={professionalMode}
-              onModeChange={setProfessionalMode}
+              onSelectAnyForAll={handleSelectAnyForAll}
+              onSelectPerGuestMode={handleSelectPerGuestMode}
+              onPersonProfessionalSelect={handlePersonProfessionalSelect}
             />
           )}
 
