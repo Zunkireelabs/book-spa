@@ -7,7 +7,7 @@ import { bookingWords } from './NotificationBell';
 
 const VISIBLE_MS = 8000;
 
-const Card = ({ p, onOpen, onClose, branchName, words, stacked }) => {
+const Card = ({ p, onOpen, onClose, branchName, words, stacked, desktop }) => {
   const [left, setLeft] = useState(VISIBLE_MS);
   const hover = useRef(false);
   useEffect(() => {
@@ -47,6 +47,13 @@ const Card = ({ p, onOpen, onClose, branchName, words, stacked }) => {
           )}
           {isBurst && <Link to={p.inboxPath} onClick={onClose} className="text-xs text-primary font-body-medium hover:underline">Open Inbox</Link>}
         </div>
+        {desktop && (
+          <p className="mt-2 pt-2 border-t border-gray-100 text-[11.5px] text-text-secondary flex items-center gap-1.5 flex-wrap">
+            Get these when Zennly is in another tab?
+            <button type="button" onClick={desktop.allow} className="text-primary font-body-medium hover:underline">Allow</button>
+            <button type="button" onClick={desktop.decline} className="text-text-tertiary hover:underline">No thanks</button>
+          </p>
+        )}
       </div>
       <button type="button" onClick={onClose} aria-label="Dismiss" className="absolute top-2.5 right-2.5 text-text-tertiary hover:text-text-primary">
         <Icon name="X" size={14} />
@@ -57,7 +64,7 @@ const Card = ({ p, onOpen, onClose, branchName, words, stacked }) => {
 };
 
 const NotificationToasts = () => {
-  const { popups, soundPill, visibleCount, openItem, closePopup, inboxPath, branches } = useNotifications();
+  const { popups, soundPill, visibleCount, openItem, closePopup, inboxPath, branches, askDesktop, allowDesktop, declineDesktop } = useNotifications();
   const industry = useIndustry();
   const words = bookingWords(industry);
   const [pillDismissed, setPillDismissed] = useState(false);
@@ -79,6 +86,7 @@ const NotificationToasts = () => {
             key={p.key}
             p={{ ...p, inboxPath }}
             stacked={false}
+            desktop={i === 0 && askDesktop ? { allow: allowDesktop, decline: declineDesktop } : null}
             words={words}
             branchName={p.item ? nameOf(p.item.branchId) : null}
             onOpen={(n) => openItem(n)}

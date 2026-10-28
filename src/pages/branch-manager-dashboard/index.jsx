@@ -29,6 +29,7 @@ import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
 import AttendanceSettingsPanel from './components/MasterData/AttendanceSettingsPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
+import NotificationSettingsContent from '../inbox/NotificationSettingsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -496,6 +497,7 @@ const BranchManagerDashboard = () => {
       case 'attendance-settings': return !isOverall && ['admin', 'manager'].includes(profile?.role) ? <AttendanceSettingsPanel branchId={branchId} /> : null;
       case 'closed-dates': return !isOverall && profile?.role === 'admin' ? <ClosedDatesPanel branchId={branchId} /> : null;
       case 'provider-profile': return <ProviderProfilePanel />;
+      case 'notifications': return <NotificationSettingsContent />;
       case 'audit': return <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />;
       default: return null;
     }

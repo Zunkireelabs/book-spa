@@ -52,7 +52,7 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+. Done locally in 847a5c9; ships with the UI-port PR |
 | ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere. Mockup first |
 | ZNLY-112 | Sadin | high | Therapists "Overall" fails (uuid "__overall__") + Add with a Branch field + no Overall for one-branch tenants. Built and owner-checked (V31), committed locally; ships with the UI-port PR |
-| ZNLY-135 | Sadin | high | Notifications: pop-up card + sound, bell category tabs + branch labels, Inbox page, per-user settings. Mockup v3 approved; V35a (DB + bell + pop-up + sound) with bookx-16, then V35b Inbox, V35c new events |
+| ZNLY-135 | Sadin | high | Notifications: pop-up card + sound, bell category tabs + branch labels, Inbox page, per-user settings. V35a committed (4e762b7). V35b built (Inbox, settings, sound picker, mig 332), awaiting commit OK. Then V35c new events (+ actor column) |
 | ZNLY-123 | Sadin | medium | UI-23: Attendance page redesign, payroll-grade. V34a/a2/b committed (1663683). V34c payroll guard on hold until ZNLY-135 |
 | ZNLY-113 | Sadin | high | One home-branch model for temporary transfers. V33a (a8f55f0) + V33b (d99f8e5) + V33c (3019d2d) committed locally, owner-checked. Code done; ships with the UI-port PR |
 | ZNLY-118 | Sadin | high | Lent therapist commission can go missing. Fixed in 3019d2d (V33c), owner-verified locally; ships with the UI-port PR |
@@ -86,6 +86,7 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-140 | Sadin | medium | DECIDE: Inbox hover quick actions (Confirm / Review / Open attendance) |
 | ZNLY-84 | Sadin | medium | A-2: admin_viewer sees write actions on customer-detail. Hand to Anish or fix here? |
 | ZNLY-85 | Sadin | medium | V-4: staff voucher limits. Match booking limits? |
 | ZNLY-89 | Sadin | medium | V-9: win-back emails already-booked guests. Align with At-risk rule? |
@@ -103,6 +104,7 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-126 | Sadin | low | Overtime pay for hours outside the usual shift. ONLY if customers ask |
 | ZNLY-122 | Sadin | low | Therapists list never refreshes itself (stale transfer/Today states) |
 | ZNLY-127 | Sadin | medium | Calendar hides a visitor whose transfer window starts later today (can't pre-book). needs-verification |
+| ZNLY-139 | unassigned | low | Real licence-clean dog bark for the "Woof!" notification sound (follow-up to ZNLY-135) |
 | ZNLY-137 | Sadin | medium | Fingerprint attendance machine integration (punches → save_attendance, source "device") |
 | ZNLY-138 | unassigned | low | Per-person "expect a check-in" override (follow-up to ZNLY-123) |
 | ZNLY-133 | unassigned | medium | Weekly timesheet review + approval before payroll (split from ZNLY-123) |

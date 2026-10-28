@@ -3,20 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import {
   fetchNotifications, fetchUnreadNotificationCount, fetchNotificationPrefs, markNotificationRead, markAllNotificationsRead,
+  markNotificationUnread, saveNotificationPref, saveNotificationSettings,
 } from '../services/api';
 import { useAuth } from './AuthContext';
 import { useBranch } from './BranchContext';
 import { useOrg } from './OrgContext';
 import {
-  categoryOf, evaluateLiveEvent, isBurst, canPlaySound, isSticky, POPUP_VISIBLE_MAX, DEFAULT_SETTINGS,
+  categoryOf, evaluateLiveEvent, isBurst, canPlaySound, isSticky, POPUP_VISIBLE_MAX, DEFAULT_SETTINGS, prefFor,
 } from '../lib/notificationRules';
-import { playChime, installSoundUnlock, isSoundUnlocked, onSoundUnlock } from '../lib/notificationSound';
+import { playSound, installSoundUnlock, isSoundUnlocked, onSoundUnlock } from '../lib/notificationSound';
 
 // One Realtime channel per user for the whole staff app: feed (bell), live pop-up cards, chime, tab title.
 const NotificationsContext = createContext(null);
 
 const FEED_LIMIT = 50;
 const SOUND_PILL_KEY = 'zennly.notif.soundPillShown';
+const DESKTOP_DECLINED_KEY = 'zennly.notif.desktopDeclined';
+
+const desktopSupported = () => typeof window !== 'undefined' && 'Notification' in window;
+const readDeclined = () => { try { return localStorage.getItem(DESKTOP_DECLINED_KEY) === '1'; } catch { return false; } };
 
 const normalize = (row) => ({
   id: row.id,
@@ -47,6 +52,9 @@ export const NotificationsProvider = ({ children }) => {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [popups, setPopups] = useState([]);
   const [soundPill, setSoundPill] = useState(false);
+  const [desktopPerm, setDesktopPerm] = useState(() => (desktopSupported() ? Notification.permission : 'unsupported'));
+  const [desktopDeclined, setDesktopDeclined] = useState(readDeclined);
+  const [firstPopupSeen, setFirstPopupSeen] = useState(false);
 
   const itemsRef = useRef([]);
   const seen = useRef(new Set());
@@ -55,6 +63,7 @@ export const NotificationsProvider = ({ children }) => {
   const reloadTimer = useRef(null);
   const arrivals = useRef([]);
   const bc = useRef(null);
+  const openItemRef = useRef(null);
   itemsRef.current = items;
   prefsRef.current = { prefs, settings, branches };
 
@@ -92,6 +101,14 @@ export const NotificationsProvider = ({ children }) => {
     const verdict = evaluateLiveEvent({ row: n, userId, prefs: pf, settings: st, branch });
 
     if (verdict.popup) {
+      setFirstPopupSeen(true);
+      // Tab in the background + the person allowed desktop alerts: a browser notification for the same pop-up-eligible events.
+      if (desktopSupported() && Notification.permission === 'granted' && document.hidden) {
+        try {
+          const note = new Notification(n.title, { body: n.body || '', tag: n.id });
+          note.onclick = () => { window.focus(); note.close(); openItemRef.current?.(n); };
+        } catch { /* some browsers only allow notifications from a service worker */ }
+      }
       setPopups((prev) => {
         let next = prev;
         if (n.type === 'new_online_booking') {
@@ -122,7 +139,7 @@ export const NotificationsProvider = ({ children }) => {
           if (cur?.read) return;
           if (!canPlaySound(lastSoundAt.current)) return;
           lastSoundAt.current = Date.now();
-          playChime(n.category);
+          playSound(prefsRef.current.settings.sound_choice, n.category);
         }, 400);
       }
     }
@@ -195,6 +212,42 @@ export const NotificationsProvider = ({ children }) => {
     await markAllNotificationsRead();
   }, []);
 
+  const markUnread = useCallback(async (id) => {
+    const wasRead = itemsRef.current.find((n) => n.id === id)?.read;
+    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
+    if (wasRead !== false) setUnreadTotal((c) => c + 1);
+    await markNotificationUnread(id);
+  }, []);
+
+  // Settings apply live: state first, then saved (a failed save reloads the stored values).
+  const setPref = useCallback(async (category, patch) => {
+    const next = { ...prefFor(prefsRef.current.prefs, category), ...patch };
+    setPrefs((p) => ({ ...p, [category]: next }));
+    const { error } = await saveNotificationPref(category, next);
+    if (error) fetchNotificationPrefs().then(({ data }) => data && setPrefs(data.prefs));
+    return { error };
+  }, []);
+  const setSetting = useCallback(async (patch) => {
+    setSettings((s) => ({ ...s, ...patch }));
+    const { error } = await saveNotificationSettings(patch);
+    if (error) fetchNotificationPrefs().then(({ data }) => data && setSettings({ ...DEFAULT_SETTINGS, ...(data.settings || {}) }));
+    return { error };
+  }, []);
+
+  // Desktop alerts: asked only after the first pop-up of the session, never on load; a "no" is remembered.
+  const allowDesktop = useCallback(async () => {
+    if (!desktopSupported()) return 'unsupported';
+    const result = await Notification.requestPermission();
+    setDesktopPerm(result);
+    if (result === 'denied') declineDesktop(); // eslint-disable-line no-use-before-define
+    return result;
+  }, []);
+  const declineDesktop = useCallback(() => {
+    try { localStorage.setItem(DESKTOP_DECLINED_KEY, '1'); } catch { /* storage blocked */ }
+    setDesktopDeclined(true);
+  }, []);
+  const askDesktop = desktopPerm === 'default' && !desktopDeclined && firstPopupSeen;
+
   // Open the thing a notification is about. Bookings open the existing booking side panel on the bookings view.
   // A row whose booking is gone (booking_id null after ON DELETE SET NULL, or a stale id) opens the Inbox, not an empty panel.
   const openItem = useCallback(async (n) => {
@@ -205,11 +258,12 @@ export const NotificationsProvider = ({ children }) => {
       const { data } = await supabase.from('bookings').select('id').eq('id', n.bookingId).maybeSingle();
       exists = !!data;
     }
-    if (exists && (n.category === 'bookings' || n.type === 'discount_request')) navigate(`${base}/dashboard?view=bookings&open=${n.bookingId}`);
-    else if (exists && n.category === 'approvals') navigate(`${base}/dashboard?view=bookings`);
-    else navigate(`${base}/inbox`);
+    if (n.category === 'approvals') navigate(`${base}/inbox?c=approvals&n=${n.id}`); // "Review" lands on the Approvals view with that row open
+    else if (exists && n.category === 'bookings') navigate(`${base}/dashboard?view=bookings&open=${n.bookingId}`);
+    else navigate(`${base}/inbox${n.category ? `?c=${n.category}` : ''}`);
   }, [markRead, navigate, org?.slug]);
 
+  openItemRef.current = openItem;
   const inboxPath = org?.slug ? `/${org.slug}/inbox` : '/inbox';
 
   const unreadCount = unreadTotal;
@@ -231,14 +285,15 @@ export const NotificationsProvider = ({ children }) => {
   }, [unreadCount]);
 
   const value = useMemo(() => ({
-    items, unreadCount, role, popups, soundPill, inboxPath, branches,
+    items, unreadCount, role, popups, soundPill, inboxPath, branches, prefs, settings,
     visibleCount: POPUP_VISIBLE_MAX,
-    markRead, markAllRead, openItem, closePopup, reload: load,
-  }), [items, unreadCount, role, popups, soundPill, inboxPath, branches, markRead, markAllRead, openItem, closePopup, load]);
+    desktopPerm, askDesktop, allowDesktop, declineDesktop,
+    markRead, markUnread, markAllRead, openItem, closePopup, setPref, setSetting, reload: load,
+  }), [items, unreadCount, role, popups, soundPill, inboxPath, branches, prefs, settings, desktopPerm, askDesktop, allowDesktop, declineDesktop, markRead, markUnread, markAllRead, openItem, closePopup, setPref, setSetting, load]);
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
 };
 
 // Outside the provider (public pages, tests) the feed is simply empty.
-const EMPTY = { items: [], unreadCount: 0, role: null, popups: [], soundPill: false, inboxPath: '/inbox', branches: [], visibleCount: POPUP_VISIBLE_MAX, markRead() {}, markAllRead() {}, openItem() {}, closePopup() {}, reload() {} };
+const EMPTY = { items: [], unreadCount: 0, role: null, popups: [], soundPill: false, inboxPath: '/inbox', branches: [], visibleCount: POPUP_VISIBLE_MAX, prefs: {}, settings: DEFAULT_SETTINGS, desktopPerm: 'unsupported', askDesktop: false, allowDesktop() {}, declineDesktop() {}, markRead() {}, markUnread() {}, markAllRead() {}, openItem() {}, closePopup() {}, setPref() {}, setSetting() {}, reload() {} };
 export const useNotifications = () => useContext(NotificationsContext) || EMPTY;

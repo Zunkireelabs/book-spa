@@ -1,4 +1,4 @@
-import { getNav } from 'navigation/navRegistry';
+import { getNav, navPath } from 'navigation/navRegistry';
 import { getVisibleReports } from 'pages/branch-manager-dashboard/components/Reports/reportRegistry';
 import { getVisibleSettings } from 'pages/branch-manager-dashboard/components/Settings/settingsRegistry';
 import { AREAS, getVisibleTabs } from 'pages/branch-manager-dashboard/components/Area/areaTabsRegistry';
@@ -42,7 +42,7 @@ export const buildPages = ({ role, isOverall, staffLabelPlural, productLabel, en
   const add = (item) => { if (!seenViews.has(item.view)) { seenViews.add(item.view); pages.push(item); } };
 
   [...nav.sections.flatMap((s) => s.items), ...nav.footer].forEach((n) =>
-    add({ key: `page:${n.view}`, kind: 'page', label: n.label, icon: n.icon, view: n.view, href: viewHref(basePath, n.view), keywords: n.keywords }));
+    add({ key: `page:${n.view || n.id}`, kind: 'page', label: n.label, icon: n.icon, view: n.view || n.id, href: navPath(n, basePath), keywords: n.keywords }));
 
   // Report pages (staff have none), settings pages, and the tabs of each area ("Bookings · New booking")
   getVisibleReports(role).forEach((r) =>

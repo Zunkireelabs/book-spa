@@ -37,6 +37,7 @@ const AreaLayout = ({ title, menuStorageKey, menuTop = null, categories, activeV
               <button key={r.id} type="button" className={`${menuRow(activeView === r.view)} mb-0.5`} onClick={() => onNavigate(r.view)} aria-current={activeView === r.view ? 'page' : undefined}>
                 <Icon name={r.icon} size={15} className="flex-shrink-0" />
                 <span className="flex-1 truncate">{r.title}</span>
+                {r.count > 0 && <span className="text-[11px] text-text-tertiary tabular-nums">{r.count}</span>}
               </button>
             ))}
           </div>

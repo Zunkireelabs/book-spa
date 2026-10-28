@@ -61,7 +61,7 @@ const ProfileMenu = () => {
   const row = 'w-full h-9 flex items-center gap-3 px-2.5 rounded-spa text-left text-sm font-body text-text-primary hover:bg-black/[0.04] focus:bg-black/[0.04] focus:outline-none';
 
   return (
-    <div className="relative flex flex-shrink-0">
+    <div className="relative flex flex-shrink-0" data-profile-anchor>
       <button
         ref={triggerRef}
         type="button"

@@ -10,6 +10,7 @@ import { useAutoRefresh } from 'hooks/useAutoRefresh';
 import { fetchPendingApprovalCount } from 'services/api';
 import { useOptionalCommandPalette, SHORTCUT_LABEL } from 'components/CommandPalette/useCommandPalette';
 import { getNav, navPath, isNavItemActive } from 'navigation/navRegistry';
+import { useNotifications } from 'contexts/NotificationsContext';
 
 const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: propBranch, onCollapseChange, collapsed }) => {
   const location = useLocation();
@@ -17,6 +18,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const { profile, signOut } = useAuth();
   const { branchName: contextBranchName, branchId, isOverall } = useBranch();
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const { unreadCount: inboxUnread } = useNotifications();
   const { staffLabelPlural, productLabel } = useIndustry();
   const palette = useOptionalCommandPalette();
   const openPalette = palette?.openPalette;
@@ -95,7 +97,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   // The current `?view=`; the bare dashboard URL is the landing view: the dashboard for managers/admins, the calendar for staff.
   const onDashboard = location.pathname === basePath;
   const currentView = onDashboard ? (new URLSearchParams(location.search).get('view') || (userRole === 'staff' ? 'calendar' : 'dashboard')) : null;
-  const isItemActive = (item) => currentView !== null && isNavItemActive(item, currentView);
+  const isItemActive = (item) => (item.path ? location.pathname.endsWith(`/${item.path}`) : currentView !== null && isNavItemActive(item, currentView));
 
   // New Booking is no longer a nav item (it is a tab under Bookings); the mobile FAB remains.
   const showNewBookingFab = !isOverall;
@@ -110,7 +112,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
   const mobileOverflowItems = flatItems.filter((i) => !primaryIds.includes(i.id));
 
   const renderNavItem = (item) => {
-    const showBadge = item.id === 'dashboard' && pendingApprovals > 0;
+    const badgeCount = item.id === 'inbox' ? inboxUnread : (item.id === 'dashboard' ? pendingApprovals : 0);
+    const showBadge = badgeCount > 0;
     return (
       <Link
         key={item.id}
@@ -131,7 +134,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
         {!isCollapsed && <span className="flex-1">{item.label}</span>}
         {showBadge && !isCollapsed && (
           <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[11px] font-semibold text-white bg-error rounded-full">
-            {pendingApprovals > 99 ? '99+' : pendingApprovals}
+            {badgeCount > 99 ? '99+' : badgeCount}
           </span>
         )}
       </Link>
@@ -335,7 +338,8 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       >
         <div className="flex items-center gap-0.5">
           {mobilePrimaryItems.map((item) => {
-            const showBadge = item.id === 'dashboard' && pendingApprovals > 0;
+            const badgeCount = item.id === 'inbox' ? inboxUnread : (item.id === 'dashboard' ? pendingApprovals : 0);
+            const showBadge = badgeCount > 0;
             return (
               <Link
                 key={item.id}
@@ -353,7 +357,7 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
                 <span className="text-[10px] leading-none font-medium">{item.label}</span>
                 {showBadge && (
                   <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 text-[10px] font-semibold text-white bg-error rounded-full">
-                    {pendingApprovals > 9 ? '9+' : pendingApprovals}
+                    {badgeCount > 9 ? '9+' : badgeCount}
                   </span>
                 )}
               </Link>

@@ -24,6 +24,7 @@ const flagged = (enabled, items) => (enabled ? items : []);
 export const NAV_SECTIONS = [
   { id: 'main', label: null, items: [
     { id: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', view: 'dashboard', roles: ALL },
+    { id: 'inbox', label: 'Inbox', icon: 'Inbox', path: 'inbox', keywords: 'notifications alerts approvals', roles: ALL },
     { id: 'calendar', label: 'Calendar', icon: 'CalendarDays', view: 'calendar', keywords: 'schedule diary bookings', roles: ALL },
     { id: 'reports', label: 'Reports', icon: 'BarChart3', view: 'all-reports', keywords: 'analytics insights', roles: STAFF_UP, isActiveView: isReportView },
   ] },
@@ -66,7 +67,8 @@ export const NAV_FOOTER = [
   { id: 'settings', label: 'Settings', icon: 'Settings', view: 'settings', keywords: 'preferences setup configuration', roles: STAFF_UP, isActiveView: isSettingsView },
 ];
 
-export const navPath = (item, basePath) => `${basePath}?view=${item.view}`;
+// Most pages are `?view=` tabs of the dashboard route; a few (the Inbox) are routes of their own (`path`).
+export const navPath = (item, basePath) => (item.path ? `${basePath.replace(/\/dashboard$/, '')}/${item.path}` : `${basePath}?view=${item.view}`);
 
 // Is `item` the current page? `view` is the `?view=` value, with the bare-URL landing already resolved by the caller.
 export const isNavItemActive = (item, view) =>

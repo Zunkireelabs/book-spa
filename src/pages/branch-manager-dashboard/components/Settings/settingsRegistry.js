@@ -29,6 +29,7 @@ export const SETTINGS = [
   { id: 'provider-profile', view: 'provider-profile', title: 'Provider Profile', description: 'Your spa profile and images shown to customers.', icon: 'Image', category: 'booking', roles: ['admin'], overallHidden: true, keywords: 'logo photos about' },
 
   { id: 'attendance-settings', view: 'attendance-settings', title: 'Attendance', description: 'How this branch tracks attendance.', icon: 'Clock', category: 'booking', roles: MGR_ADMIN, overallHidden: true, keywords: 'late grace check out shift' },
+  { id: 'notifications', view: 'notifications', title: 'Notifications', description: 'What interrupts you: pop-ups, sound and desktop alerts.', icon: 'Bell', category: 'account', roles: STAFF_UP, keywords: 'alerts pop-up sound inbox' },
   { id: 'audit', view: 'audit', title: 'Audit Log', description: 'Every change made in this spa, and who made it.', icon: 'History', category: 'account', roles: STAFF_UP, keywords: 'history log changes who' },
 ];
 

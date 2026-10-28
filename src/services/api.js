@@ -3695,7 +3695,7 @@ export async function fetchNotificationPrefs() {
     if (authError) return { data: null, error: authError };
     const [prefs, settings] = await Promise.all([
       supabase.from('notification_prefs').select('category, popup, sound').eq('user_id', user.id),
-      supabase.from('notification_settings').select('sound_enabled, quiet_outside_hours').eq('user_id', user.id).maybeSingle(),
+      supabase.from('notification_settings').select('sound_enabled, sound_choice, quiet_outside_hours, heard_branch_ids').eq('user_id', user.id).maybeSingle(),
     ]);
     if (prefs.error) throw prefs.error;
     if (settings.error) throw settings.error;
@@ -3742,6 +3742,120 @@ export async function markAllNotificationsRead() {
     return { data: { success: true }, error: null };
   } catch (error) {
     console.error('[API] markAllNotificationsRead error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ── Inbox (ZNLY-135 V35b). `filter` comes from buildInboxFilter (src/lib/notificationRules.js). ──────────────────────────
+const applyInboxFilter = (q, f) => {
+  let query = q.in('category', f.categories).gte('created_at', f.since);
+  if (f.unreadOnly) query = query.eq('read', false);
+  if (f.branchId) query = query.eq('branch_id', f.branchId);
+  if (f.search) query = query.or(`title.ilike.%${f.search}%,body.ilike.%${f.search}%`);
+  return query;
+};
+
+/** One page of the Inbox, newest first; pass the last row's created_at as filter.before for the next page. */
+export async function fetchInbox(filter) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    let q = applyInboxFilter(
+      supabase.from('notifications').select('id, type, title, body, booking_id, branch_id, category, read, created_at').eq('user_id', user.id),
+      filter,
+    );
+    if (filter.before) q = q.lt('created_at', filter.before);
+    const { data, error } = await q.order('created_at', { ascending: false }).limit(filter.limit);
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchInbox error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Unread per category (rail counts) + how many unread discount requests wait for the approver. */
+export async function fetchInboxCounts() {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.from('notifications').select('category, type').eq('user_id', user.id).eq('read', false).limit(5000);
+    if (error) throw error;
+    const byCategory = {};
+    let approvalRequests = 0;
+    (data || []).forEach((r) => {
+      byCategory[r.category] = (byCategory[r.category] || 0) + 1;
+      if (r.type === 'discount_request') approvalRequests += 1;
+    });
+    return { data: { byCategory, approvalRequests }, error: null };
+  } catch (error) {
+    console.error('[API] fetchInboxCounts error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** When the newest notification arrived (the "all caught up" line). */
+export async function fetchLastNotificationAt() {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { data, error } = await supabase.from('notifications').select('created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    return { data: data?.created_at || null, error: null };
+  } catch (error) {
+    console.error('[API] fetchLastNotificationAt error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function markNotificationUnread(notificationId) {
+  try {
+    const { error } = await supabase.from('notifications').update({ read: false }).eq('id', notificationId);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] markNotificationUnread error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** "Mark all read" for the current Inbox filter (every page of it, not only what is loaded). */
+export async function markInboxFilterRead(filter) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { error } = await applyInboxFilter(supabase.from('notifications').update({ read: true }).eq('user_id', user.id), { ...filter, unreadOnly: true });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] markInboxFilterRead error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function saveNotificationPref(category, { popup, sound }) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { error } = await supabase.from('notification_prefs').upsert({ user_id: user.id, category, popup, sound }, { onConflict: 'user_id,category' });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] saveNotificationPref error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/** Global switches: { sound_enabled?, sound_choice?, quiet_outside_hours?, heard_branch_ids? }. */
+export async function saveNotificationSettings(patch) {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { error } = await supabase.from('notification_settings').upsert({ user_id: user.id, ...patch }, { onConflict: 'user_id' });
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] saveNotificationSettings error:', error.message);
     return { data: null, error };
   }
 }

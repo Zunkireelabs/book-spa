@@ -29,7 +29,7 @@ export const DEFAULT_PREFS = {
   stock: { popup: false, sound: false },
   guests: { popup: false, sound: false },
 };
-export const DEFAULT_SETTINGS = { sound_enabled: true, quiet_outside_hours: true };
+export const DEFAULT_SETTINGS = { sound_enabled: true, sound_choice: 'chime', quiet_outside_hours: true, heard_branch_ids: null };
 
 // Bell tabs: categories this role can receive (front desk: bookings + answers to their own discount requests).
 export const categoriesForRole = (role) =>
@@ -102,6 +102,9 @@ export function isWithinOpeningHours(branch, now = new Date()) {
 
 export const canPlaySound = (lastAt, now = Date.now()) => !lastAt || now - lastAt >= SOUND_MIN_GAP_MS;
 
+/** "Branches I hear from" (admins): null/empty = every branch. It only gates pop-ups and sound, never the Inbox. Unscoped items always pass. */
+export const heardBranch = (heardIds, branchId) => !heardIds || heardIds.length === 0 || !branchId || heardIds.includes(branchId);
+
 /**
  * Should a LIVE insert pop up / chime? (Callers only pass INSERTs that arrive live, never the page-load fetch.)
  * row: { category, actorId?, read }.  Returns { popup, sound }; sound here is the pref gate only, the 10 s rate
@@ -112,6 +115,7 @@ export function evaluateLiveEvent({ row, userId, prefs, settings, branch, now = 
   if (!row || row.read) return none;
   if (row.actorId && row.actorId === userId) return none; // never for the user's own actions
   const cfg = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+  if (!heardBranch(cfg.heard_branch_ids, row.branchId)) return none;
   if (cfg.quiet_outside_hours && !isWithinOpeningHours(branch, now)) return none;
   const pref = prefFor(prefs, row.category);
   return { popup: !!pref.popup, sound: !!pref.sound && !!cfg.sound_enabled };
@@ -120,3 +124,57 @@ export function evaluateLiveEvent({ row, userId, prefs, settings, branch, now = 
 /** 5+ arrivals within a minute collapse into one card. */
 export const isBurst = (arrivalTimes, now = Date.now()) =>
   arrivalTimes.filter((t) => now - t <= BURST_WINDOW_MS).length >= BURST_COUNT;
+
+// ── Inbox (ZNLY-135 V35b) ────────────────────────────────────────────────────────────────────────────────────────────
+export const INBOX_PAGE_SIZE = 40;
+export const INBOX_WINDOW_DAYS = 90;
+
+/** Escape the characters that are special in a PostgREST ilike / or() value. */
+export const escapeSearch = (q) => String(q || '').trim().replace(/[%_,()\\]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * The Inbox query as plain data, so the page, the API helper and the tests agree on it:
+ * { unreadOnly, category (null = all), branchId, search, since (ISO), before (cursor: created_at of the last row), limit }.
+ * `allowed` = categories this role may see; a category outside it is ignored (falls back to all allowed).
+ */
+export function buildInboxFilter({ unreadOnly = true, category = null, branchId = null, search = '', before = null, allowed = CATEGORIES, now = new Date(), limit = INBOX_PAGE_SIZE } = {}) {
+  const cat = category && allowed.includes(category) ? category : null;
+  return {
+    unreadOnly: !!unreadOnly,
+    categories: cat ? [cat] : [...allowed],
+    branchId: branchId || null,
+    search: escapeSearch(search),
+    since: new Date(now.getTime() - INBOX_WINDOW_DAYS * 86400000).toISOString(),
+    before: before || null,
+    limit,
+  };
+}
+
+/** Nepal-time day key (YYYY-MM-DD) for grouping. */
+const dayKey = (v, tz = 'Asia/Kathmandu') => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(v));
+
+/** "Today" / "Yesterday" / "Mon 26 Oct" for an item's created_at. */
+export function dayGroupLabel(createdAt, now = new Date()) {
+  const k = dayKey(createdAt);
+  if (k === dayKey(now)) return 'Today';
+  if (k === dayKey(new Date(now.getTime() - 86400000))) return 'Yesterday';
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(createdAt));
+}
+
+/** Newest-first rows -> [{ label, items }] (never merges items, unlike the bell). */
+export function groupByDayLabel(items, now = new Date()) {
+  const out = [];
+  for (const it of items) {
+    const label = dayGroupLabel(it.createdAt, now);
+    const last = out[out.length - 1];
+    if (last && last.label === label) last.items.push(it); else out.push({ label, items: [it] });
+  }
+  return out;
+}
+
+/** Header line: "12 unread · 2 need your approval" (approvals part only when a manager/admin can approve). */
+export function inboxHeadline(unread, approvalsPending, canApprove) {
+  const parts = [`${unread} unread`];
+  if (canApprove && approvalsPending > 0) parts.push(`${approvalsPending} need your approval`);
+  return parts.join(' · ');
+}

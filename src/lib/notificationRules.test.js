@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   categoryOf, groupNotifications, groupUnread, badgeText, isWithinOpeningHours, canPlaySound, evaluateLiveEvent,
-  isBurst, categoriesForRole, DEFAULT_PREFS,
+  isBurst, categoriesForRole, DEFAULT_PREFS, heardBranch, buildInboxFilter, escapeSearch, dayGroupLabel, groupByDayLabel, inboxHeadline,
 } from './notificationRules';
 
 const at = (min) => new Date(Date.UTC(2026, 9, 28, 6, 0, 0) - min * 60000).toISOString();
@@ -97,5 +97,63 @@ describe('rate limit + burst + roles', () => {
     expect(categoriesForRole('staff')).toEqual(['bookings', 'approvals']);
     expect(categoriesForRole('manager')).toHaveLength(5);
     expect(DEFAULT_PREFS.approvals.sound).toBe(true);
+  });
+});
+
+describe('branches I hear from', () => {
+  it('null / empty list = every branch; unscoped items always pass', () => {
+    expect(heardBranch(null, 'L')).toBe(true);
+    expect(heardBranch([], 'L')).toBe(true);
+    expect(heardBranch(['S'], null)).toBe(true);
+  });
+  it('a list filters by branch', () => {
+    expect(heardBranch(['S'], 'L')).toBe(false);
+    expect(heardBranch(['S', 'L'], 'L')).toBe(true);
+  });
+  it('silences pop-up and sound for other branches, never for the chosen one', () => {
+    const row = { category: 'bookings', branchId: 'L', read: false };
+    const base = { row, userId: 'u', prefs: {}, branch: null, now: new Date() };
+    expect(evaluateLiveEvent({ ...base, settings: { heard_branch_ids: ['S'], quiet_outside_hours: false } })).toEqual({ popup: false, sound: false });
+    expect(evaluateLiveEvent({ ...base, settings: { heard_branch_ids: ['L'], quiet_outside_hours: false } })).toEqual({ popup: true, sound: true });
+  });
+});
+
+describe('buildInboxFilter', () => {
+  const now = new Date('2026-10-28T06:00:00Z');
+  it('defaults to unread, every allowed category, a 90-day window', () => {
+    const f = buildInboxFilter({ allowed: ['bookings', 'approvals'], now });
+    expect(f.unreadOnly).toBe(true);
+    expect(f.categories).toEqual(['bookings', 'approvals']);
+    expect(f.since).toBe(new Date('2026-07-30T06:00:00Z').toISOString());
+  });
+  it('one category from ?c=, ignoring one the role cannot receive', () => {
+    expect(buildInboxFilter({ category: 'approvals', now }).categories).toEqual(['approvals']);
+    expect(buildInboxFilter({ category: 'stock', allowed: ['bookings', 'approvals'], now }).categories).toEqual(['bookings', 'approvals']);
+  });
+  it('carries branch, cursor and a sanitised search', () => {
+    const f = buildInboxFilter({ branchId: 'L', before: '2026-10-28T05:00:00Z', search: ' Sita,(G)% ', unreadOnly: false, now });
+    expect(f).toMatchObject({ branchId: 'L', before: '2026-10-28T05:00:00Z', search: 'Sita G', unreadOnly: false });
+  });
+  it('escapeSearch strips filter syntax', () => expect(escapeSearch('a,b)(c_%')).toBe('a b c'));
+});
+
+describe('inbox day groups + headline', () => {
+  const now = new Date('2026-10-28T10:00:00Z'); // 15:45 in Nepal
+  it('labels Today / Yesterday / a date by Nepal day', () => {
+    expect(dayGroupLabel('2026-10-28T09:00:00Z', now)).toBe('Today');
+    expect(dayGroupLabel('2026-10-27T10:00:00Z', now)).toBe('Yesterday');
+    expect(dayGroupLabel('2026-10-20T10:00:00Z', now)).toBe('Tue 20 Oct');
+    // 19:00Z on the 27th is already 00:45 on the 28th in Nepal
+    expect(dayGroupLabel('2026-10-27T19:00:00Z', now)).toBe('Today');
+  });
+  it('never merges items', () => {
+    const items = [{ id: 1, createdAt: '2026-10-28T09:00:00Z' }, { id: 2, createdAt: '2026-10-28T08:59:00Z' }, { id: 3, createdAt: '2026-10-27T09:00:00Z' }];
+    const g = groupByDayLabel(items, now);
+    expect(g.map((x) => [x.label, x.items.length])).toEqual([['Today', 2], ['Yesterday', 1]]);
+  });
+  it('headline mentions approvals only for approvers', () => {
+    expect(inboxHeadline(12, 2, true)).toBe('12 unread · 2 need your approval');
+    expect(inboxHeadline(12, 2, false)).toBe('12 unread');
+    expect(inboxHeadline(0, 0, true)).toBe('0 unread');
   });
 });

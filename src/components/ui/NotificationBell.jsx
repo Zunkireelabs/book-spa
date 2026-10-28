@@ -110,13 +110,17 @@ const NotificationBell = ({
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState('all');
   const [expanded, setExpanded] = useState(() => new Set());
-  const [coords, setCoords] = useState({ top: 0, right: 0 });
+  const [coords, setCoords] = useState({ top: 0, left: 8, right: 8 });
   const btnRef = useRef(null);
   const panelRef = useRef(null);
 
   const updateCoords = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setCoords({ top: r.bottom + 12, right: window.innerWidth - r.right });
+    if (!r) return;
+    // Left edge stays where the old 440px panel started; the right edge lines up with the profile menu (the avatar's right edge).
+    const avatar = document.querySelector('[data-profile-anchor]')?.getBoundingClientRect();
+    const rightEdge = Math.min(avatar ? avatar.right : r.right, window.innerWidth - 8);
+    setCoords({ top: r.bottom + 12, left: Math.max(8, Math.min(r.right - 440, rightEdge - 320)), right: window.innerWidth - rightEdge });
   }, []);
 
   const toggle = () => {
@@ -201,14 +205,19 @@ const NotificationBell = ({
       {open && createPortal(
         <div
           ref={panelRef}
-          style={{ position: 'fixed', top: coords.top, right: coords.right }}
-          className="w-[440px] max-w-[calc(100vw-16px)] bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden"
+          style={{ position: 'fixed', top: coords.top, left: coords.left, right: coords.right, maxHeight: `calc(100vh - ${coords.top}px - 64px)` }}
+          className="flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 z-notification overflow-hidden"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
-            {unreadCount > 0 && (
-              <button onClick={onMarkAllRead} className="text-xs text-primary hover:underline">Mark all read</button>
-            )}
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && (
+                <button onClick={onMarkAllRead} className="text-xs text-primary hover:underline">Mark all read</button>
+              )}
+              <Link to={`${inboxPath}?c=settings`} onClick={() => setOpen(false)} aria-label="Notification settings" title="Notification settings" className="text-gray-400 hover:text-gray-700">
+                <Icon name="Settings" size={15} />
+              </Link>
+            </div>
           </div>
 
           <div className="flex gap-0.5 px-2 pt-2 border-b border-gray-100 overflow-x-auto" role="tablist">
@@ -230,7 +239,7 @@ const NotificationBell = ({
             })}
           </div>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {entries.length === 0 ? (
               <div className="px-4 py-10 text-center">
                 <Icon name="BellOff" size={28} className="text-gray-300 mx-auto mb-2" />
@@ -248,7 +257,7 @@ const NotificationBell = ({
 
           <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
             <span>{shownUnread} of {total} unread shown</span>
-            <Link to={inboxPath} onClick={() => setOpen(false)} className="text-primary font-body-medium hover:underline">Open Inbox →</Link>
+            <Link to={tab === 'all' ? inboxPath : `${inboxPath}?c=${tab}`} onClick={() => setOpen(false)} className="text-primary font-body-medium hover:underline">Open Inbox →</Link>
           </div>
         </div>,
         document.body
