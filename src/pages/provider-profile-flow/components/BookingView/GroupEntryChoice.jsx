@@ -34,7 +34,7 @@ const GroupEntryChoice = ({ onChooseSolo, onChooseGroup, onClose }) => {
 
   return createPortal(
     <div className="zn-scope fixed inset-0 z-modal-overlay flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[var(--zn-overlay)]" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--zn-overlay)] backdrop-blur-sm" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
