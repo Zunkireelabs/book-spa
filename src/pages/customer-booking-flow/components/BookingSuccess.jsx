@@ -105,7 +105,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
                   {services.length > 1 ? 'Services' : 'Service'}
                 </span>
                 {services.map((s, i) => (
-                  <p key={s?.id ?? i} className="font-body font-body-normal text-sm text-text-primary">
+                  <p key={`${s?.id ?? 'svc'}-${i}`} className="font-body font-body-normal text-sm text-text-primary">
                     {s?.name}
                   </p>
                 ))}
