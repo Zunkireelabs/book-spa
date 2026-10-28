@@ -3,7 +3,7 @@
 // two stay consistent about what "available" means (room capacity + gender headcount).
 
 export const START_HOUR = 10;
-export const END_HOUR = 20;
+export const END_HOUR = 18;
 
 export function getNepalNow() {
   const now = new Date();
