@@ -5939,6 +5939,74 @@ export async function createBookingGroup({ services, date, startTime, therapistI
   return { data: { bookings: created, bookingGroupId }, error: null };
 }
 
+// Group booking (multiple PEOPLE at one shared time, Fresha-style) — distinct from
+// createBookingGroup above, which sequences one person through several back-to-back
+// services. Here every row shares the same date/startTime; the rollback mechanics are
+// copied from createBookingGroup's since both serve the same anonymous-customer RLS
+// shape (no anon SELECT/UPDATE on bookings, so compensation goes through the same
+// narrow public_cancel_booking_group RPC).
+export async function submitGroupBooking({ branchId, orgSlug, date, startTime, genderPreference, specialRequests, leadContact, people, createBookingFn = createBooking }) {
+  const rowArgs = (person) => ({
+    branchId,
+    orgSlug,
+    date,
+    startTime,
+    genderPreference,
+    specialRequests,
+    serviceId: person.service.id,
+    therapistId: person.therapistId,
+    customerName: person.isLead ? leadContact.name : (person.name || person.label),
+    customerEmail: leadContact.email,
+    customerPhone: leadContact.phone,
+    customerGender: person.isLead ? leadContact.gender : null,
+  });
+
+  // Single person: no group, no compensation path — behave exactly like a plain booking.
+  if (people.length === 1) {
+    const { data, error } = await createBookingFn(rowArgs(people[0]));
+    return { data: data ? { bookings: [data] } : null, error };
+  }
+
+  const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const created = [];
+  for (const person of people) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await createBookingFn({ ...rowArgs(person), bookingGroupId });
+
+    if (error) {
+      if (created.length > 0) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const { error: rollbackError } = await supabase
+            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+          if (rollbackError) throw rollbackError;
+        } catch (cancelError) {
+          console.error('[API] submitGroupBooking rollback FAILED for group', bookingGroupId, cancelError);
+          return {
+            data: null,
+            error: {
+              code: 'BOOKING_GROUP_PARTIAL',
+              message: `${person.label || person.name || 'A person in your group'} could not be booked, and we could not automatically release the others. Please contact the branch to confirm what is reserved.`,
+            },
+          };
+        }
+      }
+      return {
+        data: null,
+        error: {
+          ...error,
+          message: `${error.message || 'could not be booked.'}${created.length > 0 ? ' The rest of your group was released — please pick another time.' : ''}`,
+        },
+      };
+    }
+    created.push(data);
+  }
+
+  return { data: { bookings: created }, error: null };
+}
 
 // (booking-details-assignment-modal, calendar's Rebook-reuse-as-reschedule
 // branch), which intentionally creates a fresh booking row and cancels the
