@@ -72,10 +72,18 @@ const GuestsStep = ({ people, services, activeGuestId, onSelectActiveGuest, onSe
           <h2 className="font-medium text-base text-[var(--zn-foreground)] mb-3">
             Choose a service for {activePerson.label}
           </h2>
+          {/* GroupBookingView's own header is a plain non-sticky back/X row (unlike the
+              real, fixed CustomerHeader the profile page renders above ServicesSection's
+              usual instance) -- stickyTop="0" so the search+pill block sits flush at the
+              very top here instead of leaving a 65px gap with the previous item's tail
+              poking through above it. scrollSpyOffset drops by that same 65px so category
+              highlighting still triggers at the right scroll position. */}
           <ServicesSection
             services={services}
             selectedServices={activePerson.service ? [activePerson.service] : []}
             onServiceToggle={(service) => onServiceChosenForActiveGuest(service)}
+            stickyTop="0"
+            scrollSpyOffset={181}
           />
         </div>
       )}
