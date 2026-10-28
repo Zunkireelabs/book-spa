@@ -30,6 +30,22 @@ export function transferShadeSegments(col, day, { openMin, closeMin, fmt = (t) =
     return clip(start && day === start.date ? toMin(start.time) : openMin, day === end.date ? toMin(end.time) : closeMin, place);
   }
   const place = col.transferFromBranch || col.fromBranch;
+  if (col.visitWindows?.length > 1) {
+    // Two or more visits: shade whatever is outside the UNION of the visit windows that day (the gap between visits included).
+    const wins = col.visitWindows.map((w) => [toKathmanduParts(w.startAt), toKathmanduParts(w.endAt)])
+      .filter(([a, b]) => a && b && a.date <= day && b.date >= day)
+      .map(([a, b]) => [a.date < day ? 0 : toMin(a.time), b.date > day ? 1440 : toMin(b.time)])
+      .sort((x, y) => x[0] - y[0]);
+    if (col.visitWindows.every((w) => (toKathmanduParts(w.endAt)?.date ?? '9') < day)) return []; // every visit is over
+    const out = [];
+    let cursor = 0;
+    for (const [a, b] of wins) {
+      if (a > cursor) out.push(...clip(cursor, a, place));
+      cursor = Math.max(cursor, b);
+    }
+    if (cursor < 1440) out.push(...clip(cursor, 1440, place));
+    return out;
+  }
   if (!end) return [];
   if (start && day < start.date) return clip(openMin, closeMin, place);   // before the visit starts
   if (day > end.date) return [];                                          // visit over

@@ -3,7 +3,7 @@
 // admin and admin_viewer (Payroll's rule: admin edits, admin_viewer reads; managers and staff NEVER see pay); for everyone else they
 // are null (and RLS / get_therapist_activity enforce it a second time on the server).
 import { supabase } from '../lib/supabase';
-import { computeProductCommissionBase, fetchClosedDateRanges } from './api';
+import { computeProductCommissionBase, fetchClosedDateRanges, fetchHomePayrollBookings } from './api';
 import { payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, totalCommissionEarned } from './payrollCalc';
 import { dbDowOfDate, effectiveHoursForDate, hoursFromShiftRow, timeToMinutes, DB_DOW_LABELS } from '../utils/staffDay';
 import { nextWorkingDay, isClosedDate } from '../utils/todayStatusLine';
@@ -219,17 +219,14 @@ export async function fetchTherapistEarnings({ therapistId, branchId, periodMont
     const { firstDay, lastDay } = payrollMonthBounds(periodMonth);
 
     // The branch's active staff, as Payroll sees them (names drive the referral match).
-    const [staffRes, bookingsRes, compRes, runItemRes] = await Promise.all([
+    const [staffRes, compRes, runItemRes] = await Promise.all([
       supabase.from('therapists').select('id, name').eq('is_active', true).eq('branch_id', branchId),
-      supabase.from('bookings')
-        .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value')
-        .eq('status', 'Completed').eq('payment_status', 'paid').eq('branch_id', branchId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('staff_compensation').select('monthly_salary, commission_rate, product_commission_rate').eq('therapist_id', therapistId).maybeSingle(),
       supabase.from('payroll_items')
         .select('net_pay, payroll_runs!inner(period_month, status, branch_id)')
         .eq('therapist_id', therapistId).order('created_at', { ascending: false }).limit(5),
     ]);
-    for (const r of [staffRes, bookingsRes, compRes, runItemRes]) if (r.error) throw r.error;
+    for (const r of [staffRes, compRes, runItemRes]) if (r.error) throw r.error;
 
     let staff = staffRes.data || [];
     if (!staff.some((t) => t.id === therapistId)) {
@@ -237,7 +234,9 @@ export async function fetchTherapistEarnings({ therapistId, branchId, periodMont
       if (error) throw error;
       staff = [...staff, me];
     }
-    const { serviceRevenueMap, referralCommissionMap } = tallyBookingEarnings({ bookings: bookingsRes.data, therapists: staff });
+    // Same rule as Payroll (ZNLY-125): bookings whose therapist's home on the booking's date was this branch, wherever they happened.
+    const homeBookings = await fetchHomePayrollBookings({ branchId, firstDay, lastDay });
+    const { serviceRevenueMap, referralCommissionMap } = tallyBookingEarnings({ bookings: homeBookings, therapists: staff });
     const productPay = await computeProductCommissionBase({ branchId, periodMonth, therapistIds: [therapistId] });
     const parts = computeCommissionParts({
       comp: compRes.data,

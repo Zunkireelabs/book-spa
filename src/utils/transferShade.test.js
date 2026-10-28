@@ -49,3 +49,17 @@ describe('transferShadeSegments', () => {
     expect(dedupeAgainst(segs, [])).toHaveLength(1);
   });
 });
+
+describe('two visits in one day (ZNLY-113)', () => {
+  const two = { ...vis, visitWindows: [
+    { startAt: NP('2026-10-27', '12:00'), endAt: NP('2026-10-27', '15:30') },
+    { startAt: NP('2026-10-27', '18:55'), endAt: NP('2026-10-27', '21:55') },
+  ] };
+  it('shades before, between and after the visits, never inside either', () => {
+    expect(transferShadeSegments(two, '2026-10-27', { openMin: 540, closeMin: 1320 }).map((s) => [s.startMin, s.endMin]))
+      .toEqual([[540, 720], [930, 1135], [1315, 1320]]);
+  });
+  it('nothing once both visits are over', () => {
+    expect(transferShadeSegments(two, '2026-10-28', R)).toEqual([]);
+  });
+});

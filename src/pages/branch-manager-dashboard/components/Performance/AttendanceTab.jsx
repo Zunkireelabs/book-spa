@@ -127,6 +127,7 @@ const AttendanceTab = ({ therapistId, branchId, range }) => {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="font-data font-data-normal text-sm text-text-secondary">{row.checkIn || '—'}</span>
+                    {row.workedAtNote && <div className="text-[11px] text-text-tertiary">{row.workedAtNote}</div>}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="font-data font-data-normal text-sm text-text-secondary">{row.checkOut || '—'}</span>
@@ -157,7 +158,7 @@ const AttendanceTab = ({ therapistId, branchId, range }) => {
               </div>
               <div className="flex items-center gap-3 text-xs text-text-tertiary">
                 <span>Sched {row.scheduledHours}h</span>
-                <span>{row.checkIn || '—'} → {row.checkOut || '—'}</span>
+                <span>{row.checkIn || '—'} → {row.checkOut || '—'}{row.workedAtNote ? ` · ${row.workedAtNote}` : ''}</span>
                 <span>{row.workedHours != null ? `${row.workedHours}h worked` : '—'}</span>
               </div>
             </div>

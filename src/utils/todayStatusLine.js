@@ -18,6 +18,10 @@ export const STATUS_DOT_COLOR = { grey: '#B8B8BD', amber: '#F59E0B', green: '#2D
 
 const hhmm = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const range = (a, b) => `${a}–${b}`;
+const h12 = (min) => { const h = Math.floor(min / 60) % 24; return `${h % 12 === 0 ? 12 : h % 12}:${String(min % 60).padStart(2, '0')}`; };
+const ampm = (min) => (Math.floor(min / 60) % 24 >= 12 ? 'pm' : 'am');
+/** "6:55 – 9:55 pm" (am/pm shown once when both ends agree). */
+const range12 = (a, b) => (ampm(a) === ampm(b) ? `${h12(a)} – ${h12(b)} ${ampm(b)}` : `${h12(a)} ${ampm(a)} – ${h12(b)} ${ampm(b)}`);
 const weekdayOf = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   return WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -80,6 +84,25 @@ export function todayStatusLine({ hours, attendance = null, nowMin = 0, branchCl
   if (half) {
     const r = range(hhmm(half.start_min), hhmm(Math.min(half.end_min, 1439)));
     return line('half-day', 8, ['Half day', `off ${r}`], `Away ${r}`, 'purple', 'leave');
+  }
+
+  // Visitor today (ZNLY-113 A+): the shift IS the visit window(s), i.e. the open hours minus the OTHER_BRANCH stretches.
+  if (h.source === 'window' && start != null && end != null) {
+    const gaps = off.filter((o) => o.code === 'OTHER_BRANCH').sort((a, b) => a.start_min - b.start_min);
+    const wins = [];
+    let cursor = start;
+    for (const g of gaps) {
+      if (g.start_min > cursor) wins.push([cursor, Math.min(g.start_min, end)]);
+      cursor = Math.max(cursor, g.end_min);
+    }
+    if (cursor < end) wins.push([cursor, end]);
+    const spans = wins.filter(([a, z]) => z > a);
+    const cur = spans.find(([a, z]) => a <= nowMin && nowMin < z);
+    const next = spans.find(([a]) => a > nowMin);
+    const text = spans.map(([a, z]) => range12(a, z)).join(', ');
+    if (cur) return line('visiting', checkedIn ? 3 : 1, [checkedIn ? `Checked in ${checkedIn}` : null, `Here ${range12(cur[0], cur[1])}`], `Here ${range12(cur[0], cur[1])}`, 'green', 'shift');
+    if (next) return line('visiting-upcoming', 1, [`Here ${range12(next[0], next[1])}`], `Here ${h12(next[0])} ${ampm(next[0])}`, 'grey', 'shift');
+    return line('finished', 5, [text ? `Visit ended (${text})` : 'Visit ended'], 'Finished', 'grey', 'off');
   }
 
   if (noHours) {

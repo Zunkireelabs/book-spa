@@ -87,7 +87,7 @@ const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
  */
 export function hoursFromShiftRow(row) {
   if (!row) return { source: 'none', startTime: null, endTime: null, isDayOff: false, breaks: [], openNoHours: false, off: [], missing: true };
-  const source = row.source === 'roster' ? 'override' : row.source === 'weekly' ? 'weekly' : 'none';
+  const source = row.source === 'roster' ? 'override' : row.source === 'weekly' ? 'weekly' : row.source === 'window' ? 'window' : 'none';
   const works = row.works === true && !!row.start_time;
   return {
     source,

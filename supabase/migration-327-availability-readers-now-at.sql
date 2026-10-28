@@ -122,19 +122,23 @@ BEGIN
   -- ZNLY-113: away from home, they are bookable here only inside a window into this branch. Mark every other minute.
   IF v_branch IS DISTINCT FROM (SELECT t.branch_id FROM public.therapists t WHERE t.id = p_therapist_id) THEN
     RETURN QUERY
-    WITH win AS (
-      SELECT min(w.ws) AS a, max(w.we) AS b
+    -- Every minute of the day OUTSIDE the union of this branch's windows (two visits in one day leave the gap between them marked too).
+    WITH wins AS (
+      SELECT GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (w.ws - v_day0)) / 60)::int) AS s,
+             CASE WHEN w.we = 'infinity' THEN 1440 ELSE LEAST(1440, CEIL(EXTRACT(EPOCH FROM (w.we - v_day0)) / 60)::int) END AS e
         FROM public._staff_transfer_windows(ARRAY[p_therapist_id]) w
        WHERE w.to_branch_id = v_branch AND NOT w.is_return_leg AND NOT w.is_permanent
          AND w.ws < v_day1 AND w.we > v_day0
+    ), ordered AS (
+      SELECT o.s, COALESCE(max(o.e) OVER (ORDER BY o.s, o.e ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS prev_e FROM wins o
+    ), gaps AS (
+      SELECT ordered.prev_e AS s, ordered.s AS e FROM ordered WHERE ordered.s > ordered.prev_e
+      UNION ALL
+      SELECT COALESCE((SELECT max(wins.e) FROM wins), 0), 1440
     ), home AS (SELECT (SELECT name FROM public.branches WHERE id = t.branch_id) AS n FROM public.therapists t WHERE t.id = p_therapist_id)
-    SELECT x.s, x.e, 'OTHER_BRANCH'::text, 'other_branch'::text, (SELECT n FROM home)
-      FROM win,
-      LATERAL (VALUES
-        (0, CASE WHEN win.a IS NULL THEN 1440 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (win.a - v_day0)) / 60)::int) END),
-        (CASE WHEN win.b IS NULL OR win.b = 'infinity' THEN 1440 ELSE LEAST(1440, CEIL(EXTRACT(EPOCH FROM (win.b - v_day0)) / 60)::int) END, 1440)
-      ) AS x(s, e)
-     WHERE x.e > x.s;
+    SELECT g.s, g.e, 'OTHER_BRANCH'::text, 'other_branch'::text, (SELECT n FROM home)
+      FROM gaps g
+     WHERE g.e > g.s;
   END IF;
 
   -- overlapping bookings: own, companion (junction) and combo items

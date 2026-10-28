@@ -97,3 +97,37 @@ export function computeNetPay({ salary, deduction = 0, svcCommission = 0, refCom
 export function totalCommissionEarned(parts) {
   return round2(parts.svcCommission + parts.refCommission + parts.productEarned - parts.productDeduction);
 }
+
+/**
+ * Home-branch rule (ZNLY-118): a person is paid by their HOME branch for every booking they did in the month, wherever it happened.
+ * bookings: [{ therapist_id, final_amount, branch_id, branch_name? }] for the home therapists; homeBranchId: the branch paying them.
+ * Returns { [therapistId]: { atHome, lent: { [branchId]: { branchName, revenue } }, lentTotal } }. Depends only on the rows,
+ * never on when payroll runs.
+ */
+export function splitServiceRevenueByBranch({ bookings, homeBranchId, therapistIds }) {
+  const out = {};
+  for (const id of therapistIds) out[id] = { atHome: 0, lent: {}, lentTotal: 0 };
+  const r2 = (n) => Math.round(n * 100) / 100;
+  for (const b of (bookings || [])) {
+    const row = out[b.therapist_id];
+    if (!row) continue;
+    const amt = Number(b.final_amount);
+    if (b.branch_id === homeBranchId) {
+      row.atHome = r2(row.atHome + amt);
+    } else {
+      const l = row.lent[b.branch_id] || { branchName: b.branch_name || '', revenue: 0 };
+      l.revenue = r2(l.revenue + amt);
+      row.lent[b.branch_id] = l;
+      row.lentTotal = r2(row.lentTotal + amt);
+    }
+  }
+  return out;
+}
+
+/** The receiving branch's one help line, or null when no visitor worked here. visitors/revenue come from payroll_visitor_revenue. */
+export function visitorPayrollHelpLine({ visitors, revenue }) {
+  const n = Number(visitors) || 0;
+  if (n === 0) return null;
+  const amount = Math.round(Number(revenue) || 0).toLocaleString('en-IN');
+  return `${n} visiting therapist${n === 1 ? '' : 's'} did NPR ${amount} here. Paid by their home branch.`;
+}

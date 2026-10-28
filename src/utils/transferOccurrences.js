@@ -21,6 +21,51 @@ const minToHHMM = (relRaw) => {
   return `${String(Math.floor(rel / 60)).padStart(2, '0')}:${String(rel % 60).padStart(2, '0')}`;
 };
 
+// All "not here" occurrences of a day for a set of rows. A visitor with two windows the same day is only "not here" outside the
+// UNION of their windows, so visiting rows are merged per therapist + branch pair before occurrences are built.
+export function transferOccurrencesForDate(rows, date) {
+  const dayStart = wallToMin(date, '00:00');
+  const dayEnd = dayStart + DAY_MIN;
+  const out = [];
+  const visits = new Map();
+  for (const row of rows || []) {
+    if (row?.kind === 'in') {
+      if (!row.endAt || !row.startDate) continue;
+      const s = wallToMin(row.startDate, row.startTime || '00:00');
+      const e = new Date(row.endAt).getTime() / 60000;
+      if (Number.isNaN(e)) continue;
+      const key = `${row.therapistId}|${row.otherBranch || ''}`;
+      if (!visits.has(key)) visits.set(key, { row, wins: [] });
+      visits.get(key).wins.push([s, e]);
+    } else {
+      out.push(...transferWindowOccurrencesForDate(row, date));
+    }
+  }
+  for (const { row, wins } of visits.values()) {
+    const label = `Visiting${row.otherBranch ? ` from ${row.otherBranch}` : ''} — not here`;
+    // walk the day left to right; every stretch not covered by a window is "not here"
+    let cursor = dayStart;
+    for (const [s, e] of wins.sort((a, b) => a[0] - b[0])) {
+      if (e <= cursor) continue;
+      if (s >= dayEnd) break;
+      if (s > cursor) out.push(visitGap(row, date, dayStart, dayEnd, cursor, s, label));
+      cursor = Math.max(cursor, e);
+      if (cursor >= dayEnd) break;
+    }
+    // after the last window: not here, unless every window already ended before the day (back home: nothing to shade)
+    if (cursor < dayEnd && wins.some(([, e]) => e > dayStart)) out.push(visitGap(row, date, dayStart, dayEnd, cursor, dayEnd, label));
+  }
+  return out;
+}
+const visitGap = (row, date, dayStart, dayEnd, fromAbs, toAbs, description) => ({
+  date,
+  startTime: minToHHMM(Math.max(0, fromAbs - dayStart)),
+  endTime: toAbs >= dayEnd ? '24:00' : minToHHMM(toAbs - dayStart),
+  therapistId: row.therapistId,
+  description,
+  kind: 'transfer',
+});
+
 // row: { therapistId, kind: 'out' | 'in', startDate, startTime, endAt (ISO instant), otherBranch }
 export function transferWindowOccurrencesForDate(row, date) {
   if (!row?.endAt || !row.startDate) return [];

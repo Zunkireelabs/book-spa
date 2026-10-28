@@ -47,3 +47,19 @@ describe('nextWorkingDay', () => {
   });
   it('null when nothing in the horizon', () => expect(nextWorkingDay('2026-11-01', () => H({ works: false, start_time: null, end_time: null }))).toBeNull());
 });
+
+describe('todayStatusLine: a visitor reads from the visit window (ZNLY-113 A+)', () => {
+  // Sanepa 09:00-21:00; visit 18:55-21:00 -> the rest of the day is OTHER_BRANCH
+  const visit = { source: 'window', start_time: '09:00:00', end_time: '21:00:00', off: [{ code: 'OTHER_BRANCH', start_min: 0, end_min: 1135, label: 'Lazimpat' }] };
+  it('inside the window: Here 6:55 – 9:00 pm, never "Shift ended"', () => {
+    expect(run(visit, '19:40').full).toBe('Here 6:55 – 9:00 pm');
+    expect(run(visit, '19:40').full).not.toMatch(/Shift/);
+  });
+  it('before the window the home stretch still reads At <home>', () => expect(run(visit, '12:00').full).toBe('At Lazimpat until 18:55'));
+  it('after the window: visit ended, not "Shift ended"', () => expect(run({ ...visit, off: [{ code: 'OTHER_BRANCH', start_min: 0, end_min: 600, label: 'Lazimpat' }] }, '22:00').full).toMatch(/^Visit ended/));
+  it('two windows the same day: the next one is announced between them', () => {
+    const two = { ...visit, off: [{ code: 'OTHER_BRANCH', start_min: 0, end_min: 720 }, { code: 'OTHER_BRANCH', start_min: 930, end_min: 1135 }] };
+    expect(run(two, '12:30').full).toBe('Here 12:00 – 3:30 pm');
+    expect(run(two, '16:00').full).toBe('At another branch until 18:55');
+  });
+});

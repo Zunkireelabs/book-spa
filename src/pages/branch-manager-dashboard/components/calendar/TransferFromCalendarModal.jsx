@@ -3,6 +3,7 @@ import { transferTherapist, fetchAllBranches } from '../../../../services/api';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
 import { transferChange } from '../../../../services/availabilityConflicts';
 import { computeRevertDate, DURATION_UNIT_OPTIONS, formatRevert, toYmd, toHm } from '../../../../utils/transferPreview';
+import TransferHoursWarning from '../../../../components/ui/TransferHoursWarning';
 import {
   PanelShell, FormBody, Field, TextInput, NumberInput, SelectField, Segmented, DateField, TimeField, InlineError,
 } from '../../../../components/ui/PanelFormKit';
@@ -156,6 +157,10 @@ const TransferFromCalendarModal = ({
           </p>
         )}
 
+        {!isPermanent && (
+          <TransferHoursWarning therapistId={therapistId} therapistName={therapistName} toBranch={orgBranches.find((b) => b.id === toBranch)}
+            startDate={startDate} startTime={startTime} revertDate={revertDate} />
+        )}
         <Field label="Note (optional)">
           <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason for transfer..." />
         </Field>

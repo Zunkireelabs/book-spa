@@ -7,6 +7,7 @@ import {
   fetchStaffCompensation,
   setStaffCompensation,
   getPayrollRun,
+  fetchPayrollBranchSplit,
   generatePayroll,
   finalizePayroll,
   fetchTherapistProductSales,
@@ -219,12 +220,15 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
   const [finalizing, setFinalizing] = useState(false);
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
   const [drill, setDrill] = useState(null); // an item
+  const [split, setSplit] = useState(null); // { byTherapist, visitorLine }
 
   const loadRun = useCallback(async (month) => {
     setLoading(true);
     setError(null);
     const { data, error: err } = await getPayrollRun({ branchId, periodMonth: month });
     if (err) setError(err.message || 'Failed to load payroll run.'); else setRunData(data);
+    const sp = await fetchPayrollBranchSplit({ branchId, periodMonth: month });
+    setSplit(sp.data || null);
     setLoading(false);
   }, [branchId]);
   useEffect(() => { if (selectedMonth) loadRun(selectedMonth); }, [loadRun, selectedMonth]);
@@ -329,6 +333,7 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
         <EmptyBlock icon="FileText" title="No pay run for this month yet" hint={readOnly ? '' : 'Pick a month and press Generate.'} />
       ) : (
         <div className="overflow-x-auto mt-3">
+          {split?.visitorLine && <p className="text-[12px] text-[#8A8A90] mb-2">{split.visitorLine}</p>}
           <table className="w-full border-collapse min-w-[980px]">
             <thead>
               <tr>
@@ -358,7 +363,15 @@ const RunPayrollPanel = ({ branchId, readOnly = false }) => {
                       {item.unpaidLeaveDays > 0 && <span className="ml-1 text-[11px] text-error font-medium" title={`${item.unpaidLeaveDays} leave day(s) beyond the paid cap (${SICK_LEAVE_CAP} sick / ${ANNUAL_LEAVE_CAP} annual per year), deducted like Absent`}>({item.unpaidLeaveDays} unpaid)</span>}
                     </td>
                     <td className={`${num} ${item.attendanceDeduction > 0 ? 'text-error' : 'text-[#B4B4BA]'}`}>{item.attendanceDeduction > 0 ? `−${fmt(item.attendanceDeduction)}` : '—'}</td>
-                    <td className={`${num} text-[#515152]`}>{item.serviceRevenue > 0 ? fmt(item.serviceRevenue) : '—'}</td>
+                    <td className={`${num} text-[#515152]`}>
+                      {item.serviceRevenue > 0 ? fmt(item.serviceRevenue) : '—'}
+                      {split?.byTherapist?.[item.therapistId]?.lentTotal > 0 && (
+                        <div className="text-[11px] text-[#8A8A90]">
+                          At home {fmt(split.byTherapist[item.therapistId].atHome)}
+                          {Object.values(split.byTherapist[item.therapistId].lent).map((l) => ` · at ${l.branchName} (lent) ${fmt(l.revenue)}`).join('')}
+                        </div>
+                      )}
+                    </td>
                     <td className={num}>{item.serviceCommission > 0 ? fmt(item.serviceCommission) : '—'}</td>
                     <td className={num}>{item.referralCommission > 0 ? fmt(item.referralCommission) : '—'}</td>
                     <td className={`${num} bg-[#F7F9F6]`} data-products-sold>{item.productRevenue > 0 ? drillBtn(item, fmt(item.productRevenue)) : (item.productCommissionDeduction > 0 ? drillBtn(item, '—') : '—')}</td>

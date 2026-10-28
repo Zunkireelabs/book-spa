@@ -19,7 +19,11 @@ import {
   fetchPendingTransfers,
   fetchTherapistTransferStatus,
   fetchShiftsForRange,
+  fetchBranchesByOrgId,
+  fetchVisitingAttendanceToday,
+  markVisitorAttendance,
 } from '../../../../services/api';
+import { workedAtNote, visitFromText } from '../../../../services/visitorAttendance';
 import { useAvailabilityConflictGuard } from '../../../../hooks/useAvailabilityConflictGuard';
 import { leaveChange, defaultHalfDayOff, validateHalfDay } from '../../../../services/availabilityConflicts';
 import { hhmmToMinutes } from '../../../../services/availability';
@@ -191,6 +195,32 @@ const AttendancePanel = ({ branchId }) => {
   // branch's own fetchAttendance() result.
   const [transferredAttendance, setTransferredAttendance] = useState({});
 
+  // Visitors checked in HERE (V33c): today only; home owns the record, this branch's manager writes just the two times.
+  const [branchNameById, setBranchNameById] = useState({});
+  const [visitors, setVisitors] = useState([]);
+  const [visitorEdits, setVisitorEdits] = useState({});
+  const loadVisitors = useCallback(async () => {
+    if (selectedDate !== today || !branchId || branchId === 'all') { setVisitors([]); return; }
+    const { data } = await fetchVisitingAttendanceToday({ branchId });
+    setVisitors(Object.values(data || {}));
+  }, [selectedDate, today, branchId]);
+  useEffect(() => { loadVisitors(); }, [loadVisitors]);
+  useEffect(() => {
+    if (!profile?.org_id) return;
+    fetchBranchesByOrgId(profile.org_id).then(({ data }) => setBranchNameById(Object.fromEntries((data || []).map((b) => [b.id, b.name]))));
+  }, [profile?.org_id]);
+  const saveVisitor = async (v) => {
+    const e = visitorEdits[v.therapistId] || {};
+    const { error: err } = await markVisitorAttendance({
+      therapistId: v.therapistId, branchId,
+      checkInTime: e.checkInTime ?? null, checkOutTime: e.checkOutTime ?? null,
+    });
+    if (err) { showToast(err.message || 'Failed to save attendance.', 'error'); return; }
+    setVisitorEdits((prev) => ({ ...prev, [v.therapistId]: {} }));
+    showToast(`Attendance saved for ${v.therapistName}`);
+    loadVisitors();
+  };
+
   useEffect(() => {
     const ids = transferredOutBase.map((s) => s.therapistId);
     if (ids.length === 0) {
@@ -213,11 +243,13 @@ const AttendancePanel = ({ branchId }) => {
   // Scheduled ones are still on the roster, so they already have their own row.
   const filteredTransferredOut = useMemo(() => {
     if (focusTherapistId || statusFilter !== 'all' || !['all', 'transferred'].includes(staffTypeFilter)) return [];
-    const active = transferredOutList.filter((s) => !s.isPending);
+    // Drop the away row when the person already has a home row (one row per person).
+    const homeIds = new Set(therapists.map((t) => t.therapistId));
+    const active = transferredOutList.filter((s) => !s.isPending && !homeIds.has(s.therapistId));
     if (!searchQuery.trim()) return active;
     const q = searchQuery.toLowerCase().trim();
     return active.filter((s) => (s.therapistName || '').toLowerCase().includes(q));
-  }, [transferredOutList, searchQuery, staffTypeFilter, statusFilter, focusTherapistId]);
+  }, [transferredOutList, therapists, searchQuery, staffTypeFilter, statusFilter, focusTherapistId]);
 
   const transferredCount = useMemo(
     () => therapists.filter((t) => isTransferredTherapist(t.therapistId)).length + transferredOutList.filter((s) => !s.isPending).length,
@@ -683,7 +715,7 @@ const AttendancePanel = ({ branchId }) => {
                         {(() => {
                           // Late = checked in after that date's shift start (the same shift the calendar uses).
                           const sh = shiftOf(t.therapistId);
-                          const late = sh && edit.checkInTime ? hhmmToMinutes(edit.checkInTime) - hhmmToMinutes(sh.start) : 0;
+                          const late = sh && edit.checkInTime && !(t.workedAtBranchId && t.workedAtBranchId !== branchId) ? hhmmToMinutes(edit.checkInTime) - hhmmToMinutes(sh.start) : 0;
                           return late > 0 ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-caption font-caption-medium bg-warning/10 text-warning" title={`Shift starts ${sh.start}`}>
                               Late {late} min
@@ -701,6 +733,10 @@ const AttendancePanel = ({ branchId }) => {
                           </span>
                         )}
                       </div>
+                      {(() => {
+                        const note = workedAtNote({ row: t, homeBranchId: branchId, branchNameById });
+                        return note ? <div className="font-body text-xs text-text-secondary">{note}</div> : null;
+                      })()}
                     </div>
                   </div>
 
@@ -994,6 +1030,32 @@ const AttendancePanel = ({ branchId }) => {
           </div>
         )}
       </div>
+
+      {visitors.length > 0 && (
+        <div className="bg-surface rounded-spa-lg border border-border">
+          <div className="px-4 py-3 border-b border-border font-body font-body-medium text-sm text-text-primary">Visiting</div>
+          <div className="divide-y divide-border">
+            {visitors.map((v) => {
+              const e = visitorEdits[v.therapistId] || {};
+              const set = (k, val) => setVisitorEdits((prev) => ({ ...prev, [v.therapistId]: { ...prev[v.therapistId], [k]: val } }));
+              return (
+                <div key={v.therapistId} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <span className="font-body font-body-medium text-sm text-text-primary flex-1 min-w-[8rem]">
+                    {v.therapistName}
+                    {v.windowFrom && new Date(v.windowFrom) > new Date() && <span className="ml-2 font-body text-xs text-text-secondary">{visitFromText(v.windowFrom)}</span>}
+                  </span>
+                  <input type="time" value={e.checkInTime ?? v.checkInTime ?? ''} onChange={(ev) => set('checkInTime', ev.target.value)} disabled={dayLocked}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm text-text-primary" />
+                  <input type="time" value={e.checkOutTime ?? v.checkOutTime ?? ''} onChange={(ev) => set('checkOutTime', ev.target.value)} disabled={dayLocked}
+                    className="px-2 py-1.5 rounded-spa border border-border bg-surface font-data text-sm text-text-primary" />
+                  <button onClick={() => saveVisitor(v)} disabled={dayLocked || (e.checkInTime == null && e.checkOutTime == null)}
+                    className="px-3 py-1.5 rounded-spa bg-primary text-white font-body text-sm disabled:opacity-50">Save</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {conflictModal}
 

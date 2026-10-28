@@ -6,7 +6,7 @@ fix this file.
 
 *Generated from Plane by `/project-pm sync`. Don't hand-edit; change Plane, then re-sync.*
 
-Last synced: **2026-10-27** by bookx-d5 (lead)
+Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 
 ---
 
@@ -52,6 +52,10 @@ Last synced: **2026-10-27** by bookx-d5 (lead)
 | ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+. Done locally in 847a5c9; ships with the UI-port PR |
 | ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere. Mockup first |
 | ZNLY-112 | Sadin | high | Therapists "Overall" fails (uuid "__overall__") + Add with a Branch field + no Overall for one-branch tenants. Built and owner-checked (V31), committed locally; ships with the UI-port PR |
+| ZNLY-113 | Sadin | high | One home-branch model for temporary transfers. V33a (a8f55f0) + V33b (d99f8e5) committed locally; V33c + fix1–5 (mig 328–329) built, final owner check pending |
+| ZNLY-119 | Sadin | low | Profile: Branch row in the read view + Transfer/Return now in the header menu. Built in V33b (d99f8e5); ships with the UI-port PR |
+| ZNLY-125 | Sadin | medium | Decided: the branch that was home on the booking date pays. Built in V33c-fix3, ships with ZNLY-113 |
+| ZNLY-120 | Sadin | low | Pill for a transfer later today ("To Sanepa at 4:20pm"). Built in V33b (d99f8e5); ships with the UI-port PR |
 
 ## In review / on stage
 
@@ -89,6 +93,15 @@ Last synced: **2026-10-27** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-121 | Sadin | high | Customer booking flow shows every date "Full" at Sanepa (local). Must clear before the UI-port PR |
+| ZNLY-118 | Sadin | high | Lent therapist commission can go missing (payroll at run time). Fixed by ZNLY-113 V33c, verify |
+| ZNLY-123 | Sadin | medium | UI-23: Attendance page redesign. Next after ZNLY-113 (rating table → mockup first) |
+| ZNLY-124 | Sadin | medium | Product-sales drill-down ignores sales at other branches (won't match commission) |
+| ZNLY-126 | Sadin | low | Overtime pay for hours outside the usual shift. ONLY if customers ask |
+| ZNLY-122 | Sadin | low | Therapists list never refreshes itself (stale transfer/Today states) |
+| ZNLY-127 | Sadin | medium | Calendar hides a visitor whose transfer window starts later today (can't pre-book). needs-verification |
+| ZNLY-128 | Sadin | low | Therapist profile menu shows "Back to therapist list" twice |
+| ZNLY-129 | Sadin | low | Profile timeline uses the late return record, not the planned end (revert_at) |
 | ZNLY-114 | Sadin | low | Overall: transferred therapist's Today hours merge shift rows from both branches (likely fixed by ZNLY-113) |
 | ZNLY-115 | Sadin | low | Working hours editor doesn't check against branch opening hours (mockup first) |
 | ZNLY-116 | Sadin | medium | Therapist History says "room" for branch transfers (locationLabel used as the branch word) |
@@ -96,7 +109,6 @@ Last synced: **2026-10-27** by bookx-d5 (lead)
 | ZNLY-109 | Sadin | low | Calendar header tooltip mixes 24h and 12h ("Shift started 09:00" next to "12:00pm") |
 | ZNLY-110 | Sadin | low | Calendar shading labels cut mid-time: wrap instead of truncate |
 | ZNLY-111 | Sadin | low | Calendar grid has no right gutter: last column runs flush to the window edge |
-| ZNLY-113 | Sadin | high | One home-branch model for temporary transfers: who sees, edits and pays a lent therapist |
 | ZNLY-15 | unassigned | high | Rotate/remove accounts exposed by deleted dev-info.html |
 | ZNLY-18 | unassigned | high | Supabase Auth URL config / allowlists for the new domain |
 | ZNLY-82 | Sadin | high | UI-16: release prep, regression pass, stage re-merge, PR to stage |

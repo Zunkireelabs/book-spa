@@ -1,5 +1,6 @@
 import { toTransferInput } from '../utils/transferText';
-import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay } from './payrollCalc';
+import { workedAtNote } from './visitorAttendance';
+import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
 import { supabase, supabaseCustomer } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
@@ -38,7 +39,7 @@ async function clearAvailabilityOverride(bookingId) {
 }
 import { resolveJunctionRoomId, countOverlappingRoomRows } from './roomOverrideHelpers';
 import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
-import { transferWindowOccurrencesForDate } from '../utils/transferOccurrences';
+import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/customerDirectory';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
@@ -5480,7 +5481,7 @@ export async function fetchTransferOccurrences(branchId, startDate, endDate) {
 
     const occurrences = [];
     for (let d = startDate; d <= endDate; d = shiftDateStr(d, 1)) {
-      rows.forEach(r => occurrences.push(...transferWindowOccurrencesForDate(r, d)));
+      occurrences.push(...transferOccurrencesForDate(rows, d));
     }
     return { data: occurrences, error: null };
   } catch (error) {
@@ -5543,6 +5544,11 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
     const inRows = dedupeTransfersByKey(sortTransfersByTime(inRes.data || []), t => t.therapist_id);
     const inById = {};
     inRows.forEach(t => { inById[t.therapist_id] = { fromBranch: t.fromBranch?.name || null, ...windowOf(t) }; });
+    // Every visit window of the range per person (two visits in a day): "not here" is the day minus their union (transferShade.js).
+    const visitWindowsById = {};
+    sortTransfersByTime(inRes.data || []).forEach(t => {
+      (visitWindowsById[t.therapist_id] ||= []).push({ startAt: kathmanduInstant(t.effective_date, t.start_time), endAt: windowOf(t).returnsAt });
+    });
 
     const outById = {};
     outRows.forEach(t => { if (t.therapist) outById[t.therapist.id] = t; });
@@ -5550,7 +5556,7 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
     // ZNLY-113: branch_id is the HOME branch for the whole window, so a lent-out therapist is still one of `therapists`: tag the column
     // with the window instead of rebuilding a separate "away" column.
     const tagged = therapists.map(d => {
-      const withIn = inById[d.id] ? { ...d, transferredIn: true, ...inById[d.id] } : d;
+      const withIn = inById[d.id] ? { ...d, transferredIn: true, ...inById[d.id], visitWindows: visitWindowsById[d.id] } : d;
       const withOut = outById[d.id] ? { ...withIn, transferredOut: true, transferId: outById[d.id].id, ...windowOf(outById[d.id]) } : withIn;
       return scheduledByTherapist[d.id] ? { ...withOut, scheduledTransfer: scheduledByTherapist[d.id] } : withOut;
     });
@@ -5558,7 +5564,7 @@ async function applyCalendarTransfers(branchId, startDate, endDate, therapists) 
     // Visitors: not in the home list, so each gets a column for the window (current, upcoming, or ended within the range).
     const visitedColumns = inRows
       .filter(t => t.therapist && !activeIds.has(t.therapist.id))
-      .map(t => ({ ...t.therapist, transferredIn: true, fromBranch: t.fromBranch?.name || null, ...windowOf(t) }));
+      .map(t => ({ ...t.therapist, transferredIn: true, fromBranch: t.fromBranch?.name || null, ...windowOf(t), visitWindows: visitWindowsById[t.therapist.id] }));
 
     return [...tagged, ...visitedColumns]
       .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
@@ -11011,7 +11017,7 @@ export async function fetchAttendance({ branchId, date }) {
     therapistsQuery = withBranch(therapistsQuery, branchId);
     const attendanceQuery = supabase
       .from('therapist_attendance')
-      .select('therapist_id, status, check_in_time, check_out_time, notes, off_start, off_end')
+      .select('therapist_id, status, check_in_time, check_out_time, notes, off_start, off_end, worked_at_branch_id')
       .eq('date', targetDate);
     const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceQuery]);
     if (therapistsResult.error) throw therapistsResult.error;
@@ -11037,6 +11043,7 @@ export async function fetchAttendance({ branchId, date }) {
         checkInTime: formatTimeKathmandu(att?.check_in_time),
         checkOutTime: formatTimeKathmandu(att?.check_out_time),
         notes: att?.notes || null,
+        workedAtBranchId: att?.worked_at_branch_id || null,
         offStart: att?.off_start ? String(att.off_start).slice(0, 5) : null,   // half day: exact off times (migration-316)
         offEnd: att?.off_end ? String(att.off_end).slice(0, 5) : null,
       };
@@ -11046,6 +11053,43 @@ export async function fetchAttendance({ branchId, date }) {
   } catch (error) {
     console.error('[API] fetchAttendance error:', error.message);
     return { data: null, error };
+  }
+}
+
+// Today's visitors at a branch with their check-in/out (mig 328). Times come back as 'HH:MM'.
+export async function fetchVisitingAttendanceToday({ branchId }) {
+  try {
+    const { data, error } = await supabase.rpc('visiting_attendance_today', { p_branch_id: branchId });
+    if (error) throw error;
+    const map = {};
+    (data || []).forEach((r) => {
+      map[r.therapist_id] = { therapistId: r.therapist_id, therapistName: r.therapist_name, checkInTime: formatTimeKathmandu(r.check_in_time), checkOutTime: formatTimeKathmandu(r.check_out_time), workedAtBranchId: r.worked_at_branch_id, windowFrom: r.window_from, windowTo: r.window_to };
+    });
+    return { data: map, error: null };
+  } catch (error) {
+    console.error('[API] fetchVisitingAttendanceToday error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// The receiving manager's check-in / check-out for a visitor: today only, nothing else (the RPC enforces it).
+export async function markVisitorAttendance({ therapistId, branchId, checkInTime, checkOutTime }) {
+  try {
+    const today = nepalNow().today;
+    const { error } = await supabase.rpc('mark_visitor_attendance', {
+      p_therapist_id: therapistId, p_branch_id: branchId,
+      p_check_in: combineDateTimeKathmandu(today, checkInTime), p_check_out: combineDateTimeKathmandu(today, checkOutTime),
+    });
+    if (error) {
+      if (error.code === 'P0004' || (error.message || '').includes('ATTENDANCE_DAY_LOCKED')) {
+        return { data: null, error: { code: 'ATTENDANCE_DAY_LOCKED', message: 'This day has been closed. Attendance cannot be modified.' } };
+      }
+      throw error;
+    }
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] markVisitorAttendance error:', error.message);
+    return { data: null, error: { code: 'UNKNOWN_ERROR', message: error.message } };
   }
 }
 
@@ -11899,7 +11943,7 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
 
     let query = supabase
       .from('therapist_attendance')
-      .select('date, status, check_in_time, check_out_time')
+      .select('date, status, check_in_time, check_out_time, branch_id, worked_at_branch_id, worked_at:branches!worked_at_branch_id(name)')
       .eq('therapist_id', therapistId)
       .gte('date', startDate)
       .lte('date', endDate)
@@ -11967,6 +12011,7 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
         scheduledHours: Math.round((dayWindow / 60) * 10) / 10,
         checkIn: checkInTime,
         checkOut: checkOutTime,
+        workedAtNote: workedAtNote({ row: { workedAtBranchId: a.worked_at_branch_id, checkInTime, checkOutTime }, homeBranchId: a.branch_id, branchNameById: { [a.worked_at_branch_id]: a.worked_at?.name } }),
         workedHours: workedMin !== null ? Math.round((workedMin / 60) * 10) / 10 : null,
         status: dayStatus,
       };
@@ -12043,7 +12088,7 @@ export async function fetchAllBranches() {
 
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, address, phone, is_active')
+      .select('id, name, address, phone, is_active, open_time, close_time')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -12728,39 +12773,101 @@ const nepalMonthOf = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone
 //              (never an edit to a finalized run: it lands as a deduction in the first run after the refund, i.e. in month
 //              max(month of the refund, month of the sale + 1)). A refund made before the run was finalized is simply not in `earned`.
 // Returns { earned: { [therapistId]: NPR }, refunded: { [therapistId]: NPR } } (amounts, before the rate).
+// Home-on-the-date payroll (ZNLY-118 / ZNLY-125): the branch that was a person's HOME on the booking's date pays, wherever the booking
+// happened. RLS hides other branches' rows from that manager, so they come through payroll_home_* (mig 328).
+// Returns every paid booking this branch pays for in the month (at home and at other branches). Overall reads everything directly.
+export async function fetchHomePayrollBookings({ branchId, firstDay, lastDay }) {
+  if (isOverallBranch(branchId)) {
+    const { data, error } = await supabase.from('bookings')
+      .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value, branch_id')
+      .eq('status', 'Completed').eq('payment_status', 'paid').gte('date', firstDay).lte('date', lastDay);
+    if (error) throw error;
+    return data || [];
+  }
+  const { data, error } = await supabase.rpc('payroll_home_bookings', { p_branch_id: resolveBranchId(branchId), p_from: firstDay, p_to: lastDay });
+  if (error) throw error;
+  return data || [];
+}
+
+// People this branch pays for in the month who have since moved away for good: commission-only lines, no salary here.
+export async function fetchDepartedPayrollStaff({ branchId, firstDay, lastDay }) {
+  const { data, error } = await supabase.rpc('payroll_departed_staff', { p_branch_id: resolveBranchId(branchId), p_from: firstDay, p_to: lastDay });
+  if (error) throw error;
+  return data || [];
+}
+
+// The Payroll screen's extra lines (ZNLY-118): per person "at home / at <other> (lent)" and the receiving branch's visitor help line.
+export async function fetchPayrollBranchSplit({ branchId, periodMonth }) {
+  try {
+    if (isOverallBranch(branchId)) return { data: { byTherapist: {}, visitorLine: null }, error: null };
+    const { firstDay, lastDay } = payrollMonthBounds(periodMonth);
+    const home = resolveBranchId(branchId);
+    const [staffRes, bookings, departed, visitRes] = await Promise.all([
+      supabase.from('therapists').select('id').eq('is_active', true).eq('branch_id', home),
+      fetchHomePayrollBookings({ branchId, firstDay, lastDay }),
+      fetchDepartedPayrollStaff({ branchId, firstDay, lastDay }),
+      supabase.rpc('payroll_visitor_revenue', { p_branch_id: home, p_from: firstDay, p_to: lastDay }),
+    ]);
+    for (const r of [staffRes, visitRes]) if (r.error) throw r.error;
+    const byTherapist = splitServiceRevenueByBranch({
+      bookings, homeBranchId: home, therapistIds: [...(staffRes.data || []), ...departed].map((t) => t.id),
+    });
+    return { data: { byTherapist, visitorLine: visitorPayrollHelpLine(visitRes.data?.[0] || {}) }, error: null };
+  } catch (error) {
+    console.error('[API] fetchPayrollBranchSplit error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function computeProductCommissionBase({ branchId, periodMonth, therapistIds }) {
   const out = { earned: {}, refunded: {} };
   therapistIds.forEach((id) => { out.earned[id] = 0; out.refunded[id] = 0; });
   const from = nepalMonthStart(periodMonth);
   const to = nepalMonthStart(nextPeriodMonth(periodMonth));
 
-  let earnedQ = supabase
-    .from('product_sales')
-    .select('sold_by_therapist_id, total_amount, products(earns_commission)')
-    .in('sold_by_therapist_id', therapistIds)
-    .is('refunded_at', null)
-    .gte('created_at', from)
-    .lt('created_at', to);
-  earnedQ = withBranch(earnedQ, branchId);
-  const { data: earnedRows, error: earnedErr } = await earnedQ;
-  if (earnedErr) throw earnedErr;
-  for (const r of (earnedRows || [])) {
+  // Sales this branch pays for: made by a person whose home on the sale's date was this branch, wherever the sale happened
+  // (payroll_home_product_sales, mig 328). Overall (all branches) reads product_sales directly.
+  let earnedRows0 = [];
+  let homeSales = [];
+  if (isOverallBranch(branchId)) {
+    const { data, error: earnedErr } = await withBranch(supabase
+      .from('product_sales')
+      .select('sold_by_therapist_id, total_amount, products(earns_commission)')
+      .in('sold_by_therapist_id', therapistIds)
+      .is('refunded_at', null)
+      .gte('created_at', from)
+      .lt('created_at', to), branchId);
+    if (earnedErr) throw earnedErr;
+    earnedRows0 = data || [];
+  } else {
+    const { data: rows, error: homeErr } = await supabase.rpc('payroll_home_product_sales', {
+      p_branch_id: resolveBranchId(branchId), p_from: from, p_to: to, p_refund_from: nepalMonthStart(prevPeriodMonth(periodMonth)),
+    });
+    if (homeErr) throw homeErr;
+    homeSales = (rows || []).filter((r) => therapistIds.includes(r.sold_by_therapist_id));
+  }
+  const asProductRow = (r) => ({ sold_by_therapist_id: r.sold_by_therapist_id, total_amount: r.total_amount, created_at: r.created_at, refunded_at: r.refunded_at, products: { earns_commission: r.earns_commission } });
+  const earnedRows = [...earnedRows0, ...homeSales.filter((r) => !r.refunded_at && r.created_at >= from && r.created_at < to).map(asProductRow)];
+  for (const r of earnedRows) {
     if (r.products?.earns_commission === false) continue;
     out.earned[r.sold_by_therapist_id] = Math.round((out.earned[r.sold_by_therapist_id] + Number(r.total_amount)) * 100) / 100;
   }
 
   // Refunds that land in this run: refunded in this month of an older sale, or in the previous month for a sale of that same month.
   const lowerBound = nepalMonthStart(prevPeriodMonth(periodMonth));
-  let refundQ = supabase
-    .from('product_sales')
-    .select('sold_by_therapist_id, total_amount, created_at, refunded_at, products(earns_commission)')
-    .in('sold_by_therapist_id', therapistIds)
-    .not('refunded_at', 'is', null)
-    .gte('refunded_at', lowerBound)
-    .lt('refunded_at', to);
-  refundQ = withBranch(refundQ, branchId);
-  const { data: refundRows, error: refundErr } = await refundQ;
-  if (refundErr) throw refundErr;
+  let refundRows0 = [];
+  if (isOverallBranch(branchId)) {
+    const { data, error: refundErr } = await withBranch(supabase
+      .from('product_sales')
+      .select('sold_by_therapist_id, total_amount, created_at, refunded_at, products(earns_commission)')
+      .in('sold_by_therapist_id', therapistIds)
+      .not('refunded_at', 'is', null)
+      .gte('refunded_at', lowerBound)
+      .lt('refunded_at', to), branchId);
+    if (refundErr) throw refundErr;
+    refundRows0 = data || [];
+  }
+  const refundRows = [...refundRows0, ...homeSales.filter((r) => r.refunded_at).map(asProductRow)];
   const candidates = (refundRows || []).filter((r) => {
     const created = nepalMonthOf(r.created_at);
     const refunded = nepalMonthOf(r.refunded_at);
@@ -12850,9 +12957,15 @@ export async function generatePayroll({ branchId, periodMonth }) {
       .eq('is_active', true)
       .order('name');
     therapistQuery = withBranch(therapistQuery, branchId);
-    const { data: therapists, error: tErr } = await therapistQuery;
+    const { data: therapists0, error: tErr } = await therapistQuery;
     if (tErr) throw tErr;
-    if (!therapists || therapists.length === 0) {
+    // People this branch paid in the month who have since moved away for good: commission only, no salary here (ZNLY-125).
+    const departed = isOverallBranch(branchId) ? [] : await fetchDepartedPayrollStaff({ branchId, firstDay, lastDay });
+    const therapists = [
+      ...(therapists0 || []),
+      ...departed.map((d) => ({ id: d.id, name: d.name, staff_compensation: { monthly_salary: 0, commission_rate: d.commission_rate, product_commission_rate: d.product_commission_rate } })),
+    ];
+    if (therapists.length === 0) {
       return { data: null, error: { code: 'NO_STAFF', message: 'No active staff found for this branch.' } };
     }
 
@@ -12917,17 +13030,9 @@ export async function generatePayroll({ branchId, periodMonth }) {
         + overCap(t.annualBefore, t.annualIn, ANNUAL_LEAVE_PAID_CAP_DAYS);
     };
 
-    // Fetch completed+paid bookings in the period to compute service revenue.
-    let bookingQuery = supabase
-      .from('bookings')
-      .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value')
-      .eq('status', 'Completed')
-      .eq('payment_status', 'paid')
-      .gte('date', firstDay)
-      .lte('date', lastDay);
-    bookingQuery = withBranch(bookingQuery, branchId);
-    const { data: bookings, error: bErr } = await bookingQuery;
-    if (bErr) throw bErr;
+    // Completed+paid bookings this branch pays for in the period: those whose therapist's home ON THE BOOKING'S DATE was this branch,
+    // wherever they happened (ZNLY-125).
+    const bookings = await fetchHomePayrollBookings({ branchId, firstDay, lastDay });
 
     // Sum service revenue per therapist, and referral commission per therapist name (shared maths: payrollCalc.js).
     const { serviceRevenueMap, referralCommissionMap } = tallyBookingEarnings({ bookings, therapists });

@@ -6,6 +6,7 @@ import {
 import { computeRevertDate as computeRevertDateUtil, DURATION_UNIT_OPTIONS as UNIT_OPTIONS, formatRevert, toYmd, toHm, validateExtension } from '../../utils/transferPreview';
 import { friendlyError } from '../../utils/friendlyError';
 import { useIndustry } from '../../hooks/useIndustry';
+import TransferHoursWarning from './TransferHoursWarning';
 import { useAuth } from '../../contexts/AuthContext';
 import TransferPill from './TransferPill';
 import { canAct } from '../../utils/transferPermissions';
@@ -672,6 +673,10 @@ const TransferManagementModal = ({ variant = 'modal', therapistId, therapistName
           <p className="text-xs text-text-secondary">
             Returns to the current branch around <span className="font-body-medium text-text-primary">{formatRevert(revertDateObj)}</span>
           </p>
+        )}
+        {!isPermanentTransfer && (
+          <TransferHoursWarning therapistId={therapistId} therapistName={therapistName} toBranch={orgBranches.find((b) => b.id === transferToBranch)}
+            startDate={transferStartDate} startTime={transferStartTime} revertDate={revertDateObj} use24h={use24h} />
         )}
         <Field label="Note (optional)">
           <TextInput value={transferNote} onChange={(e) => setTransferNote(e.target.value)} placeholder="Reason for transfer..." />
