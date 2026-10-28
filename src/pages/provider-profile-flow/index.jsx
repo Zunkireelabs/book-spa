@@ -400,6 +400,7 @@ const ProviderProfileFlow = () => {
         loadingTherapists={loadingTherapists}
         therapistsError={therapistsError}
         onRetryTherapists={() => setFetchNonce((n) => n + 1)}
+        showStaffSelection={showStaffSelection}
         customerAccountId={customerProfile?.id}
         onGroupBookingComplete={handleGroupBookingComplete}
       />

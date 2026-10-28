@@ -1,4 +1,4 @@
-import React, { useState, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import DiscardDialog from '../BookingView/DiscardDialog';
@@ -19,7 +19,7 @@ const STEP_HEADINGS = {
   confirm: 'Your details',
 };
 
-const STEPS = [
+const ALL_STEPS = [
   { key: 'guests', label: 'Guests' },
   { key: 'professional', label: 'Professional' },
   { key: 'time', label: 'Time' },
@@ -44,6 +44,7 @@ const GroupBookingView = ({
   loadingTherapists,
   therapistsError,
   onRetryTherapists,
+  showStaffSelection,
   customerAccountId,
   onGroupBookingComplete,
 }) => {
@@ -59,6 +60,33 @@ const GroupBookingView = ({
     referralSource: '', referralClientName: '', referralPhone: '', referralCountryCode: '+977',
     referralSocialPlatform: '', referralStaffName: '', specialRequests: '', agreeToTerms: false,
   });
+
+  // Mirrors BookingView's own steps list exactly: showStaffSelection=false drops the
+  // professional step entirely for solo, so group booking's toggle-respecting fix
+  // (Anish: "make group booking respect the toggle too") does the same here rather
+  // than just hiding the staff names within a step the customer still has to click
+  // through. The therapist roster itself is still fetched regardless (migration-305's
+  // group-booking bypass) -- computeGroupSlots needs real therapist data to size its
+  // "any professional" reserve-count math even when nobody ever sees a name.
+  const STEPS = useMemo(
+    () => (showStaffSelection ? ALL_STEPS : ALL_STEPS.filter((s) => s.key !== 'professional')),
+    [showStaffSelection],
+  );
+
+  // With no professional step to click through, every person needs {mode:'any'}
+  // auto-assigned the moment they have a service -- same implicit behavior BookingView
+  // already has for solo (selectedProfessional just stays null/unset and the booking
+  // goes to "any professional" without ever asking). Guarded on already being 'any' so
+  // this doesn't fight a stale 'specific' pick left over from toggling the setting
+  // mid-session.
+  useEffect(() => {
+    if (showStaffSelection) return;
+    const needsAny = people.some((p) => p.service && p.professional?.mode !== 'any');
+    if (!needsAny) return;
+    onPeopleChange((prev) => prev.map((p) => (
+      p.service && p.professional?.mode !== 'any' ? { ...p, professional: { mode: 'any' } } : p
+    )));
+  }, [showStaffSelection, people, onPeopleChange]);
 
   useLayoutEffect(() => {
     scrollToTopInstant();
