@@ -3645,14 +3645,14 @@ async function notifyDiscountDecision(booking, decision) {
 /**
  * Fetch the current user's in-app notifications (most recent first).
  */
-export async function fetchNotifications(limit = 30) {
+export async function fetchNotifications(limit = 50) {
   try {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
     const { data, error } = await supabase
       .from('notifications')
-      .select('id, type, title, body, booking_id, read, created_at, booking:bookings(acknowledged_at, acknowledger:users!acknowledged_by(full_name))')
+      .select('id, type, title, body, booking_id, branch_id, category, read, created_at, booking:bookings(acknowledged_at, acknowledger:users!acknowledged_by(full_name))')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -3661,6 +3661,49 @@ export async function fetchNotifications(limit = 30) {
     return { data: data || [], error: null };
   } catch (error) {
     console.error('[API] fetchNotifications error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * How many of the current user's notifications are unread (the bell footer's "N of M").
+ */
+export async function fetchUnreadNotificationCount() {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('read', false);
+    if (error) throw error;
+    return { data: count || 0, error: null };
+  } catch (error) {
+    console.error('[API] fetchUnreadNotificationCount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * The current user's pop-up/sound prefs per category and their global switches (migration-331).
+ * Missing rows mean "use the defaults" (src/lib/notificationRules.js).
+ */
+export async function fetchNotificationPrefs() {
+  try {
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const [prefs, settings] = await Promise.all([
+      supabase.from('notification_prefs').select('category, popup, sound').eq('user_id', user.id),
+      supabase.from('notification_settings').select('sound_enabled, quiet_outside_hours').eq('user_id', user.id).maybeSingle(),
+    ]);
+    if (prefs.error) throw prefs.error;
+    if (settings.error) throw settings.error;
+    const byCategory = {};
+    (prefs.data || []).forEach((r) => { byCategory[r.category] = { popup: r.popup, sound: r.sound }; });
+    return { data: { prefs: byCategory, settings: settings.data || null }, error: null };
+  } catch (error) {
+    console.error('[API] fetchNotificationPrefs error:', error.message);
     return { data: null, error };
   }
 }

@@ -4,6 +4,7 @@ import BranchSwitcher from './BranchSwitcher';
 import NotificationBell from './NotificationBell';
 import ProfileMenu from './ProfileMenu';
 import RealtimeStatus from './RealtimeStatus';
+import { useNotifications } from '../../contexts/NotificationsContext';
 import { useCommandPalette } from '../CommandPalette/useCommandPalette';
 
 // Shared top bar for the manager and staff dashboards. Per-dashboard bits come in as props:
@@ -23,6 +24,8 @@ const MobileSearchButton = () => {
   );
 };
 
+// The bell reads the shared NotificationsProvider feed. A page may pass `notifications` to add its own rows on top
+// (the manager dashboard merges its pending-discount rows); `unreadCount` then replaces the provider's count.
 const AppHeader = ({
   realtimeStatus,
   leftExtra = null,
@@ -32,7 +35,11 @@ const AppHeader = ({
   unreadCount,
   onMarkAllRead,
   onItemClick,
-}) => (
+}) => {
+  const ctx = useNotifications();
+  const feed = notifications || ctx.items;
+  const unread = notifications ? unreadCount : ctx.unreadCount;
+  return (
   <header className="bg-surface-sidebar sticky top-0 z-header flex-shrink-0">
     <div className="h-12 px-3 sm:px-4 flex items-center justify-between gap-2">
       <div className="flex items-center gap-2 min-w-0">
@@ -58,13 +65,17 @@ const AppHeader = ({
             <span className="hidden sm:inline text-sm font-body font-body-medium">Assistant</span>
           </button>
         )}
-        {notifications && (
+        {(
           <div className="[&>button]:h-[var(--control-h)] [&>button]:w-[var(--control-h)] [&>button]:p-0 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-spa-lg [&>button]:text-text-secondary [&>button:hover]:bg-black/[0.04]">
             <NotificationBell
-              notifications={notifications}
-              unreadCount={unreadCount}
-              onMarkAllRead={onMarkAllRead}
-              onItemClick={onItemClick}
+              notifications={feed}
+              unreadCount={unread}
+              totalUnread={notifications ? undefined : ctx.unreadCount}
+              role={ctx.role}
+              branches={ctx.branches}
+              inboxPath={ctx.inboxPath}
+              onMarkAllRead={onMarkAllRead || ctx.markAllRead}
+              onItemClick={onItemClick || ctx.openItem}
             />
           </div>
         )}
@@ -72,6 +83,7 @@ const AppHeader = ({
       </div>
     </div>
   </header>
-);
+  );
+};
 
 export default AppHeader;

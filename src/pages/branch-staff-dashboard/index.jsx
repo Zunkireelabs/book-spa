@@ -24,7 +24,6 @@ import { useBranch } from '../../contexts/BranchContext';
 import { fetchBookings, fetchTherapists, updateBookingStatus, assignTherapist, recordPayment, recordTip, applyDiscount } from '../../services/api';
 import { transformBookings, toDbStatus, isNoShow } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
-import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED, PRODUCTS_ENABLED } from '../../lib/featureFlags';
 import { getTodayISO, toISO } from '../../utils/periodPresets';
 
@@ -32,14 +31,6 @@ const BranchStaffDashboard = () => {
   const { profile, user } = useAuth();
   const { branchId, branchName, loading: branchLoading } = useBranch();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { items: notifications, markRead: markNotifRead, markAllRead: markAllNotifsRead } = usePersistentNotifications(user?.id);
-  const unreadNotifCount = notifications.filter((n) => !n.read).length;
-
-  const handleNotificationClick = (n) => {
-    markNotifRead(n.id);
-    setSearchParams(n.type === 'new_online_booking' && n.bookingId ? { view: 'bookings', open: n.bookingId } : { view: 'bookings' });
-  };
-
   const viewMode = searchParams.get('view') || 'calendar'; // staff land on the calendar; the sidebar's Dashboard link is ?view=dashboard
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -514,10 +505,6 @@ const BranchStaffDashboard = () => {
       variant={viewMode === 'calendar' || areaForView ? 'fill' : 'page'}
       header={{
         realtimeStatus,
-        notifications,
-        unreadCount: unreadNotifCount,
-        onMarkAllRead: markAllNotifsRead,
-        onItemClick: handleNotificationClick,
       }}
       floating={
         <>

@@ -9,7 +9,7 @@ import AppShell from '../../components/ui/AppShell';
 import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
 import { transformBookings, toDbStatus } from '../../services/bookingTransformers';
 import { supabase } from '../../lib/supabase';
-import { usePersistentNotifications } from '../../hooks/usePersistentNotifications';
+import { useNotifications } from '../../contexts/NotificationsContext';
 
 // Import all components
 import MetricsCard from './components/MetricsCard';
@@ -83,7 +83,7 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 const BranchManagerDashboard = () => {
   const { profile, user } = useAuth();
   const { branchId, branchName, isOverall, loading: branchLoading } = useBranch();
-  const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
+  const { items: persistentNotifs, openItem: openNotificationItem, markAllRead: markAllPersistentRead } = useNotifications();
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -191,7 +191,8 @@ const BranchManagerDashboard = () => {
                 ].slice(0, 30)
           );
 
-          if (!isToday && newBooking.date) {
+          // Online bookings (created_by IS NULL) get the NotificationsProvider pop-up card instead.
+          if (!isToday && newBooking.date && newBooking.created_by != null) {
             const bookingDate = new Date(newBooking.date);
             const formattedDate = bookingDate.toLocaleDateString('en-GB', {
               weekday: 'short',
@@ -330,14 +331,8 @@ const BranchManagerDashboard = () => {
       navigate(`?view=dashboard&highlight=${n.bookingId}`);
       return;
     }
-    if (n.type === 'new_online_booking' && n.bookingId) {
-      markPersistentRead(n.id);
-      navigate(`?view=bookings&open=${n.bookingId}`);
-      return;
-    }
-    if (n.type === 'discount_approved' || n.type === 'discount_declined') {
-      markPersistentRead(n.id);
-      navigate('?view=bookings');
+    if (n.type === 'new_online_booking' || n.type === 'discount_approved' || n.type === 'discount_declined') {
+      openNotificationItem(n); // marks read; opens the booking, or the Inbox when the booking is gone
       return;
     }
     setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));

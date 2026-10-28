@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import StaffSidebar from './StaffSidebar';
 import AppHeader from './AppHeader';
 import { CommandPaletteProvider } from '../CommandPalette/useCommandPalette';
+import NotificationToasts from './NotificationToasts';
 
 // The scroller of the content frame (desktop). Pages that need to scroll programmatically use this instead of `window`.
 const ScrollerContext = createContext(null);
@@ -60,6 +61,7 @@ const AppShell = ({ sidebar, header, banner = null, floating = null, aside = nul
         </div>
       </div>
     </div>
+    <NotificationToasts />
     </CommandPaletteProvider>
   );
 };
