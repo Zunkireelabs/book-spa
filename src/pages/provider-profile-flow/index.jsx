@@ -129,17 +129,28 @@ const ProviderProfileFlow = () => {
   // Pushes history so browser Back returns here instead of leaving the site — the
   // gate (and Back) is now the only way to change branch. When group booking is
   // live, also surfaces the solo-vs-group choice immediately after picking a
-  // branch (a second history entry on top) rather than waiting for the customer to
-  // browse services and hit a Book CTA first — Anish wants the choice to be the
-  // first thing shown post-branch-select, not something gated behind picking a
-  // service. Single-branch auto-select gets the identical prompt, just triggered
-  // from the branches-fetch effect below instead of this click handler.
+  // branch rather than waiting for the customer to browse services and hit a Book
+  // CTA first — Anish wants the choice to be the first thing shown post-branch-
+  // select, not something gated behind picking a service.
+  //
+  // Single history entry, not two: picking a branch and seeing the choice screen
+  // is one combined action from the customer's point of view, so X / Back on the
+  // choice screen must undo both and return straight to BranchGate ("the
+  // beginning"), not land on the profile/services page as an intermediate step.
+  // closeBooking()'s `providerBooking` check still does a single history.back()
+  // either way — the state object itself just carries both flags now, so popping
+  // it lands on the pre-selection (null) state in one step, and popstate's own
+  // `branches.length > 1 && !state.providerBranch` check then re-shows the gate.
+  // Single-branch auto-select gets the identical prompt (branches-fetch effect
+  // below) but pushes only `providerBooking` — there's no gate screen to return to
+  // there, so X there correctly lands on the profile page instead.
   const handleBranchGateSelect = useCallback((branch) => {
     handleBranchSelect(branch);
-    window.history.pushState({ providerBranch: true }, '');
     if (GROUP_BOOKING_ENABLED) {
       setEntryChoiceOpen(true);
-      window.history.pushState({ providerBooking: true }, '');
+      window.history.pushState({ providerBranch: true, providerBooking: true }, '');
+    } else {
+      window.history.pushState({ providerBranch: true }, '');
     }
   }, [handleBranchSelect]);
 
