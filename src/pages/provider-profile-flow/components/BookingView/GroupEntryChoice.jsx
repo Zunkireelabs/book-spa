@@ -34,7 +34,12 @@ const GroupEntryChoice = ({ onChooseSolo, onChooseGroup, onClose }) => {
 
   return createPortal(
     <div className="zn-scope fixed inset-0 z-modal-overlay flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[var(--zn-overlay)] backdrop-blur-sm" onClick={onClose} />
+      {/* A full --zn-overlay (40% dark) tint flattens the page behind it to a uniform
+          gray regardless of blur strength, since this page is mostly near-white —
+          there's no color/contrast left for the blur to carry through. Much lighter
+          tint + stronger blur instead, so the actual branch cards/hero photo stay
+          visibly (if softly) recognizable, frosted-glass style. */}
+      <div className="absolute inset-0 bg-white/20 backdrop-blur-md" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
