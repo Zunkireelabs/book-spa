@@ -431,7 +431,13 @@ const ProviderProfileFlow = () => {
     );
   }
 
-  if (branches.length > 1 && !selectedBranch) {
+  // Stays on BranchGate (as the modal's dimmed background) through the entry
+  // choice too, even though selectedBranch is technically already set by this
+  // point (handleBranchGateSelect sets it in the same tick as opening the modal,
+  // so services/therapists can start prefetching) — the customer hasn't actually
+  // left the branch-selection screen yet from their point of view, and shouldn't
+  // see the profile page flash in behind the modal they're about to answer.
+  if (branches.length > 1 && (!selectedBranch || entryChoiceOpen)) {
     return (
       <>
         <BranchGate
