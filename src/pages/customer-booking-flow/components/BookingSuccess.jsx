@@ -44,6 +44,10 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   // group booking); every other caller sets the singular `selectedService`. Normalize
   // to a list once so both paths render every service and the real combined total.
   const services = bookingData?.selectedServices ?? (bookingData?.selectedService ? [bookingData.selectedService] : []);
+  // Group booking: each person got their own row/booking number. Only worth a
+  // dedicated list once there's more than one -- a 1-person "group" (or the solo
+  // path, which never sets this at all) falls through to the single chip below.
+  const groupBookings = bookingData?.groupBookings?.length > 1 ? bookingData.groupBookings : null;
   const priceOf = (s) => Number(s?.effective_price_npr ?? s?.price_npr ?? s?.price ?? 0);
   const total = services.reduce((sum, s) => sum + priceOf(s), 0);
 
@@ -77,12 +81,25 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
           Your {getServiceWord()} appointment has been successfully booked
         </p>
 
-        <div className="inline-flex items-center space-x-2 bg-success/10 text-success px-4 py-2 rounded-spa">
-          <Icon name="Calendar" size={16} />
-          <span className="font-body font-body-medium text-sm">
-            Booking ID: {bookingData?.bookingId}
-          </span>
-        </div>
+        {groupBookings ? (
+          <div className="inline-flex flex-col items-stretch gap-1.5 bg-success/10 text-success px-4 py-2 rounded-spa text-left">
+            {groupBookings.map((b, i) => (
+              <div key={`${b.bookingNumber ?? 'booking'}-${i}`} className="flex items-center gap-2">
+                <Icon name="Calendar" size={16} className="shrink-0" />
+                <span className="font-body font-body-medium text-sm">
+                  {b.label}: {b.bookingNumber}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="inline-flex items-center space-x-2 bg-success/10 text-success px-4 py-2 rounded-spa">
+            <Icon name="Calendar" size={16} />
+            <span className="font-body font-body-medium text-sm">
+              Booking ID: {bookingData?.bookingId}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Quick Summary */}
@@ -105,7 +122,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
                   {services.length > 1 ? 'Services' : 'Service'}
                 </span>
                 {services.map((s, i) => (
-                  <p key={s?.id ?? i} className="font-body font-body-normal text-sm text-text-primary">
+                  <p key={`${s?.id ?? 'svc'}-${i}`} className="font-body font-body-normal text-sm text-text-primary">
                     {s?.name}
                   </p>
                 ))}

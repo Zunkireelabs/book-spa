@@ -291,6 +291,11 @@ const ProviderProfileFlow = () => {
   const handleGroupBookingComplete = ({ bookings, selectedDateTime: groupDateTime, people: groupedPeople, leadContact }) => {
     setBookingData({
       bookingId: bookings[0]?.booking_number,
+      // submitGroupBooking's loop pushes each created row in the same order it
+      // iterates `people`, so bookings[i] lines up positionally with
+      // groupedPeople[i] -- lets BookingSuccess show each person's own booking
+      // number instead of just the lead's.
+      groupBookings: groupedPeople.map((p, i) => ({ label: p.label, bookingNumber: bookings[i]?.booking_number })),
       selectedBranch,
       selectedServices: groupedPeople.map((p) => p.service).filter(Boolean),
       selectedDateTime: groupDateTime,
