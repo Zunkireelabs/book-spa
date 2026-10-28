@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import CustomerHeader from '../../components/ui/CustomerHeader';
+import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
@@ -173,8 +174,17 @@ const ProviderProfileFlow = () => {
   // empty id list, which the service layer turns into `null` → the full bookable
   // roster, so Team shows everyone on first load. Cancelled flag so a fast service
   // switch can't land a stale list.
+  //
+  // showStaffSelection alone is NOT the right gate here: it only controls whether a
+  // SOLO customer is offered a staff-picker on the profile page -- group booking's
+  // per-person professional step needs real therapist data regardless of that
+  // tenant setting (nuad-thai-spa has it off, and group booking still needs the
+  // roster to compute per-person availability; without this, computeGroupSlots sees
+  // zero eligible therapists and correctly-but-wrongly marks every slot
+  // unavailable). Fetch whenever either the solo staff-picker is on, or group mode
+  // is in use.
   useEffect(() => {
-    if (!showStaffSelection || !orgSlug || !selectedBranch?.id) return undefined;
+    if ((!showStaffSelection && !groupModeOpen) || !orgSlug || !selectedBranch?.id) return undefined;
     let cancelled = false;
     setLoadingTherapists(true);
     setTherapistsError(null);
@@ -189,7 +199,7 @@ const ProviderProfileFlow = () => {
       setLoadingTherapists(false);
     });
     return () => { cancelled = true; };
-  }, [showStaffSelection, orgSlug, selectedBranch?.id, selectedServices, fetchNonce]);
+  }, [showStaffSelection, groupModeOpen, orgSlug, selectedBranch?.id, selectedServices, fetchNonce]);
 
   // Drops a specific pick once the (re-fetched) roster no longer includes them —
   // e.g. a newly-ticked service they can't perform. Guarded on loading/error: mid-fetch
@@ -216,6 +226,12 @@ const ProviderProfileFlow = () => {
 
   const chooseSoloEntry = () => {
     setEntryChoiceOpen(false);
+    // Solo booking has no "pick a service" step of its own -- that's this profile
+    // page's ServicesSection. Reaching this choice screen via the new persistent
+    // "Book" CTA (unconditional, unlike SummaryCard/MobileBookingBar) can land here
+    // with nothing selected yet; open BookingView only once there's something to
+    // book, otherwise just land back on the profile page to pick a service first.
+    if (selectedServices.length === 0) return;
     setBookingOpen(true);
   };
 
@@ -388,6 +404,22 @@ const ProviderProfileFlow = () => {
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
+
+      {/* Persistent "Book" entry, unconditional unlike SummaryCard/MobileBookingBar's
+          cart-gated CTA below -- lets a customer reach the solo-vs-group choice
+          screen before picking any service, matching Fresha's reference flow (the
+          choice comes first, not after a service is already in the cart). Only
+          needed while group booking exists as a second path; with the flag off,
+          openBooking() is solo-only anyway and the existing gated CTA is the one
+          entry point, unchanged. */}
+      {GROUP_BOOKING_ENABLED && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+          <Button variant="primary" onClick={openBooking} className="w-full sm:w-auto">
+            <Icon name="CalendarPlus" size={16} className="mr-2" />
+            Book
+          </Button>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] pb-24 lg:pb-10">
         <div className="min-w-0">
