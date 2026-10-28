@@ -126,7 +126,12 @@ const BookingView = ({
   const handleContinue = currentStep === 'confirm' ? () => setShowConfirmation(true) : goNext;
 
   return (
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]">
+    // --booking-header-h: real measured height of the sticky back/X row below (60px
+    // content + 16px clearance) — every other sticky element on this page (SummaryCard's
+    // sidebar) must start at or past this offset or it scrolls up underneath/overlapping
+    // the back/X buttons, exactly the collision Anish caught live after the sticky-row
+    // fix (dd7d6ed1) introduced it without updating what sticks below it.
+    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
       {/* sticky, not static -- same fix as GroupBookingView's identical row: it scrolled
           away with the page on any step with enough content to scroll. Both buttons
           carry their own opaque circular background, so the row itself needs none to
@@ -244,6 +249,7 @@ const BookingView = ({
             continueLabel={continueLabel}
             disabled={!canContinue[currentStep]}
             showContinue={!onReview}
+            stickyTop="var(--booking-header-h)"
           />
         </div>
       </div>

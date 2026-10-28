@@ -187,7 +187,9 @@ const GroupBookingView = ({
   };
 
   return (
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]">
+    // --booking-header-h: see BookingView's identical comment — same sticky back/X
+    // row, same collision, same fix.
+    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
       {/* sticky, not static -- was plain flow, so it scrolled away with the page the
           moment any step had enough content to scroll (made far worse once the hero
           image pushed everything down further). Anish: "this going back arrow in left
@@ -330,6 +332,7 @@ const GroupBookingView = ({
               onContinue={handleContinue}
               continueLabel="Continue"
               disabled={!canContinue[currentStep]}
+              stickyTop="var(--booking-header-h)"
             />
           </div>
         )}

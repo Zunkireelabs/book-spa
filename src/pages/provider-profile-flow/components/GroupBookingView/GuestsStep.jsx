@@ -72,18 +72,20 @@ const GuestsStep = ({ people, services, activeGuestId, onSelectActiveGuest, onSe
           <h2 className="font-medium text-base text-[var(--zn-foreground)] mb-3">
             Choose a service for {activePerson.label}
           </h2>
-          {/* GroupBookingView's own header is a plain non-sticky back/X row (unlike the
-              real, fixed CustomerHeader the profile page renders above ServicesSection's
-              usual instance) -- stickyTop="0" so the search+pill block sits flush at the
-              very top here instead of leaving a 65px gap with the previous item's tail
-              poking through above it. scrollSpyOffset drops by that same 65px so category
-              highlighting still triggers at the right scroll position. */}
+          {/* GroupBookingView's own sticky back/X row (not the profile page's real
+              CustomerHeader) is what this search+pill block must clear -- stickyTop="0"
+              made it sit flush at y=0 and overlap the back/X buttons the moment both
+              became sticky (Anish caught this live). --booking-header-h (set on
+              GroupBookingView's root) is the back/X row's actual measured height, so the
+              search bar starts right below it instead of underneath it. scrollSpyOffset
+              is shifted by the same 76px so category highlighting still triggers at the
+              right scroll position. */}
           <ServicesSection
             services={services}
             selectedServices={activePerson.service ? [activePerson.service] : []}
             onServiceToggle={(service) => onServiceChosenForActiveGuest(service)}
-            stickyTop="0"
-            scrollSpyOffset={181}
+            stickyTop="var(--booking-header-h)"
+            scrollSpyOffset={257}
           />
         </div>
       )}
