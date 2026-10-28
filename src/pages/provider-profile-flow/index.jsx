@@ -117,10 +117,22 @@ const ProviderProfileFlow = () => {
   }, []);
 
   // Pushes history so browser Back returns here instead of leaving the site — the
-  // gate (and Back) is now the only way to change branch.
+  // gate (and Back) is now the only way to change branch. When group booking is
+  // live, also surfaces the solo-vs-group choice immediately after picking a
+  // branch (a second history entry on top) rather than waiting for the customer to
+  // browse services and hit a Book CTA first — Anish wants the choice to be the
+  // first thing shown post-branch-select, not something gated behind picking a
+  // service. Single-branch auto-select (below) intentionally still lands on the
+  // profile page without this prompt — no explicit "selecting a branch" gesture to
+  // hang it off, and auto-opening a full-page interstitial the instant a
+  // single-branch tenant's page loads is a bigger behavior change than asked for.
   const handleBranchGateSelect = useCallback((branch) => {
     handleBranchSelect(branch);
     window.history.pushState({ providerBranch: true }, '');
+    if (GROUP_BOOKING_ENABLED) {
+      setEntryChoiceOpen(true);
+      window.history.pushState({ providerBooking: true }, '');
+    }
   }, [handleBranchSelect]);
 
   useEffect(() => {
