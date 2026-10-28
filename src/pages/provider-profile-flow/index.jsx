@@ -16,6 +16,7 @@ import SummaryCard from './components/SummaryCard';
 import MobileBookingBar from './components/MobileBookingBar';
 import BookingView from './components/BookingView';
 import GroupEntryChoice from './components/BookingView/GroupEntryChoice';
+import GroupBookingView from './components/GroupBookingView';
 import { createLeadPerson } from './utils/groupBooking';
 import { GROUP_BOOKING_ENABLED } from '../../lib/featureFlags';
 import './zennly-theme.css';
@@ -289,6 +290,24 @@ const ProviderProfileFlow = () => {
         onChooseSolo={chooseSoloEntry}
         onChooseGroup={chooseGroupEntry}
         onClose={closeBooking}
+      />
+    );
+  }
+
+  if (groupModeOpen) {
+    return (
+      <GroupBookingView
+        onClose={closeBooking}
+        orgSlug={orgSlug}
+        selectedBranch={selectedBranch}
+        services={services}
+        people={groupPeople}
+        onPeopleChange={setGroupPeople}
+        therapists={therapists}
+        loadingTherapists={loadingTherapists}
+        therapistsError={therapistsError}
+        onRetryTherapists={() => setFetchNonce((n) => n + 1)}
+        customerAccountId={customerProfile?.id}
       />
     );
   }
