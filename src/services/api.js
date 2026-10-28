@@ -5939,6 +5939,98 @@ export async function createBookingGroup({ services, date, startTime, therapistI
   return { data: { bookings: created, bookingGroupId }, error: null };
 }
 
+// Group booking (multiple PEOPLE at one shared time, Fresha-style) — distinct from
+// createBookingGroup above, which sequences one person through several back-to-back
+// services. Here every row shares the same date/startTime; the rollback mechanics are
+// copied from createBookingGroup's since both serve the same anonymous-customer RLS
+// shape (no anon SELECT/UPDATE on bookings, so compensation goes through the same
+// narrow public_cancel_booking_group RPC).
+export async function submitGroupBooking({ branchId, orgSlug, date, startTime, genderPreference, specialRequests, leadContact, people, customerAccountId = null, createBookingFn = createBooking }) {
+  // Referral resolution mirrors BookingConfirmation.jsx's handleConfirmBooking exactly
+  // (lead-only — guests have no account of their own to credit a referral against).
+  let referringCustomerId = null;
+  let referralSourceDetail = null;
+  const referralSource = leadContact.referralSource || null;
+
+  if (referralSource === 'client') {
+    const namePart = leadContact.referralClientName?.trim() || '';
+    const dialCode = leadContact.referralCountryCode || '+977';
+    const referralE164 = toE164(leadContact.referralPhone, dialCode);
+    const phonePart = referralE164 ? `(${referralE164})` : '';
+    referralSourceDetail = [namePart, phonePart].filter(Boolean).join(' ') || null;
+
+    if (referralE164 && referralE164 !== leadContact.phone) {
+      const { data: referrer } = await lookupReferrerByPhone(orgSlug, leadContact.referralPhone, dialCode);
+      referringCustomerId = referrer?.id || null;
+    }
+  } else if (referralSource === 'social_media') {
+    referralSourceDetail = leadContact.referralSocialPlatform || null;
+  } else if (referralSource === 'staff') {
+    referralSourceDetail = leadContact.referralStaffName?.trim() || null;
+  }
+
+  const rowArgs = (person) => ({
+    branchId,
+    orgSlug,
+    date,
+    startTime,
+    genderPreference,
+    specialRequests,
+    serviceId: person.service.id,
+    therapistId: person.therapistId,
+    customerName: person.isLead ? leadContact.name : (person.name || person.label),
+    customerEmail: leadContact.email,
+    customerPhone: leadContact.phone,
+    customerGender: person.isLead ? leadContact.gender : null,
+    ...(person.isLead ? { customerAccountId, referringCustomerId, referralSource, referralSourceDetail } : {}),
+  });
+
+  // Single person: no group, no compensation path — behave exactly like a plain booking.
+  if (people.length === 1) {
+    const { data, error } = await createBookingFn(rowArgs(people[0]));
+    return { data: data ? { bookings: [data] } : null, error };
+  }
+
+  const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const created = [];
+  for (const person of people) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await createBookingFn({ ...rowArgs(person), bookingGroupId });
+
+    if (error) {
+      if (created.length > 0) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const { error: rollbackError } = await supabase
+            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+          if (rollbackError) throw rollbackError;
+        } catch (cancelError) {
+          console.error('[API] submitGroupBooking rollback FAILED for group', bookingGroupId, cancelError);
+          return {
+            data: null,
+            error: {
+              code: 'BOOKING_GROUP_PARTIAL',
+              message: `${person.label || person.name || 'A person in your group'} could not be booked, and we could not automatically release the others. Please contact the branch to confirm what is reserved.`,
+            },
+          };
+        }
+      }
+      return {
+        data: null,
+        error: {
+          ...error,
+          message: `${error.message || 'could not be booked.'}${created.length > 0 ? ' The rest of your group was released — please pick another time.' : ''}`,
+        },
+      };
+    }
+    created.push(data);
+  }
+
+  return { data: { bookings: created }, error: null };
+}
 
 // (booking-details-assignment-modal, calendar's Rebook-reuse-as-reschedule
 // branch), which intentionally creates a fresh booking row and cancels the
@@ -11342,8 +11434,14 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
  * Fetch bookable staff for the provider-profile "Select professional" step
  * (public_get_bookable_therapists, migration-252) — org-scoped (the raw anon RLS
  * policy on `therapists` is not) and allow-list-aware when p_service_id is passed.
+ *
+ * forGroupBooking (migration-305) bypasses the tenant's show_staff_selection=true
+ * requirement server-side: that flag only governs whether a SOLO customer is offered
+ * a staff-picker on the profile page, unrelated to group booking's need for the same
+ * roster to compute per-person availability. Defaults to false so every existing
+ * (solo-flow) caller is unaffected.
  */
-export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
+export async function fetchBookableTherapists(orgSlug, branchId, serviceIds, forGroupBooking = false) {
   try {
     // Accepts one id or an array — a multi-service visit is covered by a single
     // professional, so the roster must be narrowed to staff eligible for every
@@ -11356,6 +11454,7 @@ export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
       p_org_slug: orgSlug,
       p_branch_id: branchId,
       p_service_ids: ids.length > 0 ? ids : null,
+      p_for_group_booking: forGroupBooking,
     });
 
     if (error) throw error;
