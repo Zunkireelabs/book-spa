@@ -127,7 +127,11 @@ const BookingView = ({
 
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
+      {/* sticky, not static -- same fix as GroupBookingView's identical row: it scrolled
+          away with the page on any step with enough content to scroll. Both buttons
+          carry their own opaque circular background, so the row itself needs none to
+          stay legible pinned over whatever's beneath it. */}
+      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
         <button
           onClick={handleBack}
           aria-label="Back"

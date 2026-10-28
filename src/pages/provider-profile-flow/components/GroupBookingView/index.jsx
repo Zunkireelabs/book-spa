@@ -188,7 +188,13 @@ const GroupBookingView = ({
 
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
+      {/* sticky, not static -- was plain flow, so it scrolled away with the page the
+          moment any step had enough content to scroll (made far worse once the hero
+          image pushed everything down further). Anish: "this going back arrow in left
+          side and cross right side goes away while scrolling down." Both buttons carry
+          their own opaque circular background already, so this needs no background of
+          its own to stay legible pinned over the hero photo or page content beneath it. */}
+      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 flex items-center justify-between">
         <button
           onClick={handleBack}
           aria-label="Back"
