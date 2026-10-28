@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import DiscardDialog from '../BookingView/DiscardDialog';
+import ProfileHero from '../ProfileHero';
 import GroupSummaryCard from './GroupSummaryCard';
 import GuestsStep from './GuestsStep';
 import GroupProfessionalStep from './GroupProfessionalStep';
@@ -209,6 +210,16 @@ const GroupBookingView = ({
         <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
       )}
 
+      {/* Solo's equivalent "pick a service" screen is the profile page itself, which
+          always shows ProfileHero -- Anish: "there is cover image similar to individual
+          bookings" [missing here]. Only on 'guests' (group booking's service-picking
+          step), matching BookingView's later steps (professional/time/confirm), which
+          never show a hero either -- this isn't "every step gets a hero", it's "the
+          service-picking step gets the same hero the solo service-picking screen has". */}
+      {currentStep === 'guests' && (
+        <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-28 lg:pb-16">
         <nav aria-label="Group booking steps" className="flex items-center gap-2 flex-wrap mt-4">
           {STEPS.map((s, i) => (
@@ -262,7 +273,11 @@ const GroupBookingView = ({
           // stays full-width/no sidebar since GroupConfirmStep already renders its own
           // equivalent per-person breakdown + total inline as the final review.
           <div className="grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
-            <div className="min-w-0 max-w-2xl">
+            {/* No max-w cap, matching BookingView's left column exactly (just min-w-0) --
+                a stray max-w-2xl here left the service list narrower than the solo
+                flow's equivalent (Anish: "services width is not same... increase the
+                width"). */}
+            <div className="min-w-0">
               {currentStep === 'guests' && (
                 <GuestsStep
                   people={people}
