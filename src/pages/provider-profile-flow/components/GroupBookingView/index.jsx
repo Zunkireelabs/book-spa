@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
-import DiscardDialog from '../BookingView/DiscardDialog';
+import CustomerHeader from '../../../../components/ui/CustomerHeader';
 import ProfileHero from '../ProfileHero';
 import GroupSummaryCard from './GroupSummaryCard';
 import GuestsStep from './GuestsStep';
@@ -12,7 +12,6 @@ import { addGuest, removeGuest, updateGuestField } from '../../utils/groupBookin
 import { submitGroupBooking } from '../../../../services/api';
 import { toE164 } from '../../../../utils/phone';
 import { scrollToTopInstant } from '../../../../utils/scroll';
-import { useCollapsedHeaderTitle } from '../../utils/useCollapsedHeaderTitle';
 
 const STEP_HEADINGS = {
   guests: 'Add guests and services',
@@ -52,7 +51,6 @@ const GroupBookingView = ({
 }) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [activeGuestId, setActiveGuestId] = useState('lead');
-  const [confirmingClose, setConfirmingClose] = useState(false);
   const [professionalMode, setProfessionalMode] = useState(null); // null | 'any' | 'per-guest'
   const [selectedDateTime, setSelectedDateTime] = useState({ date: '', time: '' });
   const [submitting, setSubmitting] = useState(false);
@@ -96,7 +94,6 @@ const GroupBookingView = ({
 
   const currentStep = STEPS[stepIndex]?.key;
   const pageTitle = STEP_HEADINGS[currentStep];
-  const { titleRef, collapsed } = useCollapsedHeaderTitle();
 
   const canContinue = {
     guests: people.every((p) => !!p.service),
@@ -105,9 +102,7 @@ const GroupBookingView = ({
     confirm: false, // GroupConfirmStep (Task 8) owns its own submit gating
   };
 
-  const goBack = () => setStepIndex((i) => Math.max(0, i - 1));
   const goNext = () => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1));
-  const handleBack = stepIndex > 0 ? goBack : onClose;
   const handleContinue = goNext;
 
   // Functional updates throughout — onPeopleChange is the parent's raw setState
@@ -189,44 +184,15 @@ const GroupBookingView = ({
     onGroupBookingComplete({ bookings: data.bookings, selectedDateTime, people, leadContact });
   };
 
+  // No back/X icon row -- matches the solo profile page exactly (persistent
+  // CustomerHeader, no floating icon buttons). Anish: "make it similar like individual
+  // bookings with no back button and no cross button." Exiting and moving between steps
+  // both go through the nav below (the leading "Services" crumb calls onClose
+  // unconditionally, same label/destination as BookingView's own escape hatch; each
+  // passed step name is its own back-navigation) or the browser's Back button.
   return (
-    // --booking-header-h: see BookingView's identical comment — same sticky back/X
-    // row, same collision, same fix.
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
-      {/* sticky, not static -- it scrolled away with the page on any step with enough
-          content to scroll. Transparent, not an opaque bar (Anish: "use the transparent
-          as header") -- the collapsing title below replaces that fix instead: once the
-          real heading scrolls out from under this row, a small copy fades in next to
-          the back button, same pattern as BookingView's identical row. */}
-      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={handleBack}
-            aria-label="Back"
-            className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
-          >
-            <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
-          </button>
-          <h2
-            aria-hidden={!collapsed}
-            className={`font-medium text-lg text-[var(--zn-foreground)] truncate transition-opacity duration-150 ${collapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-          >
-            {pageTitle}
-          </h2>
-        </div>
-
-        <button
-          onClick={() => setConfirmingClose(true)}
-          aria-label="Close booking"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
-        >
-          <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
-        </button>
-      </div>
-
-      {confirmingClose && (
-        <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
-      )}
+    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
 
       {/* Solo's equivalent "pick a service" screen is the profile page itself, which
           always shows ProfileHero -- Anish: "there is cover image similar to individual
@@ -240,6 +206,14 @@ const GroupBookingView = ({
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-28 lg:pb-16">
         <nav aria-label="Group booking steps" className="flex items-center gap-2 flex-wrap mt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-[var(--zn-muted-foreground)] hover:text-[var(--zn-foreground)] underline transition-colors"
+          >
+            Services
+          </button>
+          <Icon name="ChevronRight" size={14} className="text-[var(--zn-muted-foreground)]" />
           {STEPS.map((s, i) => (
             <React.Fragment key={s.key}>
               {i > 0 && <Icon name="ChevronRight" size={14} className="text-[var(--zn-muted-foreground)]" />}
@@ -262,7 +236,7 @@ const GroupBookingView = ({
           ))}
         </nav>
 
-        <h1 ref={titleRef} className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
+        <h1 className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
           {pageTitle}
         </h1>
 
@@ -342,7 +316,7 @@ const GroupBookingView = ({
               onContinue={handleContinue}
               continueLabel="Continue"
               disabled={!canContinue[currentStep]}
-              stickyTop="var(--booking-header-h)"
+              stickyTop="var(--customer-header-h, 64px)"
             />
           </div>
         )}

@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
+import CustomerHeader from '../../../../components/ui/CustomerHeader';
 import SummaryCard from '../SummaryCard';
 import ProfessionalStep from './ProfessionalStep';
 import DateTimeStep from './DateTimeStep';
 import ConfirmStep from './ConfirmStep';
-import DiscardDialog from './DiscardDialog';
 import { useTenant } from '../../../../contexts/TenantContext';
 import { scrollToTopInstant } from '../../../../utils/scroll';
-import { useCollapsedHeaderTitle } from '../../utils/useCollapsedHeaderTitle';
 
 // Full-page booking view (Fresha-style), replacing the earlier 460px slide-over: the
 // drawer left two thirds of the screen empty while cramming every step into a narrow
@@ -64,7 +63,6 @@ const BookingView = ({
     return i > 0 ? i : 0;
   });
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const [confirmingClose, setConfirmingClose] = useState(false);
 
   // A late-arriving flag (TenantContext resolves async) can't strand stepIndex past
   // the end of a shorter steps array.
@@ -94,7 +92,6 @@ const BookingView = ({
 
   const handleEditBooking = () => setShowConfirmation(false);
 
-  const goBack = () => setStepIndex((i) => Math.max(0, i - 1));
   const goNext = () => setStepIndex((i) => Math.min(steps.length - 1, i + 1));
 
   const isCustomerInfoValid = () => {
@@ -118,60 +115,22 @@ const BookingView = ({
   const currentStep = steps[stepIndex]?.key;
   const onReview = currentStep === 'confirm' && showConfirmation;
 
-  // From the review screen, back edits the details again; otherwise it walks the
-  // steps — and from the first step, back exits to the profile page (the services
-  // step now lives there), same destination as the Services breadcrumb crumb below.
-  const handleBack = onReview ? handleEditBooking : (stepIndex > 0 ? goBack : onClose);
-
   const continueLabel = currentStep === 'confirm' ? 'Review' : 'Continue';
   const handleContinue = currentStep === 'confirm' ? () => setShowConfirmation(true) : goNext;
 
   const pageTitle = onReview ? 'Review and confirm' : STEP_HEADINGS[currentStep];
-  const { titleRef, collapsed } = useCollapsedHeaderTitle();
 
+  // No back/X icon row -- matches the solo profile page exactly (persistent
+  // CustomerHeader, no floating icon buttons at all). Anish: "make it similar like
+  // individual bookings with no back button and no cross button." Exiting the flow and
+  // moving between steps both go through the nav below (the "Services" crumb calls
+  // onClose unconditionally; each step name is its own back-navigation once it's been
+  // passed) or the browser's own Back button (already wired via history push/pop in
+  // the parent). The review screen's own "Edit" control (inside ConfirmStep ->
+  // BookingConfirmation) is independent of this and still works unchanged.
   return (
-    // --booking-header-h: real measured height of the sticky back/X row below (60px
-    // content + 16px clearance) — every other sticky element on this page (SummaryCard's
-    // sidebar) must start at or past this offset or it scrolls up underneath/overlapping
-    // the back/X buttons, exactly the collision Anish caught live after the sticky-row
-    // fix (dd7d6ed1) introduced it without updating what sticks below it.
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
-      {/* sticky, not static -- it scrolled away with the page on any step with enough
-          content to scroll. Transparent, not an opaque bar (Anish: "use the transparent
-          as header") -- the collapsing title below replaces that fix instead: once the
-          real heading scrolls out from under this row, a small copy of it fades in next
-          to the back button, so nothing needs a solid background to avoid other content
-          showing through -- there's no longer other content at that position once the
-          title itself is what's showing there. */}
-      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={handleBack}
-            aria-label="Back"
-            className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
-          >
-            <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
-          </button>
-          <h2
-            aria-hidden={!collapsed}
-            className={`font-medium text-lg text-[var(--zn-foreground)] truncate transition-opacity duration-150 ${collapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-          >
-            {pageTitle}
-          </h2>
-        </div>
-
-        <button
-          onClick={() => setConfirmingClose(true)}
-          aria-label="Close booking"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
-        >
-          <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
-        </button>
-      </div>
-
-      {confirmingClose && (
-        <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
-      )}
+    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+      <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-28 lg:pb-16">
         <nav aria-label="Booking steps" className="flex items-center gap-2 flex-wrap mt-4">
@@ -204,7 +163,7 @@ const BookingView = ({
           ))}
         </nav>
 
-        <h1 ref={titleRef} className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
+        <h1 className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
           {pageTitle}
         </h1>
 
@@ -264,7 +223,7 @@ const BookingView = ({
             continueLabel={continueLabel}
             disabled={!canContinue[currentStep]}
             showContinue={!onReview}
-            stickyTop="var(--booking-header-h)"
+            stickyTop="var(--customer-header-h, 64px)"
           />
         </div>
       </div>
