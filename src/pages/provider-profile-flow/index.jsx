@@ -440,20 +440,29 @@ const ProviderProfileFlow = () => {
   if (branches.length > 1 && (!selectedBranch || entryChoiceOpen)) {
     return (
       <>
-        <BranchGate
-          orgName={orgName}
-          heroImageUrl={heroImageUrl}
-          logoUrl={logoUrl}
-          branches={branches}
-          onSelect={handleBranchGateSelect}
-        />
+        {/* backdrop-filter on the modal's own scrim doesn't reliably composite in
+            every environment (confirmed: the hero photo is loaded, but zero of its
+            color shows through a blurred scrim) — blurring the background content
+            itself instead works everywhere, no backdrop compositing required. */}
+        <div className={entryChoiceOpen ? 'blur-sm pointer-events-none transition-[filter] duration-200' : 'transition-[filter] duration-200'}>
+          <BranchGate
+            orgName={orgName}
+            heroImageUrl={heroImageUrl}
+            logoUrl={logoUrl}
+            branches={branches}
+            onSelect={handleBranchGateSelect}
+          />
+        </div>
         {entryChoiceModal}
       </>
     );
   }
 
   return (
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+    <div
+      className={`zn-scope min-h-screen bg-[var(--zn-background)] transition-[filter] duration-200 ${entryChoiceOpen ? 'blur-sm pointer-events-none' : ''}`}
+      style={{ paddingTop: 'var(--customer-header-h, 64px)' }}
+    >
       {entryChoiceModal}
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
