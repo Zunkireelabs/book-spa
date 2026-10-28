@@ -99,7 +99,17 @@ const ProviderProfileFlow = () => {
       // Auto-select only when unambiguous. Two or more branches show BranchGate
       // first instead — silently picking data[0] let a customer book the wrong
       // location on a multi-branch org with no way to tell.
-      if (data?.length === 1) setSelectedBranch(data[0]);
+      if (data?.length === 1) {
+        setSelectedBranch(data[0]);
+        // Same "choice first" behavior as the explicit BranchGate pick below — a
+        // single-branch tenant has no gate screen to hang the prompt off, so it
+        // fires here instead, once, right after the auto-select resolves (this
+        // effect only re-runs on orgId change, not on every render).
+        if (GROUP_BOOKING_ENABLED) {
+          setEntryChoiceOpen(true);
+          window.history.pushState({ providerBooking: true }, '');
+        }
+      }
       setBranchesLoaded(true);
     });
   }, [orgId]);
@@ -122,10 +132,8 @@ const ProviderProfileFlow = () => {
   // branch (a second history entry on top) rather than waiting for the customer to
   // browse services and hit a Book CTA first — Anish wants the choice to be the
   // first thing shown post-branch-select, not something gated behind picking a
-  // service. Single-branch auto-select (below) intentionally still lands on the
-  // profile page without this prompt — no explicit "selecting a branch" gesture to
-  // hang it off, and auto-opening a full-page interstitial the instant a
-  // single-branch tenant's page loads is a bigger behavior change than asked for.
+  // service. Single-branch auto-select gets the identical prompt, just triggered
+  // from the branches-fetch effect below instead of this click handler.
   const handleBranchGateSelect = useCallback((branch) => {
     handleBranchSelect(branch);
     window.history.pushState({ providerBranch: true }, '');
