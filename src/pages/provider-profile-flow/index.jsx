@@ -15,6 +15,9 @@ import BranchGate from './components/BranchGate';
 import SummaryCard from './components/SummaryCard';
 import MobileBookingBar from './components/MobileBookingBar';
 import BookingView from './components/BookingView';
+import GroupEntryChoice from './components/BookingView/GroupEntryChoice';
+import { createLeadPerson } from './utils/groupBooking';
+import { GROUP_BOOKING_ENABLED } from '../../lib/featureFlags';
 import './zennly-theme.css';
 
 // The customer booking flow for every tenant: scroll-spy category pills + hero +
@@ -50,6 +53,9 @@ const ProviderProfileFlow = () => {
   const [selectedDateTime, setSelectedDateTime] = useState({ date: '', time: '' });
   const [genderPreference, setGenderPreference] = useState('no-preference');
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [entryChoiceOpen, setEntryChoiceOpen] = useState(false);
+  const [groupModeOpen, setGroupModeOpen] = useState(false);
+  const [groupPeople, setGroupPeople] = useState(() => [createLeadPerson()]);
   const [bookingData, setBookingData] = useState(null);
   const [customerInfo, setCustomerInfo] = useState({
     firstName: '',
@@ -202,19 +208,33 @@ const ProviderProfileFlow = () => {
   // otherwise leave the site entirely instead of returning to the profile — so opening
   // pushes a history entry and Back pops it.
   const openBooking = () => {
-    setBookingOpen(true);
+    if (GROUP_BOOKING_ENABLED) setEntryChoiceOpen(true);
+    else setBookingOpen(true);
     window.history.pushState({ providerBooking: true }, '');
+  };
+
+  const chooseSoloEntry = () => {
+    setEntryChoiceOpen(false);
+    setBookingOpen(true);
+  };
+
+  const chooseGroupEntry = () => {
+    setEntryChoiceOpen(false);
+    setGroupPeople([createLeadPerson()]);
+    setGroupModeOpen(true);
   };
 
   const closeBooking = () => {
     if (window.history.state?.providerBooking) window.history.back();
-    else setBookingOpen(false);
+    else { setBookingOpen(false); setEntryChoiceOpen(false); setGroupModeOpen(false); }
     scrollToTopInstant();
   };
 
   useEffect(() => {
     const onPopState = (e) => {
       setBookingOpen(false);
+      setEntryChoiceOpen(false);
+      setGroupModeOpen(false);
       // Popping back past the gate's pushed entry (state.providerBranch) lands on
       // the pre-selection entry (state null) — re-show the gate instead of leaving
       // the customer on services with no way back to it.
@@ -261,6 +281,16 @@ const ProviderProfileFlow = () => {
 
   if (bookingData) {
     return <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} onBookAnother={handleBookAnother} />;
+  }
+
+  if (entryChoiceOpen) {
+    return (
+      <GroupEntryChoice
+        onChooseSolo={chooseSoloEntry}
+        onChooseGroup={chooseGroupEntry}
+        onClose={closeBooking}
+      />
+    );
   }
 
   // Full-page takeover rather than an overlay: the profile page simply isn't rendered
