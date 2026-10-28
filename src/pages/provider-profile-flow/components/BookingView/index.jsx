@@ -223,7 +223,11 @@ const BookingView = ({
             continueLabel={continueLabel}
             disabled={!canContinue[currentStep]}
             showContinue={!onReview}
-            stickyTop="var(--customer-header-h, 64px)"
+            // Matches the profile page's own SummaryCard exactly (index.jsx) -- header
+            // height plus breathing room, not just the bare header height, which left
+            // the card touching the header with zero gap (Anish caught the mismatch
+            // comparing solo's profile-page service list to group's GuestsStep).
+            stickyTop="calc(var(--customer-header-h, 64px) + 1.5rem)"
           />
         </div>
       </div>

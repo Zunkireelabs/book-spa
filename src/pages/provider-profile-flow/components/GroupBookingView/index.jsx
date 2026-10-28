@@ -316,7 +316,7 @@ const GroupBookingView = ({
               onContinue={handleContinue}
               continueLabel="Continue"
               disabled={!canContinue[currentStep]}
-              stickyTop="var(--customer-header-h, 64px)"
+              stickyTop="calc(var(--customer-header-h, 64px) + 1.5rem)"
             />
           </div>
         )}
