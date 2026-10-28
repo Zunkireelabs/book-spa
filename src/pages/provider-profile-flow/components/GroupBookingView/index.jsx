@@ -12,6 +12,7 @@ import { addGuest, removeGuest, updateGuestField } from '../../utils/groupBookin
 import { submitGroupBooking } from '../../../../services/api';
 import { toE164 } from '../../../../utils/phone';
 import { scrollToTopInstant } from '../../../../utils/scroll';
+import { useCollapsedHeaderTitle } from '../../utils/useCollapsedHeaderTitle';
 
 const STEP_HEADINGS = {
   guests: 'Add guests and services',
@@ -94,6 +95,8 @@ const GroupBookingView = ({
   }, [stepIndex]);
 
   const currentStep = STEPS[stepIndex]?.key;
+  const pageTitle = STEP_HEADINGS[currentStep];
+  const { titleRef, collapsed } = useCollapsedHeaderTitle();
 
   const canContinue = {
     guests: people.every((p) => !!p.service),
@@ -190,29 +193,35 @@ const GroupBookingView = ({
     // --booking-header-h: see BookingView's identical comment — same sticky back/X
     // row, same collision, same fix.
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
-      {/* sticky, not static -- was plain flow, so it scrolled away with the page the
-          moment any step had enough content to scroll. Opaque full-width background
-          (not just the buttons' own circles) -- Anish caught the "Services" heading
-          peeking out from behind the back button mid-scroll; a transparent row with
-          floating icons read as a bug once content/headings showed through it. */}
-      <div className="sticky top-0 z-header bg-[var(--zn-background)] border-b border-[var(--zn-border)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
-        <button
-          onClick={handleBack}
-          aria-label="Back"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
-        >
-          <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
-        </button>
+      {/* sticky, not static -- it scrolled away with the page on any step with enough
+          content to scroll. Transparent, not an opaque bar (Anish: "use the transparent
+          as header") -- the collapsing title below replaces that fix instead: once the
+          real heading scrolls out from under this row, a small copy fades in next to
+          the back button, same pattern as BookingView's identical row. */}
+      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={handleBack}
+            aria-label="Back"
+            className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
+          >
+            <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
+          </button>
+          <h2
+            aria-hidden={!collapsed}
+            className={`font-medium text-lg text-[var(--zn-foreground)] truncate transition-opacity duration-150 ${collapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          >
+            {pageTitle}
+          </h2>
+        </div>
 
         <button
           onClick={() => setConfirmingClose(true)}
           aria-label="Close booking"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
+          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
         >
           <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
         </button>
-      </div>
       </div>
 
       {confirmingClose && (
@@ -253,8 +262,8 @@ const GroupBookingView = ({
           ))}
         </nav>
 
-        <h1 className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
-          {STEP_HEADINGS[currentStep]}
+        <h1 ref={titleRef} className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
+          {pageTitle}
         </h1>
 
         {currentStep === 'confirm' ? (

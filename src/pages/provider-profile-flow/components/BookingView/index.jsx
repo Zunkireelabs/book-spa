@@ -8,6 +8,7 @@ import ConfirmStep from './ConfirmStep';
 import DiscardDialog from './DiscardDialog';
 import { useTenant } from '../../../../contexts/TenantContext';
 import { scrollToTopInstant } from '../../../../utils/scroll';
+import { useCollapsedHeaderTitle } from '../../utils/useCollapsedHeaderTitle';
 
 // Full-page booking view (Fresha-style), replacing the earlier 460px slide-over: the
 // drawer left two thirds of the screen empty while cramming every step into a narrow
@@ -125,6 +126,9 @@ const BookingView = ({
   const continueLabel = currentStep === 'confirm' ? 'Review' : 'Continue';
   const handleContinue = currentStep === 'confirm' ? () => setShowConfirmation(true) : goNext;
 
+  const pageTitle = onReview ? 'Review and confirm' : STEP_HEADINGS[currentStep];
+  const { titleRef, collapsed } = useCollapsedHeaderTitle();
+
   return (
     // --booking-header-h: real measured height of the sticky back/X row below (60px
     // content + 16px clearance) — every other sticky element on this page (SummaryCard's
@@ -132,31 +136,37 @@ const BookingView = ({
     // the back/X buttons, exactly the collision Anish caught live after the sticky-row
     // fix (dd7d6ed1) introduced it without updating what sticks below it.
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ '--booking-header-h': '76px' }}>
-      {/* sticky, not static -- same fix as GroupBookingView's identical row: it scrolled
-          away with the page on any step with enough content to scroll. An opaque
-          full-width background (not just the buttons' own circles) so scrolled
-          content/headings never show through behind it either -- Anish caught a
-          service-list heading peeking out from under the back button mid-scroll;
-          transparent-row-with-floating-icons read as a bug, not a deliberate "icons
-          float over the hero photo" design. */}
-      <div className="sticky top-0 z-header bg-[var(--zn-background)] border-b border-[var(--zn-border)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
-        <button
-          onClick={handleBack}
-          aria-label="Back"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
-        >
-          <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
-        </button>
+      {/* sticky, not static -- it scrolled away with the page on any step with enough
+          content to scroll. Transparent, not an opaque bar (Anish: "use the transparent
+          as header") -- the collapsing title below replaces that fix instead: once the
+          real heading scrolls out from under this row, a small copy of it fades in next
+          to the back button, so nothing needs a solid background to avoid other content
+          showing through -- there's no longer other content at that position once the
+          title itself is what's showing there. */}
+      <div className="sticky top-0 z-header max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={handleBack}
+            aria-label="Back"
+            className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
+          >
+            <Icon name="ArrowLeft" size={18} className="text-[var(--zn-foreground)]" />
+          </button>
+          <h2
+            aria-hidden={!collapsed}
+            className={`font-medium text-lg text-[var(--zn-foreground)] truncate transition-opacity duration-150 ${collapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          >
+            {pageTitle}
+          </h2>
+        </div>
 
         <button
           onClick={() => setConfirmingClose(true)}
           aria-label="Close booking"
-          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center hover:border-[var(--zn-foreground)]/40"
+          className="w-10 h-10 rounded-full border border-[var(--zn-border)] bg-[var(--zn-card)] flex items-center justify-center shrink-0 hover:border-[var(--zn-foreground)]/40"
         >
           <Icon name="X" size={18} className="text-[var(--zn-foreground)]" />
         </button>
-      </div>
       </div>
 
       {confirmingClose && (
@@ -194,8 +204,8 @@ const BookingView = ({
           ))}
         </nav>
 
-        <h1 className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
-          {onReview ? 'Review and confirm' : STEP_HEADINGS[currentStep]}
+        <h1 ref={titleRef} className="font-normal text-[32px] sm:text-[40px] tracking-[-0.01em] text-[var(--zn-foreground)] mt-4 mb-6">
+          {pageTitle}
         </h1>
 
         <div className="grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
