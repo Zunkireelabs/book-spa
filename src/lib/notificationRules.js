@@ -13,8 +13,10 @@ const CATEGORY_BY_TYPE = {
   discount_approved: 'approvals',
   discount_declined: 'approvals',
   discount_fyi: 'approvals',
+  discount_big_fyi: 'approvals',
   transferred_staff_reminder: 'team',
   attendance_gap: 'team',
+  attendance_gaps: 'team',
   low_stock: 'stock',
   outreach_review_pending: 'guests',
   renewal_due: 'guests',
@@ -37,8 +39,15 @@ export const categoriesForRole = (role) =>
 
 export const prefFor = (prefs, category) => prefs?.[category] || DEFAULT_PREFS[category] || { popup: false, sound: false };
 
-// Approvals stay on screen until acted on or closed.
+// Approvals stay on screen until acted on or closed (the FYI is bell/Inbox only, so it never reaches a pop-up).
 export const isSticky = (category) => category === 'approvals';
+
+// Per-type overrides of the category pref (scene E): not user-editable, so they live here and not in notification_prefs.
+// popup/sound: false = never, true = always, absent = follow the category pref. 
+const TYPE_OVERRIDES = {
+  discount_big_fyi: { popup: false, sound: false },
+  attendance_gaps: { sound: false },
+};
 
 export const GROUP_WINDOW_MS = 10 * 60 * 1000;
 export const GROUP_MAX = 5;
@@ -118,7 +127,10 @@ export function evaluateLiveEvent({ row, userId, prefs, settings, branch, now = 
   if (!heardBranch(cfg.heard_branch_ids, row.branchId)) return none;
   if (cfg.quiet_outside_hours && !isWithinOpeningHours(branch, now)) return none;
   const pref = prefFor(prefs, row.category);
-  return { popup: !!pref.popup, sound: !!pref.sound && !!cfg.sound_enabled };
+  const ov = TYPE_OVERRIDES[row.type] || {};
+  const popup = ov.popup ?? !!pref.popup;
+  const sound = (ov.sound ?? !!pref.sound) && !!cfg.sound_enabled;
+  return { popup, sound };
 }
 
 /** 5+ arrivals within a minute collapse into one card. */

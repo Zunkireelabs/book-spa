@@ -11,6 +11,7 @@ describe('categoryOf', () => {
   it.each([
     ['new_online_booking', 'bookings'], ['discount_approved', 'approvals'], ['discount_declined', 'approvals'],
     ['transferred_staff_reminder', 'team'], ['low_stock', 'stock'], ['outreach_review_pending', 'guests'],
+    ['discount_big_fyi', 'approvals'], ['attendance_gaps', 'team'], ['attendance_gap', 'team'],
     ['something_new', 'bookings'],
   ])('%s -> %s', (t, c) => expect(categoryOf(t)).toBe(c));
 });
@@ -72,6 +73,22 @@ describe('evaluateLiveEvent gate', () => {
   it("ignores the user's own action and already-read rows", () => {
     expect(evaluateLiveEvent({ ...base, row: row({ actorId: 'u1' }) })).toEqual({ popup: false, sound: false });
     expect(evaluateLiveEvent({ ...base, row: row({ read: true }) })).toEqual({ popup: false, sound: false });
+  });
+  it('actor gate: only the actor is skipped, others still hear it', () => {
+    expect(evaluateLiveEvent({ ...base, row: row({ actorId: 'u2' }) })).toEqual({ popup: true, sound: true });
+    expect(evaluateLiveEvent({ ...base, row: row({ actorId: null }) })).toEqual({ popup: true, sound: true });
+  });
+  it('per-type override: big-discount FYI is bell/Inbox only even though Approvals pops up', () => {
+    expect(evaluateLiveEvent({ ...base, row: row({ category: 'approvals', type: 'discount_request' }) })).toEqual({ popup: true, sound: true });
+    expect(evaluateLiveEvent({ ...base, row: row({ category: 'approvals', type: 'discount_big_fyi' }) })).toEqual({ popup: false, sound: false });
+    // an explicit pref cannot turn the FYI into a pop-up
+    expect(evaluateLiveEvent({ ...base, prefs: { approvals: { popup: true, sound: true } }, row: row({ category: 'approvals', type: 'discount_big_fyi' }) })).toEqual({ popup: false, sound: false });
+  });
+  it('per-type override: attendance gaps pop up with no sound', () => {
+    const prefs = { team: { popup: true, sound: true } };
+    expect(evaluateLiveEvent({ ...base, row: row({ category: 'team', type: 'attendance_gaps' }) })).toEqual({ popup: true, sound: false });
+    expect(evaluateLiveEvent({ ...base, prefs, row: row({ category: 'team', type: 'attendance_gaps' }) })).toEqual({ popup: true, sound: false });
+    expect(evaluateLiveEvent({ ...base, prefs: { team: { popup: false, sound: false } }, row: row({ category: 'team', type: 'attendance_gaps' }) }).popup).toBe(false);
   });
   it('is quiet outside opening hours unless switched off', () => {
     const branch = { open_time: '09:00', close_time: '21:00' };

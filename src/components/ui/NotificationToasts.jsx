@@ -32,8 +32,8 @@ const Card = ({ p, onOpen, onClose, branchName, words, stacked, desktop }) => {
       onMouseLeave={() => { hover.current = false; }}
       className={`relative overflow-hidden bg-white border border-gray-200 rounded-spa-lg shadow-spa-modal p-3.5 flex gap-3 ${stacked ? 'scale-[0.96] opacity-90' : ''}`}
     >
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isApproval ? 'bg-warning/10 text-warning' : 'bg-primary/10 text-primary'}`}>
-        <Icon name={isApproval ? 'Percent' : 'Globe'} size={15} />
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isApproval ? 'bg-warning/10 text-warning' : n.type === 'attendance_gaps' ? 'bg-blue-50 text-blue-600' : 'bg-primary/10 text-primary'}`}>
+        <Icon name={isApproval ? 'Percent' : n.type === 'attendance_gaps' ? 'Clock' : 'Globe'} size={15} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-[13.5px] font-body-medium text-text-primary pr-6 flex items-center gap-2 flex-wrap">

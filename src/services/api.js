@@ -3652,7 +3652,7 @@ export async function fetchNotifications(limit = 50) {
 
     const { data, error } = await supabase
       .from('notifications')
-      .select('id, type, title, body, booking_id, branch_id, category, read, created_at, booking:bookings(acknowledged_at, acknowledger:users!acknowledged_by(full_name))')
+      .select('id, type, title, body, booking_id, branch_id, actor_id, category, read, created_at, booking:bookings(acknowledged_at, acknowledger:users!acknowledged_by(full_name))')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -3761,7 +3761,7 @@ export async function fetchInbox(filter) {
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
     let q = applyInboxFilter(
-      supabase.from('notifications').select('id, type, title, body, booking_id, branch_id, category, read, created_at').eq('user_id', user.id),
+      supabase.from('notifications').select('id, type, title, body, booking_id, branch_id, actor_id, category, read, created_at').eq('user_id', user.id),
       filter,
     );
     if (filter.before) q = q.lt('created_at', filter.before);

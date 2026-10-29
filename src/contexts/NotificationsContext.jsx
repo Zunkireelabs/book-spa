@@ -30,6 +30,7 @@ const normalize = (row) => ({
   body: row.body,
   bookingId: row.booking_id,
   branchId: row.branch_id || null,
+  actorId: row.actor_id || null,
   category: row.category || categoryOf(row.type),
   read: row.read,
   createdAt: row.created_at,
@@ -40,7 +41,7 @@ const normalize = (row) => ({
 
 export const NotificationsProvider = ({ children }) => {
   const { user, profile } = useAuth();
-  const { branches } = useBranch();
+  const { branches, switchBranch } = useBranch();
   const { org } = useOrg();
   const navigate = useNavigate();
   const userId = user?.id;
@@ -258,10 +259,16 @@ export const NotificationsProvider = ({ children }) => {
       const { data } = await supabase.from('bookings').select('id').eq('id', n.bookingId).maybeSingle();
       exists = !!data;
     }
-    if (n.category === 'approvals') navigate(`${base}/inbox?c=approvals&n=${n.id}`); // "Review" lands on the Approvals view with that row open
+    if (n.type === 'attendance_gaps') {
+      // the digest is about one branch + day: land on Attendance for it
+      if (n.branchId) switchBranch?.(n.branchId);
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(new Date(n.createdAt));
+      navigate(`${base}/dashboard?view=attendance&date=${day}`);
+    } else if (n.type === 'discount_big_fyi' && exists) navigate(`${base}/dashboard?view=bookings&open=${n.bookingId}`);
+    else if (n.category === 'approvals') navigate(`${base}/inbox?c=approvals&n=${n.id}`); // "Review" lands on the Approvals view with that row open
     else if (exists && n.category === 'bookings') navigate(`${base}/dashboard?view=bookings&open=${n.bookingId}`);
     else navigate(`${base}/inbox${n.category ? `?c=${n.category}` : ''}`);
-  }, [markRead, navigate, org?.slug]);
+  }, [markRead, navigate, org?.slug, switchBranch]);
 
   openItemRef.current = openItem;
   const inboxPath = org?.slug ? `/${org.slug}/inbox` : '/inbox';

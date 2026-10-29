@@ -90,8 +90,12 @@ const AttendancePanel = ({ branchId }) => {
   const fmt = (hm) => (!hm ? '' : use24h ? String(hm).slice(0, 5) : hmTo12h(hm));
   const { confirmConflicts, conflictModal } = useAvailabilityConflictGuard();
 
-  const [selectedDate, setSelectedDate] = useState(today);
   const [searchParams, setSearchParams] = useSearchParams();
+  // ?date=YYYY-MM-DD (from an attendance-gaps notification) opens that day; a day in the future is ignored
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = searchParams.get('date');
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today ? d : today;
+  });
   const focusTherapistId = searchParams.get('therapist');
   const clearFocusTherapist = () => { const next = new URLSearchParams(searchParams); next.delete('therapist'); setSearchParams(next, { replace: true }); };
 

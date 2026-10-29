@@ -21,8 +21,8 @@ import NotificationSettingsContent, { CATEGORY_META } from './NotificationSettin
 
 const TYPE_ICON = {
   new_online_booking: 'Globe', booking_cancelled_by_guest: 'CalendarX', booking_rescheduled_by_guest: 'CalendarClock',
-  discount_request: 'Percent', discount_approved: 'Check', discount_declined: 'X', low_stock: 'Package',
-  attendance_gap: 'Clock', transferred_staff_reminder: 'ArrowLeftRight', outreach_review_pending: 'Heart', renewal_due: 'Heart',
+  discount_request: 'Percent', discount_big_fyi: 'Percent', discount_approved: 'Check', discount_declined: 'X', low_stock: 'Package',
+  attendance_gap: 'Clock', attendance_gaps: 'Clock', transferred_staff_reminder: 'ArrowLeftRight', outreach_review_pending: 'Heart', renewal_due: 'Heart',
 };
 const ICON_STYLE = { bookings: 'bg-primary/10 text-primary', approvals: 'bg-warning/10 text-warning', team: 'bg-blue-50 text-blue-600', stock: 'bg-gray-100 text-gray-600', guests: 'bg-pink-50 text-pink-600' };
 // Where a non-booking item leads (the panel offers it as a link).
@@ -32,7 +32,7 @@ const timeOf = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kathm
 const dateTimeOf = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
 
 const normalizeRow = (r) => ({
-  id: r.id, type: r.type, title: r.title, body: r.body, bookingId: r.booking_id, branchId: r.branch_id || null,
+  id: r.id, type: r.type, title: r.title, body: r.body, bookingId: r.booking_id, branchId: r.branch_id || null, actorId: r.actor_id || null,
   category: r.category || categoryOf(r.type), read: r.read, createdAt: r.created_at,
 });
 
