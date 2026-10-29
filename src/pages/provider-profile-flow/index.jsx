@@ -214,16 +214,29 @@ const ProviderProfileFlow = () => {
   // zero eligible therapists and correctly-but-wrongly marks every slot
   // unavailable). Fetch whenever either the solo staff-picker is on, or group mode
   // is in use.
+  // Group mode's roster must cover every guest's own picked service, not just the
+  // lead's solo cart — guests can (and do) pick services outside selectedServices.
+  // Keyed as a joined string so the effect below only refetches when the actual set
+  // of guest service ids changes, not on every groupPeople update (name edits,
+  // professional picks, etc.).
+  const groupServiceIdsKey = useMemo(
+    () => [...new Set(groupPeople.map((p) => p.service?.id).filter(Boolean))].sort().join(','),
+    [groupPeople],
+  );
+
   useEffect(() => {
     if ((!showStaffSelection && !groupModeOpen) || !orgSlug || !selectedBranch?.id) return undefined;
     let cancelled = false;
     setLoadingTherapists(true);
     setTherapistsError(null);
+    const serviceIds = groupModeOpen
+      ? groupServiceIdsKey.split(',').filter(Boolean)
+      : selectedServices.map((s) => s.id);
     // forGroupBooking (migration-305) bypasses the tenant's show_staff_selection
     // requirement server-side when fetching for group mode — that flag only governs
     // whether a solo customer is offered a staff-picker, unrelated to group booking's
     // need for the roster to compute per-person availability (see the comment above).
-    fetchBookableTherapists(orgSlug, selectedBranch.id, selectedServices.map((s) => s.id), groupModeOpen).then(({ data, error }) => {
+    fetchBookableTherapists(orgSlug, selectedBranch.id, serviceIds, groupModeOpen).then(({ data, error }) => {
       if (cancelled) return;
       if (error) {
         setTherapistsError(error);
@@ -234,7 +247,7 @@ const ProviderProfileFlow = () => {
       setLoadingTherapists(false);
     });
     return () => { cancelled = true; };
-  }, [showStaffSelection, groupModeOpen, orgSlug, selectedBranch?.id, selectedServices, fetchNonce]);
+  }, [showStaffSelection, groupModeOpen, orgSlug, selectedBranch?.id, selectedServices, groupServiceIdsKey, fetchNonce]);
 
   // Drops a specific pick once the (re-fetched) roster no longer includes them —
   // e.g. a newly-ticked service they can't perform. Guarded on loading/error: mid-fetch
