@@ -11,11 +11,15 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 import { useOrg } from '../../contexts/OrgContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { useIndustry } from '../../hooks/useIndustry';
+import { friendlyError } from '../../utils/friendlyError';
+import { toDbStatus } from '../../services/bookingTransformers';
+import { actionFor, statusChipFor, isRemovedBooking, OPEN_LABEL, createDelayedSaver, CONFIRM_UNDO_MS } from '../../lib/inboxActions';
 import {
   buildInboxFilter, categoriesForRole, categoryOf, groupByDayLabel, INBOX_PAGE_SIZE,
 } from '../../lib/notificationRules';
-import { fetchInbox, fetchInboxCounts, fetchLastNotificationAt, markInboxFilterRead } from '../../services/api';
+import { fetchInbox, fetchInboxCounts, fetchLastNotificationAt, markInboxFilterRead, updateBookingStatus, acknowledgeBooking } from '../../services/api';
 import InboxBookingPanel from './InboxBookingPanel';
 import NotificationSettingsContent, { CATEGORY_META } from './NotificationSettingsPanel';
 
@@ -32,7 +36,7 @@ const timeOf = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kathm
 const dateTimeOf = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
 
 const normalizeRow = (r) => ({
-  id: r.id, type: r.type, title: r.title, body: r.body, bookingId: r.booking_id, branchId: r.branch_id || null, actorId: r.actor_id || null,
+  id: r.id, type: r.type, title: r.title, body: r.body, bookingId: r.booking_id, branchId: r.branch_id || null, actorId: r.actor_id || null, booking: r.booking || null,
   category: r.category || categoryOf(r.type), read: r.read, createdAt: r.created_at,
 });
 
@@ -40,7 +44,8 @@ const InboxBody = () => {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const { org } = useOrg();
-  const { branchName } = useBranch();
+  const { branchName, switchBranch } = useBranch();
+  const { user } = useAuth();
   const words = bookingWords(useIndustry());
   const {
     role, branches, items: feedItems, unreadCount, markRead, markUnread, setPref, reload: reloadFeed,
@@ -140,6 +145,102 @@ const InboxBody = () => {
     setMuted(CATEGORY_META[n.category]?.label || n.category);
     setTimeout(() => setMuted(null), 3500);
   };
+
+  // ── Quick actions (ZNLY-140) ──
+  // Confirm shows at once and is really saved after 5 s (Gmail-style): the state machine has no Confirmed -> Pending, so Undo just cancels the save.
+  const [undoStack, setUndoStack] = useState([]); // [{ id, bookingNo, guest }] pending confirms, newest last
+  const [flash, setFlash] = useState(null);
+  const originals = useRef(new Map()); // notification id -> the row before the optimistic confirm
+  const reloadRef = useRef(null);
+  reloadRef.current = () => { loadFirst(); loadCounts(); };
+  const saveConfirm = useCallback(async (id, { bookingId }) => {
+    setUndoStack((s) => s.filter((x) => x.id !== id));
+    originals.current.delete(id);
+    const r = await updateBookingStatus({ bookingId, newStatus: toDbStatus('confirmed') });
+    if (r.error) {
+      setFlash(friendlyError(r.error, "Couldn't confirm that booking."));
+      setTimeout(() => setFlash(null), 4000);
+      reloadRef.current?.();
+      return;
+    }
+    await acknowledgeBooking(bookingId);
+    markRead([id]);
+    reloadRef.current?.();
+  }, [markRead]);
+  const saveRef = useRef(saveConfirm);
+  saveRef.current = saveConfirm; // the saver is built once; its save always goes through the latest callback
+  const saverRef = useRef(null);
+  if (!saverRef.current) saverRef.current = createDelayedSaver({ save: (id, payload) => saveRef.current(id, payload) });
+  useEffect(() => {
+    const flush = () => saverRef.current.flush();
+    window.addEventListener('pagehide', flush);
+    return () => { window.removeEventListener('pagehide', flush); flush(); };
+  }, []);
+  const confirmRow = (n) => {
+    originals.current.set(n.id, n);
+    const me = user?.id;
+    setRows((rs) => rs.map((r) => (r.id === n.id
+      ? { ...r, read: true, booking: { ...r.booking, status: 'Confirmed', acknowledged_by: me, acknowledged_at: new Date().toISOString(), acknowledger: { full_name: 'you' } } }
+      : r)));
+    markRead([n.id]);
+    setUndoStack((s) => [...s, { id: n.id, bookingNo: n.booking?.booking_number, guest: n.booking?.customer_name }]);
+    saverRef.current.schedule(n.id, { bookingId: n.bookingId });
+  };
+  const undoConfirm = useCallback((id) => {
+    if (!saverRef.current.undo(id)) return;
+    const orig = originals.current.get(id);
+    originals.current.delete(id);
+    setUndoStack((s) => s.filter((x) => x.id !== id));
+    if (orig) {
+      setRows((rs) => rs.map((r) => (r.id === id ? orig : r)));
+      if (!orig.read) markUnread(id);
+    }
+  }, [markUnread]);
+  const topUndo = undoStack[undoStack.length - 1] || null;
+  useEffect(() => {
+    if (!topUndo) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') undoConfirm(topUndo.id); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [topUndo, undoConfirm]);
+  const [barOn, setBarOn] = useState(false);
+  useEffect(() => { setBarOn(false); if (!topUndo) return undefined; const t = setTimeout(() => setBarOn(true), 30); return () => clearTimeout(t); }, [topUndo?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goThere = (n, dest) => {
+    markRead([n.id]); setRead(n.id, true);
+    if (dest === 'attendance') {
+      if (n.branchId) switchBranch?.(n.branchId);
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu' }).format(new Date(n.createdAt));
+      navigate(`${base}/dashboard?view=attendance&date=${day}`);
+    } else navigate(`${base}/dashboard?view=${dest}`);
+  };
+  const muteTip = (n) => `Mute ${n.type === 'new_online_booking' ? `new online ${words.many}` : (CATEGORY_META[n.category]?.label || n.category).toLowerCase()}`;
+  const iconBtn = (label, icon, onClick, last = false) => (
+    <span className="relative group/tip">
+      <button type="button" aria-label={label} onClick={onClick}
+        className="w-7 h-7 rounded-lg border border-border bg-white text-text-secondary flex items-center justify-center hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+        <Icon name={icon} size={14} />
+      </button>
+      <span className={`pointer-events-none hidden group-hover/tip:block group-focus-within/tip:block absolute bottom-full mb-1.5 ${last ? 'right-0' : 'left-1/2 -translate-x-1/2'} bg-gray-900 text-white text-[11px] rounded-md px-2 py-0.5 whitespace-nowrap z-dropdown`}>
+        {label}
+        <span className={`absolute top-full ${last ? 'right-2.5' : 'left-1/2 -translate-x-1/2'} border-4 border-transparent border-t-gray-900`} />
+      </span>
+    </span>
+  );
+  const typeAction = (n, act) => {
+    if (act === 'confirm') {
+      return <button type="button" onClick={(e) => { e.stopPropagation(); confirmRow(n); }} className="text-[12.5px] font-medium px-3 h-7 rounded-lg bg-primary text-white hover:bg-primary/90 whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">Confirm</button>;
+    }
+    if (act === 'open') {
+      return <button type="button" onClick={(e) => { e.stopPropagation(); openRow(n); }} className="text-[12.5px] font-medium px-3 h-7 rounded-lg border border-border bg-white text-text-primary hover:bg-gray-50 whitespace-nowrap">Open</button>;
+    }
+    if (act.startsWith('open:')) {
+      const dest = act.slice(5);
+      return <button type="button" onClick={(e) => { e.stopPropagation(); goThere(n, dest); }} className="text-[12.5px] font-medium px-3 h-7 rounded-lg border border-border bg-white text-text-primary hover:bg-gray-50 whitespace-nowrap">{OPEN_LABEL[dest] || 'Open →'}</button>;
+    }
+    return null;
+  };
+
   const markAll = async () => {
     setRows((rs) => rs.map((r) => ({ ...r, read: true })));
     await markInboxFilterRead(filter);
@@ -258,7 +359,7 @@ const InboxBody = () => {
         <section key={g.label}>
           {/* Date label: outside the card, sticky and opaque. */}
           <h2 className="sticky top-0 z-sticky-filter bg-surface-dim px-4 sm:px-6 lg:px-8 pt-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">{g.label}</h2>
-          <ul className="border-y border-border rounded-none bg-surface overflow-clip">
+          <ul className="border-y border-border rounded-none bg-surface ">
             {g.items.map((n) => (
               <li key={n.id}
                 className={`group relative flex items-start gap-3 pl-4 sm:pl-6 lg:pl-8 pr-4 sm:pr-6 lg:pr-8 py-3 cursor-pointer border-b border-border last:border-b-0 hover:bg-black/[0.02] ${n.read ? '' : 'bg-primary/5'} ${openId === n.id ? 'shadow-[inset_3px_0_0_#2D5A27]' : ''}`}
@@ -269,13 +370,22 @@ const InboxBody = () => {
                   <p className={`text-[13.5px] text-text-primary flex items-center gap-2 flex-wrap ${n.read ? '' : 'font-semibold'}`}>
                     <span>{n.title}</span>
                     {branchLabel(n.branchId) && <span className="text-[11px] font-normal bg-gray-100 text-text-secondary rounded px-1.5 py-px">{branchLabel(n.branchId)}</span>}
+                    {(() => {
+                      const chip = statusChipFor(n, { userId: user?.id, saving: saverRef.current.has(n.id), word: words.one });
+                      if (!chip.kind) return null;
+                      return <span className={`text-[11px] font-normal rounded px-1.5 py-px ${chip.kind === 'pending' ? 'bg-warning/10 text-warning' : chip.kind === 'late' ? 'bg-error/10 text-error' : 'bg-gray-100 text-text-secondary'}`}>{chip.text}</span>;
+                    })()}
                   </p>
                   {n.body && <p className={`text-[13px] mt-0.5 leading-snug truncate ${n.read ? 'text-text-tertiary' : 'text-text-secondary'}`}>{n.body}</p>}
+                  {/* Phone / touch: the type action sits under the text; read/mute live in the panel. */}
+                  {(() => { const a = actionFor(n, { role }); return a === 'none' ? null : <div className="mt-2 hidden max-sm:block [@media(hover:none)]:block" onClick={(e) => e.stopPropagation()}>{typeAction(n, a)}</div>; })()}
                 </div>
-                <span className="text-[12px] text-text-tertiary tabular-nums flex-shrink-0 pt-0.5">{timeOf(n.createdAt)}</span>
-                <div className="absolute right-4 sm:right-6 lg:right-8 bottom-1.5 hidden group-hover:flex gap-1 bg-white/95 rounded" onClick={(e) => e.stopPropagation()}>
-                  <button type="button" onClick={() => toggleUnread(n)} className="text-[11.5px] px-2 py-0.5 rounded border border-border hover:bg-gray-50">{n.read ? 'Mark unread' : 'Mark read'}</button>
-                  <button type="button" onClick={() => mute(n)} className="text-[11.5px] px-2 py-0.5 rounded border border-border hover:bg-gray-50">Mute this kind</button>
+                <span className="text-[12px] text-text-tertiary tabular-nums flex-shrink-0 pt-0.5 [@media(hover:hover)]:group-hover:sm:hidden [@media(hover:hover)]:group-focus-within:sm:hidden">{timeOf(n.createdAt)}</span>
+                {/* Hover / keyboard focus: the time gives way to [type action] [read/unread] [mute]. Never on touch. */}
+                <div className="relative hidden flex-shrink-0 items-center gap-1.5 self-center [@media(hover:hover)]:sm:group-hover:flex [@media(hover:hover)]:sm:group-focus-within:flex" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                  {typeAction(n, actionFor(n, { role }))}
+                  {iconBtn(n.read ? 'Mark unread' : 'Mark read', n.read ? 'Mail' : 'MailOpen', () => toggleUnread(n))}
+                  {iconBtn(muteTip(n), 'BellOff', () => mute(n), true)}
                 </div>
               </li>
             ))}
@@ -289,7 +399,8 @@ const InboxBody = () => {
     </>
   );
 
-  const hasBookingPanel = openItem && openItem.bookingId && (openItem.category === 'bookings' || openItem.category === 'approvals');
+  const removedOpen = openItem && isRemovedBooking(openItem);
+  const hasBookingPanel = openItem && openItem.bookingId && !removedOpen && (openItem.category === 'bookings' || openItem.category === 'approvals');
   return (
     <>
       <AreaLayout title="Inbox" menuStorageKey="zennly.inbox.menu" menuTop={menuTop} categories={menuCategories} activeView={activeView} onNavigate={goTo}>
@@ -314,7 +425,12 @@ const InboxBody = () => {
       {!settingsView && openItem && !hasBookingPanel && (
         <SidePanel isOpen title={openItem.title} onClose={closePanel}>
           <div className="px-5 py-4">
-            {openItem.category === 'bookings' || openItem.category === 'approvals' ? (
+            {removedOpen ? (
+              <>
+                {openItem.body && <p className="text-[13px] text-text-secondary mb-3">{openItem.body}</p>}
+                <p className="text-[13px] text-text-secondary">This {words.one} was deleted.</p>
+              </>
+            ) : openItem.category === 'bookings' || openItem.category === 'approvals' ? (
               <p className="text-[13px] text-text-secondary mb-3">This {words.one} no longer exists. The notification stays here as a record.</p>
             ) : (
               <>
@@ -330,6 +446,14 @@ const InboxBody = () => {
           </div>
         </SidePanel>
       )}
+      {topUndo && (
+        <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast bg-gray-900 text-white text-[13.5px] rounded-xl pl-4 pr-3.5 pt-2.5 pb-3 shadow-spa-elevated overflow-hidden flex items-center gap-4">
+          <span>{words.one.charAt(0).toUpperCase() + words.one.slice(1)} {topUndo.bookingNo || ''} confirmed{topUndo.guest ? ` · ${topUndo.guest}` : ''}</span>
+          <button type="button" onClick={() => undoConfirm(topUndo.id)} className="font-semibold text-accent rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">Undo</button>
+          <span className="absolute left-0 bottom-0 h-[3px] bg-accent" style={{ width: barOn ? '0%' : '100%', transition: barOn ? `width ${CONFIRM_UNDO_MS}ms linear` : 'none' }} />
+        </div>
+      )}
+      {flash && <div role="alert" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast bg-error text-white text-[13px] rounded-full px-4 py-2 shadow-spa-elevated">{flash}</div>}
       {muted && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast bg-text-primary text-white text-[13px] rounded-full px-4 py-2 shadow-spa-elevated">
           {muted} will no longer pop up or play a sound. <Link to="?c=settings" className="underline ml-1">Settings</Link>
