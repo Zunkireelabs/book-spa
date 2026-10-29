@@ -26,9 +26,11 @@ describe('buildActions', () => {
     expect(buildActions({ ...base, role: 'admin', isOverall: true }).map((a) => a.view)).not.toContain('new-booking');
   });
 
-  it('offers Collect payment to staff only', () => {
-    expect(buildActions({ ...base, role: 'staff', isOverall: false }).map((a) => a.view)).toContain('collect-payment');
-    expect(buildActions({ ...base, role: 'manager', isOverall: false }).map((a) => a.view)).not.toContain('collect-payment');
+  it('offers Collect payment to staff, manager and admin on a concrete branch (not admin_viewer, not Overall)', () => {
+    const views = (o) => buildActions({ ...base, ...o }).map((a) => a.view);
+    ['staff', 'manager', 'admin'].forEach((role) => expect(views({ role, isOverall: false })).toContain('collect-payment'));
+    expect(views({ role: 'admin', isOverall: true })).not.toContain('collect-payment');
+    expect(views({ role: 'admin_viewer', isOverall: false })).not.toContain('collect-payment');
   });
 });
 

@@ -78,6 +78,10 @@ import MessageLogPanel from './components/Outreach/MessageLogPanel';
 import ProviderSettingsPanel from './components/Outreach/ProviderSettingsPanel';
 import StaffBookingForm from '../branch-staff-dashboard/components/StaffBookingForm';
 import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBookingPanel';
+import CollectPaymentPanel from '../branch-staff-dashboard/components/CollectPaymentPanel';
+import EnrollMemberPanel from './components/Memberships/EnrollMemberPanel';
+import NewVoucherPanel from './components/Vouchers/NewVoucherPanel';
+import DashboardHome from '../dashboard-home';
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
@@ -87,7 +91,7 @@ const BranchManagerDashboard = () => {
   const { items: persistentNotifs, openItem: openNotificationItem, markAllRead: markAllPersistentRead } = useNotifications();
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [period, setPeriodState] = useState(() => ({ key: 'daily', from: getTodayISO(), to: getTodayISO() }));
@@ -97,6 +101,11 @@ const BranchManagerDashboard = () => {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newBookingNotification, setNewBookingNotification] = useState(null);
+  const [actionSuccess, setActionSuccess] = useState(null);
+  const showSuccess = (msg) => {
+    setActionSuccess(msg);
+    setTimeout(() => setActionSuccess(null), 3000);
+  };
   const [notifications, setNotifications] = useState([]);
   const [discountNotifs, setDiscountNotifs] = useState([]);
   const [readDiscountIds, setReadDiscountIds] = useState(() => new Set());
@@ -348,67 +357,14 @@ const BranchManagerDashboard = () => {
     }
   };
 
+  // V36a: the old widget stack is retired; DashboardHome owns the dashboard (the widgets stay in the repo for Reports).
   const renderDashboardView = () => (
-    <div className="space-y-3 sm:space-y-4 lg:space-y-6">
-      {/* Revenue Intelligence Cards */}
-      <RevenueCards branchId={branchId} period={period} />
-
-      {/* Today's Insights - sales by payment method, membership/voucher activity, staff utilization */}
-      <TodayInsightsPanel branchId={branchId} period={period} showProducts={PRODUCTS_ENABLED} />
-
-      {/* Utilization & Capacity Intelligence */}
-      <UtilizationPanel branchId={branchId} period={period} />
-
-      {/* Risk Indicators */}
-      <RiskIndicatorsPanel branchId={branchId} date={period.to} />
-
-      {/* Pending Discount Approvals */}
-      <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
-
-      {/* Key Metrics Row - Responsive grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-        {loading ? (
-          <div className="col-span-2 lg:col-span-4 text-center py-6 sm:py-8">
-            <div className="animate-spin w-6 h-6 sm:w-8 sm:h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2 sm:mb-3" />
-            <p className="text-xs sm:text-sm text-gray-500">Loading metrics...</p>
-          </div>
-        ) : (
-          metricsData.map((metric, index) => (
-            <MetricsCard
-              key={index}
-              title={metric.title}
-              value={metric.value}
-              change={metric.change}
-              changeType={metric.changeType}
-              icon={metric.icon}
-              currency={metric.currency}
-            />
-          ))
-        )}
-      </div>
-
-      {/* Status Legend - Hide on mobile, show on sm+ */}
-      <div className="hidden sm:block bg-white border border-gray-200 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5">
-        <StatusLegend showPayment />
-      </div>
-
-      {/* Tips — not revenue, kept visually separate, directly above Top Performers */}
-      <TipsSummaryCard branchId={branchId} userRole={profile?.role} />
-
-      {/* Main Dashboard Grid - Responsive: 1 col mobile, 2 cols tablet+ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
-        <TherapistUtilizationChart branchId={branchId} period={period} />
-        <BookingPipelineChart branchId={branchId} period={period} />
-        <TopPerformersCard branchId={branchId} period={period} />
-        <RealtimeBookingFeed
-          bookings={bookings}
-          branchId={branchId}
-          onQuickStatusUpdate={handleQuickStatusUpdate}
-        />
-      </div>
-
-      {/* Revenue Analytics */}
-      <RevenueAnalyticsChart branchId={branchId} period={period} />
+    <div className="space-y-3 sm:space-y-4">
+      <DashboardHome />
+      {/* Kept until V36c's Needs action: discount notifications deep-link here (?view=dashboard&highlight=<bookingId>) */}
+      {['manager', 'admin'].includes(profile?.role) && !isOverall && (
+        <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
+      )}
     </div>
   );
 
@@ -449,11 +405,37 @@ const BranchManagerDashboard = () => {
     if (branchLoading) return <BranchPending />; // panels need the resolved branch
     const salesReadOnly = profile?.role === 'admin_viewer'; // #411 access is view-only
     const salesViewer = ['manager', 'admin', 'admin_viewer'].includes(profile?.role); // #411: admin_viewer can open Packages / Memberships / Vouchers
+    const frontDesk = ['manager', 'admin'].includes(profile?.role);
+    // Panel is the second child so switching between the sell tabs doesn't remount (refetch + flash) the bookings list
+    const withBookingsList = (overlay) => (<><BookingsViewPanel key="bookings-list" branchId={branchId} />{overlay}</>);
     const outreachAdmin = OUTREACH_ENABLED && profile?.role === 'admin';
     switch (view) {
-      case 'bookings': return <BookingsViewPanel branchId={branchId} />;
+      case 'bookings': return withBookingsList(null);
       case 'new-booking': return !isOverall ? <StaffBookingForm onBookingCreated={loadData} /> : null;
       case 'check-booking': return !isOverall ? <CheckBookingPanel branchId={branchId} /> : null;
+      // Front-desk tools (ZNLY-149): manager and admin sell and collect too; admin_viewer stays read-only.
+      case 'collect-payment': return frontDesk && !isOverall ? <CollectPaymentPanel onSuccess={showSuccess} /> : null;
+      case 'new-membership':
+        return MEMBERSHIP_ENABLED && frontDesk && !isOverall ? withBookingsList(
+          <EnrollMemberPanel
+            onClose={() => setSearchParams({ view: 'bookings' })}
+            onEnrolled={(id, info) => {
+              setSearchParams({ view: 'bookings' });
+              showSuccess(info?.message || 'Membership created.');
+            }}
+          />,
+        ) : null;
+      case 'new-voucher':
+        return VOUCHER_ENABLED && frontDesk && !isOverall ? withBookingsList(
+          <NewVoucherPanel
+            userRole={profile?.role}
+            onClose={() => setSearchParams({ view: 'bookings' })}
+            onIssued={() => {
+              setSearchParams({ view: 'bookings' });
+              showSuccess('Voucher issued.');
+            }}
+          />,
+        ) : null;
       case 'therapists':
       case 'therapists-inactive':
       case 'therapists-positions':
@@ -515,7 +497,7 @@ const BranchManagerDashboard = () => {
         sidebar={{ userRole: 'manager', userName: managerData.name, branchName: managerData.branch }}
         header={{
           realtimeStatus,
-          leftExtra: viewMode === 'dashboard' ? <PeriodFilter value={period} onChange={setPeriod} /> : null,
+          leftExtra: null, // the dashboard is always today, so no period picker
           onToggleAssistant: toggleAssistant,
           assistantOpen: isAssistantOpen,
           notifications: feedNotifications,
@@ -536,7 +518,11 @@ const BranchManagerDashboard = () => {
           )
         }
         floating={
-          newBookingNotification && (
+          actionSuccess ? (
+            <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-toast bg-success text-white px-4 sm:px-5 py-3 rounded-spa-lg spa-shadow-elevated animate-fade-in">
+              <span className="font-body font-body-medium text-sm">{actionSuccess}</span>
+            </div>
+          ) : newBookingNotification && (
             <div className="fixed top-16 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 z-toast bg-primary text-white px-4 sm:px-5 py-3 rounded-lg shadow-lg animate-fade-in sm:max-w-sm">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-0.5">

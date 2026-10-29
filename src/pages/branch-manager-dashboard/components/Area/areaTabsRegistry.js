@@ -6,6 +6,8 @@ const ALL = ['staff', 'manager', 'admin', 'admin_viewer'];
 const STAFF_UP = ['manager', 'admin', 'admin_viewer'];
 const MGR_ADMIN_VIEWER = STAFF_UP; // Packages / Memberships / Vouchers tabs: admin_viewer is read-only (#411)
 
+const FRONT_DESK = ['staff', 'manager', 'admin']; // sell/collect tools; admin_viewer stays read-only (ZNLY-149)
+
 export const AREAS = [
   {
     id: 'bookings',
@@ -15,9 +17,9 @@ export const AREAS = [
       { view: 'bookings', label: 'All bookings', roles: ALL },
       { view: 'new-booking', label: 'New booking', roles: ['staff', 'manager', 'admin'], overallHidden: true },
       { view: 'check-booking', label: 'Check booking', roles: ALL, overallHidden: true },
-      { view: 'collect-payment', label: 'Collect payment', roles: ['staff'] },
-      ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', label: 'New membership', roles: ['staff'] }] : []),
-      ...(VOUCHER_ENABLED ? [{ view: 'new-voucher', label: 'New voucher', roles: ['staff'] }] : []),
+      { view: 'collect-payment', label: 'Collect payment', roles: FRONT_DESK, overallHidden: true },
+      ...(MEMBERSHIP_ENABLED ? [{ view: 'new-membership', label: 'New membership', roles: FRONT_DESK, overallHidden: true }] : []),
+      ...(VOUCHER_ENABLED ? [{ view: 'new-voucher', label: 'New voucher', roles: FRONT_DESK, overallHidden: true }] : []),
     ],
   },
   // Single pages: one tab, so the header shows and there is no tab row.

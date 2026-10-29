@@ -9,6 +9,8 @@ import QuickFilters from './components/QuickFilters';
 import BookingsList from './components/BookingsList';
 import BookingsViewPanel from '../branch-manager-dashboard/components/BookingsViewPanel';
 import StaffBookingForm from './components/StaffBookingForm';
+import DashboardHome from '../dashboard-home';
+import { hasOwnBookingsToday } from '../../lib/dashboardViews';
 import CheckBookingPanel from './components/CheckBookingPanel';
 import CollectPaymentPanel from './components/CollectPaymentPanel';
 import TherapistAvailability from './components/TherapistAvailability';
@@ -558,76 +560,7 @@ const BranchStaffDashboard = () => {
       }
     >
       {viewMode === 'dashboard' ? (
-        <div className="flex flex-col gap-2 sm:gap-3 min-h-[calc(100vh-120px)]">
-          {/* Today's revenue + sales insights - staff only ever see today, no period picker */}
-          <RevenueCards branchId={branchId} period={todayPeriod} todayOnly />
-          <TodayInsightsPanel branchId={branchId} period={todayPeriod} showVouchers={false} />
-
-          {/* Overview Stats */}
-          <h2 className="text-base sm:text-lg font-semibold text-gray-900">{getOverviewTitle()}</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-            <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-              <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">Confirmed</div>
-              <div className="text-xl sm:text-2xl font-semibold text-emerald-600">{bookingCounts.confirmed}</div>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-              <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">Pending</div>
-              <div className="text-xl sm:text-2xl font-semibold text-amber-500">{bookingCounts.pending}</div>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-              <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">In Progress</div>
-              <div className="text-xl sm:text-2xl font-semibold text-blue-600">{bookingCounts.inProgress}</div>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-              <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5 sm:mb-1">Completed</div>
-              <div className="text-xl sm:text-2xl font-semibold text-gray-400">{bookingCounts.completed}</div>
-            </div>
-          </div>
-
-          {/* Inline Filters */}
-          <QuickFilters
-            onFiltersChange={handleFiltersChange}
-            bookingCounts={bookingCounts}
-          />
-
-          {/* Main Grid - Responsive: stack on mobile, side-by-side on lg */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 sm:gap-3 flex-1">
-            {/* Bookings List - Full width on mobile/tablet, 9 cols on desktop */}
-            <div className="lg:col-span-9 order-1">
-              {loading ? (
-                <div className="bg-white rounded-lg border border-gray-200 p-8 sm:p-12 text-center">
-                  <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-                  <p className="text-sm text-gray-500">Loading bookings...</p>
-                </div>
-              ) : (
-                <BookingsList
-                  bookings={filteredBookings}
-                  therapists={therapists}
-                  onStatusUpdate={handleStatusUpdate}
-                  onAssignTherapist={handleAssignTherapist}
-                  onRecordPayment={handleRecordPayment}
-                  onGroupPaymentRecorded={handleGroupPaymentRecorded}
-                  onApplyDiscount={handleApplyDiscount}
-                  userRole={profile?.role || 'staff'}
-                  onRefresh={loadData}
-                  dateRange={filters.dateRange}
-                />
-              )}
-            </div>
-
-            {/* Therapist Panel - Below bookings on mobile, sidebar on desktop */}
-            <div className="lg:col-span-3 order-2">
-              <TherapistAvailability
-                therapists={therapists}
-                pendingBookings={bookings.filter(b => b.status === 'pending' && !b.therapist)}
-                onAssignTherapist={handleAssignTherapist}
-              />
-            </div>
-          </div>
-
-          {/* Tips — not revenue, kept visually separate, last section on the page */}
-          <TipsSummaryCard branchId={branchId} userRole={userRole} />
-        </div>
+        <DashboardHome hasBookingsToday={hasOwnBookingsToday(bookings, profile?.full_name)} />
       ) : viewMode === 'calendar' ? (
         <OperationalCalendar branchId={branchId} />
       ) : areaForView ? (

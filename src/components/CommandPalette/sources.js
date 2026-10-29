@@ -63,7 +63,7 @@ export const buildActions = ({ role, isOverall, basePath }) => {
   const actions = [];
   if (!isOverall) actions.push({ key: 'action:new-booking', kind: 'action', label: 'New booking', icon: 'Plus', view: 'new-booking', href: viewHref(basePath, 'new-booking'), keywords: 'create add appointment book' });
   actions.push({ key: 'action:today', kind: 'action', label: 'Go to today on the calendar', icon: 'CalendarDays', view: 'calendar', href: viewHref(basePath, 'calendar'), keywords: 'now date jump' });
-  if (role === 'staff') actions.push({ key: 'action:collect-payment', kind: 'action', label: 'Collect payment', icon: 'HandCoins', view: 'collect-payment', href: viewHref(basePath, 'collect-payment'), keywords: 'pay balance dues' });
+  if (['staff', 'manager', 'admin'].includes(role) && !isOverall) actions.push({ key: 'action:collect-payment', kind: 'action', label: 'Collect payment', icon: 'HandCoins', view: 'collect-payment', href: viewHref(basePath, 'collect-payment'), keywords: 'pay balance dues' });
   return actions;
 };
 
