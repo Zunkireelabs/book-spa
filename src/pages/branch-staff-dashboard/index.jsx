@@ -560,7 +560,7 @@ const BranchStaffDashboard = () => {
       }
     >
       {viewMode === 'dashboard' ? (
-        <DashboardHome hasBookingsToday={hasOwnBookingsToday(bookings, profile?.full_name)} />
+        <DashboardHome hasBookingsToday={hasOwnBookingsToday(bookings, profile?.therapist_id)} />
       ) : viewMode === 'calendar' ? (
         <OperationalCalendar branchId={branchId} />
       ) : areaForView ? (

@@ -67,17 +67,11 @@ export function dayPhase(hm, { open, close } = {}) {
   return 'live';
 }
 
-const norm = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
-/**
- * True when one of today's bookings is assigned to this user. There is no user -> therapist link in the schema, so the
- * match is by name against the booking's assigned therapists (`therapists[]`, falling back to `therapist`).
- */
-export function hasOwnBookingsToday(bookings, fullName) {
-  const me = norm(fullName);
-  if (!me) return false;
+/** True when one of the bookings is assigned to this login's linked therapist (users.therapist_id, ZNLY-150). */
+export function hasOwnBookingsToday(bookings, therapistId) {
+  if (!therapistId) return false;
   return (bookings || []).some((b) => {
     const assigned = b.therapists?.length ? b.therapists : (b.therapist ? [b.therapist] : []);
-    return assigned.some((t) => norm(t?.name) === me);
+    return assigned.some((t) => t?.id === therapistId);
   });
 }

@@ -347,6 +347,31 @@ export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
   }
 }
 
+// The whole dashboard in one call (get_dashboard, migration-334): pulse, floor, needs_action, week, branches, money, loose_ends,
+// tomorrow, my_day. branchIds are cut to the caller's tenant/branches server-side; money is null for staff. `date` defaults to today.
+export async function fetchDashboard({ branchIds, date = null }) {
+  try {
+    const { data, error } = await supabase.rpc('get_dashboard', { p_branch_ids: branchIds, p_date: date });
+    if (error) throw error;
+    return { data: data || {}, error: null };
+  } catch (error) {
+    console.error('[API] fetchDashboard error:', error.message);
+    return { data: {}, error };
+  }
+}
+
+// Link a login to the person they work as (users.therapist_id, ZNLY-150). Manager/admin only; null unlinks. The RPC is the only write path.
+export async function setUserTherapist({ userId, therapistId = null }) {
+  try {
+    const { error } = await supabase.rpc('set_user_therapist', { p_user_id: userId, p_therapist_id: therapistId });
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    console.error('[API] setUserTherapist error:', error.message);
+    return { error };
+  }
+}
+
 // Upcoming open bookings a PROPOSED change would strand (availability_affected_bookings, migration-321). Read-only; the change
 // shapes are built in services/availabilityConflicts.js. Fails open: a database without migration-321 returns no rows so the
 // save still goes through (the rule itself is enforced by the database guard, this is only the early warning).

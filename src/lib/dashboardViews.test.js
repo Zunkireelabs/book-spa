@@ -69,14 +69,14 @@ describe('remembered view storage', () => {
 });
 
 describe('hasOwnBookingsToday', () => {
-  const bookings = [{ therapists: [{ name: 'Sita  Rai' }] }, { therapist: { name: 'Hari' } }, { therapists: [] }];
-  it('matches the user by assigned therapist name, ignoring case and spacing', () => {
-    expect(hasOwnBookingsToday(bookings, 'sita rai')).toBe(true);
-    expect(hasOwnBookingsToday(bookings, 'Hari')).toBe(true);
+  const bookings = [{ therapists: [{ id: 't1' }, { id: 't2' }] }, { therapist: { id: 't3' } }, { therapists: [] }];
+  it('matches the login\'s linked therapist among assigned therapists', () => {
+    expect(hasOwnBookingsToday(bookings, 't2')).toBe(true);
+    expect(hasOwnBookingsToday(bookings, 't3')).toBe(true);
   });
-  it('is false for other people, no name, or no bookings', () => {
-    expect(hasOwnBookingsToday(bookings, 'Maya')).toBe(false);
-    expect(hasOwnBookingsToday(bookings, '')).toBe(false);
-    expect(hasOwnBookingsToday(null, 'Hari')).toBe(false);
+  it('is false for other people, an unlinked login, or no bookings', () => {
+    expect(hasOwnBookingsToday(bookings, 't9')).toBe(false);
+    expect(hasOwnBookingsToday(bookings, null)).toBe(false);
+    expect(hasOwnBookingsToday(null, 't1')).toBe(false);
   });
 });
