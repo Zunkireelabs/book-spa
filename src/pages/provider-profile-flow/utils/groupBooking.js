@@ -34,8 +34,15 @@ const relabelGuests = (people) => {
   });
 };
 
-export const addGuest = (people) => {
-  if (people.length >= MAX_GROUP_SIZE) return people;
+// maxSize lets a caller clamp tighter than MAX_GROUP_SIZE's hard product cap (6) --
+// a branch's own online_booking_capacity (Booking Settings, migration-301) can be
+// set lower, and since every guest counts 1-for-1 against that cap (confirmed
+// product decision -- a group of N consumes N online-capacity units, not 1), the
+// UI must never let a customer build a group bigger than the branch could ever
+// actually seat online. Defaults to MAX_GROUP_SIZE so existing callers/tests are
+// unaffected.
+export const addGuest = (people, maxSize = MAX_GROUP_SIZE) => {
+  if (people.length >= maxSize) return people;
   const nextNumber = people.length + 1;
   return [...people, createGuestPerson(nextNumber)];
 };

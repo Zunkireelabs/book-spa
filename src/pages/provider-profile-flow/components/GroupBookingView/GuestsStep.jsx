@@ -26,9 +26,9 @@ const PersonRow = ({ person, isActive, onSelect }) => (
 // single-select mode (a click always REPLACES the active person's service, never
 // toggles it off) since this screen's job is "exactly one service per guest", not the
 // solo flow's multi-service cart.
-const GuestsStep = ({ people, services, activeGuestId, onSelectActiveGuest, onServiceChosenForActiveGuest, onAddGuest, onRemoveGuest }) => {
+const GuestsStep = ({ people, services, activeGuestId, onSelectActiveGuest, onServiceChosenForActiveGuest, onAddGuest, onRemoveGuest, maxGroupSize = MAX_GROUP_SIZE }) => {
   const activePerson = people.find((p) => p.id === activeGuestId) || null;
-  const atMax = people.length >= MAX_GROUP_SIZE;
+  const atMax = people.length >= maxGroupSize;
 
   return (
     <div className="space-y-6">
@@ -63,7 +63,7 @@ const GuestsStep = ({ people, services, activeGuestId, onSelectActiveGuest, onSe
           Add guest
         </button>
         <p className="mt-2 text-xs text-center text-[var(--zn-muted-foreground)]">
-          Book a group appointment for up to 6 guests
+          Book a group appointment for up to {maxGroupSize} guest{maxGroupSize === 1 ? '' : 's'}
         </p>
       </div>
 

@@ -11,6 +11,12 @@ describe('groupBooking person-list helpers', () => {
     expect(people).toHaveLength(MAX_GROUP_SIZE);
   });
 
+  it('addGuest respects a tighter maxSize than MAX_GROUP_SIZE (branch online_booking_capacity)', () => {
+    let people = [createLeadPerson()];
+    for (let i = 0; i < 10; i++) people = addGuest(people, 3);
+    expect(people).toHaveLength(3);
+  });
+
   it('removeGuest relabels remaining guests by new position, and is a no-op on the lead', () => {
     let people = [createLeadPerson(), createGuestPerson(2), createGuestPerson(3)];
     people = removeGuest(people, people[1].id); // remove "Guest 2"

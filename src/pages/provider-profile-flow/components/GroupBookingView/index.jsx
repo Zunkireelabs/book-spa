@@ -8,7 +8,7 @@ import GuestsStep from './GuestsStep';
 import GroupProfessionalStep from './GroupProfessionalStep';
 import GroupTimeStep from './GroupTimeStep';
 import GroupConfirmStep, { mapBookingError } from './GroupConfirmStep';
-import { addGuest, removeGuest, updateGuestField } from '../../utils/groupBooking';
+import { addGuest, removeGuest, updateGuestField, MAX_GROUP_SIZE } from '../../utils/groupBooking';
 import { submitGroupBooking } from '../../../../services/api';
 import { toE164 } from '../../../../utils/phone';
 import { scrollToTopInstant } from '../../../../utils/scroll';
@@ -111,7 +111,19 @@ const GroupBookingView = ({
   // firing for every person at once); computing the next array from the `people`
   // closure instead of the updater's own `prev` would let later calls in the same
   // batch silently overwrite earlier ones.
-  const handleAddGuest = () => onPeopleChange((prev) => addGuest(prev));
+  // A branch's online_booking_capacity (Booking Settings) can be set lower than
+  // MAX_GROUP_SIZE's hard product cap -- every guest counts 1-for-1 against that cap
+  // (confirmed decision, see groupBooking.js's addGuest comment), so the UI must never
+  // let a customer build a group bigger than the branch could ever actually seat
+  // online. null/undefined capacity means "no limit" (Booking Settings: "Leave it
+  // blank for no limit"), so only clamp down when a real number is set and it's
+  // tighter than the product cap. Anish caught this live: Lazimpat capped at 5, but
+  // "Add guest" let a customer build a 6-person group anyway.
+  const effectiveMaxGroupSize = selectedBranch?.online_booking_capacity != null
+    ? Math.min(MAX_GROUP_SIZE, selectedBranch.online_booking_capacity)
+    : MAX_GROUP_SIZE;
+
+  const handleAddGuest = () => onPeopleChange((prev) => addGuest(prev, effectiveMaxGroupSize));
   const handleRemoveGuest = (guestId) => {
     onPeopleChange((prev) => removeGuest(prev, guestId));
     if (activeGuestId === guestId) setActiveGuestId('lead');
@@ -279,6 +291,7 @@ const GroupBookingView = ({
                   onServiceChosenForActiveGuest={handleServiceChosenForActiveGuest}
                   onAddGuest={handleAddGuest}
                   onRemoveGuest={handleRemoveGuest}
+                  maxGroupSize={effectiveMaxGroupSize}
                 />
               )}
 
