@@ -50,6 +50,7 @@ DECLARE
   v_loose jsonb; v_tomorrow jsonb; v_my jsonb;
   r record; rr jsonb; v_cursor int; v_busy int; v_blocks jsonb; v_gaps jsonb; v_state text; v_list jsonb := '[]'; v_sh jsonb;
   v_f int; v_e int; v_k text;
+  v_prev date; v_sh_prev jsonb; v_prev_rev numeric; v_prev_share numeric;
 BEGIN
   SELECT u.role::text, u.org_id INTO v_role, v_org FROM public.users u WHERE u.id = v_uid;
   IF v_role IS NULL THEN RETURN '{}'::jsonb; END IF;
@@ -86,6 +87,31 @@ BEGIN
   SELECT COALESCE(jsonb_agg(to_jsonb(s) || jsonb_build_object('branch_id', bid)), '[]') INTO v_sh
     FROM unnest(v_ids) bid CROSS JOIN LATERAL public.therapist_shifts_for_range(bid, v_date, v_date + 6) s;
 
+  -- same weekday last week, for the pulse comparisons (revenue only for money roles; booked share from the same shift rule)
+  v_prev := v_date - 7;
+  SELECT COALESCE(jsonb_agg(to_jsonb(s) || jsonb_build_object('branch_id', bid)), '[]') INTO v_sh_prev
+    FROM unnest(v_ids) bid CROSS JOIN LATERAL public.therapist_shifts_for_range(bid, v_prev, v_prev) s;
+  IF v_money THEN
+    SELECT COALESCE(sum(p.amount), 0) - COALESCE((SELECT sum(rf.amount) FROM public.payment_refunds rf JOIN public.bookings rb ON rb.id = rf.booking_id
+             WHERE rb.branch_id = ANY (v_ids) AND rf.created_at >= (v_prev::timestamp AT TIME ZONE 'Asia/Kathmandu') AND rf.created_at < ((v_prev + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu')), 0)
+      INTO v_prev_rev
+      FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
+     WHERE pb.branch_id = ANY (v_ids) AND p.created_at >= (v_prev::timestamp AT TIME ZONE 'Asia/Kathmandu') AND p.created_at < ((v_prev + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu');
+    IF NOT EXISTS (SELECT 1 FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
+                    WHERE pb.branch_id = ANY (v_ids) AND p.created_at >= (v_prev::timestamp AT TIME ZONE 'Asia/Kathmandu') AND p.created_at < ((v_prev + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu')) THEN
+      v_prev_rev := NULL;  -- no payments that day: "no data", not a 0 baseline
+    END IF;
+  END IF;
+  SELECT CASE WHEN a.avail > 0 THEN round(COALESCE(bk.booked, 0)::numeric / a.avail, 3) END INTO v_prev_share
+    FROM (SELECT COALESCE(sum(GREATEST(0, (EXTRACT(EPOCH FROM x.end_time - x.start_time) / 60)::int
+                 - COALESCE((SELECT sum((y->>'end_min')::int - (y->>'start_min')::int) FROM jsonb_array_elements(x.breaks) y), 0)
+                 - COALESCE((SELECT sum((y->>'end_min')::int - (y->>'start_min')::int) FROM jsonb_array_elements(x.off) y), 0))), 0)::int AS avail
+            FROM jsonb_to_recordset(v_sh_prev) AS x(works boolean, start_time time, end_time time, breaks jsonb, off jsonb)
+           WHERE x.works AND x.start_time IS NOT NULL) a,
+         (SELECT COALESCE(sum((EXTRACT(EPOCH FROM COALESCE(bt.end_time, b2.end_time) - COALESCE(bt.start_time, b2.start_time)) / 60)::int), 0)::int AS booked
+            FROM public.booking_therapists bt JOIN public.bookings b2 ON b2.id = bt.booking_id
+           WHERE b2.branch_id = ANY (v_ids) AND b2.date = v_prev AND b2.status NOT IN ('Cancelled', 'No Show')) bk;
+
   -- floor: per branch, the therapists working that day with their blocks and gaps >= 1h, busiest first ---------------
   FOR r IN
     WITH sh AS (
@@ -96,16 +122,17 @@ BEGIN
     SELECT sh.branch_id, sh.therapist_id, t.name, t.position,
            (EXTRACT(EPOCH FROM sh.start_time) / 60)::int AS s_min,
            LEAST(1440, (EXTRACT(EPOCH FROM sh.end_time) / 60)::int + CASE WHEN sh.end_time = '23:59:59' THEN 1 ELSE 0 END) AS e_min,
-           (SELECT COALESCE(jsonb_agg(jsonb_build_object('k', q.k, 'f', q.f, 'e', q.e) ORDER BY q.f, q.e), '[]') FROM (
+           (SELECT COALESCE(jsonb_agg(jsonb_build_object('k', q.k, 'f', q.f, 'e', q.e, 'id', q.bid, 'label', q.lbl) ORDER BY q.f, q.e), '[]') FROM (
               SELECT CASE bk.status WHEN 'Completed' THEN 'done' WHEN 'In-Progress' THEN 'now' WHEN 'Confirmed' THEN 'booked' ELSE 'unconfirmed' END AS k,
                      (EXTRACT(EPOCH FROM COALESCE(bt.start_time, bk.start_time)) / 60)::int AS f,
-                     (EXTRACT(EPOCH FROM COALESCE(bt.end_time, bk.end_time)) / 60)::int AS e
+                     (EXTRACT(EPOCH FROM COALESCE(bt.end_time, bk.end_time)) / 60)::int AS e,
+                     bk.id AS bid, concat_ws(' · ', bk.customer_name, bk.service_name_snapshot) AS lbl
                 FROM public.booking_therapists bt JOIN public.bookings bk ON bk.id = bt.booking_id
                WHERE bt.therapist_id = sh.therapist_id AND bk.date = v_date AND bk.status NOT IN ('Cancelled', 'No Show')
               UNION ALL
-              SELECT 'break', (y->>'start_min')::int, (y->>'end_min')::int FROM jsonb_array_elements(COALESCE(sh.breaks, '[]')) y
+              SELECT 'break', (y->>'start_min')::int, (y->>'end_min')::int, NULL::uuid, 'Break' FROM jsonb_array_elements(COALESCE(sh.breaks, '[]')) y
               UNION ALL
-              SELECT 'leave', (y->>'start_min')::int, (y->>'end_min')::int FROM jsonb_array_elements(COALESCE(sh.off, '[]')) y
+              SELECT 'leave', (y->>'start_min')::int, (y->>'end_min')::int, NULL::uuid, 'Off' FROM jsonb_array_elements(COALESCE(sh.off, '[]')) y
            ) q) AS ranges
       FROM sh JOIN public.therapists t ON t.id = sh.therapist_id
   LOOP
@@ -113,18 +140,19 @@ BEGIN
     FOR rr IN SELECT e FROM jsonb_array_elements(r.ranges) e LOOP
       v_k := rr->>'k'; v_f := (rr->>'f')::int; v_e := (rr->>'e')::int;
       IF v_f - v_cursor >= 60 THEN
-        v_gaps := v_gaps || jsonb_build_object('from', public.minutes_to_hhmm(v_cursor), 'to', public.minutes_to_hhmm(v_f));
+        v_gaps := v_gaps || jsonb_build_object('from', public.minutes_to_hhmm(v_cursor), 'to', public.minutes_to_hhmm(v_f), 'from_min', v_cursor, 'to_min', v_f);
       END IF;
-      v_blocks := v_blocks || jsonb_build_object('kind', v_k, 'from', public.minutes_to_hhmm(v_f), 'to', public.minutes_to_hhmm(v_e));
+      v_blocks := v_blocks || jsonb_build_object('kind', v_k, 'from', public.minutes_to_hhmm(v_f), 'to', public.minutes_to_hhmm(v_e),
+                                                 'from_min', v_f, 'to_min', v_e, 'booking_id', rr->>'id', 'label', rr->>'label');
       IF v_k NOT IN ('break', 'leave') THEN v_busy := v_busy + GREATEST(0, v_e - v_f); END IF;
       v_cursor := GREATEST(v_cursor, v_e);
     END LOOP;
     IF r.e_min - v_cursor >= 60 THEN
-      v_gaps := v_gaps || jsonb_build_object('from', public.minutes_to_hhmm(v_cursor), 'to', public.minutes_to_hhmm(r.e_min));
+      v_gaps := v_gaps || jsonb_build_object('from', public.minutes_to_hhmm(v_cursor), 'to', public.minutes_to_hhmm(r.e_min), 'from_min', v_cursor, 'to_min', r.e_min);
     END IF;
     v_state := CASE WHEN v_is_today AND v_blocks @> '[{"kind":"now"}]' THEN 'now' END;
     v_list := v_list || jsonb_build_object('branch_id', r.branch_id, 'therapist_id', r.therapist_id, 'name', r.name, 'position', r.position,
-                'shift_from', public.minutes_to_hhmm(r.s_min), 'shift_to', public.minutes_to_hhmm(r.e_min),
+                'shift_from', public.minutes_to_hhmm(r.s_min), 'shift_to', public.minutes_to_hhmm(r.e_min), 'shift_from_min', r.s_min, 'shift_to_min', r.e_min,
                 'busy_minutes', v_busy, 'state', v_state, 'blocks', v_blocks, 'gaps', v_gaps);
   END LOOP;
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -234,7 +262,7 @@ BEGIN
     INTO v_my;
 
   RETURN jsonb_build_object('date', v_date, 'role', v_role, 'branch_ids', to_jsonb(v_ids),
-           'pulse', v_pulse, 'floor', v_floor, 'needs_action', v_needs, 'week', v_week, 'branches', v_branches,
+           'pulse', v_pulse || jsonb_build_object('revenue_prev', v_prev_rev, 'booked_share_prev', v_prev_share), 'floor', v_floor, 'needs_action', v_needs, 'week', v_week, 'branches', v_branches,
            'money', v_money_j, 'loose_ends', v_loose, 'tomorrow', v_tomorrow, 'my_day', v_my);
 END;
 $fn$;

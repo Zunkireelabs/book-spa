@@ -1,3 +1,4 @@
+import { buildNeeds } from '../lib/dashboardNeeds';
 import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
@@ -357,6 +358,24 @@ export async function fetchDashboard({ branchIds, date = null }) {
   } catch (error) {
     console.error('[API] fetchDashboard error:', error.message);
     return { data: {}, error };
+  }
+}
+
+// The rows behind the dashboard's Needs action card (the RPC only counts them): completed-but-unpaid (last 7 days), unconfirmed and
+// unassigned bookings today. RLS-scoped reads of bookings; `date` is the Nepal day.
+export async function fetchNeedsActionRows({ branchId, date }) {
+  try {
+    const from = new Date(`${date}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 7);
+    const { data, error } = await supabase.from('bookings')
+      .select('id, booking_number, branch_id, customer_name, date, start_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount)')
+      .eq('branch_id', branchId).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
+      .in('status', ['Pending', 'Confirmed', 'Completed']).order('start_time').limit(300);
+    if (error) throw error;
+    return { data: buildNeeds(data, date), error: null };
+  } catch (error) {
+    console.error('[API] fetchNeedsActionRows error:', error.message);
+    return { data: { unpaid: [], unconfirmed: [], unassigned: [] }, error };
   }
 }
 

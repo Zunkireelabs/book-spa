@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import {
   fetchServices,
   createBooking,
-  createComboBookingItems,
   rescheduleBookingAsNewBooking,
   fetchBookingById,
   deleteBlock,
@@ -15,6 +14,7 @@ import { findBlockOverlap, describeBlockOverlap } from '../../../../../utils/blo
 import { toKathmanduParts, formatTimeFromSlot } from '../calendarDates';
 import { useAvailabilityGuard } from '../../../../../contexts/AvailabilityOverrideContext';
 import { friendlyError, isNetworkError, NETWORK_CHECK_CALENDAR_COPY } from '../../../../../utils/friendlyError';
+import { submitQuickCreate } from '../quickCreateSubmit';
 import { isCheckedOutBlockedSlot, DEFAULT_SLOT_MINUTES } from '../calendarSlots';
 
 // Panel routing for the calendar: which panel is open (booking details, quick-create, block / transfer forms), the
@@ -394,97 +394,9 @@ export function useCalendarPanels({ branchId, currentDate, calendarData, refresh
   }, [searchParams, branchId, currentDate, handleEmptySlotClick, openQuickCreateForSlot, setSearchParams]);
 
   const handleQuickCreateSubmit = useCallback(async (formData) => {
-    if (!branchId) return 'Missing branch info.';
-    const date = formData.bookingDate;
-    const startTime = formData.bookingTime;
-    if (!date || !startTime) return 'Date and time are required.';
-
-    // Group booking: one booking per person, all sharing one booking_group_id.
-    // Created sequentially so each room-capacity check sees prior group members
-    // (matters for a Couple sharing one room, and Separate rooms running low).
-    if (formData.mode === 'group') {
-      const people = formData.people || [];
-      if (people.length === 0) return 'Add at least one person.';
-      const groupId = crypto.randomUUID();
-      let created = 0;
-      for (let i = 0; i < people.length; i++) {
-        const person = people[i];
-        const result = await guard((overrideReason) => createBooking({
-          branchId,
-          serviceId: person.serviceId,
-          date,
-          startTime,
-          customerName: person.customerName,
-          customerPhone: person.customerPhone,
-          customerEmail: person.customerEmail,
-          customerGender: person.customerGender,
-          specialRequests: formData.specialRequests,
-          therapistIds: person.therapistIds,
-          roomId: person.roomId || undefined,
-          bookingGroupId: groupId,
-          overrideReason,
-        }));
-        if (result.error) {
-          const who = person.customerName || `person ${i + 1}`;
-          const tail = created > 0 ? ` (${created} booking${created > 1 ? 's' : ''} already created)` : '';
-          return `Failed for ${who}: ${result.error.message || 'could not create booking.'}${tail}`;
-        }
-        created++;
-      }
-      showToast(`${created} group bookings created successfully`);
-      setQuickCreateSlot(null);
-      refreshCalendar();
-      return null;
-    }
-
-    const result = await guard((overrideReason) => createBooking({
-      branchId,
-      serviceId: formData.serviceId,
-      date,
-      startTime,
-      customerName: formData.customerName,
-      customerPhone: formData.customerPhone,
-      customerEmail: formData.customerEmail,
-      customerGender: formData.customerGender,
-      specialRequests: formData.specialRequests,
-      therapistIds: formData.therapistIds || (formData.therapistId ? [formData.therapistId] : null),
-      // Zennly: bookings.room_id is NOT NULL, so "Any available" must let createBooking auto-assign a room ('none' would insert NULL).
-      roomId: formData.roomId || undefined,
-      therapistRoomOverrides: formData.therapistRoomOverrides,
-      companionName: formData.companionName,
-      companionPhone: formData.companionPhone,
-      referringCustomerId: formData.referringCustomerId,
-      referringRewardType: formData.referringRewardType,
-      referringRewardAmount: formData.referringRewardAmount,
-      overrideReason,
-    }));
-    if (result.error) {
-      return result.error.message || 'Failed to create booking.';
-    }
-
-    if (formData.comboAssignments?.length > 0 && result.data?.id) {
-      const comboResult = await createComboBookingItems({
-        bookingId: result.data.id,
-        branchId,
-        date,
-        startTime,
-        roomId: formData.roomId && formData.roomId !== 'none' ? formData.roomId : null,
-        components: formData.comboAssignments,
-        overrideReason: result.overrideReason,
-      });
-      if (comboResult.error) {
-        showToast(`Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, 'error');
-        setQuickCreateSlot(null);
-        refreshCalendar();
-        return null;
-      }
-    }
-
-    if (result.data?._therapistAssignmentWarning) {
-      showToast(`Booking created, but: ${result.data._therapistAssignmentWarning}`, 'error');
-    } else {
-      showToast('Booking created successfully');
-    }
+    const r = await submitQuickCreate({ formData, branchId, guard });
+    if (r.error) return r.error;
+    showToast(r.toast.msg, r.toast.type);
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;

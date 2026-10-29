@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch, OVERALL_BRANCH_ID } from '../../contexts/BranchContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import { supabase } from '../../lib/supabase';
+import { fetchDashboard } from '../../services/api';
+import BranchView from './BranchView';
+import { useSearchParams } from 'react-router-dom';
 import { nepalNow } from '../../utils/customerDirectory';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
 
@@ -24,6 +27,8 @@ const BLOCKS = {
   myday: { all: ['My bookings today', 'My earnings today', 'My attendance'] },
 };
 
+const toMin = (t) => (t ? Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5)) : null);
+
 const greetingFor = (hm) => {
   const h = Number(hm.slice(0, 2));
   if (h < 12) return 'Good morning';
@@ -37,7 +42,9 @@ const dateLine = (today) =>
 const DashboardHome = ({ hasBookingsToday = false }) => {
   const { profile, user } = useAuth();
   const { branchId, branchName, branches = [], isOverall, switchBranch } = useBranch();
-  const { locationLabelPlural } = useIndustry();
+  const { locationLabelPlural, staffLabel, staffLabelPlural } = useIndustry();
+  const [searchParams] = useSearchParams();
+  const highlight = searchParams.get('highlight'); // discount notifications deep-link to the Branch view's Needs action
   const role = profile?.role || 'staff';
   const userId = user?.id || profile?.id;
   const branchCount = role === 'admin' || role === 'admin_viewer' ? branches.length : 1;
@@ -50,7 +57,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
 
   const views = availableViews({ role, branchCount });
   const [picked, setPicked] = useState(null);
-  const view = !isOverall && picked && picked !== 'business' && views.includes(picked)
+  const view = highlight && views.includes('branch') && !isOverall ? 'branch' : !isOverall && picked && picked !== 'business' && views.includes(picked)
     ? picked
     : defaultView({ role, branchCount, isOverall, hasBookingsToday, remembered: readRememberedView(userId) });
 
@@ -77,6 +84,21 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
       .then(({ data }) => { if (!cancelled) setHours(data ? { open: data.open_time, close: data.close_time } : null); });
     return () => { cancelled = true; };
   }, [branchId, isOverall]);
+
+  const [dash, setDash] = useState(null);
+  const [dashError, setDashError] = useState(false);
+  const loadDash = useCallback(async () => {
+    if (!branchId || isOverall) { setDash(null); setDashError(false); return; }
+    const { data, error } = await fetchDashboard({ branchIds: [branchId] });
+    setDashError(!!error);
+    if (!error) setDash(data); // a failed refresh keeps the last good data under the error notice
+  }, [branchId, isOverall]);
+  useEffect(() => { loadDash(); }, [loadDash]);
+  useEffect(() => {
+    const id = setInterval(loadDash, 60000);
+    window.addEventListener('pending-approvals-changed', loadDash);
+    return () => { clearInterval(id); window.removeEventListener('pending-approvals-changed', loadDash); };
+  }, [loadDash]);
 
   const autoPhase = dayPhase(now.hm, hours || {});
   const [manualPhase, setManualPhase] = useState(null); // a manual pick lasts for the session
@@ -134,6 +156,13 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
         </div>
       </header>
 
+      {view === 'branch' && !isOverall ? (
+        <BranchView
+          phase={phase} data={dash} dataError={dashError} nowMin={Number(now.hm.slice(0, 2)) * 60 + Number(now.hm.slice(3, 5))} today={now.today}
+          hours={hours ? { open: toMin(hours.open), close: toMin(hours.close) } : null}
+          branchId={branchId} role={role} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural} highlight={highlight} onReload={loadDash}
+        />
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
         {blocks.map((name) => (
           <div key={name} className="bg-white rounded-lg border border-gray-200 p-4 min-h-[120px]">
@@ -142,6 +171,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 };

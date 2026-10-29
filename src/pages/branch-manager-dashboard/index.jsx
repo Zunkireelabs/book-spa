@@ -358,15 +358,8 @@ const BranchManagerDashboard = () => {
   };
 
   // V36a: the old widget stack is retired; DashboardHome owns the dashboard (the widgets stay in the repo for Reports).
-  const renderDashboardView = () => (
-    <div className="space-y-3 sm:space-y-4">
-      <DashboardHome />
-      {/* Kept until V36c's Needs action: discount notifications deep-link here (?view=dashboard&highlight=<bookingId>) */}
-      {['manager', 'admin'].includes(profile?.role) && !isOverall && (
-        <PendingDiscountsPanel branchId={branchId} highlightBookingId={searchParams.get('highlight')} />
-      )}
-    </div>
-  );
+  // V36c: the Branch view carries its own Needs action (incl. pending discounts + the ?highlight= deep link).
+  const renderDashboardView = () => <DashboardHome />;
 
   const renderCalendarView = () => (
     <OperationalCalendar branchId={branchId} />
