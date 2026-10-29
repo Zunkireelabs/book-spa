@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch, OVERALL_BRANCH_ID } from '../../contexts/BranchContext';
 import { useIndustry } from '../../hooks/useIndustry';
+import Icon from '../../components/AppIcon';
 import { supabase } from '../../lib/supabase';
 import { fetchDashboard, fetchSetupState } from '../../services/api';
 import BranchView from './BranchView';
@@ -14,9 +15,9 @@ import { nepalNow } from '../../utils/customerDirectory';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
 
 const PHASES = [
-  { key: 'prep', label: 'Prep' },
-  { key: 'live', label: 'Live' },
-  { key: 'close', label: 'Close' },
+  { key: 'prep', label: 'Prep', icon: 'Sun' },
+  { key: 'live', label: 'Live', icon: 'Activity' },
+  { key: 'close', label: 'Close', icon: 'Moon' },
 ];
 
 // Block names per view and phase. V36c/d replace these placeholders with the real cards (mockup: dashboard-v2.html).
@@ -132,59 +133,59 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
   }, [view, phase]);
 
   const firstName = (profile?.full_name || '').split(' ')[0];
-  const showPhases = view === 'branch';
-  const scope = isOverall ? 'All branches' : branchName;
+  const showPhases = view === 'branch' || view === 'business';
+  const scope = isOverall ? `${branches.length} ${(branches.length === 1 ? 'branch' : 'branches')}` : branchName;
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+      <header className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
             {greetingFor(now.hm)}{firstName ? `, ${firstName}` : ''}
           </h1>
           <p className="text-sm text-gray-500">{dateLine(now.today)}{scope ? ` · ${scope}` : ''}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {views.length > 1 && (
-            <div role="tablist" aria-label="Dashboard view" className="inline-flex rounded-lg bg-gray-100 p-0.5">
-              {views.map((v) => (
-                <button
-                  key={v}
-                  role="tab"
-                  aria-selected={view === v}
-                  onClick={() => pickView(v)}
-                  className={`px-3 py-1.5 text-sm rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  {VIEWS[v]}
-                </button>
-              ))}
-            </div>
-          )}
-          {showPhases && (
-            <div role="tablist" aria-label="Part of the day" className="flex items-center gap-3">
-              {PHASES.map((p) => (
-                <button
-                  key={p.key}
-                  role="tab"
-                  aria-selected={phase === p.key}
-                  onClick={() => setManualPhase(p.key)}
-                  className={`text-sm pb-0.5 border-b-2 transition-colors ${phase === p.key ? 'border-primary text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {views.length > 1 && (
+          <div role="tablist" aria-label="Dashboard view" className="inline-flex rounded-lg bg-gray-100 p-0.5 self-center">
+            {views.map((v) => (
+              <button
+                key={v}
+                role="tab"
+                aria-selected={view === v}
+                onClick={() => pickView(v)}
+                className={`px-3 py-1.5 text-[12.5px] whitespace-nowrap rounded-md transition-colors ${view === v ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                {VIEWS[v]}
+              </button>
+            ))}
+          </div>
+        )}
+        {showPhases && (
+          <div role="tablist" aria-label="Part of the day" className="flex items-center gap-4 sm:ml-auto self-center">
+            {PHASES.map((p) => (
+              <button
+                key={p.key}
+                role="tab"
+                aria-selected={phase === p.key}
+                onClick={() => setManualPhase(p.key)}
+                className={`flex items-center gap-1.5 text-sm font-medium py-1 border-b-2 transition-colors ${phase === p.key ? 'border-primary text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                <Icon name={p.icon} size={15} />{p.label}
+                {phase === p.key && <i className="w-1.5 h-1.5 rounded-full bg-success" />}
+              </button>
+            ))}
+            <span className="text-[11.5px] text-gray-400">{manualPhase ? 'chosen by you' : 'auto'}</span>
+          </div>
+        )}
       </header>
 
       {view === 'business' && isOverall ? (
         <BusinessView
           data={dash} dataError={dashError} branchIds={branches.map((b) => b.id)} today={now.today}
-          staffLabelPlural={staffLabelPlural} onOpenBranch={openBranch} onReload={loadDash}
+          role={role} onOpenBranch={openBranch} onReload={loadDash}
         />
       ) : view === 'frontdesk' && !isOverall ? (
-        <FrontDeskView data={dash} dataError={dashError} branchId={branchId} today={now.today} nowMin={nowMin} role={role} staffLabelPlural={staffLabelPlural} onReload={loadDash} />
+        <FrontDeskView data={dash} dataError={dashError} branchId={branchId} today={now.today} nowMin={nowMin} role={role} staffLabel={staffLabel} onReload={loadDash} />
       ) : view === 'myday' && !isOverall ? (
         <MyDayView data={dash} dataError={dashError} branchId={branchId} today={now.today} nowHm={now.hm} role={role} staffLabelPlural={staffLabelPlural} onReload={loadDash} />
       ) : view === 'branch' && !isOverall ? (
@@ -192,6 +193,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
           phase={phase} data={dash} dataError={dashError} nowMin={nowMin} today={now.today} newTenant={newTenant} setup={setup}
           hours={hours ? { open: toMin(hours.open), close: toMin(hours.close) } : null}
           branchId={branchId} role={role} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural} highlight={highlight} onReload={loadDash}
+          nowHm={now.hm} onOpenMyDay={() => pickView('myday')}
         />
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">

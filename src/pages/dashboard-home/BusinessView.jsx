@@ -1,23 +1,35 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
-import { Card, Row, Tile, npr, plural, shortDay } from './dashKit';
-import { fetchBusinessNeeds } from '../../services/api';
+import { Card, GroupBand, Row, SuggestionsCard, npr, pctChange, plural, shortDay, weekdayName } from './dashKit';
+import { approveDiscount, fetchBusinessNeeds, rejectDiscount } from '../../services/api';
+import { adminDiscounts, summarizeWaiting } from '../../lib/dashboardNeeds';
+import { friendlyError } from '../../utils/friendlyError';
 
-const KIND = {
-  discount: { icon: 'Percent', tone: 'text-warning', text: (b) => `Discount waiting for approval · ${b.customer_name || b.booking_number}` },
-  unconfirmed: { icon: 'Clock', tone: 'text-warning', text: (b) => `${b.customer_name || b.booking_number} not confirmed` },
-  unpaid: { icon: 'HandCoins', tone: 'text-error', text: (b) => `${b.customer_name || b.booking_number} completed, not paid · NPR ${Number(b.final_amount || 0).toLocaleString('en-IN')}` },
-};
 const waited = (min) => (min >= 24 * 60 ? `${Math.floor(min / 1440)}d` : min >= 60 ? `${Math.floor(min / 60)}h` : `${min}m`);
+const nepalDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Kathmandu' });
+const sinceLabel = (ms, today) => {
+  if (ms == null) return null;
+  if (nepalDay(ms) !== today) return shortDay(nepalDay(ms));
+  return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kathmandu' }).toLowerCase();
+};
+
+const Change = ({ pct }) => (pct == null ? <span className="text-gray-400">—</span>
+  : pct === 0 ? <span className="text-gray-500">same</span>
+    : <span className={pct > 0 ? 'text-primary' : 'text-error'}>{pct > 0 ? '+' : '−'}{Math.abs(pct)}%</span>);
 
 /**
- * Business view (admin / admin_viewer, All branches): brief, branches table (a row opens that branch's Branch view), Needs action limited to
- * admin-only items and anything waiting over 2h (grouped by branch), Suggestions placeholder. `data` is get_dashboard for every branch.
+ * Business view (admin / admin_viewer, All branches; mockup scene D): one-line brief, Branches table (a row opens that branch's Branch
+ * view), Needs action split into "Needs you (admin)" (discounts, approved/declined in place) and "Waiting at branches" (one summary
+ * row per kind per branch, older than 2h), Suggestions placeholder. `data` is get_dashboard for every branch.
  */
-const BusinessView = ({ data, dataError, branchIds, today, staffLabelPlural = 'staff', onOpenBranch, onReload, newTenant = false }) => {
+const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, onReload }) => {
+  const loc = 'branch'; // the app's own word for a site; useIndustry's locationLabel means rooms here
+  const locs = 'branches';
   const [groups, setGroups] = useState([]);
   const [needsError, setNeedsError] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [message, setMessage] = useState(null);
   const load = async () => {
     if (!branchIds?.length) return;
     const { data: g, error } = await fetchBusinessNeeds({ branchIds, date: today });
@@ -25,14 +37,34 @@ const BusinessView = ({ data, dataError, branchIds, today, staffLabelPlural = 's
     if (!error) setGroups(g);
   };
   useEffect(() => { load(); }, [branchIds?.join(','), today]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    window.addEventListener('pending-approvals-changed', load);
+    return () => window.removeEventListener('pending-approvals-changed', load);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   const retry = () => { load(); onReload?.(); };
+
+  const decide = async (b, approve) => {
+    setBusyId(b.id); setMessage(null);
+    const res = await (approve ? approveDiscount(b.id) : rejectDiscount(b.id));
+    setBusyId(null);
+    if (res.error) setMessage(friendlyError(res.error, res.error.message || 'Could not save that.'));
+    else window.dispatchEvent(new CustomEvent('pending-approvals-changed'));
+    retry();
+  };
 
   const pulse = data?.pulse || {};
   const canMoney = data?.money != null;
+  const canAct = role === 'admin';
   const rows = data?.branches || [];
+  const weekday = weekdayName(today);
+  const discounts = adminDiscounts(groups);
+  const waiting = summarizeWaiting(groups);
   const needCount = groups.reduce((n, g) => n + g.items.length, 0);
-  const working = rows.reduce((n, r) => n + Number(r.working || 0), 0);
-  const label = 'branches';
+  const needsOf = (id) => groups.find((g) => g.branch_id === id)?.items.length || 0;
+
+  const change = pctChange(pulse.revenue, pulse.revenue_prev);
+  const behind = rows.map((r) => ({ name: r.name, pct: pctChange(r.revenue, r.revenue_prev) })).filter((r) => r.pct != null && r.pct < 0).sort((a, b) => a.pct - b.pct)[0];
+  const sep = <span className="text-gray-300 mx-1.5">·</span>;
 
   return (
     <div className="space-y-3 sm:space-y-4">
@@ -40,32 +72,48 @@ const BusinessView = ({ data, dataError, branchIds, today, staffLabelPlural = 's
         <Card icon="Building2" title="Business today" error onRetry={retry} />
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
-            <Tile label="Bookings today" value={pulse.bookings ?? 0} sub={`${pulse.completed || 0} done · ${(pulse.confirmed || 0) + (pulse.pending || 0)} to come`} icon="CalendarDays" />
-            <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={newTenant ? 'No comparison yet' : canMoney ? 'All ' + label : 'Not shown for your role'} icon="Banknote" />
-            <Tile label={`${staffLabelPlural} working`} value={working} sub={`Across ${plural(rows.length, 'branch', label)}`} icon="Users" />
-            <Tile label="Needs a decision" value={needsError ? '—' : needCount} sub="Admin-only or waiting over 2h" icon="Inbox" />
+          <div className="flex items-start gap-3 bg-white border border-gray-200 rounded-lg px-4 py-3.5 text-sm text-gray-700 leading-relaxed">
+            <Icon name="Activity" size={16} className="text-gray-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <b>{plural(pulse.bookings || 0, 'booking')}</b> across {plural(rows.length, loc, locs)}
+              {canMoney && <>{sep}<b>{npr(pulse.revenue)}</b> taken{change != null && change !== 0 && <> <span className={change > 0 ? 'text-primary font-medium' : 'text-error font-medium'}>{change > 0 ? '+' : '−'}{Math.abs(change)}%</span> vs last {weekday.slice(0, 3)}</>}</>}
+              {behind && <>{sep}{behind.name} is behind <span className="text-error">−{Math.abs(behind.pct)}%</span></>}
+              {!needsError && <>{sep}<span className={needCount ? 'text-warning font-medium' : ''}>{needCount === 0 ? 'nothing needs someone' : `${needCount} ${needCount === 1 ? 'thing needs' : 'things need'} someone`}</span></>}
+            </div>
           </div>
-          <Card icon="Building2" title="Branches" meta="Click one to open it">
-            {rows.length === 0 ? <p className="text-sm text-gray-500">No {label} yet.</p> : (
-              <div className="overflow-x-auto -mx-1">
+          <Card icon="Building2" title="Branches today" meta={`Click a row to open that ${loc}`}>
+            {rows.length === 0 ? <p className="text-sm text-gray-500">No {locs} yet.</p> : (
+              <div className="overflow-x-auto -mx-4 -my-4">
                 <table className="w-full text-sm">
-                  <thead><tr className="text-left text-xs text-gray-500">
-                    <th className="px-1 py-1.5 font-medium">Name</th><th className="px-1 py-1.5 font-medium text-right">Bookings</th>
-                    <th className="px-1 py-1.5 font-medium text-right">Done</th>{canMoney && <th className="px-1 py-1.5 font-medium text-right">Taken</th>}
-                    <th className="px-1 py-1.5 font-medium text-right">Working</th><th />
+                  <thead><tr className="text-[11px] text-gray-500 bg-background border-b border-gray-100">
+                    <th className="px-3.5 py-2 font-medium text-left">Branch</th><th className="px-3.5 py-2 font-medium text-right">Now</th>
+                    <th className="px-3.5 py-2 font-medium text-right">Bookings</th>
+                    {canMoney && <th className="px-3.5 py-2 font-medium text-right">Taken today</th>}
+                    {canMoney && <th className="px-3.5 py-2 font-medium text-right whitespace-nowrap">vs last {weekday.slice(0, 3)}</th>}
+                    <th className="px-3.5 py-2 font-medium text-right">Booked hours</th>
+                    {canMoney && <th className="px-3.5 py-2 font-medium text-right">Unpaid</th>}
+                    <th className="px-3.5 py-2 font-medium text-right">Needs action</th>
                   </tr></thead>
                   <tbody>
-                    {rows.map((r) => (
-                      <tr key={r.branch_id} onClick={() => onOpenBranch(r.branch_id)} className="border-t border-gray-100 cursor-pointer hover:bg-gray-50">
-                        <td className="px-1 py-2 font-medium text-gray-900">{r.name}</td>
-                        <td className="px-1 py-2 text-right tabular-nums">{r.bookings}</td>
-                        <td className="px-1 py-2 text-right tabular-nums">{r.completed}</td>
-                        {canMoney && <td className="px-1 py-2 text-right tabular-nums">{npr(r.revenue)}</td>}
-                        <td className="px-1 py-2 text-right tabular-nums">{r.working}</td>
-                        <td className="px-1 py-2 text-right text-gray-400"><Icon name="ChevronRight" size={14} /></td>
-                      </tr>
-                    ))}
+                    {rows.map((r) => {
+                      const pct = r.booked_share == null ? null : Math.round(r.booked_share * 100);
+                      const n = needsOf(r.branch_id);
+                      return (
+                        <tr key={r.branch_id} tabIndex={0} onClick={() => onOpenBranch(r.branch_id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpenBranch(r.branch_id); }}
+                          className="border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50">
+                          <td className="px-3.5 py-2.5"><div className="font-semibold text-gray-900">{r.name}</div>{r.manager && <div className="text-[11px] text-gray-500">Manager {r.manager}</div>}</td>
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">{r.busy_now} of {r.working} busy</td>
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{r.completed} / {r.bookings}</td>
+                          {canMoney && <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">{npr(r.revenue)}</td>}
+                          {canMoney && <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]"><Change pct={pctChange(r.revenue, r.revenue_prev)} /></td>}
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap">
+                            {pct == null ? '—' : <><span className="inline-block w-14 h-[5px] bg-gray-100 rounded-full overflow-hidden align-middle mr-1.5"><i className={`block h-full ${pct < 45 ? 'bg-accent' : 'bg-primary'}`} style={{ width: `${Math.min(100, pct)}%` }} /></span>{pct}%</>}
+                          </td>
+                          {canMoney && <td className={`px-3.5 py-2.5 text-right font-data text-[12.5px] whitespace-nowrap ${Number(r.unpaid) > 0 ? 'text-warning' : ''}`}>{npr(r.unpaid)}</td>}
+                          <td className="px-3.5 py-2.5 text-right font-data text-[12.5px]">{needsError ? '—' : n}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -75,22 +123,39 @@ const BusinessView = ({ data, dataError, branchIds, today, staffLabelPlural = 's
       )}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
         <div className="lg:col-span-3">
-          <Card icon="Inbox" title="Needs your decision" count={needCount} error={needsError} onRetry={retry}>
-            {groups.length === 0 && <p className="text-sm text-gray-500">Nothing needs you right now ✓</p>}
-            {groups.map((g) => (
-              <div key={g.branch_id} className="mb-3 last:mb-0">
-                <div className="text-xs font-medium text-gray-500 mb-1">{g.branch_name} · {g.items.length}</div>
-                {g.items.map((b) => (
-                  <Row key={`${b.kind}${b.id}`} icon={KIND[b.kind].icon} tone={KIND[b.kind].tone} title={KIND[b.kind].text(b)} sub={`${shortDay(b.date)} · waiting ${waited(b.wait_min)}`}
-                    actions={<Button size="sm" variant="outline" onClick={() => onOpenBranch(g.branch_id, b.kind === 'discount' ? b.id : null)}>Open</Button>} />
-                ))}
-              </div>
-            ))}
+          <Card icon="Inbox" title="Needs action" count={needCount} meta="Money owed, or items a manager can't clear" error={needsError} onRetry={retry}>
+            <GroupBand>Needs you (admin)</GroupBand>
+            {discounts.length === 0 && <p className="text-sm text-gray-500 py-2.5">Nothing needs you right now ✓</p>}
+            {discounts.map((b) => {
+              const pct = Number(b.base_amount) > 0 ? Math.round((Number(b.discount_amount || 0) / Number(b.base_amount)) * 100) : null;
+              return (
+                <Row key={b.id} icon="Percent" tone="text-warning" chip={b.branch_name}
+                  title={`Discount${pct ? ` ${pct}%` : ''} for ${b.customer_name || b.booking_number}`}
+                  sub={[b.requester?.full_name ? `${b.requester.full_name} asks` : 'Waiting for approval', `${npr(b.base_amount)} → ${npr(b.final_amount)}`, b.discount_reason ? `"${b.discount_reason}"` : null].filter(Boolean).join(' · ')}
+                  actions={canAct ? (<>
+                    <Button size="sm" variant="outline" disabled={busyId === b.id} onClick={() => decide(b, false)}>Decline</Button>
+                    <Button size="sm" variant="primary" disabled={busyId === b.id} onClick={() => decide(b, true)}>Approve</Button>
+                  </>) : null} />
+              );
+            })}
+            {message && <p className="text-xs text-error pb-2">{message}</p>}
+            <GroupBand>Waiting at {locs}</GroupBand>
+            {waiting.length === 0 && <p className="text-sm text-gray-500 py-2.5">Nothing is waiting at the {locs} ✓</p>}
+            {waiting.map((w) => {
+              const since = sinceLabel(w.since, today);
+              return w.kind === 'unpaid' ? (
+                <Row key={`${w.branch_id}u`} icon="HandCoins" tone="text-error" chip={w.branch_name}
+                  title={`${plural(w.count, 'completed booking')} unpaid`} sub={[`${npr(w.amount)} owed`, w.oldest_date === today ? (since ? `since ${since}` : null) : `oldest ${shortDay(w.oldest_date)}`].filter(Boolean).join(' · ')}
+                  actions={<Button size="sm" variant="ghost" onClick={() => onOpenBranch(w.branch_id)}>Open {loc}</Button>} />
+              ) : (
+                <Row key={`${w.branch_id}c`} icon="Clock" tone="text-warning" chip={w.branch_name}
+                  title={`${plural(w.count, 'booking')} not confirmed`} sub={`waiting ${waited(Math.max(...w.items.map((i) => i.wait_min)))}${since ? ` · since ${since}` : ''}`}
+                  actions={<Button size="sm" variant="ghost" onClick={() => onOpenBranch(w.branch_id)}>Open {loc}</Button>} />
+              );
+            })}
           </Card>
         </div>
-        <div className="lg:col-span-2">
-          <Card icon="Sparkles" title="Suggestions" meta="Coming soon"><p className="text-sm text-gray-400">Rule-based suggestions will appear here.</p></Card>
-        </div>
+        <div className="lg:col-span-2"><SuggestionsCard /></div>
       </div>
     </div>
   );

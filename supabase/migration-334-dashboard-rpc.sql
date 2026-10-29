@@ -30,6 +30,23 @@ AS $$
    WHERE u.id = auth.uid();
 $$;
 
+-- Booked share of therapist hours for one branch-day, from a shifts jsonb (therapist_shifts_for_range rows + branch_id). NULL without hours.
+CREATE OR REPLACE FUNCTION public._dashboard_booked_share(p_branch uuid, p_day date, p_sh jsonb)
+RETURNS numeric
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT CASE WHEN a.avail > 0 THEN round(b.booked::numeric / a.avail, 3) END
+    FROM (SELECT COALESCE(sum(GREATEST(0, (EXTRACT(EPOCH FROM x.end_time - x.start_time) / 60)::int
+                 - COALESCE((SELECT sum((y->>'end_min')::int - (y->>'start_min')::int) FROM jsonb_array_elements(x.breaks) y), 0)
+                 - COALESCE((SELECT sum((y->>'end_min')::int - (y->>'start_min')::int) FROM jsonb_array_elements(x.off) y), 0))), 0)::int AS avail
+            FROM jsonb_to_recordset(p_sh) AS x(branch_id uuid, shift_date date, works boolean, start_time time, end_time time, breaks jsonb, off jsonb)
+           WHERE x.branch_id = p_branch AND x.shift_date = p_day AND x.works AND x.start_time IS NOT NULL) a,
+         (SELECT COALESCE(sum((EXTRACT(EPOCH FROM COALESCE(bt.end_time, b2.end_time) - COALESCE(bt.start_time, b2.start_time)) / 60)::int), 0)::int AS booked
+            FROM public.booking_therapists bt JOIN public.bookings b2 ON b2.id = bt.booking_id
+           WHERE b2.branch_id = p_branch AND b2.date = p_day AND b2.status NOT IN ('Cancelled', 'No Show')) b;
+$$;
+
 CREATE OR REPLACE FUNCTION public.get_dashboard(p_branch_ids uuid[], p_date date DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -74,6 +91,8 @@ BEGIN
            'completed',   count(*) FILTER (WHERE bk.status = 'Completed'),
            'cancelled',   count(*) FILTER (WHERE bk.status = 'Cancelled'),
            'no_show',     count(*) FILTER (WHERE bk.status = 'No Show'),
+           -- late: start time passed (Nepal time) and still Pending/Confirmed, so "to come" = pending + confirmed - late
+           'late',        count(*) FILTER (WHERE v_is_today AND bk.status IN ('Pending', 'Confirmed') AND bk.start_time < (now() AT TIME ZONE 'Asia/Kathmandu')::time),
            'revenue',     CASE WHEN v_money THEN (
                             SELECT COALESCE(sum(p.amount), 0) - COALESCE((SELECT sum(rf.amount) FROM public.payment_refunds rf
                                      JOIN public.bookings rb ON rb.id = rf.booking_id
@@ -208,7 +227,20 @@ BEGIN
            'revenue',   CASE WHEN v_money THEN (SELECT COALESCE(sum(p.amount), 0) FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
                                                  WHERE pb.branch_id = br.id AND p.created_at >= d0 AND p.created_at < d1) END,
            'working',   (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, source text) WHERE x.branch_id = br.id AND x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'
-                         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE))
+                         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE)),
+           -- scene D columns: manager, "x of y busy" (working = y), vs last same weekday, booked hours, unpaid
+           'manager',   (SELECT u.full_name FROM public.users u
+                          WHERE u.role = 'manager' AND (u.branch_id = br.id OR EXISTS (SELECT 1 FROM public.user_branches ub WHERE ub.user_id = u.id AND ub.branch_id = br.id))
+                          ORDER BY u.full_name LIMIT 1),
+           'busy_now',  (SELECT count(*) FROM jsonb_array_elements(v_list) e WHERE e->>'branch_id' = br.id::text AND e->>'state' = 'now'),
+           'revenue_prev', CASE WHEN v_money AND EXISTS (SELECT 1 FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
+                                   WHERE pb.branch_id = br.id AND p.created_at >= (v_prev::timestamp AT TIME ZONE 'Asia/Kathmandu') AND p.created_at < ((v_prev + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu'))
+                           THEN (SELECT COALESCE(sum(p.amount), 0) FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
+                                  WHERE pb.branch_id = br.id AND p.created_at >= (v_prev::timestamp AT TIME ZONE 'Asia/Kathmandu') AND p.created_at < ((v_prev + 1)::timestamp AT TIME ZONE 'Asia/Kathmandu')) END,
+           'booked_share',      public._dashboard_booked_share(br.id, v_date, v_sh),
+           'booked_share_prev', public._dashboard_booked_share(br.id, v_prev, v_sh_prev),
+           'unpaid',    CASE WHEN v_money THEN (SELECT COALESCE(sum(GREATEST(bk.final_amount - COALESCE((SELECT sum(p.amount) FROM public.payments p WHERE p.booking_id = bk.id), 0), 0)), 0)
+                                  FROM public.bookings bk WHERE bk.branch_id = br.id AND bk.status = 'Completed' AND bk.payment_status <> 'paid' AND bk.date <= v_date) END
          ) ORDER BY br.name), '[]')
     INTO v_branches FROM public.branches br WHERE br.id = ANY (v_ids);
 
@@ -247,14 +279,27 @@ BEGIN
            'therapist_ids', to_jsonb(v_mine),
            'bookings', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', bk.id, 'number', bk.booking_number, 'branch_id', bk.branch_id,
                 'start', to_char(COALESCE(bt.start_time, bk.start_time), 'HH24:MI'), 'end', to_char(COALESCE(bt.end_time, bk.end_time), 'HH24:MI'),
-                'customer', bk.customer_name, 'service', bk.service_name_snapshot, 'status', bk.status)
+                'customer', bk.customer_name, 'service', bk.service_name_snapshot, 'status', bk.status, 'room', bk.room_name_snapshot,
+                'visit', CASE WHEN bk.customer_id IS NULL THEN NULL ELSE (SELECT count(*) FROM public.bookings pv
+                           WHERE pv.customer_id = bk.customer_id AND pv.status NOT IN ('Cancelled', 'No Show') AND (pv.date, pv.start_time) <= (bk.date, bk.start_time)) END)
                 ORDER BY COALESCE(bt.start_time, bk.start_time))
               FROM public.booking_therapists bt JOIN public.bookings bk ON bk.id = bt.booking_id
              WHERE bt.therapist_id = ANY (v_mine) AND bk.date = v_date AND bk.branch_id = ANY (v_ids) AND bk.status <> 'Cancelled'), '[]'),
            'tips', (SELECT COALESCE(sum(tp.amount), 0) FROM public.booking_tips tp
                       JOIN public.bookings tb ON tb.id = tp.booking_id
                      WHERE tp.received_by = v_uid AND tb.branch_id = ANY (v_ids) AND tp.created_at >= d0 AND tp.created_at < d1),
+           'tips_month', (SELECT COALESCE(sum(tp.amount), 0) FROM public.booking_tips tp
+                      JOIN public.bookings tb ON tb.id = tp.booking_id
+                     WHERE tp.received_by = v_uid AND tb.branch_id = ANY (v_ids) AND tp.created_at >= (date_trunc('month', v_date)::timestamp AT TIME ZONE 'Asia/Kathmandu') AND tp.created_at < d1),
            'commission', NULL,
+           'commission_inputs_month', jsonb_build_object(
+              'service_revenue', (SELECT COALESCE(sum(bk.final_amount), 0) FROM public.bookings bk
+                                   WHERE bk.therapist_id = ANY (v_mine) AND bk.date BETWEEN date_trunc('month', v_date)::date AND v_date AND bk.status = 'Completed' AND bk.payment_status = 'paid'),
+              'referral_rows', COALESCE((SELECT jsonb_agg(jsonb_build_object('final_amount', bk.final_amount, 'type', bk.referral_commission_type,
+                                              'value', bk.referral_commission_value))
+                                   FROM public.bookings bk JOIN public.therapists mt ON mt.id = ANY (v_mine)
+                                  WHERE bk.date BETWEEN date_trunc('month', v_date)::date AND v_date AND bk.status = 'Completed' AND bk.payment_status = 'paid'
+                                    AND bk.branch_id = ANY (v_ids) AND lower(btrim(bk.referred_by)) = lower(btrim(mt.name))), '[]')),
            'commission_inputs', jsonb_build_object(
               'service_revenue', (SELECT COALESCE(sum(bk.final_amount), 0) FROM public.bookings bk
                                    WHERE bk.therapist_id = ANY (v_mine) AND bk.date = v_date AND bk.status = 'Completed' AND bk.payment_status = 'paid'),
@@ -275,6 +320,7 @@ $fn$;
 REVOKE ALL ON FUNCTION public.get_dashboard(uuid[], date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_dashboard(uuid[], date) TO authenticated;
 REVOKE ALL ON FUNCTION public._dashboard_my_therapist_ids() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._dashboard_booked_share(uuid, date, jsonb) FROM PUBLIC, anon, authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
 VALUES ('334', 'dashboard-rpc')

@@ -17,6 +17,13 @@ export function fmtClock(min) {
   return `${h}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h24 < 12 ? 'am' : 'pm'}`;
 }
 
+/** 245,360 -> '4:05–6 pm' (the am/pm shows once when both ends share it). */
+export function fmtRange(from, to) {
+  const a = fmtClock(from);
+  const b = fmtClock(to);
+  return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -3)}–${b}` : `${a}–${b}`;
+}
+
 /** Gaps still ahead of `nowMin` (clipped to it) that are at least an hour. nowMin = null keeps every gap (Prep). */
 export function upcomingGaps(gaps, nowMin = null) {
   return (gaps || [])
@@ -72,8 +79,14 @@ export function axisBounds(therapists, open = null, close = null) {
   return { start, end: end > start ? end : start + 60 };
 }
 
-/** Booking-state counts for the Bookings tile: done / now / still to come. */
+/** Booking-state counts for the Bookings tile: done / now / late (start passed, still Pending/Confirmed) / still to come. */
 export function bookingSplit(pulse) {
   const p = pulse || {};
-  return { done: p.completed || 0, now: p.in_progress || 0, toCome: (p.confirmed || 0) + (p.pending || 0) };
+  const late = p.late || 0;
+  return { done: p.completed || 0, now: p.in_progress || 0, late, toCome: Math.max(0, (p.confirmed || 0) + (p.pending || 0) - late) };
+}
+
+/** '1 done · 3 late · 2 to come' (now and late only when there are some). */
+export function splitLine(s) {
+  return [`${s.done} done`, s.now ? `${s.now} now` : null, s.late ? `${s.late} late` : null, `${s.toCome} to come`].filter(Boolean).join(' · ');
 }

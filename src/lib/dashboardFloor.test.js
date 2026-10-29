@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtDuration, fmtClock, upcomingGaps, freeTime, axisBounds, bookingSplit } from './dashboardFloor';
+import { fmtDuration, fmtClock, upcomingGaps, freeTime, axisBounds, bookingSplit, splitLine } from './dashboardFloor';
 
 describe('formatting', () => {
   it('durations', () => {
@@ -41,7 +41,12 @@ describe('axisBounds', () => {
 
 describe('bookingSplit', () => {
   it('groups statuses', () => {
-    expect(bookingSplit({ completed: 8, in_progress: 3, confirmed: 2, pending: 1 })).toEqual({ done: 8, now: 3, toCome: 3 });
-    expect(bookingSplit(null)).toEqual({ done: 0, now: 0, toCome: 0 });
+    expect(bookingSplit({ completed: 8, in_progress: 3, confirmed: 2, pending: 1 })).toEqual({ done: 8, now: 3, late: 0, toCome: 3 });
+    expect(bookingSplit(null)).toEqual({ done: 0, now: 0, late: 0, toCome: 0 });
+  });
+  it('splits late out of to come', () => {
+    const s = bookingSplit({ completed: 1, in_progress: 0, confirmed: 4, pending: 1, late: 3 });
+    expect(s).toEqual({ done: 1, now: 0, late: 3, toCome: 2 });
+    expect(splitLine(s)).toBe('1 done · 3 late · 2 to come');
   });
 });

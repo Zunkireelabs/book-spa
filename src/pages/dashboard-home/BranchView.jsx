@@ -9,11 +9,13 @@ import SetupChecklist from './SetupChecklist';
 import { DashPanels } from './DashboardPanels';
 import { fetchNeedsActionRows, updateBookingStatus } from '../../services/api';
 import { supabase } from '../../lib/supabase';
-import { bookingSplit, fmtClock, fmtFreeTotal, freeTime } from '../../lib/dashboardFloor';
-import { npr, plural, shortDay, clock12, LoadError, Card, Row, Tile } from './dashKit';
-import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
+import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
+import DeskButtons from './DeskButtons';
+import { paidNote } from '../../lib/dashboardMoney';
+import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, Tile } from './dashKit';
+import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
 
-const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Asia/Kathmandu' });
+const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'Asia/Kathmandu' });
 // Delta vs the same weekday last week: green up / red down, plain "—" when there is no data to compare.
 const Delta = ({ now, prev, unit }) => {
   if (now == null || prev == null || (unit === '%' && Number(prev) === 0)) return <span className="text-gray-400">— vs last {WEEKDAY}</span>;
@@ -43,7 +45,7 @@ const WeekStrip = ({ week }) => (
 /**
  * The Branch view (V36c): Live / Prep / Close for one branch, from get_dashboard. `data` is the RPC result, `hours` {open, close} minutes.
  */
-const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false, newTenant = false, setup = null }) => {
+const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false, newTenant = false, setup = null, nowHm = null, onOpenMyDay }) => {
   const [, setSearchParams] = useSearchParams();
   const [panel, setPanel] = useState(null); // { type: 'booking', id } | { type: 'create', slot } | { type: 'collect', booking }
   const [needs, setNeeds] = useState({ unpaid: [], unconfirmed: [], unassigned: [] });
@@ -95,7 +97,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const rowName = (b) => b.customer_name || b.booking_number;
 
   const unpaidRows = needs.unpaid.map((b) => (
-    <Row key={`p${b.id}`} icon="HandCoins" tone="text-error" title={`Collect ${npr(b.final_amount)} · ${rowName(b)}`} sub={`Completed ${b.date === today ? clock12(b.start_time) : shortDay(b.date)} · not paid`}
+    <Row key={`p${b.id}`} icon="HandCoins" tone="text-error" title={`Collect ${npr(b.amount_due)} · ${rowName(b)}`} sub={[`Completed ${b.date === today ? clock12(b.start_time) : shortDay(b.date)}`, paidNote(b) || 'not paid'].join(' · ')}
       actions={canAct && <Button size="sm" variant="primary" onClick={() => setPanel({ type: 'collect', booking: b })}>Collect</Button>} />
   ));
   const unconfirmedRows = needs.unconfirmed.map((b) => (
@@ -117,11 +119,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
       {unpaidRows}{unconfirmedRows}{unassignedRows}
     </Card>
   );
-  const suggestions = (
-    <Card icon="Sparkles" title="Suggestions" meta="Coming soon">
-      <p className="text-sm text-gray-400">Rule-based suggestions will appear here.</p>
-    </Card>
-  );
+  const suggestions = <SuggestionsCard />;
   const nextSeven = <Card icon="CalendarDays" title="Next 7 days" error={bad} onRetry={refresh} meta={`Booked share of ${(staffLabel || 'staff').toLowerCase()} hours`}><WeekStrip week={data?.week} /></Card>;
   const floorCard = (title, meta) => (
     <Card icon="Users" title={title} meta={meta} error={bad} onRetry={refresh}>
@@ -130,28 +128,28 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     </Card>
   );
 
-  const myDay = data?.my_day?.bookings?.length > 0 && (
-    <section className="bg-primary/5 border border-primary/20 rounded-lg px-4 py-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-gray-900"><Icon name="User" size={15} /> My day <span className="text-xs text-gray-500 font-normal">{plural(data.my_day.bookings.length, 'booking')}{Number(data.my_day.tips) > 0 ? ` · tips ${npr(data.my_day.tips)}` : ''}</span></div>
-      <div className="flex gap-2 overflow-x-auto mt-2">
-        {data.my_day.bookings.map((b) => (
-          <button key={b.id} type="button" onClick={() => openBooking(b.id)} className="flex-shrink-0 text-left bg-white border border-gray-200 rounded px-3 py-1.5 text-xs">
-            <div className="font-medium text-gray-900">{clock12(b.start)} · {b.customer}</div>
-            <div className="text-gray-500">{b.service} · {b.status}</div>
-          </button>
-        ))}
+  // Solo owner (scene G): linked, with bookings today -> a green My day strip first. The same "next client" rule as the My day view.
+  const mineList = data?.my_day?.bookings || [];
+  const mineNext = mineList.length && nowHm ? nextClient(mineList, nowHm) : null;
+  const toMinHm = (t) => Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5));
+  const mineIn = mineNext && mineNext.status !== 'In-Progress' ? toMinHm(mineNext.start) - toMinHm(nowHm) : null;
+  const mineDay = dayStatus(mineList, nowHm || '00:00');
+  const myDay = mineList.length > 0 && (
+    <section className="bg-primary text-white rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2" data-myday-strip>
+      <div className="min-w-0">
+        <div className="text-[11px] tracking-wide opacity-75">
+          {mineNext ? (mineNext.status === 'In-Progress' ? 'MY DAY · WITH YOU NOW' : mineIn > 0 ? `MY DAY · NEXT CLIENT IN ${fmtDuration(mineIn).replace(/m$/, ' MIN').toUpperCase()}` : 'MY DAY · NEXT CLIENT IS DUE') : mineDay.allClosed ? 'MY DAY · ALL DONE' : 'MY DAY · NO MORE CLIENTS TODAY'}
+        </div>
+        {mineNext && <div className="text-[15px] font-semibold truncate">{clock12(mineNext.start)} · {mineNext.customer || mineNext.number} · {mineNext.service}</div>}
+        <div className="text-xs opacity-85">{[mineNext?.room, !mineNext && !mineDay.allClosed ? `${mineDay.open} not closed yet` : null, `${mineDay.done} of ${mineList.length} done today`].filter(Boolean).join(' · ')}</div>
       </div>
+      <button type="button" onClick={onOpenMyDay} className="ml-auto bg-white text-primary text-xs font-medium rounded-lg px-3 py-1.5 hover:bg-white/90">Open my day</button>
     </section>
   );
 
-  const frontDesk = canAct && (
-    <div className="flex flex-wrap gap-2">
-      <Button size="sm" variant="outline" iconName="Plus" onClick={bookNow}>New booking</Button>
-      <Button size="sm" variant="outline" iconName="HandCoins" onClick={() => go('collect-payment')}>Collect payment</Button>
-      {MEMBERSHIP_ENABLED && <Button size="sm" variant="outline" iconName="CreditCard" onClick={() => go('new-membership')}>New membership</Button>}
-      {VOUCHER_ENABLED && <Button size="sm" variant="outline" iconName="Ticket" onClick={() => go('new-voucher')}>New voucher</Button>}
-    </div>
-  );
+  const freeList = freeNow(floor?.therapists, nowMin ?? 0);
+  const walkIn = () => { const m = Math.floor((nowMin ?? 9 * 60) / 5) * 5; openCreate({ colType: freeList[0] ? 'therapist' : null, colId: freeList[0]?.therapist_id || null, hour: Math.floor(m / 60), minute: m % 60 }); };
+  const frontDesk = canAct && <DeskButtons onNew={bookNow} onWalkIn={walkIn} onGo={go} extras />;
 
   const brief = (icon, children) => badNeeds ? (
     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3"><LoadError onRetry={refresh} /></div>
@@ -229,9 +227,9 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     body = (
       <>
         {bad ? <Card icon="CalendarDays" title="Today so far" error onRetry={refresh} /> : <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
-          <Tile label="Bookings today" value={pulse.bookings ?? 0} sub={`${split.done} done · ${split.now} now · ${split.toCome} to come`} icon="CalendarDays" onClick={() => go('bookings')} />
+          <Tile label="Bookings today" value={pulse.bookings ?? 0} sub={splitLine(split)} icon="CalendarDays" onClick={() => go('bookings')} />
           <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={canMoney ? (newTenant ? 'No comparison yet' : <Delta now={pulse.revenue} prev={pulse.revenue_prev} unit="%" />) : 'Managers see this'} icon="Banknote" onClick={() => go('all-reports')} />
-          <Tile label="Free time left" value={newTenant ? '—' : fmtFreeTotal(free.total)} sub={newTenant ? 'Fills in once you take bookings' : free.biggest ? `${free.total >= 24 * 60 ? `across ${plural(free.people, (staffLabel || 'person').toLowerCase(), (staffLabelPlural || 'people').toLowerCase())} · ` : ''}biggest gap ${fmtClock(free.biggest.from_min)}–${fmtClock(free.biggest.to_min)}` : 'No gaps of 1h or more'} icon="Clock" onClick={() => go('calendar')} />
+          <Tile label="Free time left" value={newTenant ? '—' : fmtFreeTotal(free.total)} sub={newTenant ? 'Fills in once you take bookings' : free.biggest ? `${free.total >= 24 * 60 ? `across ${plural(free.people, (staffLabel || 'person').toLowerCase(), (staffLabelPlural || 'people').toLowerCase())} · ` : ''}Biggest gap ${fmtRange(free.biggest.from_min, free.biggest.to_min)}` : 'No gaps of 1h or more'} icon="Clock" onClick={() => go('calendar')} />
           <Tile label="Booked hours" value={newTenant || share == null ? '—' : `${Math.round(share * 100)}%`} sub={newTenant ? 'No comparison yet' : <>Of {(staffLabel || 'staff').toLowerCase()} hours · <Delta now={share} prev={pulse.booked_share_prev} unit="pts" /></>} icon="Users" onClick={() => go('all-reports')} />
         </div>}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">

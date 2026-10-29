@@ -361,33 +361,41 @@ export async function fetchDashboard({ branchIds, date = null }) {
   }
 }
 
-// The rows behind the dashboard's Needs action card (the RPC only counts them): completed-but-unpaid (last 7 days), unconfirmed and
+// The rows behind the dashboard's Needs action card (the RPC only counts them): completed-but-unpaid (any date), unconfirmed and
 // unassigned bookings today. RLS-scoped reads of bookings; `date` is the Nepal day.
 export async function fetchNeedsActionRows({ branchId, date }) {
   try {
     const from = new Date(`${date}T00:00:00Z`);
     from.setUTCDate(from.getUTCDate() - 7);
-    const { data, error } = await supabase.from('bookings')
-      .select('id, booking_number, branch_id, customer_name, date, start_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount)')
-      .eq('branch_id', branchId).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
-      .in('status', ['Pending', 'Confirmed', 'Completed']).order('start_time').limit(300);
-    if (error) throw error;
-    return { data: buildNeeds(data, date), error: null };
+    const cols = 'id, booking_number, branch_id, customer_name, date, start_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount)';
+    const [recent, owed] = await Promise.all([
+      supabase.from('bookings').select(cols).eq('branch_id', branchId).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
+        .in('status', ['Pending', 'Confirmed']).order('start_time').limit(300),
+      owedBookingsQuery(cols).eq('branch_id', branchId).lte('date', date).limit(500), // money owed has no 7-day floor (lib/dashboardMoney)
+    ]);
+    if (recent.error || owed.error) throw (recent.error || owed.error);
+    return { data: buildNeeds([...(recent.data || []), ...(owed.data || [])], date), error: null };
   } catch (error) {
     console.error('[API] fetchNeedsActionRows error:', error.message);
     return { data: { unpaid: [], unconfirmed: [], unassigned: [] }, error };
   }
 }
 
-const QUEUE_SELECT = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount)';
+// Completed, not fully paid bookings, any date (the candidates for lib/dashboardMoney's owed rule, which then keeps balance > 0).
+const owedBookingsQuery = (cols) => supabase.from('bookings').select(cols).eq('status', 'Completed').neq('payment_status', 'paid').order('date').order('start_time');
 
-// Front desk "Next up": today's bookings that still need a desk step (assign / collect / confirm / check in), see lib/dashboardNeeds.
+const QUEUE_SELECT = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id, therapist:therapists(name)), payments(amount)';
+
+// Front desk "Next up": today's bookings that still need a desk step (assign / collect / confirm / check in) plus the ones with a client now, see lib/dashboardNeeds.
 export async function fetchFrontDeskQueue({ branchId, date }) {
   try {
-    const { data, error } = await supabase.from('bookings').select(QUEUE_SELECT).eq('branch_id', branchId).eq('date', date)
-      .in('status', ['Pending', 'Confirmed', 'Completed']).order('start_time').limit(300);
-    if (error) throw error;
-    const queue = buildQueue(data, date).map((b) => ({ ...b, amount_paid: (b.payments || []).reduce((n, p) => n + Number(p.amount || 0), 0) }));
+    const [today, owed] = await Promise.all([
+      supabase.from('bookings').select(QUEUE_SELECT).eq('branch_id', branchId).eq('date', date)
+        .in('status', ['Pending', 'Confirmed', 'In-Progress', 'Completed']).order('start_time').limit(300),
+      owedBookingsQuery(QUEUE_SELECT).eq('branch_id', branchId).lt('date', date).limit(200), // earlier days still owing money
+    ]);
+    if (today.error || owed.error) throw (today.error || owed.error);
+    const queue = buildQueue([...(today.data || []), ...(owed.data || [])], date).map((b) => ({ ...b, amount_paid: (b.payments || []).reduce((n, p) => n + Number(p.amount || 0), 0) }));
     return { data: queue, error: null };
   } catch (error) {
     console.error('[API] fetchFrontDeskQueue error:', error.message);
@@ -400,12 +408,15 @@ export async function fetchBusinessNeeds({ branchIds, date }) {
   try {
     const from = new Date(`${date}T00:00:00Z`);
     from.setUTCDate(from.getUTCDate() - 7);
-    const { data, error } = await supabase.from('bookings')
-      .select('id, booking_number, branch_id, customer_name, date, start_time, end_time, created_at, final_amount, status, payment_status, discount_status, branches(name)')
-      .in('branch_id', branchIds).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
-      .in('status', ['Pending', 'Confirmed', 'Completed']).limit(500);
-    if (error) throw error;
-    const rows = (data || []).map((b) => ({ ...b, branch_name: b.branches?.name || '' }));
+    const cols = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, created_at, final_amount, base_amount, discount_amount, discount_reason, status, payment_status, discount_status, payments(amount), branches(name), requester:users!discount_requested_by(full_name)';
+    const [recent, owed] = await Promise.all([
+      supabase.from('bookings').select(cols).in('branch_id', branchIds).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
+        .in('status', ['Pending', 'Confirmed', 'Completed']).limit(500),
+      owedBookingsQuery(cols).in('branch_id', branchIds).lte('date', date).limit(1000), // owed has no 7-day floor, same rule as the Unpaid column
+    ]);
+    if (recent.error || owed.error) throw (recent.error || owed.error);
+    const seen = new Set();
+    const rows = [...(recent.data || []), ...(owed.data || [])].filter((b) => !seen.has(b.id) && seen.add(b.id)).map((b) => ({ ...b, branch_name: b.branches?.name || '' }));
     return { data: businessNeeds(rows, Date.now()), error: null };
   } catch (error) {
     console.error('[API] fetchBusinessNeeds error:', error.message);

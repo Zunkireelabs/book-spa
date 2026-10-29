@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import { axisBounds, fmtClock, fmtDuration, upcomingGaps } from '../../lib/dashboardFloor';
 
@@ -31,6 +31,30 @@ const subline = (t, nowMin) => {
   return next ? `free till ${fmtClock(next.from_min)}` : 'free';
 };
 
+/** A free gap: "+ Free 1h 1m" when it fits on one line, else just "Free" (the full text is in the tooltip). */
+const GapBlock = ({ g, onClick, style }) => {
+  const box = useRef(null);
+  const full = useRef(null);
+  const [short, setShort] = useState(false);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !full.current || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = () => setShort(full.current.offsetWidth + 10 > el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [g.from_min, g.to_min]);
+  const dur = fmtDuration(g.to_min - g.from_min);
+  return (
+    <button ref={box} type="button" onClick={onClick} title={`Free ${dur}, ${fmtClock(g.from_min)}–${fmtClock(g.to_min)}: book it`}
+      className="absolute top-0 bottom-0 rounded px-1 text-[11px] flex items-center gap-0.5 whitespace-nowrap overflow-hidden bg-accent/20 text-secondary border border-accent/60 hover:bg-accent/30" style={style}>
+      <span ref={full} aria-hidden="true" className="absolute invisible whitespace-nowrap pointer-events-none flex items-center gap-0.5"><Icon name="Plus" size={11} /> Free {dur}</span>
+      {short ? 'Free' : <><Icon name="Plus" size={11} /> Free {dur}</>}
+    </button>
+  );
+};
+
 /**
  * One branch's floor: working people first, busiest on top, a now-line, click a block to open the booking and a gap to start a booking.
  * nowMin is null outside today/Live (no now-line, all gaps shown).
@@ -51,7 +75,7 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
     <div>
       <div>
         <div className="relative">
-          <div className="grid grid-cols-[150px_1fr] text-[10px] text-gray-400 mb-1">
+          <div className="grid grid-cols-[190px_1fr] text-[10px] text-gray-400 mb-1">
             <div />
             <div className="relative h-4">
               {hours.map((m) => (
@@ -61,15 +85,15 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
           </div>
           <div className="relative">
             {nowMin != null && nowMin >= start && nowMin <= end && (
-              <div className="absolute top-0 bottom-0 w-px bg-error z-10 pointer-events-none" style={{ left: `calc(150px + (100% - 150px) * ${(nowMin - start) / span})` }} />
+              <div className="absolute top-0 bottom-0 w-px bg-error z-10 pointer-events-none" style={{ left: `calc(190px + (100% - 190px) * ${(nowMin - start) / span})` }} />
             )}
             {shown.map((t) => (
-              <div key={t.therapist_id} className="grid grid-cols-[150px_1fr] items-center border-t border-gray-100 py-1.5">
+              <div key={t.therapist_id} className="grid grid-cols-[190px_1fr] items-center border-t border-gray-100 py-1.5">
                 <div className="flex items-center gap-2 pr-2 min-w-0">
                   <span className="w-7 h-7 rounded-full bg-primary/10 text-primary text-[11px] font-medium flex items-center justify-center flex-shrink-0">{initials(t.name)}</span>
                   <div className="min-w-0">
-                    <div className="text-sm text-gray-900 truncate">{t.name}</div>
-                    <div className="text-[11px] text-gray-500 truncate">{subline(t, nowMin)}</div>
+                    <div className="text-sm text-gray-900 leading-tight line-clamp-2 break-words" title={t.name}>{t.name}</div>
+                    <div className="text-[11px] text-gray-500 leading-tight break-words" title={subline(t, nowMin)}>{subline(t, nowMin)}</div>
                   </div>
                 </div>
                 <div className="relative h-9">
@@ -89,16 +113,7 @@ const Floor = ({ floor, nowMin, open, close, collapsedCount = 6, onOpenBooking, 
                     );
                   })}
                   {upcomingGaps(t.gaps, nowMin).map((g) => (
-                    <button
-                      key={`g${g.from_min}`}
-                      type="button"
-                      onClick={() => onBookGap?.(t, g)}
-                      title={`Free ${fmtClock(g.from_min)}–${fmtClock(g.to_min)}: book it`}
-                      className="absolute top-0 bottom-0 rounded px-1.5 text-[11px] flex items-center gap-1 bg-accent/20 text-secondary border border-accent/60 hover:bg-accent/30"
-                      style={{ left: pos(g.from_min), width: `calc(${(((g.to_min - g.from_min) / span) * 100).toFixed(2)}% - 3px)` }}
-                    >
-                      <Icon name="Plus" size={11} /> Free {fmtDuration(g.to_min - g.from_min)}
-                    </button>
+                    <GapBlock key={`g${g.from_min}`} g={g} onClick={() => onBookGap?.(t, g)} style={{ left: pos(g.from_min), width: `calc(${(((g.to_min - g.from_min) / span) * 100).toFixed(2)}% - 3px)` }} />
                   ))}
                 </div>
               </div>

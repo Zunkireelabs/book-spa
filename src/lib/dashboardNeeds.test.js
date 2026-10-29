@@ -14,9 +14,9 @@ describe('buildNeeds', () => {
     expect(n.unpaid.map((b) => b.id)).toEqual(['a']);
     expect(n.unpaid[0]).toMatchObject({ amount_paid: 400, amount_due: 600 });
   });
-  it('never reports a negative balance', () => {
+  it('does not list an over-paid booking (balance is never negative)', () => {
     const n = buildNeeds([row({ id: 'a', status: 'Completed', payments: [{ amount: 1500 }] })], T);
-    expect(n.unpaid[0].amount_due).toBe(0);
+    expect(n.unpaid).toEqual([]);
   });
   it('lists only today\'s Pending bookings as unconfirmed', () => {
     const n = buildNeeds([row({ id: 'a', status: 'Pending' }), row({ id: 'b', status: 'Pending', date: '2026-10-28' }), row({ id: 'c' })], T);
