@@ -6,6 +6,7 @@ import SummaryCard from '../SummaryCard';
 import ProfessionalStep from './ProfessionalStep';
 import DateTimeStep from './DateTimeStep';
 import ConfirmStep from './ConfirmStep';
+import DiscardDialog from './DiscardDialog';
 import { useTenant } from '../../../../contexts/TenantContext';
 import { scrollToTopInstant } from '../../../../utils/scroll';
 
@@ -63,6 +64,7 @@ const BookingView = ({
     return i > 0 ? i : 0;
   });
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
 
   // A late-arriving flag (TenantContext resolves async) can't strand stepIndex past
   // the end of a shorter steps array.
@@ -123,20 +125,25 @@ const BookingView = ({
   // No back/X icon row -- matches the solo profile page exactly (persistent
   // CustomerHeader, no floating icon buttons at all). Anish: "make it similar like
   // individual bookings with no back button and no cross button." Exiting the flow and
-  // moving between steps both go through the nav below (the "Services" crumb calls
-  // onClose unconditionally; each step name is its own back-navigation once it's been
-  // passed) or the browser's own Back button (already wired via history push/pop in
-  // the parent). The review screen's own "Edit" control (inside ConfirmStep ->
-  // BookingConfirmation) is independent of this and still works unchanged.
+  // moving between steps both go through the nav below (the "Services" crumb opens
+  // DiscardDialog, which confirms before calling onClose -- the one piece of customer
+  // input protection this view has, since browser Back isn't gated the same way and
+  // never has been) or the browser's own Back button (already wired via history
+  // push/pop in the parent). The review screen's own "Edit" control (inside ConfirmStep
+  // -> BookingConfirmation) is independent of this and still works unchanged.
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+
+      {confirmingClose && (
+        <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-28 lg:pb-16">
         <nav aria-label="Booking steps" className="flex items-center gap-2 flex-wrap mt-4">
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => setConfirmingClose(true)}
             className="text-sm text-[var(--zn-muted-foreground)] hover:text-[var(--zn-foreground)] underline transition-colors"
           >
             Services

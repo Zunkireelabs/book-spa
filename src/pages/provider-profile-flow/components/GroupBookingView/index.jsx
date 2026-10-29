@@ -8,6 +8,7 @@ import GuestsStep from './GuestsStep';
 import GroupProfessionalStep from './GroupProfessionalStep';
 import GroupTimeStep from './GroupTimeStep';
 import GroupConfirmStep, { mapBookingError } from './GroupConfirmStep';
+import DiscardDialog from '../BookingView/DiscardDialog';
 import { addGuest, removeGuest, updateGuestField, MAX_GROUP_SIZE } from '../../utils/groupBooking';
 import { submitGroupBooking } from '../../../../services/api';
 import { toE164 } from '../../../../utils/phone';
@@ -55,6 +56,7 @@ const GroupBookingView = ({
   const [selectedDateTime, setSelectedDateTime] = useState({ date: '', time: '' });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [leadContact, setLeadContact] = useState({
     firstName: '', lastName: '', email: '', phone: '', phoneCountryCode: '+977', gender: '',
     referralSource: '', referralClientName: '', referralPhone: '', referralCountryCode: '+977',
@@ -199,12 +201,16 @@ const GroupBookingView = ({
   // No back/X icon row -- matches the solo profile page exactly (persistent
   // CustomerHeader, no floating icon buttons). Anish: "make it similar like individual
   // bookings with no back button and no cross button." Exiting and moving between steps
-  // both go through the nav below (the leading "Services" crumb calls onClose
-  // unconditionally, same label/destination as BookingView's own escape hatch; each
-  // passed step name is its own back-navigation) or the browser's Back button.
+  // both go through the nav below (the leading "Services" crumb opens DiscardDialog,
+  // same confirm-before-discard posture as BookingView's own escape hatch; each passed
+  // step name is its own back-navigation) or the browser's Back button.
   return (
     <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
+
+      {confirmingClose && (
+        <DiscardDialog onCancel={() => setConfirmingClose(false)} onConfirm={onClose} />
+      )}
 
       {/* Solo's equivalent "pick a service" screen is the profile page itself, which
           always shows ProfileHero -- Anish: "there is cover image similar to individual
@@ -220,7 +226,7 @@ const GroupBookingView = ({
         <nav aria-label="Group booking steps" className="flex items-center gap-2 flex-wrap mt-4">
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => setConfirmingClose(true)}
             className="text-sm text-[var(--zn-muted-foreground)] hover:text-[var(--zn-foreground)] underline transition-colors"
           >
             Services
