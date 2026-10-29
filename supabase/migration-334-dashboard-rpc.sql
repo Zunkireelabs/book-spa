@@ -116,8 +116,9 @@ BEGIN
   FOR r IN
     WITH sh AS (
       SELECT x.branch_id, x.therapist_id, x.start_time, x.end_time, x.breaks, x.off
-        FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, end_time time, breaks jsonb, off jsonb)
-       WHERE x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL
+        FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, end_time time, source text, breaks jsonb, off jsonb)
+       WHERE x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'  -- Therapists page rule: a real shift, not "No hours set"
+         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE)  -- support staff are not bookable
     )
     SELECT sh.branch_id, sh.therapist_id, t.name, t.position,
            (EXTRACT(EPOCH FROM sh.start_time) / 60)::int AS s_min,
@@ -153,11 +154,14 @@ BEGIN
     v_state := CASE WHEN v_is_today AND v_blocks @> '[{"kind":"now"}]' THEN 'now' END;
     v_list := v_list || jsonb_build_object('branch_id', r.branch_id, 'therapist_id', r.therapist_id, 'name', r.name, 'position', r.position,
                 'shift_from', public.minutes_to_hhmm(r.s_min), 'shift_to', public.minutes_to_hhmm(r.e_min), 'shift_from_min', r.s_min, 'shift_to_min', r.e_min,
-                'busy_minutes', v_busy, 'state', v_state, 'blocks', v_blocks, 'gaps', v_gaps);
+                'busy_minutes', v_busy, 'state', v_state,
+                'checked_in',  EXISTS (SELECT 1 FROM public.therapist_attendance ta WHERE ta.therapist_id = r.therapist_id AND ta.date = v_date AND ta.check_in_time IS NOT NULL AND ta.check_out_time IS NULL),
+                'checked_out', EXISTS (SELECT 1 FROM public.therapist_attendance ta WHERE ta.therapist_id = r.therapist_id AND ta.date = v_date AND ta.check_out_time IS NOT NULL), 'blocks', v_blocks, 'gaps', v_gaps);
   END LOOP;
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'branch_id', bid,
-           'headcount', (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, shift_date date) WHERE x.branch_id = bid AND x.shift_date = v_date),  -- same population as 'working' (active, incl. visitors)
+           'headcount', (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, source text) WHERE x.branch_id = bid AND x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'
+                         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE)),  -- same population as 'working'
            'working', (SELECT count(*) FROM jsonb_array_elements(v_list) e WHERE e->>'branch_id' = bid::text),
            'therapists', (SELECT COALESCE(jsonb_agg(e ORDER BY (e->>'busy_minutes')::int DESC, e->>'name'), '[]')
                             FROM jsonb_array_elements(v_list) e WHERE e->>'branch_id' = bid::text))), '[]')
@@ -203,7 +207,8 @@ BEGIN
            'completed', (SELECT count(*) FROM public.bookings bk WHERE bk.branch_id = br.id AND bk.date = v_date AND bk.status = 'Completed'),
            'revenue',   CASE WHEN v_money THEN (SELECT COALESCE(sum(p.amount), 0) FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
                                                  WHERE pb.branch_id = br.id AND p.created_at >= d0 AND p.created_at < d1) END,
-           'working',   (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, shift_date date, works boolean, start_time time) WHERE x.branch_id = br.id AND x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL)
+           'working',   (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, source text) WHERE x.branch_id = br.id AND x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'
+                         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE))
          ) ORDER BY br.name), '[]')
     INTO v_branches FROM public.branches br WHERE br.id = ANY (v_ids);
 

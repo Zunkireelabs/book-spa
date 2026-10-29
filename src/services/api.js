@@ -1,4 +1,4 @@
-import { buildNeeds } from '../lib/dashboardNeeds';
+import { buildNeeds, buildQueue, businessNeeds } from '../lib/dashboardNeeds';
 import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
@@ -376,6 +376,70 @@ export async function fetchNeedsActionRows({ branchId, date }) {
   } catch (error) {
     console.error('[API] fetchNeedsActionRows error:', error.message);
     return { data: { unpaid: [], unconfirmed: [], unassigned: [] }, error };
+  }
+}
+
+const QUEUE_SELECT = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount)';
+
+// Front desk "Next up": today's bookings that still need a desk step (assign / collect / confirm / check in), see lib/dashboardNeeds.
+export async function fetchFrontDeskQueue({ branchId, date }) {
+  try {
+    const { data, error } = await supabase.from('bookings').select(QUEUE_SELECT).eq('branch_id', branchId).eq('date', date)
+      .in('status', ['Pending', 'Confirmed', 'Completed']).order('start_time').limit(300);
+    if (error) throw error;
+    const queue = buildQueue(data, date).map((b) => ({ ...b, amount_paid: (b.payments || []).reduce((n, p) => n + Number(p.amount || 0), 0) }));
+    return { data: queue, error: null };
+  } catch (error) {
+    console.error('[API] fetchFrontDeskQueue error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// Business view's Needs action: admin-only items plus anything waiting over 2h, grouped by branch (lib/dashboardNeeds.businessNeeds).
+export async function fetchBusinessNeeds({ branchIds, date }) {
+  try {
+    const from = new Date(`${date}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 7);
+    const { data, error } = await supabase.from('bookings')
+      .select('id, booking_number, branch_id, customer_name, date, start_time, end_time, created_at, final_amount, status, payment_status, discount_status, branches(name)')
+      .in('branch_id', branchIds).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
+      .in('status', ['Pending', 'Confirmed', 'Completed']).limit(500);
+    if (error) throw error;
+    const rows = (data || []).map((b) => ({ ...b, branch_name: b.branches?.name || '' }));
+    return { data: businessNeeds(rows, Date.now()), error: null };
+  } catch (error) {
+    console.error('[API] fetchBusinessNeeds error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// New-tenant check + setup checklist counts for one branch. firstBookingDate is the earliest booking's date (null when none).
+export async function fetchSetupState({ branchId }) {
+  try {
+    const [sv, rm, th, first] = await Promise.all([
+      fetchServices(branchId),
+      fetchRooms(branchId),
+      supabase.from('therapists').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('is_active', true),
+      supabase.from('bookings').select('date').eq('branch_id', branchId).order('date', { ascending: true }).limit(1),
+    ]);
+    if (th.error || first.error) throw (th.error || first.error);
+    const firstBookingDate = first.data?.[0]?.date || null;
+    return { data: { counts: { services: (sv.data || []).length, rooms: (rm.data || []).length, staff: th.count || 0, bookings: firstBookingDate ? 1 : 0 }, firstBookingDate }, error: null };
+  } catch (error) {
+    console.error('[API] fetchSetupState error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// The org's logins for the Therapists "Login" field: RLS scopes it to the caller's org. therapist_id is the person each is linked to.
+export async function fetchOrgLogins() {
+  try {
+    const { data, error } = await supabase.from('users').select('id, full_name, email, role, therapist_id').in('role', ['staff', 'manager', 'admin']).order('full_name');
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchOrgLogins error:', error.message);
+    return { data: [], error };
   }
 }
 

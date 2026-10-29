@@ -3,8 +3,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useBranch, OVERALL_BRANCH_ID } from '../../contexts/BranchContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import { supabase } from '../../lib/supabase';
-import { fetchDashboard } from '../../services/api';
+import { fetchDashboard, fetchSetupState } from '../../services/api';
 import BranchView from './BranchView';
+import BusinessView from './BusinessView';
+import FrontDeskView from './FrontDeskView';
+import MyDayView from './MyDayView';
+import { isNewTenant, setupSteps } from '../../lib/dashboardTenant';
 import { useSearchParams } from 'react-router-dom';
 import { nepalNow } from '../../utils/customerDirectory';
 import { VIEWS, availableViews, defaultView, dayPhase, readRememberedView, rememberView } from '../../lib/dashboardViews';
@@ -42,8 +46,8 @@ const dateLine = (today) =>
 const DashboardHome = ({ hasBookingsToday = false }) => {
   const { profile, user } = useAuth();
   const { branchId, branchName, branches = [], isOverall, switchBranch } = useBranch();
-  const { locationLabelPlural, staffLabel, staffLabelPlural } = useIndustry();
-  const [searchParams] = useSearchParams();
+  const { staffLabel, staffLabelPlural } = useIndustry();
+  const [searchParams, setSearchParams] = useSearchParams();
   const highlight = searchParams.get('highlight'); // discount notifications deep-link to the Branch view's Needs action
   const role = profile?.role || 'staff';
   const userId = user?.id || profile?.id;
@@ -88,17 +92,35 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
   const [dash, setDash] = useState(null);
   const [dashError, setDashError] = useState(false);
   const loadDash = useCallback(async () => {
-    if (!branchId || isOverall) { setDash(null); setDashError(false); return; }
-    const { data, error } = await fetchDashboard({ branchIds: [branchId] });
+    const ids = isOverall ? branches.map((b) => b.id) : [branchId];
+    if (!ids.length || !ids[0]) { setDash(null); setDashError(false); return; }
+    const { data, error } = await fetchDashboard({ branchIds: ids });
     setDashError(!!error);
     if (!error) setDash(data); // a failed refresh keeps the last good data under the error notice
-  }, [branchId, isOverall]);
+  }, [branchId, isOverall, branches]);
   useEffect(() => { loadDash(); }, [loadDash]);
   useEffect(() => {
     const id = setInterval(loadDash, 60000);
     window.addEventListener('pending-approvals-changed', loadDash);
     return () => { clearInterval(id); window.removeEventListener('pending-approvals-changed', loadDash); };
   }, [loadDash]);
+
+  // New tenant (under two weeks of bookings): the Branch view shows a setup checklist and "—" instead of comparisons.
+  const [setupState, setSetupState] = useState(null);
+  useEffect(() => {
+    if (!branchId || isOverall) { setSetupState(null); return undefined; }
+    let cancelled = false;
+    fetchSetupState({ branchId }).then(({ data }) => { if (!cancelled) setSetupState(data); });
+    return () => { cancelled = true; };
+  }, [branchId, isOverall]);
+  const newTenant = !!setupState && isNewTenant(setupState.firstBookingDate, now.today);
+  const setup = setupState ? setupSteps(setupState.counts, { staffLabel, roomLabel: 'Rooms' }) : null;
+  const nowMin = Number(now.hm.slice(0, 2)) * 60 + Number(now.hm.slice(3, 5));
+  const openBranch = (id, discountId = null) => {
+    switchBranch(id);
+    setPicked('branch');
+    if (discountId) setSearchParams({ highlight: discountId });
+  };
 
   const autoPhase = dayPhase(now.hm, hours || {});
   const [manualPhase, setManualPhase] = useState(null); // a manual pick lasts for the session
@@ -111,7 +133,7 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
 
   const firstName = (profile?.full_name || '').split(' ')[0];
   const showPhases = view === 'branch';
-  const scope = isOverall ? `All ${(locationLabelPlural || 'branches').toLowerCase()}` : branchName;
+  const scope = isOverall ? 'All branches' : branchName;
 
   return (
     <div className="space-y-3 sm:space-y-4">
@@ -156,9 +178,18 @@ const DashboardHome = ({ hasBookingsToday = false }) => {
         </div>
       </header>
 
-      {view === 'branch' && !isOverall ? (
+      {view === 'business' && isOverall ? (
+        <BusinessView
+          data={dash} dataError={dashError} branchIds={branches.map((b) => b.id)} today={now.today}
+          staffLabelPlural={staffLabelPlural} onOpenBranch={openBranch} onReload={loadDash}
+        />
+      ) : view === 'frontdesk' && !isOverall ? (
+        <FrontDeskView data={dash} dataError={dashError} branchId={branchId} today={now.today} nowMin={nowMin} role={role} staffLabelPlural={staffLabelPlural} onReload={loadDash} />
+      ) : view === 'myday' && !isOverall ? (
+        <MyDayView data={dash} dataError={dashError} branchId={branchId} today={now.today} nowHm={now.hm} role={role} staffLabelPlural={staffLabelPlural} onReload={loadDash} />
+      ) : view === 'branch' && !isOverall ? (
         <BranchView
-          phase={phase} data={dash} dataError={dashError} nowMin={Number(now.hm.slice(0, 2)) * 60 + Number(now.hm.slice(3, 5))} today={now.today}
+          phase={phase} data={dash} dataError={dashError} nowMin={nowMin} today={now.today} newTenant={newTenant} setup={setup}
           hours={hours ? { open: toMin(hours.open), close: toMin(hours.close) } : null}
           branchId={branchId} role={role} staffLabel={staffLabel} staffLabelPlural={staffLabelPlural} highlight={highlight} onReload={loadDash}
         />

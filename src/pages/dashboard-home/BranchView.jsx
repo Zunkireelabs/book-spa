@@ -5,50 +5,15 @@ import Button from '../../components/ui/Button';
 import PendingDiscountsPanel from '../branch-manager-dashboard/components/PendingDiscountsPanel';
 import DailyClosingPanel from '../branch-manager-dashboard/components/DailyClosingPanel';
 import Floor from './Floor';
-import InboxBookingPanel from '../inbox/InboxBookingPanel';
-import { CreateBookingHost, CollectHost } from './DashboardPanels';
+import SetupChecklist from './SetupChecklist';
+import { DashPanels } from './DashboardPanels';
 import { fetchNeedsActionRows, updateBookingStatus } from '../../services/api';
 import { supabase } from '../../lib/supabase';
-import { bookingSplit, fmtClock, fmtDuration, freeTime } from '../../lib/dashboardFloor';
+import { bookingSplit, fmtClock, fmtFreeTotal, freeTime } from '../../lib/dashboardFloor';
+import { npr, plural, shortDay, clock12, LoadError, Card, Row, Tile } from './dashKit';
 import { MEMBERSHIP_ENABLED, VOUCHER_ENABLED } from '../../lib/featureFlags';
 
 const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Asia/Kathmandu' });
-const npr = (n) => (n == null ? '—' : `NPR ${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
-const plural = (n, one, many = `${one}s`) => `${n} ${Number(n) === 1 ? one : many}`;
-const shortDay = (iso) => {
-  const d = new Date(`${iso}T00:00:00Z`);
-  const part = (o) => d.toLocaleDateString('en-GB', { timeZone: 'UTC', ...o });
-  return `${part({ weekday: 'short' })} ${part({ day: 'numeric' })} ${part({ month: 'short' })}`;
-};
-const clock12 = (t) => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return fmtClock(h * 60 + m); };
-
-const LoadError = ({ onRetry }) => (
-  <p className="text-sm text-error flex items-center gap-2 flex-wrap">Couldn't load. <button type="button" onClick={onRetry} className="font-medium underline">Retry</button></p>
-);
-
-const Card = ({ icon, title, count, meta, children, className = '', error = false, onRetry }) => (
-  <section className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-    <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
-      {icon && <Icon name={icon} size={16} className="text-gray-500" />}
-      <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-      {!error && count > 0 && <span className="text-[11px] font-medium bg-error/10 text-error rounded-full px-1.5 min-w-[18px] text-center">{count}</span>}
-      {!error && meta && <span className="ml-auto text-xs text-gray-500">{meta}</span>}
-    </header>
-    <div className="p-4">{error ? <LoadError onRetry={onRetry} /> : children}</div>
-  </section>
-);
-
-const Row = ({ tone = 'text-gray-500', icon, title, sub, actions }) => (
-  <div className="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
-    <Icon name={icon} size={16} className={`${tone} flex-shrink-0`} />
-    <div className="min-w-0 flex-1">
-      <div className="text-sm text-gray-900 truncate">{title}</div>
-      {sub && <div className="text-xs text-gray-500 truncate">{sub}</div>}
-    </div>
-    <div className="flex gap-1.5 flex-shrink-0">{actions}</div>
-  </div>
-);
-
 // Delta vs the same weekday last week: green up / red down, plain "—" when there is no data to compare.
 const Delta = ({ now, prev, unit }) => {
   if (now == null || prev == null || (unit === '%' && Number(prev) === 0)) return <span className="text-gray-400">— vs last {WEEKDAY}</span>;
@@ -56,14 +21,6 @@ const Delta = ({ now, prev, unit }) => {
   if (diff === 0) return <span className="text-gray-500">same as last {WEEKDAY}</span>;
   return <span className={diff > 0 ? 'text-success font-medium' : 'text-error font-medium'}>{diff > 0 ? '+' : '−'}{Math.abs(diff)}{unit === 'pts' ? ' pts' : '%'} <span className="text-gray-500 font-normal">vs last {WEEKDAY}</span></span>;
 };
-
-const Tile = ({ label, value, sub, icon, onClick }) => (
-  <button type="button" onClick={onClick} className="text-left bg-white rounded-lg border border-gray-200 p-4 hover:border-primary/40 transition-colors">
-    <div className="flex items-center justify-between text-xs text-gray-500"><span>{label}</span><Icon name={icon} size={14} /></div>
-    <div className="text-2xl font-semibold text-gray-900 mt-1 truncate">{value}</div>
-    <div className="text-xs text-gray-500 mt-0.5 truncate">{sub}</div>
-  </button>
-);
 
 const WeekStrip = ({ week }) => (
   <div className="grid grid-cols-7 gap-2">
@@ -86,7 +43,7 @@ const WeekStrip = ({ week }) => (
 /**
  * The Branch view (V36c): Live / Prep / Close for one branch, from get_dashboard. `data` is the RPC result, `hours` {open, close} minutes.
  */
-const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false }) => {
+const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false, newTenant = false, setup = null }) => {
   const [, setSearchParams] = useSearchParams();
   const [panel, setPanel] = useState(null); // { type: 'booking', id } | { type: 'create', slot } | { type: 'collect', booking }
   const [needs, setNeeds] = useState({ unpaid: [], unconfirmed: [], unassigned: [] });
@@ -273,9 +230,9 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
       <>
         {bad ? <Card icon="CalendarDays" title="Today so far" error onRetry={refresh} /> : <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
           <Tile label="Bookings today" value={pulse.bookings ?? 0} sub={`${split.done} done · ${split.now} now · ${split.toCome} to come`} icon="CalendarDays" onClick={() => go('bookings')} />
-          <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={canMoney ? <Delta now={pulse.revenue} prev={pulse.revenue_prev} unit="%" /> : 'Managers see this'} icon="Banknote" onClick={() => go('all-reports')} />
-          <Tile label="Free time left" value={fmtDuration(free.total)} sub={free.biggest ? `Biggest gap ${fmtClock(free.biggest.from_min)}–${fmtClock(free.biggest.to_min)}` : 'No gaps of 1h or more'} icon="Clock" onClick={() => go('calendar')} />
-          <Tile label="Booked hours" value={share == null ? '—' : `${Math.round(share * 100)}%`} sub={<>Of {(staffLabel || 'staff').toLowerCase()} hours · <Delta now={share} prev={pulse.booked_share_prev} unit="pts" /></>} icon="Users" onClick={() => go('all-reports')} />
+          <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={canMoney ? (newTenant ? 'No comparison yet' : <Delta now={pulse.revenue} prev={pulse.revenue_prev} unit="%" />) : 'Managers see this'} icon="Banknote" onClick={() => go('all-reports')} />
+          <Tile label="Free time left" value={newTenant ? '—' : fmtFreeTotal(free.total)} sub={newTenant ? 'Fills in once you take bookings' : free.biggest ? `${free.total >= 24 * 60 ? `across ${plural(free.people, (staffLabel || 'person').toLowerCase(), (staffLabelPlural || 'people').toLowerCase())} · ` : ''}biggest gap ${fmtClock(free.biggest.from_min)}–${fmtClock(free.biggest.to_min)}` : 'No gaps of 1h or more'} icon="Clock" onClick={() => go('calendar')} />
+          <Tile label="Booked hours" value={newTenant || share == null ? '—' : `${Math.round(share * 100)}%`} sub={newTenant ? 'No comparison yet' : <>Of {(staffLabel || 'staff').toLowerCase()} hours · <Delta now={share} prev={pulse.booked_share_prev} unit="pts" /></>} icon="Users" onClick={() => go('all-reports')} />
         </div>}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="lg:col-span-3 space-y-3 sm:space-y-4">
@@ -290,10 +247,8 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      {myDay}{frontDesk}{body}
-      {panel?.type === 'booking' && <InboxBookingPanel bookingId={panel.id} onClose={closePanel} onChanged={refresh} />}
-      {panel?.type === 'create' && <CreateBookingHost slot={panel.slot} branchId={branchId} onClose={closePanel} onCreated={() => { closePanel(); refresh(); }} />}
-      {panel?.type === 'collect' && <CollectHost booking={panel.booking} branchId={branchId} onClose={closePanel} onPaid={refresh} />}
+      {myDay}{frontDesk}{newTenant && setup && <SetupChecklist steps={setup} onGo={go} />}{body}
+      <DashPanels panel={panel} branchId={branchId} onClose={closePanel} onChanged={refresh} />
     </div>
   );
 };

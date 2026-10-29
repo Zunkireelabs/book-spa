@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import InboxBookingPanel from '../inbox/InboxBookingPanel';
 import QuickCreatePanel from '../branch-manager-dashboard/components/calendar/QuickCreatePanel';
 import { submitQuickCreate } from '../branch-manager-dashboard/components/calendar/quickCreateSubmit';
 import PaymentModal from '../../components/ui/PaymentModal';
@@ -82,4 +83,13 @@ export const CollectHost = ({ booking, branchId, onClose, onPaid }) => {
       isSubmitting={submitting}
     />
   );
+};
+
+/** Renders whichever dashboard panel is open: { type: 'booking', id } | { type: 'create', slot } | { type: 'collect', booking }. */
+export const DashPanels = ({ panel, branchId, onClose, onChanged }) => {
+  if (!panel) return null;
+  if (panel.type === 'booking') return <InboxBookingPanel bookingId={panel.id} onClose={onClose} onChanged={onChanged} />;
+  if (panel.type === 'create') return <CreateBookingHost slot={panel.slot} branchId={branchId} onClose={onClose} onCreated={() => { onClose(); onChanged?.(); }} />;
+  if (panel.type === 'collect') return <CollectHost booking={panel.booking} branchId={branchId} onClose={onClose} onPaid={onChanged} />;
+  return null;
 };

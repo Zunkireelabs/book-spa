@@ -26,7 +26,7 @@ describe('gaps and free time', () => {
     expect(f.biggest).toEqual({ from_min: 840, to_min: 1020, minutes: 180 });
   });
   it('is empty without gaps', () => {
-    expect(freeTime([], 600)).toEqual({ total: 0, biggest: null });
+    expect(freeTime([], 600)).toEqual({ total: 0, people: 0, biggest: null });
   });
 });
 

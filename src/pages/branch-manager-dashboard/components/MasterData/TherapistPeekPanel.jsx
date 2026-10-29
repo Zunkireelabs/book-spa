@@ -8,6 +8,7 @@ import { Avatar, npr } from '../Area/listKit';
 import { formatMinutes, timeToMinutes, DB_DOW_LABELS } from '../../../../utils/staffDay';
 import { subLine } from '../../../../services/therapistsOverview';
 import { TodayCell } from './therapistBits';
+import TherapistLoginField from './TherapistLoginField';
 import TransferPill from '../../../../components/ui/TransferPill';
 import { describeTransfer, transferState } from '../../../../utils/transferText';
 import { homeServiceNameSet, servicesBookableHere } from '../../../../utils/visitorServices';
@@ -199,6 +200,8 @@ const TherapistPeekPanel = ({ t, branchName, totalServices, canSeeRates, ratesRe
             </div>
           )}
         </section>
+
+        {!visitor && ['manager', 'admin'].includes(profile?.role) && <TherapistLoginField therapistId={t.id} personName={t.name.split(' ')[0]} />}
 
         {visitor && (
           <section>

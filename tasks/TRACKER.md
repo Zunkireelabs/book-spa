@@ -52,13 +52,17 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+. Done locally in 847a5c9; ships with the UI-port PR |
 | ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere. Mockup first |
 | ZNLY-112 | Sadin | high | Therapists "Overall" fails (uuid "__overall__") + Add with a Branch field + no Overall for one-branch tenants. Built and owner-checked (V31), committed locally; ships with the UI-port PR |
-| ZNLY-135 | Sadin | high | Notifications: pop-up card + sound, bell category tabs + branch labels, Inbox page, per-user settings. V35a committed (4e762b7). V35b built (Inbox, settings, sound picker, mig 332), awaiting commit OK. Then V35c new events (+ actor column) |
+| ZNLY-134 | Sadin | medium | Site icon: big sizes = wordmark on white, small = Playfair "z". Preview temp_ss/mockups/site-icon-v1.html, awaiting owner OK |
+| ZNLY-135 | Sadin | high | Notifications: pop-up card + sound, bell category tabs + branch labels, Inbox page, per-user settings. V35a committed (4e762b7). V35b committed (760a7cd). Then V35c new events (+ actor column). Owner findings 29 Oct: bell groups bookings (wants each row), own-action bookings hidden (confirm) |
 | ZNLY-123 | Sadin | medium | UI-23: Attendance page redesign, payroll-grade. V34a/a2/b committed (1663683). V34c payroll guard on hold until ZNLY-135 |
 | ZNLY-113 | Sadin | high | One home-branch model for temporary transfers. V33a (a8f55f0) + V33b (d99f8e5) + V33c (3019d2d) committed locally, owner-checked. Code done; ships with the UI-port PR |
 | ZNLY-118 | Sadin | high | Lent therapist commission can go missing. Fixed in 3019d2d (V33c), owner-verified locally; ships with the UI-port PR |
 | ZNLY-119 | Sadin | low | Profile: Branch row in the read view + Transfer/Return now in the header menu. Built in V33b (d99f8e5); ships with the UI-port PR |
 | ZNLY-125 | Sadin | medium | Decided: the branch that was home on the booking date pays. Built in V33c-fix3, ships with ZNLY-113 |
 | ZNLY-120 | Sadin | low | Pill for a transfer later today ("To Sanepa at 4:20pm"). Built in V33b (d99f8e5); ships with the UI-port PR |
+| ZNLY-147 | Sadin | high | Dashboard redesign: job views (Business/Branch/Front desk/My day) × Prep/Live/Close + insights. Mockup v2 approved (9.4). V36a (8b45e05), V36b (fa4b429), V36c Branch view (976821c), V36d Business/Front desk/My day/new-tenant checklist committed (owner-checked); next V36e insights |
+| ZNLY-150 | Sadin | high | Login ↔ therapist: link existed (users.therapist_id, mig 324); my day uses it (fa4b429). "Login" field in Therapists panel built in V36d, owner walkthrough done |
+| ZNLY-149 | Sadin | high | Front-desk tools (Collect payment etc.) for manager/admin. Built in V36a (8b45e05), owner-checked; ships with the UI-port PR |
 
 ## In review / on stage
 
@@ -78,7 +82,6 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-13 | unassigned | high | Renumber colliding migration-289 (PR #413 vs #415) |
 | ZNLY-26 | unassigned | high | Verify 503 "Reconnecting" screen + login banner against a real failure |
 | ZNLY-94 | Anish | high | Get onboarded to the Plane workflow |
-| ZNLY-134 | Sadin | medium | Update site icon (favicon + app icons) to the new Zennly logo; small sizes likely need a "z" monogram |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist (split from ZNLY-123) |
 | ZNLY-17 | unassigned | medium | Flip STAGING_DOMAIN to dev-app.zennly.io, verify stage health check |
 
@@ -99,6 +102,9 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-152 | Sadin | medium | Sidebar "Bookings" badge: count of bookings needing someone (same source as dashboard Needs action) |
+| ZNLY-151 | Sadin | medium | Retire the old "New booking" wizard page + old centred Booking Management modal; right-hand panels everywhere |
+| ZNLY-148 | Sadin | medium | Dashboard metrics look wrong (Unpaid 173%, utilization 0% while booked, Top performers NPR 0). Needs verification |
 | ZNLY-121 | Sadin | high | Customer booking flow shows every date "Full" at Sanepa (local). Must clear before the UI-port PR |
 | ZNLY-124 | Sadin | medium | Product-sales drill-down ignores sales at other branches (won't match commission) |
 | ZNLY-126 | Sadin | low | Overtime pay for hours outside the usual shift. ONLY if customers ask |

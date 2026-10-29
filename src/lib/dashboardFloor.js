@@ -24,18 +24,40 @@ export function upcomingGaps(gaps, nowMin = null) {
     .filter((g) => g.to_min - g.from_min >= 60);
 }
 
-/** { total, biggest: {from_min,to_min,minutes}|null } of the free gaps across the floor. */
+/** { total, people, biggest: {from_min,to_min,minutes}|null } of the free gaps across the floor; people = how many have one. */
 export function freeTime(therapists, nowMin = null) {
   let total = 0;
+  let people = 0;
   let biggest = null;
   for (const t of therapists || []) {
-    for (const g of upcomingGaps(t.gaps, nowMin)) {
+    const gaps = upcomingGaps(t.gaps, nowMin);
+    if (gaps.length) people += 1;
+    for (const g of gaps) {
       const minutes = g.to_min - g.from_min;
       total += minutes;
       if (!biggest || minutes > biggest.minutes) biggest = { from_min: g.from_min, to_min: g.to_min, minutes };
     }
   }
-  return { total, biggest };
+  return { total, people, biggest };
+}
+
+/** Hours as the Free-time tile shows them: under a day '5h 30m', beyond that whole hours '240h'. */
+export function fmtFreeTotal(min) {
+  return min >= 24 * 60 ? `${Math.round(min / 60)}h` : fmtDuration(min);
+}
+
+/** People on shift right now with nothing on and not checked out today: [{ therapist_id, name, free_until_min, checked_in }], checked-in first, then longest-free. */
+export function freeNow(therapists, nowMin) {
+  const out = [];
+  for (const t of therapists || []) {
+    if (!(t.shift_from_min <= nowMin && nowMin < t.shift_to_min)) continue;
+    if (t.checked_out) continue;
+    const inBlock = (t.blocks || []).some((b) => b.from_min <= nowMin && nowMin < b.to_min);
+    if (inBlock) continue;
+    const next = (t.blocks || []).filter((b) => b.from_min > nowMin).reduce((m, b) => Math.min(m, b.from_min), t.shift_to_min);
+    out.push({ therapist_id: t.therapist_id, name: t.name, free_until_min: next, checked_in: !!t.checked_in });
+  }
+  return out.sort((a, b) => Number(b.checked_in) - Number(a.checked_in) || b.free_until_min - a.free_until_min);
 }
 
 /** Axis bounds (whole hours) covering the branch hours and every shift. */
