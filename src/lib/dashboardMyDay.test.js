@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { dayStatus, myEarnings, nextClient } from './dashboardMyDay';
-import { businessNeeds, buildQueue, summarizeWaiting, adminDiscounts } from './dashboardNeeds';
+import { groupNeeds, needsOf, buildQueue, summarizeWaiting, adminDiscounts } from './dashboardNeeds';
 import { isNewTenant, setupSteps } from './dashboardTenant';
 import { freeNow, freeTime, fmtFreeTotal } from './dashboardFloor';
 
@@ -30,38 +30,18 @@ describe('nextClient', () => {
   });
 });
 
-describe('businessNeeds', () => {
-  const now = Date.parse('2026-10-29T10:00:00+05:45');
-  const base = { branch_id: 'b1', branch_name: 'Lazimpat', date: '2026-10-29', payment_status: 'unpaid', status: 'Confirmed', final_amount: 1000 };
-  it('keeps a pending discount and money owed at once, and unconfirmed bookings only after 2 hours', () => {
-    const g = businessNeeds([
-      { ...base, id: 'd', discount_status: 'pending', created_at: '2026-10-29T09:30:00+05:45' },
-      { ...base, id: 'p1', status: 'Pending', created_at: '2026-10-29T09:00:00+05:45' },
-      { ...base, id: 'p2', status: 'Pending', created_at: '2026-10-29T07:00:00+05:45' },
-      { ...base, id: 'u1', status: 'Completed', end_time: '09:00:00' },
-      { ...base, id: 'u2', status: 'Completed', end_time: '06:30:00' },
-    ], now);
-    expect(g).toHaveLength(1);
-    expect(g[0].items.map((i) => i.id)).toEqual(['u2', 'p2', 'u1', 'd']);
-  });
-  it('groups by branch, busiest first', () => {
-    const mk = (id, branch) => ({ ...base, id, branch_id: branch, branch_name: branch, discount_status: 'pending' });
-    expect(businessNeeds([mk('1', 'B'), mk('2', 'A'), mk('3', 'A')], now).map((g) => g.branch_id)).toEqual(['A', 'B']);
-  });
-});
-
 describe('summarizeWaiting / adminDiscounts', () => {
   const now = Date.parse('2026-10-29T15:00:00+05:45');
   const base = { branch_id: 'b1', branch_name: 'Lazimpat', date: '2026-10-29', payment_status: 'unpaid', status: 'Completed', final_amount: 2400 };
-  const groups = businessNeeds([
+  const groups = groupNeeds(needsOf([
     { ...base, id: 'u1', end_time: '12:15:00' },
     { ...base, id: 'u2', end_time: '12:30:00' },
     { ...base, id: 'p1', status: 'Pending', created_at: '2026-10-29T10:00:00+05:45' },
     { ...base, id: 'd1', status: 'Confirmed', discount_status: 'pending', created_at: '2026-10-29T14:30:00+05:45' },
-  ], now);
+  ], now, '2026-10-29'));
   it('gives one row per kind per branch with count, total and the oldest time', () => {
     const rows = summarizeWaiting(groups);
-    expect(rows.map((r) => [r.kind, r.count, r.amount])).toEqual([['unpaid', 2, 4800], ['unconfirmed', 1, null]]);
+    expect(rows.map((r) => [r.kind, r.count, r.amount])).toEqual([['owed', 2, 4800], ['unconfirmed', 1, null]]);
     expect(rows[0].since).toBe(Date.parse('2026-10-29T12:15:00+05:45'));
   });
   it('lists discounts separately as the admin rows', () => {

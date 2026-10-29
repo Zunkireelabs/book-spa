@@ -58,6 +58,8 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-113 | Sadin | high | One home-branch model for temporary transfers. V33a (a8f55f0) + V33b (d99f8e5) + V33c (3019d2d) committed locally, owner-checked. Code done; ships with the UI-port PR |
 | ZNLY-118 | Sadin | high | Lent therapist commission can go missing. Fixed in 3019d2d (V33c), owner-verified locally; ships with the UI-port PR |
 | ZNLY-119 | Sadin | low | Profile: Branch row in the read view + Transfer/Return now in the header menu. Built in V33b (d99f8e5); ships with the UI-port PR |
+| ZNLY-155 | Sadin | high | Dashboard Tomorrow "therapists working" overcounts (45 vs 17 at Lazimpat): tomorrow count in mig 334 skips the today filters |
+| ZNLY-156 | Sadin | high | Dashboard: one "needs someone" rule (Business 15 vs Branch 38 at Lazimpat), JS + SQL twin, any date |
 | ZNLY-125 | Sadin | medium | Decided: the branch that was home on the booking date pays. Built in V33c-fix3, ships with ZNLY-113 |
 | ZNLY-120 | Sadin | low | Pill for a transfer later today ("To Sanepa at 4:20pm"). Built in V33b (d99f8e5); ships with the UI-port PR |
 | ZNLY-147 | Sadin | high | Dashboard redesign: job views (Business/Branch/Front desk/My day) × Prep/Live/Close + insights. Mockup v2 approved (9.4). V36a (8b45e05), V36b (fa4b429), V36c Branch view (976821c), V36d Business/Front desk/My day/new-tenant checklist committed (owner-checked); next V36e insights |

@@ -7,13 +7,14 @@ import DailyClosingPanel from '../branch-manager-dashboard/components/DailyClosi
 import Floor from './Floor';
 import SetupChecklist from './SetupChecklist';
 import { DashPanels } from './DashboardPanels';
-import { fetchNeedsActionRows, updateBookingStatus } from '../../services/api';
+import { fetchNeeds, updateBookingStatus } from '../../services/api';
 import { supabase } from '../../lib/supabase';
 import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
 import DeskButtons from './DeskButtons';
 import { paidNote } from '../../lib/dashboardMoney';
 import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, Tile } from './dashKit';
 import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
+import { ofKind } from '../../lib/dashboardNeeds';
 
 const WEEKDAY = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'Asia/Kathmandu' });
 // Delta vs the same weekday last week: green up / red down, plain "—" when there is no data to compare.
@@ -48,7 +49,7 @@ const WeekStrip = ({ week }) => (
 const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLabel, staffLabelPlural, highlight, onReload, dataError = false, newTenant = false, setup = null, nowHm = null, onOpenMyDay }) => {
   const [, setSearchParams] = useSearchParams();
   const [panel, setPanel] = useState(null); // { type: 'booking', id } | { type: 'create', slot } | { type: 'collect', booking }
-  const [needs, setNeeds] = useState({ unpaid: [], unconfirmed: [], unassigned: [] });
+  const [needs, setNeeds] = useState([]); // every booking that needs someone, tagged with its kind (lib/dashboardNeeds)
   const [needsError, setNeedsError] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [closing, setClosing] = useState(false);
@@ -58,7 +59,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
 
   const loadNeeds = useCallback(async () => {
     if (!branchId) return;
-    const { data: rows, error } = await fetchNeedsActionRows({ branchId, date: today });
+    const { data: rows, error } = await fetchNeeds({ branchIds: [branchId], date: today });
     setNeedsError(!!error);
     if (!error) setNeeds(rows);
   }, [branchId, today]);
@@ -96,27 +97,35 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
   const badNeeds = dataError || needsError; // or the needs rows failed
   const rowName = (b) => b.customer_name || b.booking_number;
 
-  const unpaidRows = needs.unpaid.map((b) => (
+  const owed = ofKind(needs, 'owed');
+  const unconfirmed = ofKind(needs, 'unconfirmed');
+  const unassigned = ofKind(needs, 'unassigned');
+  const notClosed = ofKind(needs, 'not_closed');
+  const oldestOpen = notClosed.map((b) => b.date).sort()[0];
+  const unpaidRows = owed.map((b) => (
     <Row key={`p${b.id}`} icon="HandCoins" tone="text-error" title={`Collect ${npr(b.amount_due)} · ${rowName(b)}`} sub={[`Completed ${b.date === today ? clock12(b.start_time) : shortDay(b.date)}`, paidNote(b) || 'not paid'].join(' · ')}
       actions={canAct && <Button size="sm" variant="primary" onClick={() => setPanel({ type: 'collect', booking: b })}>Collect</Button>} />
   ));
-  const unconfirmedRows = needs.unconfirmed.map((b) => (
+  const unconfirmedRows = unconfirmed.map((b) => (
     <Row key={`c${b.id}`} icon="Clock" tone="text-warning" title={`${rowName(b)} at ${clock12(b.start_time)} not confirmed`} sub={b.service_name_snapshot}
       actions={<Button size="sm" variant="primary" disabled={busyId === b.id} onClick={() => confirm(b.id)}>Confirm</Button>} />
   ));
-  const unassignedRows = needs.unassigned.map((b) => (
+  const unassignedRows = unassigned.map((b) => (
     <Row key={`a${b.id}`} icon="UserPlus" tone="text-blue-600" title={`${rowName(b)} at ${clock12(b.start_time)} needs a ${(staffLabelPlural || 'person').toLowerCase().replace(/s$/, '')}`} sub={b.service_name_snapshot}
       actions={<Button size="sm" variant="primary" onClick={() => openBooking(b.id)}>Assign</Button>} />
   ));
 
   const discounts = canAct && <PendingDiscountsPanel branchId={branchId} highlightBookingId={highlight} />;
-  const needCount = needs.unpaid.length + needs.unconfirmed.length + needs.unassigned.length + (data?.needs_action?.pending_discounts || 0);
+  const notClosedRow = notClosed.length > 0 && (
+    <Row icon="History" tone="text-warning" title={`${plural(notClosed.length, 'booking')} never closed`} sub={`oldest ${shortDay(oldestOpen)}`} actions={<Button size="sm" variant="outline" onClick={() => go('bookings')}>Open</Button>} />
+  );
+  const needCount = needs.length; // the one rule: every kind, so Live, Close and Business show the same total
 
   const needsCard = (
     <Card icon="Inbox" title="Needs action" count={needCount} error={badNeeds} onRetry={refresh}>
       {needCount === 0 && <p className="text-sm text-gray-500">Nothing needs you right now ✓</p>}
       {discounts}
-      {unpaidRows}{unconfirmedRows}{unassignedRows}
+      {unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
     </Card>
   );
   const suggestions = <SuggestionsCard />;
@@ -160,13 +169,13 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
 
   let body;
   if (phase === 'prep') {
-    const prepCount = needs.unconfirmed.length + needs.unassigned.length;
+    const prepCount = unconfirmed.length + unassigned.length;
     body = (
       <>
         {brief('Sun', <>
           <b>{plural(pulse.bookings || 0, 'booking')}</b> today{sep}<b>{floor?.working ?? 0} of {floor?.headcount ?? 0}</b> {(staffLabelPlural || 'staff').toLowerCase()} in
           {pulse.pending > 0 && <>{sep}<span className="text-warning">{pulse.pending} unconfirmed</span></>}
-          {needs.unassigned.length > 0 && <>{sep}<span className="text-warning">{needs.unassigned.length} unassigned</span></>}
+          {unassigned.length > 0 && <>{sep}<span className="text-warning">{unassigned.length} unassigned</span></>}
         </>)}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="lg:col-span-3 space-y-3 sm:space-y-4">
@@ -181,13 +190,12 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
     );
   } else if (phase === 'close') {
     const taken = pulse.revenue;
-    const loose = (data?.loose_ends?.open_past_bookings || 0);
     body = (
       <>
         {brief('Moon', <>
           <b>{pulse.completed || 0} of {pulse.bookings || 0}</b> done{pulse.no_show > 0 && <> ({pulse.no_show} no-show)</>}
           {canMoney && <>{sep}<b>{npr(taken)}</b> taken</>}
-          {sep}<span className={needs.unpaid.length + loose ? 'text-warning' : ''}>{needs.unpaid.length + loose} loose ends</span>
+          {sep}<span className={needCount ? 'text-warning' : ''}>{needCount} loose ends</span>
           {sep}tomorrow {data?.tomorrow?.bookings ?? 0} booked
         </>)}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
@@ -213,10 +221,9 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
             </Card>
           </div>
           <div className="space-y-3 sm:space-y-4">
-            <Card icon="CheckCheck" title="Loose ends" count={needs.unpaid.length + loose} error={badNeeds} onRetry={refresh}>
-              {needs.unpaid.length + loose === 0 && <p className="text-sm text-success font-medium">Nothing left open ✓</p>}
-              {discounts}{unpaidRows}
-              {loose > 0 && <Row icon="History" tone="text-warning" title={`${plural(loose, 'earlier booking')} never finished`} sub="Pending, confirmed or in progress from the last 7 days" actions={<Button size="sm" variant="outline" onClick={() => go('bookings')}>Open</Button>} />}
+            <Card icon="CheckCheck" title="Loose ends" count={needCount} error={badNeeds} onRetry={refresh}>
+              {needCount === 0 && <p className="text-sm text-success font-medium">Nothing left open ✓</p>}
+              {discounts}{unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
             </Card>
             {suggestions}
           </div>

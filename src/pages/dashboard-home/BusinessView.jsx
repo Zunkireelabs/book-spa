@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { Card, GroupBand, Row, SuggestionsCard, npr, pctChange, plural, shortDay, weekdayName } from './dashKit';
-import { approveDiscount, fetchBusinessNeeds, rejectDiscount } from '../../services/api';
-import { adminDiscounts, summarizeWaiting } from '../../lib/dashboardNeeds';
+import { approveDiscount, fetchNeeds, rejectDiscount } from '../../services/api';
+import { adminDiscounts, groupNeeds, summarizeWaiting } from '../../lib/dashboardNeeds';
 import { friendlyError } from '../../utils/friendlyError';
 
 const waited = (min) => (min >= 24 * 60 ? `${Math.floor(min / 1440)}d` : min >= 60 ? `${Math.floor(min / 60)}h` : `${min}m`);
@@ -32,9 +32,9 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
   const [message, setMessage] = useState(null);
   const load = async () => {
     if (!branchIds?.length) return;
-    const { data: g, error } = await fetchBusinessNeeds({ branchIds, date: today });
+    const { data: items, error } = await fetchNeeds({ branchIds, date: today });
     setNeedsError(!!error);
-    if (!error) setGroups(g);
+    if (!error) setGroups(groupNeeds(items));
   };
   useEffect(() => { load(); }, [branchIds?.join(','), today]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -59,8 +59,8 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
   const weekday = weekdayName(today);
   const discounts = adminDiscounts(groups);
   const waiting = summarizeWaiting(groups);
-  const needCount = groups.reduce((n, g) => n + g.items.length, 0);
-  const needsOf = (id) => groups.find((g) => g.branch_id === id)?.items.length || 0;
+  const needCount = groups.reduce((n, g) => n + g.total, 0);
+  const needsOf = (id) => groups.find((g) => g.branch_id === id)?.total || 0;
 
   const change = pctChange(pulse.revenue, pulse.revenue_prev);
   const behind = rows.map((r) => ({ name: r.name, pct: pctChange(r.revenue, r.revenue_prev) })).filter((r) => r.pct != null && r.pct < 0).sort((a, b) => a.pct - b.pct)[0];
@@ -143,14 +143,26 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
             {waiting.length === 0 && <p className="text-sm text-gray-500 py-2.5">Nothing is waiting at the {locs} ✓</p>}
             {waiting.map((w) => {
               const since = sinceLabel(w.since, today);
-              return w.kind === 'unpaid' ? (
+              const go = <Button size="sm" variant="ghost" onClick={() => onOpenBranch(w.branch_id)}>Open {loc}</Button>;
+              if (w.kind === 'owed') return (
                 <Row key={`${w.branch_id}u`} icon="HandCoins" tone="text-error" chip={w.branch_name}
                   title={`${plural(w.count, 'completed booking')} unpaid`} sub={[`${npr(w.amount)} owed`, w.oldest_date === today ? (since ? `since ${since}` : null) : `oldest ${shortDay(w.oldest_date)}`].filter(Boolean).join(' · ')}
-                  actions={<Button size="sm" variant="ghost" onClick={() => onOpenBranch(w.branch_id)}>Open {loc}</Button>} />
-              ) : (
+                  actions={go} />
+              );
+              if (w.kind === 'not_closed') return (
+                <Row key={`${w.branch_id}n`} icon="History" tone="text-warning" chip={w.branch_name}
+                  title={`${plural(w.count, 'booking')} never closed`} sub={`oldest ${shortDay(w.oldest_date)}`}
+                  actions={go} />
+              );
+              if (w.kind === 'unassigned') return (
+                <Row key={`${w.branch_id}a`} icon="UserPlus" tone="text-blue-600" chip={w.branch_name}
+                  title={`${plural(w.count, 'booking')} with nobody assigned`} sub={since ? `starting ${since}` : null}
+                  actions={go} />
+              );
+              return (
                 <Row key={`${w.branch_id}c`} icon="Clock" tone="text-warning" chip={w.branch_name}
                   title={`${plural(w.count, 'booking')} not confirmed`} sub={`waiting ${waited(Math.max(...w.items.map((i) => i.wait_min)))}${since ? ` · since ${since}` : ''}`}
-                  actions={<Button size="sm" variant="ghost" onClick={() => onOpenBranch(w.branch_id)}>Open {loc}</Button>} />
+                  actions={go} />
               );
             })}
           </Card>

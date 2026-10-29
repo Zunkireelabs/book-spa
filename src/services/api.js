@@ -1,4 +1,4 @@
-import { buildNeeds, buildQueue, businessNeeds } from '../lib/dashboardNeeds';
+import { buildQueue, needsOf } from '../lib/dashboardNeeds';
 import { toTransferInput } from '../utils/transferText';
 import { workedAtNote } from './visitorAttendance';
 import { computeReferralCommission, payrollMonthBounds, tallyBookingEarnings, computeCommissionParts, computeNetPay, splitServiceRevenueByBranch, visitorPayrollHelpLine } from './payrollCalc';
@@ -348,7 +348,7 @@ export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
   }
 }
 
-// The whole dashboard in one call (get_dashboard, migration-334): pulse, floor, needs_action, week, branches, money, loose_ends,
+// The whole dashboard in one call (get_dashboard, migration-334): pulse, floor, week, branches (with per-kind `needs`), money,
 // tomorrow, my_day. branchIds are cut to the caller's tenant/branches server-side; money is null for staff. `date` defaults to today.
 export async function fetchDashboard({ branchIds, date = null }) {
   try {
@@ -358,26 +358,6 @@ export async function fetchDashboard({ branchIds, date = null }) {
   } catch (error) {
     console.error('[API] fetchDashboard error:', error.message);
     return { data: {}, error };
-  }
-}
-
-// The rows behind the dashboard's Needs action card (the RPC only counts them): completed-but-unpaid (any date), unconfirmed and
-// unassigned bookings today. RLS-scoped reads of bookings; `date` is the Nepal day.
-export async function fetchNeedsActionRows({ branchId, date }) {
-  try {
-    const from = new Date(`${date}T00:00:00Z`);
-    from.setUTCDate(from.getUTCDate() - 7);
-    const cols = 'id, booking_number, branch_id, customer_name, date, start_time, final_amount, status, payment_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount)';
-    const [recent, owed] = await Promise.all([
-      supabase.from('bookings').select(cols).eq('branch_id', branchId).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
-        .in('status', ['Pending', 'Confirmed']).order('start_time').limit(300),
-      owedBookingsQuery(cols).eq('branch_id', branchId).lte('date', date).limit(500), // money owed has no 7-day floor (lib/dashboardMoney)
-    ]);
-    if (recent.error || owed.error) throw (recent.error || owed.error);
-    return { data: buildNeeds([...(recent.data || []), ...(owed.data || [])], date), error: null };
-  } catch (error) {
-    console.error('[API] fetchNeedsActionRows error:', error.message);
-    return { data: { unpaid: [], unconfirmed: [], unassigned: [] }, error };
   }
 }
 
@@ -403,23 +383,24 @@ export async function fetchFrontDeskQueue({ branchId, date }) {
   }
 }
 
-// Business view's Needs action: admin-only items plus anything waiting over 2h, grouped by branch (lib/dashboardNeeds.businessNeeds).
-export async function fetchBusinessNeeds({ branchIds, date }) {
+// Every booking that needs someone, tagged with its kind: the ONE rule in lib/dashboardNeeds (classifyNeed), whose SQL twin is
+// get_dashboard branches[].needs. Business (table, Waiting rows) and Branch (Live / Prep / Close) all read this. RLS-scoped reads of
+// bookings up to `date` (the Nepal day): anything still open, anything owed, anything with a pending discount (same candidates as the SQL).
+const NEEDS_COLS = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, created_at, final_amount, base_amount, discount_amount, discount_reason, status, payment_status, discount_status, service_name_snapshot, booking_therapists(therapist_id), payments(amount), branches(name), requester:users!discount_requested_by(full_name)';
+export async function fetchNeeds({ branchIds, date }) {
   try {
-    const from = new Date(`${date}T00:00:00Z`);
-    from.setUTCDate(from.getUTCDate() - 7);
-    const cols = 'id, booking_number, branch_id, customer_name, date, start_time, end_time, created_at, final_amount, base_amount, discount_amount, discount_reason, status, payment_status, discount_status, payments(amount), branches(name), requester:users!discount_requested_by(full_name)';
-    const [recent, owed] = await Promise.all([
-      supabase.from('bookings').select(cols).in('branch_id', branchIds).gte('date', from.toISOString().slice(0, 10)).lte('date', date)
-        .in('status', ['Pending', 'Confirmed', 'Completed']).limit(500),
-      owedBookingsQuery(cols).in('branch_id', branchIds).lte('date', date).limit(1000), // owed has no 7-day floor, same rule as the Unpaid column
+    const [open, owed, discounts] = await Promise.all([
+      supabase.from('bookings').select(NEEDS_COLS).in('branch_id', branchIds).lte('date', date).in('status', ['Pending', 'Confirmed', 'In-Progress']).order('date').order('start_time').limit(1000),
+      owedBookingsQuery(NEEDS_COLS).in('branch_id', branchIds).lte('date', date).limit(1000),
+      supabase.from('bookings').select(NEEDS_COLS).in('branch_id', branchIds).lte('date', date).eq('discount_status', 'pending').limit(1000),
     ]);
-    if (recent.error || owed.error) throw (recent.error || owed.error);
+    const err = open.error || owed.error || discounts.error;
+    if (err) throw err;
     const seen = new Set();
-    const rows = [...(recent.data || []), ...(owed.data || [])].filter((b) => !seen.has(b.id) && seen.add(b.id)).map((b) => ({ ...b, branch_name: b.branches?.name || '' }));
-    return { data: businessNeeds(rows, Date.now()), error: null };
+    const rows = [...(open.data || []), ...(owed.data || []), ...(discounts.data || [])].filter((b) => !seen.has(b.id) && seen.add(b.id)).map((b) => ({ ...b, branch_name: b.branches?.name || '' }));
+    return { data: needsOf(rows, Date.now(), date), error: null };
   } catch (error) {
-    console.error('[API] fetchBusinessNeeds error:', error.message);
+    console.error('[API] fetchNeeds error:', error.message);
     return { data: [], error };
   }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { balanceOf, isOwed, paidNote } from './dashboardMoney';
-import { buildNeeds, businessNeeds, summarizeWaiting } from './dashboardNeeds';
+import { groupNeeds, needsOf, summarizeWaiting } from './dashboardNeeds';
 
 const bk = (o) => ({ status: 'Completed', payment_status: 'unpaid', final_amount: 2000, date: '2026-10-29', payments: [], ...o });
 
@@ -22,7 +22,7 @@ describe('owed rule (dashboardMoney)', () => {
   });
   it('has no date floor: a booking from weeks ago is still owed', () => {
     expect(isOwed(bk({ date: '2026-10-12' }))).toBe(true);
-    expect(buildNeeds([bk({ id: 'old', date: '2026-10-12' })], '2026-10-29').unpaid.map((b) => b.id)).toEqual(['old']);
+    expect(needsOf([bk({ id: 'old', date: '2026-10-12' })], Date.parse('2026-10-29T15:00:00+05:45'), '2026-10-29').map((b) => [b.id, b.kind])).toEqual([['old', 'owed']]);
   });
   it('sums balances (not final amounts) in the Business waiting row, with the oldest date', () => {
     const now = Date.parse('2026-10-29T15:00:00+05:45');
@@ -31,7 +31,7 @@ describe('owed rule (dashboardMoney)', () => {
       bk({ id: 'b', branch_id: 'b1', branch_name: 'Laz', date: '2026-10-26', end_time: '11:00:00', final_amount: 2000, payments: [{ amount: 1800 }] }),
       bk({ id: 'c', branch_id: 'b1', branch_name: 'Laz', payment_status: 'paid' }),
     ];
-    const [w] = summarizeWaiting(businessNeeds(rows, now));
+    const [w] = summarizeWaiting(groupNeeds(needsOf(rows, now, '2026-10-29')));
     expect([w.count, w.amount, w.oldest_date]).toEqual([2, 3700, '2026-10-12']);
   });
 });

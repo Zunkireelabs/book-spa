@@ -1,43 +1,68 @@
 import { balanceOf, isOwed, paidOf } from './dashboardMoney';
 
-
-/**
- * Split the dashboard's candidate bookings into what needs the manager: completed-but-unpaid (any date, see dashboardMoney), and today's
- * unconfirmed and unassigned ones. `rows` are bookings with `payments(amount)` joined; unpaid rows get `amount_due` (final minus paid).
- */
-export function buildNeeds(rows, date) {
-  const all = rows || [];
-  const unpaid = all.filter(isOwed).map((b) => ({ ...b, amount_paid: paidOf(b), amount_due: balanceOf(b) })); // lib/dashboardMoney: any date
-  const unconfirmed = all.filter((b) => b.status === 'Pending' && b.date === date);
-  const unassigned = all.filter((b) => b.date === date && ['Pending', 'Confirmed'].includes(b.status) && !(b.booking_therapists || []).length);
-  return { unpaid, unconfirmed, unassigned };
-}
-
 const NEPAL_OFFSET = '+05:45';
 const atNepal = (date, time) => new Date(`${date}T${String(time || '00:00').slice(0, 8)}${NEPAL_OFFSET}`).getTime();
+const OPEN = ['Pending', 'Confirmed', 'In-Progress'];
+
+// The one "needs someone" rule. Each booking falls in exactly one kind, checked in this order. The SQL twin is
+// _dashboard_need_kind() in migration-334 (get_dashboard branches[].needs): same order, same tests. Change both together.
+export const NEED_KINDS = ['discount', 'owed', 'not_closed', 'unconfirmed', 'unassigned'];
+export const UNCONFIRMED_AFTER_MIN = 120;
 
 /**
- * Business view's Needs action: only what a branch manager can't close alone (a pending discount waits for an admin), every owed
- * booking (dashboardMoney, any date, since its end) and a Pending booking waiting more than `afterMin` (default 2h) since it was created. Grouped by branch, longest wait first. `rows` need branch_id/branch_name, status, payment_status, discount_status, created_at,
- * date, end_time/start_time, customer_name, booking_number, final_amount.
+ * Kind of need a booking is in, or null. `b` needs status, date, start_time, end_time, created_at, discount_status, payment_status,
+ * final_amount, payments(amount) and booking_therapists; `today` is the Nepal day (YYYY-MM-DD), `nowMs` epoch ms.
+ *  1 discount: discount_status pending
+ *  2 owed: completed with a balance (dashboardMoney isOwed), any date
+ *  3 not_closed: Pending, Confirmed or In-Progress and date + end_time (Nepal) has passed, any date
+ *  4 unconfirmed: Pending, not yet ended, created over 2h ago
+ *  5 unassigned: today, not yet started, Pending or Confirmed, nobody assigned
  */
-export function businessNeeds(rows, nowMs, afterMin = 120) {
-  const byBranch = new Map();
+export function classifyNeed(b, nowMs, today) {
+  if (b.discount_status === 'pending') return 'discount';
+  if (isOwed(b)) return 'owed';
+  if (OPEN.includes(b.status) && b.end_time && atNepal(b.date, b.end_time) <= nowMs) return 'not_closed';
+  if (b.status === 'Pending' && b.created_at && nowMs - Date.parse(b.created_at) > UNCONFIRMED_AFTER_MIN * 60000) return 'unconfirmed';
+  if (b.date === today && ['Pending', 'Confirmed'].includes(b.status) && b.start_time && atNepal(b.date, b.start_time) > nowMs && !(b.booking_therapists || []).length) return 'unassigned';
+  return null;
+}
+
+/**
+ * Every booking that needs someone, tagged with its kind. `rows` are bookings with `payments(amount)` and `booking_therapists` joined
+ * (plus branch_id / branch_name for the Business view). Owed rows get amount_paid / amount_due; each row gets `wait_min` and `since`
+ * (epoch ms: when it started waiting, null when unknown). Bookings after `today` are not part of the rule.
+ */
+export function needsOf(rows, nowMs, today) {
+  const out = [];
   for (const b of rows || []) {
-    let kind = null;
-    let since = null;
-    if (b.discount_status === 'pending') { kind = 'discount'; since = b.created_at ? Date.parse(b.created_at) : null; }
-    else if (b.status === 'Pending') { kind = 'unconfirmed'; since = b.created_at ? Date.parse(b.created_at) : null; }
-    else if (isOwed(b)) { kind = 'unpaid'; since = atNepal(b.date, b.end_time || b.start_time); }
+    if (b.date > today) continue;
+    const kind = classifyNeed(b, nowMs, today);
     if (!kind) continue;
+    const since = kind === 'discount' || kind === 'unconfirmed' ? (b.created_at ? Date.parse(b.created_at) : null)
+      : kind === 'unassigned' ? atNepal(b.date, b.start_time) : atNepal(b.date, b.end_time || b.start_time);
     const waitMin = since == null || Number.isNaN(since) ? 0 : Math.max(0, Math.round((nowMs - since) / 60000));
-    if (kind === 'unconfirmed' && waitMin <= afterMin) continue; // discounts and money owed are never held back
-    if (!byBranch.has(b.branch_id)) byBranch.set(b.branch_id, { branch_id: b.branch_id, branch_name: b.branch_name || '', items: [] });
-    byBranch.get(b.branch_id).items.push({ ...b, kind, wait_min: waitMin, since, ...(kind === 'unpaid' ? { balance: balanceOf(b) } : {}) });
+    out.push({ ...b, kind, since, wait_min: waitMin, ...(kind === 'owed' ? { amount_paid: paidOf(b), amount_due: balanceOf(b) } : {}) });
+  }
+  return out;
+}
+
+/** Items of the given kinds. */
+export const ofKind = (items, ...kinds) => (items || []).filter((i) => kinds.includes(i.kind));
+
+/** Business view: needs grouped by branch, most first (then by name); each group has its items, per-kind `counts` and `total`. */
+export function groupNeeds(items) {
+  const byBranch = new Map();
+  for (const i of items || []) {
+    if (!byBranch.has(i.branch_id)) byBranch.set(i.branch_id, { branch_id: i.branch_id, branch_name: i.branch_name || '', items: [] });
+    byBranch.get(i.branch_id).items.push(i);
   }
   const groups = [...byBranch.values()];
-  groups.forEach((g) => g.items.sort((a, b) => b.wait_min - a.wait_min));
-  return groups.sort((a, b) => b.items.length - a.items.length || a.branch_name.localeCompare(b.branch_name));
+  groups.forEach((g) => {
+    g.items.sort((a, b) => b.wait_min - a.wait_min);
+    g.counts = Object.fromEntries(NEED_KINDS.map((k) => [k, g.items.filter((i) => i.kind === k).length]));
+    g.total = g.items.length;
+  });
+  return groups.sort((a, b) => b.total - a.total || a.branch_name.localeCompare(b.branch_name));
 }
 
 /**
@@ -62,20 +87,21 @@ export function buildQueue(rows, date) {
 }
 
 /**
- * The "Waiting at branches" rows of the Business view: from businessNeeds groups, one summary row per kind per branch
- * ("2 completed bookings unpaid · NPR 3,000 balance · oldest Mon 12 Oct") instead of one row per booking. Discounts are not summarised
- * (they are the admin's own rows). `since` is the oldest item's start (epoch ms, null when unknown).
+ * The "Waiting at branches" rows of the Business view: from groupNeeds groups, one summary row per kind per branch
+ * ("2 completed bookings unpaid · NPR 3,000 balance · oldest Mon 12 Oct", "108 bookings never closed · oldest Mon 12 Oct") instead of
+ * one row per booking. Discounts are not summarised (they are the admin's own rows). `since` is the oldest item's wait start
+ * (epoch ms, null when unknown).
  */
 export function summarizeWaiting(groups) {
   const out = [];
   for (const g of groups || []) {
-    for (const kind of ['unpaid', 'unconfirmed']) {
+    for (const kind of ['owed', 'not_closed', 'unconfirmed', 'unassigned']) {
       const items = g.items.filter((i) => i.kind === kind);
       if (!items.length) continue;
       const times = items.map((i) => i.since).filter((n) => Number.isFinite(n));
       out.push({
         branch_id: g.branch_id, branch_name: g.branch_name, kind, count: items.length,
-        amount: kind === 'unpaid' ? items.reduce((n, i) => n + i.balance, 0) : null,
+        amount: kind === 'owed' ? items.reduce((n, i) => n + i.amount_due, 0) : null,
         oldest_date: items.map((i) => i.date).sort()[0] || null,
         since: times.length ? Math.min(...times) : null, items,
       });

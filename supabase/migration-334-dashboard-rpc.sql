@@ -1,6 +1,6 @@
 -- Migration 334: get_dashboard(p_branch_ids, p_date), one call for the whole dashboard (ZNLY-147, V36b)
 --
--- Returns one jsonb: pulse, floor, needs_action, week, branches, money, loose_ends, tomorrow, my_day.
+-- Returns one jsonb: pulse, floor, week, branches (each with its `needs` counts), money, tomorrow, my_day.
 --  * Tenant + branch scope: the requested branches are cut down to the caller's org, and for manager/staff to the branches
 --    they work at (get_user_branch_ids()). Anything outside that is silently dropped. No session -> empty.
 --  * Money (revenue, payments by method, tips, cash expected) is null for staff. admin_viewer sees it (read-only Business view).
@@ -13,6 +13,12 @@
 --    hands the client what that formula needs (own completed+paid service revenue today, referral rows, the caller's rates).
 --    It still needs the name match (ZNLY-150) because staff_compensation is keyed by therapist. Product commission is a month-level
 --    base (computeProductCommissionBase) and is not in these inputs.
+--  * "Needs someone" (ZNLY-156): ONE rule, _dashboard_need_kind(). Each booking falls in exactly one kind, checked in this order:
+--    discount (discount_status pending) > owed (Completed, balance > 0, any date) > not_closed (Pending/Confirmed/In-Progress whose
+--    date + end_time has passed, any date) > unconfirmed (Pending, not ended, created over 2h ago) > unassigned (today, not started,
+--    Pending/Confirmed, no booking_therapists). JS twin: src/lib/dashboardNeeds.js classifyNeed(). Change both together.
+--    branches[].needs = {discount, owed, not_closed, unconfirmed, unassigned, total, oldest_not_closed}. Bookings from today back, any status.
+--  * "Working" (staff on shift that day): ONE rule, _dashboard_working(), used by headcount, branches[].working and tomorrow.working.
 -- All dates are Nepal days. STABLE SECURITY DEFINER, read-only. Idempotent.
 -- Applied: stage - / prod -.
 
@@ -28,6 +34,37 @@ AS $$
     FROM public.users u
     JOIN public.therapists t ON t.name = u.full_name AND t.org_id = u.org_id AND t.is_active
    WHERE u.id = auth.uid();
+$$;
+
+-- The one "needs someone" rule (see header). JS twin: classifyNeed() in src/lib/dashboardNeeds.js. NULL = nothing needed.
+CREATE OR REPLACE FUNCTION public._dashboard_need_kind(p_bk public.bookings, p_now timestamptz, p_today date)
+RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT CASE
+    WHEN p_bk.discount_status::text = 'pending' THEN 'discount'
+    WHEN p_bk.status = 'Completed' AND p_bk.payment_status <> 'paid'
+         AND p_bk.final_amount - COALESCE((SELECT sum(p.amount) FROM public.payments p WHERE p.booking_id = p_bk.id), 0) > 0 THEN 'owed'
+    WHEN p_bk.status IN ('Pending', 'Confirmed', 'In-Progress')
+         AND ((p_bk.date + p_bk.end_time) AT TIME ZONE 'Asia/Kathmandu') <= p_now THEN 'not_closed'
+    WHEN p_bk.status = 'Pending' AND p_bk.created_at < p_now - interval '2 hours' THEN 'unconfirmed'
+    WHEN p_bk.date = p_today AND p_bk.status IN ('Pending', 'Confirmed')
+         AND ((p_bk.date + p_bk.start_time) AT TIME ZONE 'Asia/Kathmandu') > p_now
+         AND NOT EXISTS (SELECT 1 FROM public.booking_therapists bt WHERE bt.booking_id = p_bk.id) THEN 'unassigned'
+  END;
+$$;
+
+-- The one "working" rule: therapists on a real shift (not "No hours set"), service staff only, on p_day in p_branches, from a shifts jsonb.
+CREATE OR REPLACE FUNCTION public._dashboard_working(p_sh jsonb, p_branches uuid[], p_day date)
+RETURNS int
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT count(*)::int
+    FROM jsonb_to_recordset(p_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, source text)
+   WHERE x.branch_id = ANY (p_branches) AND x.shift_date = p_day AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'
+     AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE);
 $$;
 
 -- Booked share of therapist hours for one branch-day, from a shifts jsonb (therapist_shifts_for_range rows + branch_id). NULL without hours.
@@ -58,13 +95,14 @@ DECLARE
   v_org     uuid;
   v_date    date := COALESCE(p_date, (now() AT TIME ZONE 'Asia/Kathmandu')::date);
   v_now_min int  := (EXTRACT(EPOCH FROM (now() AT TIME ZONE 'Asia/Kathmandu')::time) / 60)::int;
+  v_now     timestamptz := now();
   v_is_today boolean := v_date = (now() AT TIME ZONE 'Asia/Kathmandu')::date;
   v_money   boolean;
   v_ids     uuid[];
   v_mine    uuid[];
   d0 timestamptz; d1 timestamptz;
-  v_pulse jsonb; v_floor jsonb := '[]'; v_needs jsonb; v_week jsonb; v_branches jsonb; v_money_j jsonb;
-  v_loose jsonb; v_tomorrow jsonb; v_my jsonb;
+  v_pulse jsonb; v_floor jsonb := '[]'; v_week jsonb; v_branches jsonb; v_money_j jsonb;
+  v_tomorrow jsonb; v_my jsonb;
   r record; rr jsonb; v_cursor int; v_busy int; v_blocks jsonb; v_gaps jsonb; v_state text; v_list jsonb := '[]'; v_sh jsonb;
   v_f int; v_e int; v_k text;
   v_prev date; v_sh_prev jsonb; v_prev_rev numeric; v_prev_share numeric;
@@ -179,24 +217,11 @@ BEGIN
   END LOOP;
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'branch_id', bid,
-           'headcount', (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, source text) WHERE x.branch_id = bid AND x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'
-                         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE)),  -- same population as 'working'
+           'headcount', public._dashboard_working(v_sh, ARRAY[bid], v_date),  -- same population as 'working'
            'working', (SELECT count(*) FROM jsonb_array_elements(v_list) e WHERE e->>'branch_id' = bid::text),
            'therapists', (SELECT COALESCE(jsonb_agg(e ORDER BY (e->>'busy_minutes')::int DESC, e->>'name'), '[]')
                             FROM jsonb_array_elements(v_list) e WHERE e->>'branch_id' = bid::text))), '[]')
     INTO v_floor FROM unnest(v_ids) bid;
-
-  -- needs_action ----------------------------------------------------------------------------------------------------
-  SELECT jsonb_build_object(
-           'pending_discounts', count(*) FILTER (WHERE bk.discount_status::text = 'pending'),
-           'unconfirmed_today', count(*) FILTER (WHERE bk.date = v_date AND bk.status = 'Pending'),
-           'unpaid_completed',  count(*) FILTER (WHERE bk.status = 'Completed' AND bk.payment_status <> 'paid' AND bk.date <= v_date),
-           'tips_to_distribute', CASE WHEN v_money THEN (
-                SELECT count(*) FROM public.booking_tips tp JOIN public.bookings tb ON tb.id = tp.booking_id
-                 WHERE tb.branch_id = ANY (v_ids) AND tp.distributed_at IS NULL) END)
-    INTO v_needs
-    FROM public.bookings bk
-   WHERE bk.branch_id = ANY (v_ids) AND bk.date BETWEEN v_date - 30 AND v_date AND bk.status <> 'Cancelled';
 
   -- week: booked share of therapist hours, 7 days from p_date ---------------------------------------------------------
   WITH sh AS (
@@ -226,8 +251,7 @@ BEGIN
            'completed', (SELECT count(*) FROM public.bookings bk WHERE bk.branch_id = br.id AND bk.date = v_date AND bk.status = 'Completed'),
            'revenue',   CASE WHEN v_money THEN (SELECT COALESCE(sum(p.amount), 0) FROM public.payments p JOIN public.bookings pb ON pb.id = p.booking_id
                                                  WHERE pb.branch_id = br.id AND p.created_at >= d0 AND p.created_at < d1) END,
-           'working',   (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(branch_id uuid, therapist_id uuid, shift_date date, works boolean, start_time time, source text) WHERE x.branch_id = br.id AND x.shift_date = v_date AND x.works AND x.start_time IS NOT NULL AND x.source IS DISTINCT FROM 'none'
-                         AND EXISTS (SELECT 1 FROM public.therapists st WHERE st.id = x.therapist_id AND st.is_service_staff IS NOT FALSE)),
+           'working',   public._dashboard_working(v_sh, ARRAY[br.id], v_date),
            -- scene D columns: manager, "x of y busy" (working = y), vs last same weekday, booked hours, unpaid
            'manager',   (SELECT u.full_name FROM public.users u
                           WHERE u.role = 'manager' AND (u.branch_id = br.id OR EXISTS (SELECT 1 FROM public.user_branches ub WHERE ub.user_id = u.id AND ub.branch_id = br.id))
@@ -240,7 +264,17 @@ BEGIN
            'booked_share',      public._dashboard_booked_share(br.id, v_date, v_sh),
            'booked_share_prev', public._dashboard_booked_share(br.id, v_prev, v_sh_prev),
            'unpaid',    CASE WHEN v_money THEN (SELECT COALESCE(sum(GREATEST(bk.final_amount - COALESCE((SELECT sum(p.amount) FROM public.payments p WHERE p.booking_id = bk.id), 0), 0)), 0)
-                                  FROM public.bookings bk WHERE bk.branch_id = br.id AND bk.status = 'Completed' AND bk.payment_status <> 'paid' AND bk.date <= v_date) END
+                                  FROM public.bookings bk WHERE bk.branch_id = br.id AND bk.status = 'Completed' AND bk.payment_status <> 'paid' AND bk.date <= v_date) END,
+           -- needs someone: per-kind counts of the one rule (_dashboard_need_kind)
+           'needs',     (SELECT jsonb_build_object('discount', count(*) FILTER (WHERE q.k = 'discount'), 'owed', count(*) FILTER (WHERE q.k = 'owed'),
+                                'not_closed', count(*) FILTER (WHERE q.k = 'not_closed'), 'unconfirmed', count(*) FILTER (WHERE q.k = 'unconfirmed'),
+                                'unassigned', count(*) FILTER (WHERE q.k = 'unassigned'), 'total', count(*),
+                                'oldest_not_closed', min(q.d) FILTER (WHERE q.k = 'not_closed'))
+                           FROM (SELECT bk.date AS d, public._dashboard_need_kind(bk, v_now, v_date) AS k FROM public.bookings bk
+                                  WHERE bk.branch_id = br.id AND bk.date <= v_date
+                                    AND (bk.status IN ('Pending', 'Confirmed', 'In-Progress') OR bk.discount_status::text = 'pending'
+                                         OR (bk.status = 'Completed' AND bk.payment_status <> 'paid'))) q
+                          WHERE q.k IS NOT NULL)
          ) ORDER BY br.name), '[]')
     INTO v_branches FROM public.branches br WHERE br.id = ANY (v_ids);
 
@@ -259,18 +293,11 @@ BEGIN
       INTO v_money_j;
   END IF;
 
-  -- loose ends: earlier days (last 7) that never reached a terminal state, plus completed-but-unpaid ----------------------
-  SELECT jsonb_build_object(
-           'open_past_bookings', count(*) FILTER (WHERE bk.status IN ('Pending', 'Confirmed', 'In-Progress')),
-           'unpaid_past',        count(*) FILTER (WHERE bk.status = 'Completed' AND bk.payment_status <> 'paid'))
-    INTO v_loose
-    FROM public.bookings bk WHERE bk.branch_id = ANY (v_ids) AND bk.date >= v_date - 7 AND bk.date < v_date;
-
   -- tomorrow ----------------------------------------------------------------------------------------------------------
   SELECT jsonb_build_object(
            'bookings',    count(*) FILTER (WHERE bk.status <> 'Cancelled'),
            'unconfirmed', count(*) FILTER (WHERE bk.status = 'Pending'),
-           'working', (SELECT count(*) FROM jsonb_to_recordset(v_sh) AS x(shift_date date, works boolean, start_time time) WHERE x.shift_date = v_date + 1 AND x.works AND x.start_time IS NOT NULL))
+           'working', public._dashboard_working(v_sh, v_ids, v_date + 1))
     INTO v_tomorrow FROM public.bookings bk WHERE bk.branch_id = ANY (v_ids) AND bk.date = v_date + 1;
 
   -- my_day: the caller's own bookings today (see header re ZNLY-150) ---------------------------------------------------
@@ -312,14 +339,16 @@ BEGIN
     INTO v_my;
 
   RETURN jsonb_build_object('date', v_date, 'role', v_role, 'branch_ids', to_jsonb(v_ids),
-           'pulse', v_pulse || jsonb_build_object('revenue_prev', v_prev_rev, 'booked_share_prev', v_prev_share), 'floor', v_floor, 'needs_action', v_needs, 'week', v_week, 'branches', v_branches,
-           'money', v_money_j, 'loose_ends', v_loose, 'tomorrow', v_tomorrow, 'my_day', v_my);
+           'pulse', v_pulse || jsonb_build_object('revenue_prev', v_prev_rev, 'booked_share_prev', v_prev_share), 'floor', v_floor, 'week', v_week, 'branches', v_branches,
+           'money', v_money_j, 'tomorrow', v_tomorrow, 'my_day', v_my);
 END;
 $fn$;
 
 REVOKE ALL ON FUNCTION public.get_dashboard(uuid[], date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_dashboard(uuid[], date) TO authenticated;
 REVOKE ALL ON FUNCTION public._dashboard_my_therapist_ids() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._dashboard_need_kind(public.bookings, timestamptz, date) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._dashboard_working(jsonb, uuid[], date) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._dashboard_booked_share(uuid, date, jsonb) FROM PUBLIC, anon, authenticated;
 
 INSERT INTO public.schema_migrations (version, name)
