@@ -55,13 +55,23 @@ function allPeopleFitSlot({ people, allTherapists, therapistOccupancy, byRoom, b
     } else {
       // 'any' — same reserve anyProfessionalFree (solo flow) enforces: don't let
       // more unassigned-pending bookings exist than there are free therapists
-      // left to eventually cover them. Reserve the max backlog seen across this
-      // person's span, then pick the first free-and-unclaimed therapist beyond it.
-      const reserveCount = Math.max(0, ...spans.map((m) => therapistOccupancy.unassigned[date]?.get(m) || 0), 0);
+      // left to eventually cover them. Checked at EVERY slot the service spans
+      // (same .every() pattern as anyProfessionalFree), not one Math.max scalar
+      // across the whole span — free/unassigned counts can differ slot to slot,
+      // and a single scalar comparison can pass a slot that would actually fail.
+      const reserveOk = spans.every((m) => {
+        const freeAtSlot = allTherapists.filter((t) =>
+          !claimedTherapistIds.has(t.id) && !(therapistOccupancy.byTherapist[date]?.[t.id]?.get(m) > 0)
+        ).length;
+        const unassignedAtSlot = therapistOccupancy.unassigned[date]?.get(m) || 0;
+        return freeAtSlot > unassignedAtSlot;
+      });
+      if (!reserveOk) return false;
+
       const freeCandidates = allTherapists
         .map((t) => t.id)
         .filter((id) => !claimedTherapistIds.has(id) && isTherapistFree(therapistOccupancy, id, date, startMin, duration));
-      if (freeCandidates.length <= reserveCount) return false;
+      if (freeCandidates.length === 0) return false;
       therapistId = freeCandidates[0];
     }
 

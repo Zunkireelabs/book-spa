@@ -123,3 +123,29 @@ describe('computeGroupSlots — "any professional" respects the unassigned-backl
     expect(day.slots.find((s) => s.time24 === '10:00').isAvailable).toBe(false);
   });
 });
+
+describe('computeGroupSlots — reserve check per-slot, not one Math.max scalar across the span', () => {
+  it('matches anyProfessionalFree: free/unassigned counts differ between the two slots a service spans', () => {
+    // 10:00 slot: only t1 free (t2, t3 busy), 0 unassigned backlog -> 1 > 0, fine.
+    // 10:30 slot: all 3 free, but 2 unassigned backlog -> 3 > 2, fine too.
+    // A single Math.max(unassigned)=2 compared against the full-span-free intersection
+    // ({t1}, size 1) wrongly fails (1 <= 2) even though every individual slot clears
+    // its own reserve — anyProfessionalFree's per-slot .every() would accept this.
+    const result = computeGroupSlots(baseArgs({
+      allTherapists: [{ id: 't1' }, { id: 't2' }, { id: 't3' }],
+      therapistWindow: {
+        bookings: [
+          { therapist_id: 't2', busy_date: '2026-11-02', start_time: '10:00:00', duration_minutes: 30 },
+          { therapist_id: 't3', busy_date: '2026-11-02', start_time: '10:00:00', duration_minutes: 30 },
+          { therapist_id: null, busy_date: '2026-11-02', start_time: '10:30:00', duration_minutes: 30 },
+          { therapist_id: null, busy_date: '2026-11-02', start_time: '10:30:00', duration_minutes: 30 },
+        ],
+      },
+      people: [
+        { id: 'lead', service: { id: 's1', duration_minutes: 60 }, professional: { mode: 'any' } },
+      ],
+    }));
+    const day = result.find((d) => d.date === '2026-11-02');
+    expect(day.slots.find((s) => s.time24 === '10:00').isAvailable).toBe(true);
+  });
+});
