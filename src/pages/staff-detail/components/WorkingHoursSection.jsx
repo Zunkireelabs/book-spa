@@ -2,8 +2,10 @@ import React from 'react';
 import Icon from '../../../components/AppIcon';
 import TimeBoxInput from '../../../components/ui/TimeBoxInput';
 
-// Storage/display only — see migration-275's header comment: deliberately
-// not wired into booking-slot availability/conflict checks.
+// Display only. These hours and breaks are shown on the staff calendar as
+// per-column shading (see calendar/CalendarGrid's roster overlay, resolved via
+// services/rosterSchedule), but they are still NOT read by booking-slot
+// availability or conflict checks — a booking can be made outside them.
 const WorkingHoursSection = ({ rows, onChange }) => {
   const updateRow = (dayOfWeek, patch) => {
     onChange(rows.map(r => r.dayOfWeek === dayOfWeek ? { ...r, ...patch } : r));

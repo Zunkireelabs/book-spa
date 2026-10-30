@@ -6,6 +6,7 @@ import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
+import { useOrg } from '../../contexts/OrgContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
 import NotificationBell from '../../components/ui/NotificationBell';
 import { fetchBookings, fetchTherapists, updateBookingStatus, fetchPendingDiscounts } from '../../services/api';
@@ -27,6 +28,12 @@ import ServiceManagementPanel from './components/MasterData/ServiceManagementPan
 import CategoryManagementPanel from './components/MasterData/CategoryManagementPanel';
 import PaymentMethodsPanel from './components/MasterData/PaymentMethodsPanel';
 import BookingSettingsPanel from './components/MasterData/BookingSettingsPanel';
+import CalendarSettingsPanel from './components/MasterData/CalendarSettingsPanel';
+import RosterPanel from './components/MasterData/RosterPanel';
+import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
+import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCapacityPanel';
+import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
+import BranchPhotoPanel from './components/MasterData/BranchPhotoPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
@@ -47,6 +54,7 @@ import DiscountsPanel from './components/DiscountsPanel';
 import AttendanceReportPanel from './components/AttendanceReportPanel';
 import TransferReportPanel from './components/TransferReportPanel';
 import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
+import DueReportPanel from './components/Outstanding/DueReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import CustomerReferralsReportPanel from './components/Referrals/CustomerReferralsReportPanel';
 import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
@@ -73,6 +81,11 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 const BranchManagerDashboard = () => {
   const { profile, signOut, user } = useAuth();
   const { branchId, branchName, isOverall } = useBranch();
+  // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a
+  // staff member (check_branch_online_capacity() exempts bookings with a therapist_id).
+  // orgLoading matters because settings are null until the org loads — rendering on that
+  // would briefly show the panel to orgs that have staff selection on.
+  const { showStaffSelection, loading: orgLoading } = useOrg();
   const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
@@ -436,6 +449,7 @@ const BranchManagerDashboard = () => {
           userName={managerData.name}
           branchName={managerData.branch}
           onCollapseChange={setSidebarCollapsed}
+          collapsed={sidebarCollapsed}
         />
 
         <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'} transition-all duration-200 ${viewMode === 'calendar' ? 'h-screen overflow-hidden flex flex-col' : 'pb-20 lg:pb-0'}`}>
@@ -654,6 +668,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'attendance-report' && <AttendanceReportPanel branchId={branchId} />}
               {viewMode === 'transfer-report' && <TransferReportPanel />}
               {viewMode === 'outstanding' && <OutstandingReportPanel branchId={branchId} />}
+              {viewMode === 'due-report' && profile?.role === 'admin' && <DueReportPanel />}
               {viewMode === 'referrals' && <ReferralsReportPanel branchId={branchId} />}
               {viewMode === 'customer-referrals' && CUSTOMER_REFERRALS_ENABLED && <CustomerReferralsReportPanel branchId={branchId} />}
               {viewMode === 'referral-wallet' && CUSTOMER_REFERRALS_ENABLED && <ReferralWalletPanel branchId={branchId} />}
@@ -676,9 +691,33 @@ const BranchManagerDashboard = () => {
               {viewMode === 'services' && !isOverall && <ServiceManagementPanel />}
               {viewMode === 'categories' && !isOverall && <CategoryManagementPanel />}
               {viewMode === 'payment-methods' && profile?.role === 'admin' && <PaymentMethodsPanel />}
-              {viewMode === 'booking-settings' && profile?.role === 'admin' && <BookingSettingsPanel />}
+              {viewMode === 'booking-settings' && profile?.role === 'admin' && (
+                <div className="space-y-8">
+                  <BookingSettingsPanel />
+                  {!isOverall && !orgLoading ? (
+                    <>
+                      {!showStaffSelection && (
+                        <div className="border-t border-border pt-8">
+                          <OnlineBookingCapacityPanel branchId={branchId} />
+                        </div>
+                      )}
+                      <div className="border-t border-border pt-8">
+                        <AdvanceBookingWindowPanel branchId={branchId} />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="border-t border-border pt-8 font-body text-sm text-text-secondary">
+                      Select a specific branch to configure the online booking limit and advance booking window.
+                    </div>
+                  )}
+                </div>
+              )}
+              {viewMode === 'calendar-settings' && profile?.role === 'admin' && <CalendarSettingsPanel />}
               {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
+              {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
+              {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
+              {viewMode === 'branch-photo' && !isOverall && profile?.role === 'admin' && <BranchPhotoPanel branchId={branchId} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
               {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}

@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { dedupeTransfersByKey } from './transferDedup';
-import { renderTemplatePreview } from './api';
+import { renderTemplatePreview, submitGroupBooking } from './api';
+import { supabase } from '../lib/supabase';
 
 // Regression coverage for the getCalendarBookings dedup fix: a therapist transferred
 // out and back twice in the same viewed range must collapse to one calendar column,
@@ -134,5 +135,71 @@ describe('renderTemplatePreview with a layout', () => {
     const template = { subject: '', body: '{{org_name}}' };
     const result = renderTemplatePreview(template, 'Jane Doe', null);
     expect(result.body).toBe('Your Business');
+  });
+});
+
+describe('submitGroupBooking', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  // createBooking lives in this same module — vi.spyOn on the module namespace
+  // cannot intercept submitGroupBooking's own internal call to it (ES module
+  // bindings aren't rerouted through a spied namespace object for same-module
+  // calls). submitGroupBooking takes createBookingFn as an injectable seam
+  // (defaulting to the real createBooking for every real caller) specifically
+  // so tests can supply a stub here instead of hitting the network.
+  it('creates one row per person sequentially, sharing one bookingGroupId', async () => {
+    const calls = [];
+    const createBookingFn = vi.fn(async (args) => {
+      calls.push(args);
+      return { data: { bookingId: `booking-${calls.length}` }, error: null };
+    });
+    const result = await submitGroupBooking({
+      branchId: 'b1', orgSlug: 'nuad', date: '2026-11-02', startTime: '10:00',
+      leadContact: { name: 'Anish', email: 'a@x.com', phone: '9800000000', gender: 'male' },
+      people: [
+        { isLead: true, service: { id: 's1' }, therapistId: null },
+        { isLead: false, name: 'Guest 2', service: { id: 's2' }, therapistId: 't1' },
+      ],
+      createBookingFn,
+    });
+    expect(result.error).toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(calls[0].bookingGroupId).toBe(calls[1].bookingGroupId);
+    expect(calls[1].customerPhone).toBe(calls[0].customerPhone); // guest inherits lead phone
+  });
+
+  it('rolls back already-created rows and surfaces the failing person error on partial failure', async () => {
+    vi.spyOn(supabase, 'rpc').mockResolvedValue({ data: 1, error: null });
+    const createBookingFn = vi.fn()
+      .mockResolvedValueOnce({ data: { bookingId: 'booking-1' }, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'Room is full' } });
+    const result = await submitGroupBooking({
+      branchId: 'b1', orgSlug: 'nuad', date: '2026-11-02', startTime: '10:00',
+      leadContact: { name: 'Anish', email: 'a@x.com', phone: '9800000000' },
+      people: [
+        { isLead: true, service: { id: 's1' }, therapistId: null },
+        { isLead: false, name: 'Guest 2', service: { id: 's2' }, therapistId: null },
+      ],
+      createBookingFn,
+    });
+    expect(result.error.message).toContain('Room is full');
+    expect(supabase.rpc).toHaveBeenCalledWith('public_cancel_booking_group', expect.objectContaining({ p_booking_group_id: expect.any(String) }));
+  });
+
+  it('bypasses grouping entirely for a solo submission (no guests)', async () => {
+    const calls = [];
+    const createBookingFn = vi.fn(async (args) => {
+      calls.push(args);
+      return { data: { bookingId: 'booking-1' }, error: null };
+    });
+    const result = await submitGroupBooking({
+      branchId: 'b1', orgSlug: 'nuad', date: '2026-11-02', startTime: '10:00',
+      leadContact: { name: 'Anish', email: 'a@x.com', phone: '9800000000' },
+      people: [{ isLead: true, service: { id: 's1' }, therapistId: null }],
+      createBookingFn,
+    });
+    expect(result.error).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].bookingGroupId).toBeUndefined();
   });
 });

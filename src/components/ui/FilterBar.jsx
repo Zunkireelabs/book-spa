@@ -51,7 +51,7 @@ const FilterBar = ({
     || (isMobileCustomMode && dateRange ? 'Custom' : '');
 
   const meta = showMeta && (
-    <div className="flex items-center gap-2 ml-auto">
+    <div className="flex items-center gap-2 ml-auto flex-shrink-0">
       {resultCount && (
         <span className="text-sm text-gray-500 whitespace-nowrap">
           {resultCount.filtered} of {resultCount.total}
@@ -143,10 +143,14 @@ const FilterBar = ({
       {/* Row 2 — preset pills (wide desktop, lg+), date range + Apply, filter dropdowns.
           Below lg, only renders when in Custom mode or filters[] is non-empty. */}
       {hasFilterRow && (
+        // flex-wrap on every breakpoint (not lg:flex-nowrap + lg:overflow-x-auto) — an
+        // overflow-x:auto container forces overflow-y to compute to auto too (CSS
+        // overflow spec), which clips any dropdown's popover that opens below this row.
+        // Wrapping to a second line keeps every filter dropdown fully visible instead.
         <div className={`${showFilterRowMobile ? 'flex' : 'hidden lg:flex'} flex-wrap items-center gap-2 p-3`}>
           {/* Preset pill buttons — wide desktop only (lg+) */}
           {presets.length > 0 && (
-            <div className="hidden lg:flex flex-wrap items-center gap-2">
+            <div className="hidden lg:flex flex-nowrap flex-shrink-0 items-center gap-2">
               {presets.map((p) => (
                 <button
                   key={p.label}
@@ -173,29 +177,29 @@ const FilterBar = ({
               Below lg: only shown when the user picked "Custom" in the dropdown
                         or a custom range is already applied. */}
           {dateRange && (
-            <div className={`${isMobileCustomMode ? 'flex' : 'hidden'} lg:flex items-center flex-wrap gap-1 sm:gap-2 flex-1 min-w-0`}>
+            <div className={`${isMobileCustomMode ? 'flex' : 'hidden'} lg:flex items-center flex-wrap lg:flex-nowrap gap-1 sm:gap-2 flex-1 lg:flex-none min-w-0`}>
               <input
                 type="date"
                 value={dateRange.from}
                 max={dateRange.max}
                 onChange={(e) => dateRange.onFromChange(e.target.value)}
-                className="h-9 px-1.5 sm:px-2 text-xs sm:text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary min-w-0 flex-shrink"
+                className="h-9 px-1.5 sm:px-2 text-xs sm:text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary min-w-0 lg:flex-shrink-0"
               />
-              <span className="hidden sm:inline text-xs text-gray-400">to</span>
-              <span className="sm:hidden text-xs text-gray-400">–</span>
+              <span className="hidden sm:inline text-xs text-gray-400 flex-shrink-0">to</span>
+              <span className="sm:hidden text-xs text-gray-400 flex-shrink-0">–</span>
               <input
                 type="date"
                 value={dateRange.to}
                 max={dateRange.max}
                 onChange={(e) => dateRange.onToChange(e.target.value)}
-                className="h-9 px-1.5 sm:px-2 text-xs sm:text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary min-w-0 flex-shrink"
+                className="h-9 px-1.5 sm:px-2 text-xs sm:text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary min-w-0 lg:flex-shrink-0"
               />
               {dateRange.onApply && (
                 <button
                   type="button"
                   onClick={dateRange.onApply}
                   disabled={dateRange.applyDisabled}
-                  className={`px-2 sm:px-3 h-9 rounded-md text-xs sm:text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`px-2 sm:px-3 h-9 rounded-md text-xs sm:text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap lg:flex-shrink-0 ${
                     dateRange.applyActive
                       ? 'bg-primary text-white'
                       : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -209,13 +213,14 @@ const FilterBar = ({
 
           {/* Filter Dropdowns */}
           {filters.map((filter, index) => (
-            <CustomSelect
-              key={index}
-              value={filter.value}
-              onChange={filter.onChange}
-              options={filter.options}
-              size="sm"
-            />
+            <div key={index} className="flex-shrink-0">
+              <CustomSelect
+                value={filter.value}
+                onChange={filter.onChange}
+                options={filter.options}
+                size="sm"
+              />
+            </div>
           ))}
 
           {meta}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import CustomerHeader from '../../components/ui/CustomerHeader';
+import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
@@ -15,13 +16,16 @@ import BranchGate from './components/BranchGate';
 import SummaryCard from './components/SummaryCard';
 import MobileBookingBar from './components/MobileBookingBar';
 import BookingView from './components/BookingView';
+import GroupEntryChoice from './components/BookingView/GroupEntryChoice';
+import GroupBookingView from './components/GroupBookingView';
+import { createLeadPerson } from './utils/groupBooking';
+import { GROUP_BOOKING_ENABLED } from '../../lib/featureFlags';
 import './zennly-theme.css';
 
-// Profile-page-style alternative to the default step-wizard customer booking flow
-// (CustomerBookingFlowV2), gated behind organizations.settings.use_provider_profile_layout.
-// Reuses the v1 DateTimeSelection/CustomerForm/BookingConfirmation/BookingSuccess
-// components unchanged — only the surrounding page chrome (hero, scroll-spy category
-// pills, full-page booking view) is net-new.
+// The customer booking flow for every tenant: scroll-spy category pills + hero +
+// full-page booking drawer. Reuses the v1 DateTimeSelection/CustomerForm/
+// BookingConfirmation/BookingSuccess components unchanged — only the surrounding
+// page chrome (hero, scroll-spy category pills, full-page booking view) is net-new.
 const ProviderProfileFlow = () => {
   const { orgSlug } = useParams();
   const {
@@ -49,7 +53,11 @@ const ProviderProfileFlow = () => {
   // "untouched" (null), which plain boolean/undefined can't express.
   const [selectedProfessional, setSelectedProfessional] = useState(null);
   const [selectedDateTime, setSelectedDateTime] = useState({ date: '', time: '' });
+  const [genderPreference, setGenderPreference] = useState('no-preference');
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [entryChoiceOpen, setEntryChoiceOpen] = useState(false);
+  const [groupModeOpen, setGroupModeOpen] = useState(false);
+  const [groupPeople, setGroupPeople] = useState(() => [createLeadPerson()]);
   const [bookingData, setBookingData] = useState(null);
   const [customerInfo, setCustomerInfo] = useState({
     firstName: '',
@@ -91,7 +99,17 @@ const ProviderProfileFlow = () => {
       // Auto-select only when unambiguous. Two or more branches show BranchGate
       // first instead — silently picking data[0] let a customer book the wrong
       // location on a multi-branch org with no way to tell.
-      if (data?.length === 1) setSelectedBranch(data[0]);
+      if (data?.length === 1) {
+        setSelectedBranch(data[0]);
+        // Same "choice first" behavior as the explicit BranchGate pick below — a
+        // single-branch tenant has no gate screen to hang the prompt off, so it
+        // fires here instead, once, right after the auto-select resolves (this
+        // effect only re-runs on orgId change, not on every render).
+        if (GROUP_BOOKING_ENABLED) {
+          setEntryChoiceOpen(true);
+          window.history.pushState({ providerBooking: true }, '');
+        }
+      }
       setBranchesLoaded(true);
     });
   }, [orgId]);
@@ -105,13 +123,35 @@ const ProviderProfileFlow = () => {
     setSelectedServices([]);
     setSelectedProfessional(null);
     setSelectedDateTime({ date: '', time: '' });
+    setGenderPreference('no-preference');
   }, []);
 
   // Pushes history so browser Back returns here instead of leaving the site — the
-  // gate (and Back) is now the only way to change branch.
+  // gate (and Back) is now the only way to change branch. When group booking is
+  // live, also surfaces the solo-vs-group choice immediately after picking a
+  // branch rather than waiting for the customer to browse services and hit a Book
+  // CTA first — Anish wants the choice to be the first thing shown post-branch-
+  // select, not something gated behind picking a service.
+  //
+  // Single history entry, not two: picking a branch and seeing the choice screen
+  // is one combined action from the customer's point of view, so X / Back on the
+  // choice screen must undo both and return straight to BranchGate ("the
+  // beginning"), not land on the profile/services page as an intermediate step.
+  // closeBooking()'s `providerBooking` check still does a single history.back()
+  // either way — the state object itself just carries both flags now, so popping
+  // it lands on the pre-selection (null) state in one step, and popstate's own
+  // `branches.length > 1 && !state.providerBranch` check then re-shows the gate.
+  // Single-branch auto-select gets the identical prompt (branches-fetch effect
+  // below) but pushes only `providerBooking` — there's no gate screen to return to
+  // there, so X there correctly lands on the profile page instead.
   const handleBranchGateSelect = useCallback((branch) => {
     handleBranchSelect(branch);
-    window.history.pushState({ providerBranch: true }, '');
+    if (GROUP_BOOKING_ENABLED) {
+      setEntryChoiceOpen(true);
+      window.history.pushState({ providerBranch: true, providerBooking: true }, '');
+    } else {
+      window.history.pushState({ providerBranch: true }, '');
+    }
   }, [handleBranchSelect]);
 
   useEffect(() => {
@@ -144,6 +184,7 @@ const ProviderProfileFlow = () => {
     setSelectedServices([]);
     setSelectedProfessional(null);
     setSelectedDateTime({ date: '', time: '' });
+    setGenderPreference('no-preference');
   }, []);
 
   const handleProfessionalSelect = useCallback((professional) => {
@@ -164,12 +205,38 @@ const ProviderProfileFlow = () => {
   // empty id list, which the service layer turns into `null` → the full bookable
   // roster, so Team shows everyone on first load. Cancelled flag so a fast service
   // switch can't land a stale list.
+  //
+  // showStaffSelection alone is NOT the right gate here: it only controls whether a
+  // SOLO customer is offered a staff-picker on the profile page -- group booking's
+  // per-person professional step needs real therapist data regardless of that
+  // tenant setting (nuad-thai-spa has it off, and group booking still needs the
+  // roster to compute per-person availability; without this, computeGroupSlots sees
+  // zero eligible therapists and correctly-but-wrongly marks every slot
+  // unavailable). Fetch whenever either the solo staff-picker is on, or group mode
+  // is in use.
+  // Group mode's roster must cover every guest's own picked service, not just the
+  // lead's solo cart — guests can (and do) pick services outside selectedServices.
+  // Keyed as a joined string so the effect below only refetches when the actual set
+  // of guest service ids changes, not on every groupPeople update (name edits,
+  // professional picks, etc.).
+  const groupServiceIdsKey = useMemo(
+    () => [...new Set(groupPeople.map((p) => p.service?.id).filter(Boolean))].sort().join(','),
+    [groupPeople],
+  );
+
   useEffect(() => {
-    if (!showStaffSelection || !orgSlug || !selectedBranch?.id) return undefined;
+    if ((!showStaffSelection && !groupModeOpen) || !orgSlug || !selectedBranch?.id) return undefined;
     let cancelled = false;
     setLoadingTherapists(true);
     setTherapistsError(null);
-    fetchBookableTherapists(orgSlug, selectedBranch.id, selectedServices.map((s) => s.id)).then(({ data, error }) => {
+    const serviceIds = groupModeOpen
+      ? groupServiceIdsKey.split(',').filter(Boolean)
+      : selectedServices.map((s) => s.id);
+    // forGroupBooking (migration-305) bypasses the tenant's show_staff_selection
+    // requirement server-side when fetching for group mode — that flag only governs
+    // whether a solo customer is offered a staff-picker, unrelated to group booking's
+    // need for the roster to compute per-person availability (see the comment above).
+    fetchBookableTherapists(orgSlug, selectedBranch.id, serviceIds, groupModeOpen).then(({ data, error }) => {
       if (cancelled) return;
       if (error) {
         setTherapistsError(error);
@@ -180,7 +247,7 @@ const ProviderProfileFlow = () => {
       setLoadingTherapists(false);
     });
     return () => { cancelled = true; };
-  }, [showStaffSelection, orgSlug, selectedBranch?.id, selectedServices, fetchNonce]);
+  }, [showStaffSelection, groupModeOpen, orgSlug, selectedBranch?.id, selectedServices, groupServiceIdsKey, fetchNonce]);
 
   // Drops a specific pick once the (re-fetched) roster no longer includes them —
   // e.g. a newly-ticked service they can't perform. Guarded on loading/error: mid-fetch
@@ -200,19 +267,54 @@ const ProviderProfileFlow = () => {
   // otherwise leave the site entirely instead of returning to the profile — so opening
   // pushes a history entry and Back pops it.
   const openBooking = () => {
+    if (GROUP_BOOKING_ENABLED) setEntryChoiceOpen(true);
+    else setBookingOpen(true);
+    window.history.pushState({ providerBooking: true }, '');
+  };
+
+  // SummaryCard/MobileBookingBar's "Continue" only enables once a service is
+  // already ticked in the cart -- by that point the solo/group choice has already
+  // been asked and answered (right after branch select, GROUP_BOOKING_ENABLED),
+  // so re-asking it here would show the same "Select an option" screen twice for
+  // one visit. Goes straight to solo booking, same as openBooking() used to
+  // before the choice screen existed.
+  const continueSoloBooking = () => {
     setBookingOpen(true);
     window.history.pushState({ providerBooking: true }, '');
   };
 
+  const chooseSoloEntry = () => {
+    setEntryChoiceOpen(false);
+    // Solo booking has no "pick a service" step of its own -- that's this profile
+    // page's ServicesSection. Reaching this choice screen via the new persistent
+    // "Book" CTA (unconditional, unlike SummaryCard/MobileBookingBar) can land here
+    // with nothing selected yet; open BookingView only once there's something to
+    // book, otherwise just land back on the profile page to pick a service first.
+    if (selectedServices.length === 0) return;
+    setBookingOpen(true);
+  };
+
+  const chooseGroupEntry = () => {
+    setEntryChoiceOpen(false);
+    // Carry the service already selected on the profile page over to the lead, rather
+    // than silently emptying the cart the "Book group appointment" CTA was clicked
+    // from — v1 group booking caps everyone (including the lead) at one service each,
+    // so only the first already-selected service survives if more than one was picked.
+    setGroupPeople([{ ...createLeadPerson(), service: selectedServices[0] || null }]);
+    setGroupModeOpen(true);
+  };
+
   const closeBooking = () => {
     if (window.history.state?.providerBooking) window.history.back();
-    else setBookingOpen(false);
+    else { setBookingOpen(false); setEntryChoiceOpen(false); setGroupModeOpen(false); }
     scrollToTopInstant();
   };
 
   useEffect(() => {
     const onPopState = (e) => {
       setBookingOpen(false);
+      setEntryChoiceOpen(false);
+      setGroupModeOpen(false);
       // Popping back past the gate's pushed entry (state.providerBranch) lands on
       // the pre-selection entry (state null) — re-show the gate instead of leaving
       // the customer on services with no way back to it.
@@ -238,6 +340,27 @@ const ProviderProfileFlow = () => {
     setBookingOpen(false);
   };
 
+  // GroupBookingView owns its own date/time and people selections (not lifted here,
+  // same split as the rest of the group flow) — carried in the payload so BookingSuccess
+  // renders identically for solo and group without a second source of truth for either.
+  const handleGroupBookingComplete = ({ bookings, selectedDateTime: groupDateTime, people: groupedPeople, leadContact }) => {
+    setBookingData({
+      bookingId: bookings[0]?.booking_number,
+      // submitGroupBooking's loop pushes each created row in the same order it
+      // iterates `people`, so bookings[i] lines up positionally with
+      // groupedPeople[i] -- lets BookingSuccess show each person's own booking
+      // number instead of just the lead's.
+      groupBookings: groupedPeople.map((p, i) => ({ label: p.label, bookingNumber: bookings[i]?.booking_number })),
+      selectedBranch,
+      selectedServices: groupedPeople.map((p) => p.service).filter(Boolean),
+      selectedDateTime: groupDateTime,
+      customerInfo: leadContact,
+      bookingDate: new Date().toISOString(),
+      status: 'confirmed',
+    });
+    setGroupModeOpen(false);
+  };
+
   if (tenantError) {
     return (
       <div className="zn-scope min-h-screen bg-[var(--zn-background)] flex items-center justify-center">
@@ -261,6 +384,42 @@ const ProviderProfileFlow = () => {
     return <BookingSuccess bookingData={bookingData} orgSlug={orgSlug} onBookAnother={handleBookAnother} />;
   }
 
+  // entryChoiceOpen renders as a modal (below, layered over whichever of
+  // BranchGate/profile page is current) rather than its own full-page takeover —
+  // unlike BookingView/GroupBookingView, this screen is a quick either/or prompt,
+  // not a multi-step flow, so a lightweight overlay reads better than swapping the
+  // whole page out from under the customer.
+  const entryChoiceModal = entryChoiceOpen ? (
+    <GroupEntryChoice
+      onChooseSolo={chooseSoloEntry}
+      onChooseGroup={chooseGroupEntry}
+      onClose={closeBooking}
+    />
+  ) : null;
+
+  if (groupModeOpen) {
+    return (
+      <GroupBookingView
+        onClose={closeBooking}
+        orgSlug={orgSlug}
+        orgName={orgName}
+        logoUrl={logoUrl}
+        heroImageUrl={heroImageUrl}
+        selectedBranch={selectedBranch}
+        services={services}
+        people={groupPeople}
+        onPeopleChange={setGroupPeople}
+        therapists={therapists}
+        loadingTherapists={loadingTherapists}
+        therapistsError={therapistsError}
+        onRetryTherapists={() => setFetchNonce((n) => n + 1)}
+        showStaffSelection={showStaffSelection}
+        customerAccountId={customerProfile?.id}
+        onGroupBookingComplete={handleGroupBookingComplete}
+      />
+    );
+  }
+
   // Full-page takeover rather than an overlay: the profile page simply isn't rendered
   // while booking, so there's no scrim, z-index or scroll-locking to get wrong.
   if (bookingOpen) {
@@ -274,6 +433,8 @@ const ProviderProfileFlow = () => {
         onProfessionalSelect={handleProfessionalSelect}
         selectedDateTime={selectedDateTime}
         onDateTimeSelect={setSelectedDateTime}
+        genderPreference={genderPreference}
+        onGenderPreferenceChange={setGenderPreference}
         customerInfo={customerInfo}
         onCustomerInfoChange={setCustomerInfo}
         customerAccountId={customerProfile?.id}
@@ -298,22 +459,57 @@ const ProviderProfileFlow = () => {
     );
   }
 
-  if (branches.length > 1 && !selectedBranch) {
+  // Stays on BranchGate (as the modal's dimmed background) through the entry
+  // choice too, even though selectedBranch is technically already set by this
+  // point (handleBranchGateSelect sets it in the same tick as opening the modal,
+  // so services/therapists can start prefetching) — the customer hasn't actually
+  // left the branch-selection screen yet from their point of view, and shouldn't
+  // see the profile page flash in behind the modal they're about to answer.
+  if (branches.length > 1 && (!selectedBranch || entryChoiceOpen)) {
     return (
-      <BranchGate
-        orgName={orgName}
-        heroImageUrl={heroImageUrl}
-        logoUrl={logoUrl}
-        branches={branches}
-        onSelect={handleBranchGateSelect}
-      />
+      <>
+        {/* backdrop-filter on the modal's own scrim doesn't reliably composite in
+            every environment (confirmed: the hero photo is loaded, but zero of its
+            color shows through a blurred scrim) — blurring the background content
+            itself instead works everywhere, no backdrop compositing required. */}
+        <div className={entryChoiceOpen ? 'blur-sm pointer-events-none transition-[filter] duration-200' : 'transition-[filter] duration-200'}>
+          <BranchGate
+            orgName={orgName}
+            heroImageUrl={heroImageUrl}
+            logoUrl={logoUrl}
+            branches={branches}
+            onSelect={handleBranchGateSelect}
+          />
+        </div>
+        {entryChoiceModal}
+      </>
     );
   }
 
   return (
-    <div className="zn-scope min-h-screen bg-[var(--zn-background)]" style={{ paddingTop: 'var(--customer-header-h, 64px)' }}>
+    <div
+      className={`zn-scope min-h-screen bg-[var(--zn-background)] transition-[filter] duration-200 ${entryChoiceOpen ? 'blur-sm pointer-events-none' : ''}`}
+      style={{ paddingTop: 'var(--customer-header-h, 64px)' }}
+    >
+      {entryChoiceModal}
       <CustomerHeader branch={selectedBranch} containerClassName="relative max-w-7xl mx-auto px-4 sm:px-6" />
       <ProfileHero orgName={orgName} heroImageUrl={heroImageUrl} logoUrl={logoUrl} />
+
+      {/* Persistent "Book" entry, unconditional unlike SummaryCard/MobileBookingBar's
+          cart-gated CTA below -- lets a customer reach the solo-vs-group choice
+          screen before picking any service, matching Fresha's reference flow (the
+          choice comes first, not after a service is already in the cart). Only
+          needed while group booking exists as a second path; with the flag off,
+          openBooking() is solo-only anyway and the existing gated CTA is the one
+          entry point, unchanged. */}
+      {GROUP_BOOKING_ENABLED && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+          <Button variant="primary" onClick={openBooking} className="w-full sm:w-auto">
+            <Icon name="CalendarPlus" size={16} className="mr-2" />
+            Book
+          </Button>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_380px] pb-24 lg:pb-10">
         <div className="min-w-0">
@@ -342,7 +538,7 @@ const ProviderProfileFlow = () => {
             selectedServices={selectedServices}
             totalMinutes={totalMinutes}
             selectedProfessional={selectedProfessional}
-            onContinue={openBooking}
+            onContinue={continueSoloBooking}
             disabled={selectedServices.length === 0}
             stickyTop="calc(var(--customer-header-h, 64px) + 1.5rem)"
           />
@@ -353,7 +549,7 @@ const ProviderProfileFlow = () => {
         total={selectedServices.reduce((sum, s) => sum + Number(s.effective_price_npr ?? s.price_npr ?? 0), 0)}
         count={selectedServices.length}
         totalMinutes={totalMinutes}
-        onContinue={openBooking}
+        onContinue={continueSoloBooking}
         disabled={selectedServices.length === 0}
       />
 

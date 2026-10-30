@@ -77,6 +77,28 @@ manifest to fall out of sync.)
 `013` and a standalone `001` file never existed — `001` represents the base schema
 (`schema.sql` + `rls.sql`); `008` shipped as two files (`008a`, `008b`).
 
+### Version collisions
+
+Both scripts decide "already applied" from the **3-digit version only**, so if two branches pick
+the same number, the one that loses the race is skipped — the migration never ships, and the
+deploy still reports success. `scripts/lib/migration-ledger.sh` closes this: it compares the
+ledger's recorded `name` against the slug in the filename, and **fails** when a version is present
+under a different name.
+
+A file may acknowledge a known-safe collision with a header line starting
+`-- ledger-collision-ack:` explaining why the skip is correct; that downgrades the failure to a
+warning. Three files carry one today:
+
+| Version | Ledger | File | Why the skip is safe |
+|---------|--------|------|----------------------|
+| `289` | prod records `revoke-public-search-booking` (PR #415) | `migration-289-set-service-combo-components.sql` | Fully superseded by `296`, which `CREATE OR REPLACE`s the same signature. Do **not** renumber above 296 — it would re-apply the older definition after 296 and drop `default_same_room`. |
+| `133` | stage records `phone-e164` (now at `137`) | `migration-133-customer-duplicate-merge.sql` | Pre-renumbering, stage recorded this content as `135` (a ghost). Objects verified present in both databases. |
+| `134` | stage records `branch-online-capacity` (now at `138`) | `migration-134-public-customer-match.sql` | Same renumbering; stage recorded it as `136` (a ghost). Object verified present in both databases. |
+
+If you hit a new one, the fix is normally a free number above the highest applied version — not an
+ack. Ack only when a later migration genuinely supersedes the file, or the same change is already
+recorded under another version.
+
 ## Credentials / seed data (separate from migrations)
 
 Credential and seed syncs are **data**, not schema — they are **not** recorded in

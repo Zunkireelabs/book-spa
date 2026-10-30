@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../../components/AppIcon';
 import Select from '../../../../components/ui/Select';
 import Input from '../../../../components/ui/Input';
@@ -14,6 +14,105 @@ function addMinutesToTime(timeStr, minutes) {
   const wrapped = ((total % 1440) + 1440) % 1440;
   return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
 }
+
+// Free-typed 12h time (e.g. "9", "9:30", "9:30am", "21:15") -> "HH:MM", or null while
+// the text is incomplete/invalid so the field can just keep showing what was typed.
+function parseTimeInput(raw) {
+  const match = (raw || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (!match) return null;
+  let h = parseInt(match[1], 10);
+  const m = match[2] ? parseInt(match[2], 10) : 0;
+  const ampm = match[3]?.toLowerCase();
+  if (ampm) {
+    if (h < 1 || h > 12) return null;
+    if (ampm === 'pm' && h < 12) h += 12;
+    if (ampm === 'am' && h === 12) h = 0;
+  }
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
+  const h = Math.floor(i / 4);
+  const m = (i % 4) * 15;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+});
+
+// A 12-hour text+dropdown time field — native <input type="time"> renders its picker
+// (and typed value) in the OS/browser locale's format, which shows 24h regardless of
+// anything we set in HTML/CSS. This guarantees 12h display everywhere.
+const TimeField12h = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(value ? to12h(value).replace(' ', '') : '');
+  const ref = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    setText(value ? to12h(value).replace(' ', '') : '');
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (open && listRef.current) {
+      listRef.current.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'center' });
+    }
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="relative">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setText(raw);
+            const parsed = parseTimeInput(raw);
+            if (parsed) onChange(parsed);
+          }}
+          onFocus={(e) => { e.target.select(); setOpen(true); }}
+          onBlur={() => setText(value ? to12h(value).replace(' ', '') : '')}
+          placeholder="--:--"
+          autoComplete="off"
+          className="w-full pl-2 pr-7 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+        />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary spa-transition-fast"
+        >
+          <Icon name="ChevronDown" size={14} />
+        </button>
+      </div>
+      {open && (
+        <div
+          ref={listRef}
+          className="absolute left-0 top-full mt-1 w-28 max-h-48 overflow-y-auto bg-surface border border-border rounded-spa shadow-spa-elevated z-dropdown"
+        >
+          {TIME_OPTIONS.map((t) => (
+            <button
+              key={t}
+              type="button"
+              data-selected={t === value}
+              onClick={() => { onChange(t); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-sm font-body cursor-pointer hover:bg-primary/10 ${
+                t === value ? 'bg-primary/10 font-body-medium text-primary' : 'text-text-primary'
+              }`}
+            >
+              {to12h(t)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const TABS = [
   { id: 'details', label: 'Details' },
@@ -99,7 +198,7 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
 
   return (
     <div className="fixed inset-0 z-modal-overlay bg-black/50 flex items-center justify-center p-4" onClick={() => !submitting && onClose()}>
-      <div className="bg-surface rounded-spa-lg shadow-spa-modal max-w-md w-full p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface rounded-spa-lg shadow-spa-modal max-w-xl w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-heading font-heading-medium text-lg text-text-primary">Add Block</h3>
           <button onClick={() => !submitting && onClose()} className="p-1 rounded hover:bg-background">
@@ -172,42 +271,37 @@ const AddBlockModal = ({ branchId, slotInfo, therapists, rooms, onClose, onSucce
               onChange={setRoomId}
             />
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Date</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
+            <div className="space-y-1">
+              <label className="block font-body font-body-medium text-sm text-text-primary">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-2 py-1.5 rounded-spa border border-border bg-surface font-data font-data-normal text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
             </div>
 
-            <div className="space-y-1">
-              <label className="block font-body font-body-medium text-sm text-text-primary">Duration (minutes)</label>
-              <Input
-                type="number"
-                min="5"
-                step="5"
-                value={durationMinutes}
-                onChange={(e) => setDurationMinutes(e.target.value)}
-              />
-              {startTime && Number(durationMinutes) > 0 && (
-                <p className="text-xs text-text-secondary">
-                  Opens back up at <span className="font-data font-data-medium text-text-primary">{to12h(addMinutesToTime(startTime, Number(durationMinutes)))}</span>
-                </p>
-              )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Start Time</label>
+                <TimeField12h value={startTime} onChange={setStartTime} />
+              </div>
+              <div className="space-y-1">
+                <label className="block font-body font-body-medium text-sm text-text-primary">Duration (minutes)</label>
+                <Input
+                  type="number"
+                  min="5"
+                  step="5"
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(e.target.value)}
+                />
+              </div>
             </div>
+            {startTime && Number(durationMinutes) > 0 && (
+              <p className="text-xs text-text-secondary">
+                Opens back up at <span className="font-data font-data-medium text-text-primary">{to12h(addMinutesToTime(startTime, Number(durationMinutes)))}</span>
+              </p>
+            )}
 
             <div className="space-y-1">
               <label className="block font-body font-body-medium text-sm text-text-primary">Description (optional)</label>
