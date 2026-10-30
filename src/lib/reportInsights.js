@@ -93,6 +93,61 @@ export function businessHealthInsights(data, { staffLabel = 'staff', periodLabel
     .slice(0, REPORT_INSIGHT_MAX);
 }
 
+// ── Therapist performance ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const BUSY_LOW = 0.4;
+
+/**
+ * Two rules over get_report_therapist_performance (migration-339), at most one item each:
+ *  low_busy  therapists with working hours who were busy under 40% of them.
+ *  no_show   the therapist whose no-show rate is at least 2x the team's with at least 2 no-shows.
+ * Wording stays a suggestion; `why` lists the exact figures.
+ */
+export function therapistPerformanceInsights(data, { staffLabel = 'therapist', staffLabelPlural = 'therapists', periodLabel = '' } = {}) {
+  const rows = data?.current?.therapists;
+  const team = data?.current?.team;
+  if (!rows?.length || !team) return [];
+  const one = String(staffLabel).toLowerCase();
+  const many = String(staffLabelPlural).toLowerCase();
+  const source = sourceLine('From bookings, rosters and attendance', periodLabel, data);
+  const out = [];
+
+  const low = rows.filter((t) => Number(t.working_min) > 0 && t.busy != null && Number(t.busy) < BUSY_LOW).sort((a, b) => Number(a.busy) - Number(b.busy) || String(a.name).localeCompare(String(b.name)));
+  if (low.length) {
+    const branches = [...new Set(low.map((t) => t.branch_name))];
+    out.push({
+      rule: 'low_busy',
+      score: low.length,
+      headline: `${low.length} ${low.length === 1 ? one : many} ${low.length === 1 ? 'was' : 'were'} busy less than ${pct(BUSY_LOW)}% of their hours`,
+      detail: ` (${low[0].name} ${pct(low[0].busy)}%${low.length > 1 ? ` + ${low.length - 1} more` : ''}${branches.length === 1 && low.length > 1 ? `, all ${branches[0]}` : ''}). Moving a shift to a busier day or branch, or trimming it, may fit better.`,
+      why: low.map((t) => `${t.name}: ${pct(t.busy)}% (${hrs(t.booked_min)} of ${hrs(t.working_min)} h)`).join('; ') + '.',
+      source,
+      view: 'utilization',
+    });
+  }
+
+  const teamRate = Number(team.bookings) > 0 ? Number(team.no_show) / Number(team.bookings) : 0;
+  const flagged = teamRate > 0
+    ? rows.filter((t) => Number(t.no_show) >= 2 && Number(t.bookings) > 0 && Number(t.no_show) / Number(t.bookings) >= 2 * teamRate)
+        .sort((a, b) => Number(b.no_show) / Number(b.bookings) - Number(a.no_show) / Number(a.bookings) || Number(b.no_show) - Number(a.no_show))
+    : [];
+  if (flagged.length) {
+    const t = flagged[0];
+    const rate = Number(t.no_show) / Number(t.bookings);
+    const pct1 = (v) => (Math.round(v * 1000) / 10).toLocaleString('en-IN');
+    out.push({
+      rule: 'no_show',
+      score: Number(t.no_show),
+      headline: `${t.name}'s no-show rate is ${pct1(rate)}%`,
+      detail: ` (${t.no_show} of ${t.bookings}), about ${Math.round((rate / teamRate) * 10) / 10}× the team's ${pct1(teamRate)}%. A day-before reminder for their bookings may help.`,
+      why: `${flagged.map((x) => `${x.name}: ${x.no_show} of ${x.bookings} bookings (${pct1(Number(x.no_show) / Number(x.bookings))}%)`).join('; ')}. Team: ${team.no_show} of ${team.bookings} (${pct1(teamRate)}%). The rule needs at least 2 no-shows and twice the team rate.`,
+      source,
+      view: null,
+    });
+  }
+  return out.slice(0, REPORT_INSIGHT_MAX); // fixed rule order: low_busy, then no_show
+}
+
 // ── Money owed ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; // fixed names: some ICU builds print "Sept"

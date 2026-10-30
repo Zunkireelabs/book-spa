@@ -29,15 +29,16 @@ function formatPrettyDate(d) {
   return new Date(y, m - 1, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack }) => {
+const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, initialRange = null, reportRow = null, onNeedsClosing = null, backLabel = 'Back to Performance' }) => {
   const today = getTodayISO();
 
   const [activePreset, setActivePreset] = useState('weekly');
-  const [mode, setMode] = useState('preset'); // 'preset' | 'custom'
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [appliedFrom, setAppliedFrom] = useState('');
-  const [appliedTo, setAppliedTo] = useState('');
+  // initialRange ({ from, to }) opens the view on the caller's period (e.g. a report) instead of the Week preset.
+  const [mode, setMode] = useState(initialRange?.from ? 'custom' : 'preset'); // 'preset' | 'custom'
+  const [customFrom, setCustomFrom] = useState(initialRange?.from || '');
+  const [customTo, setCustomTo] = useState(initialRange?.to || '');
+  const [appliedFrom, setAppliedFrom] = useState(initialRange?.from || '');
+  const [appliedTo, setAppliedTo] = useState(initialRange?.to || '');
   const [activeTab, setActiveTab] = useState('overview');
 
   // The single source of truth every tab derives from — changing this changes every tab's data,
@@ -78,7 +79,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack }) =
             className="inline-flex items-center gap-1 mb-2 font-body font-body-medium text-sm text-text-secondary hover:text-text-primary spa-transition-fast"
           >
             <Icon name="ChevronLeft" size={16} />
-            <span>Back to Performance</span>
+            <span>{backLabel}</span>
           </button>
           <h2 className="font-heading font-heading-semibold text-xl text-text-primary truncate">{therapistName}</h2>
           <p className="font-body text-sm text-text-secondary">
@@ -127,7 +128,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack }) =
       {/* Tab content — each tab fetches its own data for {therapistId, branchId, ...range} and
           refetches whenever the period above changes. */}
       <div>
-        {activeTab === 'overview' && <OverviewTab therapistId={therapistId} branchId={branchId} range={range} />}
+        {activeTab === 'overview' && <OverviewTab therapistId={therapistId} branchId={branchId} range={range} reportRow={reportRow} onNeedsClosing={onNeedsClosing} />}
         {activeTab === 'customers' && <CustomersTab therapistId={therapistId} branchId={branchId} range={range} />}
         {activeTab === 'services' && <ServicesTab therapistId={therapistId} branchId={branchId} range={range} />}
         {activeTab === 'attendance' && <AttendanceTab therapistId={therapistId} branchId={branchId} range={range} />}

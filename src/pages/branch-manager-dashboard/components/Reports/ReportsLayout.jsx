@@ -9,6 +9,7 @@ import AreaLayout, { AreaPage, menuRow } from '../Area/AreaLayout';
 import { START_HERE, fillLabels, getReportByView, getReportTabs, canOpenReport, getVisibleReports, getVisibleGroups, migrateFavourites } from './reportRegistry';
 import BusinessHealthReport from './BusinessHealthReport';
 import MoneyOwedReport from './MoneyOwedReport';
+import TherapistPerformanceReport from './TherapistPerformanceReport';
 import { useBusinessHealth } from './useBusinessHealth';
 import { DeltaChip, PeriodPicker } from './ReportFrame';
 import { buildTiles, num, isEmptyPeriod, hasPreviousData } from './businessHealthView';
@@ -221,9 +222,9 @@ const ReportsLayout = ({ view, renderReport }) => {
     if (report.status === 'live') {
       if (!allowed) return <p className="py-12 text-center text-sm text-text-secondary">This report isn't available for your role.</p>;
       const common = { reopen, onBack: openHome, onHome: openHome, onOpenView: (v) => go(v), isFavourite: favs.includes(report.id), onToggleFav: () => toggleFav(report.id) };
-      return report.id === 'money-owed'
-        ? <MoneyOwedReport {...common} />
-        : <BusinessHealthReport periodId={periodId} onPeriod={setPeriod} custom={custom} onCustom={setCustom} {...common} />;
+      if (report.id === 'money-owed') return <MoneyOwedReport {...common} />;
+      if (report.id === 'staff-performance') return <TherapistPerformanceReport periodId={periodId} onPeriod={setPeriod} custom={custom} onCustom={setCustom} {...common} />;
+      return <BusinessHealthReport periodId={periodId} onPeriod={setPeriod} custom={custom} onCustom={setCustom} {...common} />;
     }
     const tabs = getReportTabs(report, role);
     return (

@@ -40,7 +40,7 @@ export const REPORTS = [
     ] },
   { id: 'campaigns-messages', view: 'campaigns-messages', status: 'soon', title: 'Campaigns & messages', subtitle: 'Messages sent, bookings within 7 days after', icon: 'MessageSquare', group: 'customers', roles: STAFF_UP, keywords: 'outreach sms email' },
 
-  { id: 'staff-performance', view: 'performance', status: 'legacy', title: '{staff} performance', subtitle: 'Revenue, bookings, rebook, no-show, busy %', icon: 'TrendingUp', group: 'team', roles: STAFF_UP, keywords: 'ranking therapist productivity' },
+  { id: 'staff-performance', view: 'performance', status: 'live', title: '{staff} performance', subtitle: 'Service sales, rebook, no-show, busy %, score', icon: 'TrendingUp', group: 'team', roles: STAFF_UP, keywords: 'ranking therapist productivity' },
   { id: 'utilization', view: 'utilization', status: 'soon', title: 'Utilization', subtitle: 'Booked vs working hours, {staffs} and rooms', icon: 'Gauge', group: 'team', roles: STAFF_UP, keywords: 'busy hours idle' },
   { id: 'commission-payroll', view: 'commission-payroll', status: 'soon', title: 'Commission & payroll', subtitle: 'Earned vs paid, per person and run', icon: 'Wallet', group: 'team', roles: STAFF_UP, keywords: 'salary earned paid' },
   { id: 'attendance', view: 'attendance-report', status: 'legacy', title: 'Attendance', subtitle: 'Presence, leave, late. Table or calendar', icon: 'CalendarCheck', group: 'team', roles: STAFF_UP, keywords: 'presence leave who was in',

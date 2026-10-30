@@ -11,8 +11,8 @@ describe('registry shape', () => {
     expect(REPORT_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Sales & money', 'Customers', 'Team', 'Products & prepaid']);
     expect(REPORTS.every((r) => REPORT_GROUPS.some((g) => g.id === r.group))).toBe(true);
   });
-  it('Business health and Money owed are live; ids and views are unique', () => {
-    expect(REPORTS.filter((r) => r.status === 'live').map((r) => r.id)).toEqual(['business-health', 'money-owed']);
+  it('Business health, Money owed and Therapist performance are live; ids and views are unique', () => {
+    expect(REPORTS.filter((r) => r.status === 'live').map((r) => r.id)).toEqual(['business-health', 'money-owed', 'staff-performance']);
     expect(new Set(REPORTS.map((r) => r.id)).size).toBe(17);
     expect(new Set(REPORTS.map((r) => r.view)).size).toBe(17);
   });
@@ -52,6 +52,16 @@ describe('roles', () => {
       expect(canOpenReport(r, 'admin', view)).toBe(true);
       expect(canOpenReport(r, 'staff', view)).toBe(false);
     }
+  });
+});
+
+describe('Therapist performance', () => {
+  it('the old performance view opens the live report, for manager/admin/admin_viewer only', () => {
+    const r = getReportByView('performance');
+    expect(r.id).toBe('staff-performance');
+    expect(r.status).toBe('live');
+    for (const role of ['manager', 'admin', 'admin_viewer']) expect(canOpenReport(r, role, 'performance')).toBe(true);
+    expect(canOpenReport(r, 'staff', 'performance')).toBe(false);
   });
 });
 

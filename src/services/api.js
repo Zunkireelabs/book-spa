@@ -68,6 +68,39 @@ function resolveBranchId(branchId) {
   return 'b0000000-0000-0000-0000-000000000001';
 }
 
+// Whose opening hours a therapist drill-down uses. A real branch scope = that branch; the Overall sentinel (every branch) has no hours of its
+// own, so it falls back to the therapist's home branch.
+async function hoursBranchOf(branchId, therapistId) {
+  if (!isOverallBranch(branchId)) return resolveBranchId(branchId);
+  const { data } = await supabase.from('therapists').select('branch_id').eq('id', therapistId).single();
+  return data?.branch_id || resolveBranchId(branchId);
+}
+
+// One therapist's bookings in a period, the way the Performance report counts them: the ones they are on through booking_therapists (a combo
+// has several), else bookings.therapist_id. Each row carries `share` = 1 / therapists on it, so money can be split equally like the report does.
+async function fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns, statuses = null }) {
+  const { data: links, error: lErr } = await supabase.from('booking_therapists').select('booking_id').eq('therapist_id', therapistId);
+  if (lErr) throw lErr;
+  const ids = [...new Set((links || []).map((l) => l.booking_id))];
+  let q = supabase
+    .from('bookings')
+    .select(`${columns}, therapist_id, booking_therapists(therapist_id)`)
+    .gte('date', startDate)
+    .lte('date', endDate)
+    .or(ids.length ? `therapist_id.eq.${therapistId},id.in.(${ids.join(',')})` : `therapist_id.eq.${therapistId}`);
+  if (statuses) q = q.in('status', statuses);
+  q = withBranch(q, branchId);
+  const { data, error } = await q;
+  if (error) throw error;
+  const out = [];
+  for (const b of data || []) {
+    const on = (b.booking_therapists || []).map((t) => t.therapist_id);
+    const who = on.length ? on : [b.therapist_id];
+    if (who.includes(therapistId)) out.push({ ...b, share: 1 / who.length });
+  }
+  return out;
+}
+
 // Conditionally apply a branch_id equality filter to a Supabase query builder.
 // In the Overall view (sentinel branchId) the filter is omitted so org-wide RLS applies.
 // NOTE: never route the sentinel through resolveBranchId — it would coerce to a default branch.
@@ -409,6 +442,19 @@ export async function fetchBusinessHealth({ branchIds, from, to }) {
     return { data: data || {}, error: null };
   } catch (error) {
     console.error('[API] fetchBusinessHealth error:', error.message);
+    return { data: {}, error };
+  }
+}
+
+// Therapist performance in one call (get_report_therapist_performance, migration-339): current + previous period (per-therapist rows and a team
+// total that equals Business health), weekly sales, and one block per branch. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
+export async function fetchTherapistPerformance({ branchIds, from, to }) {
+  try {
+    const { data, error } = await supabase.rpc('get_report_therapist_performance', { p_branch_ids: branchIds, p_from: from, p_to: to });
+    if (error) throw error;
+    return { data: data || {}, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistPerformance error:', error.message);
     return { data: {}, error };
   }
 }
@@ -12149,19 +12195,11 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     const { data: branch, error: bErr } = await supabase
       .from('branches')
       .select('open_time, close_time')
-      .eq('id', resolveBranchId(branchId))
+      .eq('id', await hoursBranchOf(branchId, therapistId))
       .single();
     if (bErr) throw bErr;
     const dayWindowMinutes = timeToMinutes(branch.close_time) - timeToMinutes(branch.open_time);
 
-    let bookingsQuery = supabase
-      .from('bookings')
-      .select('status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime')
-      .eq('therapist_id', therapistId)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .in('status', ['Confirmed', 'In-Progress', 'Completed']);
-    bookingsQuery = withBranch(bookingsQuery, branchId);
     let attendanceQuery = supabase
       .from('therapist_attendance')
       .select('status, check_in_time, check_out_time')
@@ -12170,14 +12208,32 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
       .lte('date', endDate);
     attendanceQuery = withBranch(attendanceQuery, branchId);
 
-    const [bookingsResult, attendanceResult] = await Promise.all([bookingsQuery, attendanceQuery]);
-    if (bookingsResult.error) throw bookingsResult.error;
-    const bookings = bookingsResult.data || [];
+    const [bookingRows, attendanceResult] = await Promise.all([
+      fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns: 'status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime, end_datetime, cancellation_reason' }),
+      attendanceQuery,
+    ]);
+    const allBookings = bookingRows.map((b) => ({ ...b, final_amount: (Number(b.final_amount) || 0) * b.share })); // a combo's price is split equally
+    const bookings = allBookings.filter(b => ['Confirmed', 'In-Progress', 'Completed'].includes(b.status));
     const attendanceRows = (!attendanceResult.error && attendanceResult.data) || [];
 
     const metrics = computeTherapistMetrics(bookings, attendanceRows, dayWindowMinutes, daysInPeriodInclusive(startDate, endDate));
 
-    return { data: { ...metrics, periodStart: startDate, periodEnd: endDate }, error: null };
+    // The same bookings, split by how they ended. "Not closed yet" = Pending / Confirmed / In-Progress whose end time has passed (nobody
+    // marked them Completed or No Show); future ones are not counted. Service sales = Completed at final price (the report row's rule).
+    const nowMs = Date.now();
+    const statusSplit = { completed: 0, noShow: 0, cancelled: 0, notClosed: 0 };
+    for (const b of allBookings) {
+      if (b.status === 'Completed') statusSplit.completed += 1;
+      else if (b.status === 'No Show' || isNoShow(b)) statusSplit.noShow += 1;
+      else if (b.status === 'Cancelled') statusSplit.cancelled += 1;
+      else if (b.end_datetime && new Date(b.end_datetime).getTime() <= nowMs) statusSplit.notClosed += 1;
+    }
+    const serviceSales = bookings.filter(b => b.status === 'Completed').reduce((sum, b) => sum + (Number(b.final_amount) || 0), 0);
+
+    // No attendance rows = no worked hours to report. computeTherapistMetrics falls back to period x branch hours for the old table; here that
+    // would be invented, so worked time and "busy while clocked in" are left out (null) instead.
+    const noAttendance = attendanceRows.length === 0;
+    return { data: { ...metrics, ...(noAttendance ? { workedHours: null, utilizationRate: null } : {}), serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
     console.error('[API] getTherapistOverview error:', error.message);
     return { data: null, error };
@@ -12202,19 +12258,9 @@ export async function getTherapistCustomerHistory({ branchId, therapistId, fromD
 
     const statuses = includeMissedCancelled ? ['Completed', 'Cancelled', 'No Show'] : ['Completed'];
 
-    let query = supabase
-      .from('bookings')
-      .select('id, customer_id, customer_name, customer_phone, service_name_snapshot, date, start_time, service_duration_snapshot, status, cancellation_reason')
-      .eq('therapist_id', therapistId)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .in('status', statuses)
-      .order('date', { ascending: false })
-      .order('start_time', { ascending: false });
-    query = withBranch(query, branchId);
-
-    const { data: bookings, error } = await query;
-    if (error) throw error;
+    const bookings = (await fetchTherapistBookings({ branchId, therapistId, startDate, endDate, statuses,
+      columns: 'id, customer_id, customer_name, customer_phone, service_name_snapshot, date, start_time, service_duration_snapshot, status, cancellation_reason' }))
+      .sort((x, y) => (y.date.localeCompare(x.date)) || String(y.start_time || '').localeCompare(String(x.start_time || '')));
     const rows = bookings || [];
 
     // For every distinct customer_id present, find their earliest org-wide Completed booking
@@ -12309,17 +12355,9 @@ export async function getTherapistServiceBreakdown({ branchId, therapistId, from
     const endDate = toDate || today;
     const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
 
-    let query = supabase
-      .from('bookings')
-      .select('service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot, cancellation_reason')
-      .eq('therapist_id', therapistId)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .in('status', ['Completed', 'Cancelled', 'No Show']);
-    query = withBranch(query, branchId);
-
-    const { data: bookings, error } = await query;
-    if (error) throw error;
+    const bookings = (await fetchTherapistBookings({ branchId, therapistId, startDate, endDate, statuses: ['Completed', 'Cancelled', 'No Show'],
+      columns: 'service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot, cancellation_reason' }))
+      .map((b) => ({ ...b, final_amount: (Number(b.final_amount) || 0) * b.share }));
 
     const byService = {};
     for (const b of (bookings || [])) {
@@ -12330,7 +12368,7 @@ export async function getTherapistServiceBreakdown({ branchId, therapistId, from
       const s = byService[name];
       if (b.status === 'Completed') {
         s.completed += 1;
-        if (b.payment_status === 'paid') s.revenue += Number(b.final_amount) || 0;
+        s.revenue += Number(b.final_amount) || 0; // service sales: Completed at final price, paid or not (same rule as the Performance report)
         if (b.service_duration_snapshot) s._durations.push(b.service_duration_snapshot);
       } else if (isNoShow(b)) {
         // Must be checked before the plain-Cancelled branch below — a No-Show
@@ -12382,7 +12420,7 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
     const { data: branch, error: bErr } = await supabase
       .from('branches')
       .select('open_time, close_time')
-      .eq('id', resolveBranchId(branchId))
+      .eq('id', await hoursBranchOf(branchId, therapistId))
       .single();
     if (bErr) throw bErr;
 

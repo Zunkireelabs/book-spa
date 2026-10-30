@@ -76,6 +76,8 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-165 | Sadin | low | Local DB: 5 leftover ZZDemo therapists (26 Oct) with bookings; add to a cleanup script and remove |
 | ZNLY-166 | Sadin | medium | v36-dashboard.sql fails ROOM_AT_CAPACITY while the ZZToday seed is loaded; make the test seed-proof |
 | ZNLY-167 | Sadin | medium | Dashboard "revenue" counts advance payments; align with Reports Sales (earned) or relabel Takings (with ZNLY-162) |
+| ZNLY-169 | Sadin | medium | Therapist Full breakdown (TherapistDetailView) still uses the old revenue rule + red utilization; align with Reports Sales (earned) |
+| ZNLY-170 | Sadin | medium | Therapist inner page UI redesign (rated 6/10): mockup first, after the V37c commit |
 
 ## In review / on stage
 

@@ -82,10 +82,10 @@ const ServicesTab = ({ therapistId, branchId, range }) => {
                   <span className="font-body font-body-medium text-sm text-text-primary truncate block max-w-[220px]">{s.serviceName}</span>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <span className="font-data font-data-normal text-sm text-success">{s.completed}</span>
+                  <span className={`font-data font-data-normal text-sm ${s.completed > 0 ? 'text-success' : 'text-text-tertiary'}`}>{s.completed}</span>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <span className="font-data font-data-normal text-sm text-error">{s.cancelled}</span>
+                  <span className={`font-data font-data-normal text-sm ${s.cancelled > 0 ? 'text-error' : 'text-text-tertiary'}`}>{s.cancelled}</span>
                 </td>
                 <td className="px-4 py-3 text-center">
                   <span className="font-data font-data-normal text-sm text-text-secondary">{s.missed}</span>
@@ -111,8 +111,8 @@ const ServicesTab = ({ therapistId, branchId, range }) => {
               <span className="font-data font-data-normal text-sm text-text-primary flex-shrink-0">{formatNPR(s.revenue)}</span>
             </div>
             <div className="flex items-center gap-3 text-xs text-text-tertiary">
-              <span className="text-success">{s.completed} completed</span>
-              <span className="text-error">{s.cancelled} cancelled</span>
+              <span className={s.completed > 0 ? 'text-success' : ''}>{s.completed} completed</span>
+              <span className={s.cancelled > 0 ? 'text-error' : ''}>{s.cancelled} cancelled</span>
               <span>{s.missed} missed</span>
               <span>{s.avgDurationMinutes ? `${s.avgDurationMinutes} min avg` : '—'}</span>
             </div>
