@@ -87,7 +87,7 @@ const TherapistPerformanceReport = ({ periodId, onPeriod, custom, onCustom, reop
     return (
       <div className="content-scroll flex-1 min-h-0 overflow-y-auto">
         <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-10 max-w-[1400px]">
-          <TherapistDetailView therapistId={detail.id} therapistName={detail.name} branchId={detail.branchId} onBack={() => setDetail(null)} periodId={periodId} custom={custom} onNeedsClosing={() => onOpenView('money-owed')} />
+          <TherapistDetailView therapistId={detail.id} therapistName={detail.name} branchId={detail.branchId} onBack={() => setDetail(null)} periodId={periodId} custom={custom} onNeedsClosing={() => onOpenView('money-owed', { section: 'needs-closing', therapist: detail.id, tname: detail.name })} onMoneyOwed={() => onOpenView('money-owed')} />
         </div>
       </div>
     );

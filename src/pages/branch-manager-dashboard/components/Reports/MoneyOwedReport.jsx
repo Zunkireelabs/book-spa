@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from 'components/AppIcon';
 import PaymentModal from 'components/ui/PaymentModal';
 import { useAuth } from 'contexts/AuthContext';
@@ -39,6 +40,9 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
   const { profile } = useAuth();
   const { branchId, branches, isOverall, loading: branchLoading, switchBranch } = useBranch();
   const { staffLabel } = useIndustry();
+  const [params, setParams] = useSearchParams();
+  const onlyTherapist = params.get('therapist'); // set by a therapist's inner page: Needs closing shows only their bookings
+  const showAllTherapists = () => { const next = new URLSearchParams(params); next.delete('therapist'); next.delete('tname'); setParams(next); };
   const role = profile?.role;
   const canCollect = ['manager', 'admin'].includes(role); // admin_viewer is read-only
   const canAssign = role !== 'admin_viewer'; // same as the old Outstanding page
@@ -288,7 +292,7 @@ const MoneyOwedReport = ({ reopen, onBack, onHome, onOpenView, titleExtra, isFav
               {activeTab === 'staff' && staffTable()}
               {activeTab === 'responsible' && responsibleTable()}
             </div>
-            <NeedsClosingSection branchId={branchId} collapsible />
+            <NeedsClosingSection branchId={branchId} collapsible therapistId={onlyTherapist} therapistName={params.get('tname') || ''} onShowAll={showAllTherapists} />
             </>
             )}
           </>

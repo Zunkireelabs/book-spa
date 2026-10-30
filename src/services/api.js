@@ -459,6 +459,19 @@ export async function fetchTherapistPerformance({ branchIds, from, to }) {
   }
 }
 
+// The Customers tab of a therapist's inner page (get_therapist_customers, migration-340): one row per customer with the bookings they had with this therapist
+// in the period, sales, owed, "booked again" (339's rule, with whom), first visit, next booking and customer type. Manager/admin/admin_viewer only.
+export async function fetchTherapistCustomers({ therapistId, branchIds, from, to }) {
+  try {
+    const { data, error } = await supabase.rpc('get_therapist_customers', { p_therapist_id: therapistId, p_branch_ids: branchIds, p_from: from, p_to: to });
+    if (error) throw error;
+    return { data: data?.customers || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistCustomers error:', error.message);
+    return { data: [], error };
+  }
+}
+
 // Money owed in one call (get_report_money_owed, migration-338): rows, totals, age buckets, the total 30 days earlier, rollups by customer / branch /
 // staff. `asOf` null = now. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
 export async function fetchMoneyOwed({ branchIds, asOf = null }) {
@@ -1828,7 +1841,7 @@ export async function getNeedsClosing({ branchId, from, to } = {}) {
     const rows = await pageAllRows(() => {
       let query = supabase
         .from('bookings')
-        .select('id, booking_number, customer_id, customer_name, customer_phone, date, start_time, status, final_amount, service_name_snapshot, therapist_name_snapshot, is_locked, payments(amount), payment_refunds(amount)')
+        .select('id, booking_number, customer_id, customer_name, customer_phone, date, start_time, status, final_amount, service_name_snapshot, therapist_name_snapshot, therapist_id, booking_therapists(therapist_id), is_locked, payments(amount), payment_refunds(amount)')
         .in('status', ['Pending', 'Confirmed', 'In-Progress']) // In-Progress only matters when from a previous day (stale)
         .order('id');
       if (from) query = query.gte('date', from);
@@ -1839,7 +1852,7 @@ export async function getNeedsClosing({ branchId, from, to } = {}) {
     const shape = (b, extra) => ({
       bookingId: b.id, bookingNumber: b.booking_number, customerName: b.customer_name, customerId: b.customer_id, date: b.date,
       startTime: (b.start_time || '').slice(0, 5), serviceName: b.service_name_snapshot || '—', therapistName: b.therapist_name_snapshot || '—',
-      status: b.status, isLocked: !!b.is_locked, ...extra,
+      status: b.status, isLocked: !!b.is_locked, therapistIds: [...new Set([b.therapist_id, ...(b.booking_therapists || []).map((t) => t.therapist_id)].filter(Boolean))], ...extra,
     });
     const unclosed = m.unclosed.map((b) => shape(b, { atStake: b.money.atStake, stillInProgress: false }))
       .concat(m.staleInProgress.map((b) => shape(b, { atStake: 0, stillInProgress: true }))) // its money is already in Outstanding
@@ -12217,7 +12230,7 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     attendanceQuery = withBranch(attendanceQuery, branchId);
 
     const [bookingRows, attendanceResult] = await Promise.all([
-      fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns: 'date, start_time, service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime, end_datetime, cancellation_reason' }),
+      fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns: 'id, date, start_time, service_name_snapshot, payments(amount), status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime, end_datetime, cancellation_reason' }),
       attendanceQuery,
     ]);
     const allBookings = bookingRows.map((b) => ({ ...b, full_amount: Number(b.final_amount) || 0, final_amount: (Number(b.final_amount) || 0) * b.share })); // a combo's price is split equally
@@ -12242,81 +12255,13 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     // would be invented, so worked time and "busy while clocked in" are left out (null) instead.
     const noAttendance = attendanceRows.length === 0;
     // One line per booking in the period (the inner page's open list, services table and CSV). paid = final price when fully paid, as paidRevenue.
+    const todayNp = nepalNow().today;
     const bookingList = allBookings
-      .map((b) => ({ date: b.date, start: String(b.start_time || '').slice(0, 5), customer: b.customer_name || '', service: b.service_name_snapshot || '', status: b.status !== 'Completed' && (b.status === 'No Show' || isNoShow(b)) ? 'No Show' : b.status, final: Number(b.final_amount) || 0, full: b.full_amount, paid: b.payment_status === 'paid' ? Number(b.final_amount) || 0 : 0, endMs: b.end_datetime ? new Date(b.end_datetime).getTime() : null, minutes: b.service_duration_snapshot || 0 }))
+      .map((b) => ({ ...(() => { const m = classifyBooking({ id: b.id, date: b.date, status: b.status, final_amount: b.full_amount, payments: b.payments }, { today: todayNp }); return { atStake: m.atStake, paidAmt: m.paid }; })(), date: b.date, start: String(b.start_time || '').slice(0, 5), customer: b.customer_name || '', service: b.service_name_snapshot || '', status: b.status !== 'Completed' && (b.status === 'No Show' || isNoShow(b)) ? 'No Show' : b.status, final: Number(b.final_amount) || 0, full: b.full_amount, paid: b.payment_status === 'paid' ? Number(b.final_amount) || 0 : 0, endMs: b.end_datetime ? new Date(b.end_datetime).getTime() : null, minutes: b.service_duration_snapshot || 0 }))
       .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     return { data: { ...metrics, ...(noAttendance ? { workedHours: null, utilizationRate: null, busyHours: null, busyMinutes: null } : {}), bookingList, dayWindowMinutes, serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
     console.error('[API] getTherapistOverview error:', error.message);
-    return { data: null, error };
-  }
-}
-
-// Customers tab: one row per attended (Completed) visit, classified New/Repeat using the same
-// "first-ever completed booking org-wide" definition getCustomerIntelligence uses for CRM
-// loyalty tiers. Pass includeMissedCancelled to also list Cancelled/No Show appointments.
-export async function getTherapistCustomerHistory({ branchId, therapistId, fromDate, toDate, includeMissedCancelled = false }) {
-  try {
-    if (!branchId) {
-      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
-    }
-    if (!therapistId) {
-      return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
-    }
-
-    const today = new Date().toISOString().split('T')[0];
-    const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
-
-    const statuses = includeMissedCancelled ? ['Completed', 'Cancelled', 'No Show'] : ['Completed'];
-
-    const bookings = (await fetchTherapistBookings({ branchId, therapistId, startDate, endDate, statuses,
-      columns: 'id, customer_id, customer_name, customer_phone, service_name_snapshot, date, start_time, service_duration_snapshot, status, cancellation_reason' }))
-      .sort((x, y) => (y.date.localeCompare(x.date)) || String(y.start_time || '').localeCompare(String(x.start_time || '')));
-    const rows = bookings || [];
-
-    // For every distinct customer_id present, find their earliest org-wide Completed booking
-    // date. A booking whose date equals that earliest date is that customer's "New" visit;
-    // everything else is "Repeat". No customer_id (walk-in/guest) → always "New".
-    const customerIds = [...new Set(rows.map(r => r.customer_id).filter(Boolean))];
-    const firstVisitByCustomer = {};
-    if (customerIds.length > 0) {
-      const { data: history, error: histErr } = await supabase
-        .from('bookings')
-        .select('customer_id, date')
-        .in('customer_id', customerIds)
-        .eq('status', 'Completed')
-        .order('date', { ascending: true });
-      if (histErr) throw histErr;
-      for (const h of (history || [])) {
-        if (!(h.customer_id in firstVisitByCustomer)) {
-          firstVisitByCustomer[h.customer_id] = h.date;
-        }
-      }
-    }
-
-    const customers = rows.map(r => ({
-      bookingId: r.id,
-      customerId: r.customer_id,
-      customerName: r.customer_name,
-      customerPhone: r.customer_phone,
-      serviceName: r.service_name_snapshot,
-      date: r.date,
-      startTime: r.start_time,
-      durationMinutes: r.service_duration_snapshot,
-      // No-Show status buttons were removed — a No-Show appointment now carries
-      // status='Cancelled' + cancellation_reason='No Show'. The `statuses` IN-list
-      // above already includes it under 'Cancelled', but it must still be labeled
-      // "No Show" here rather than losing that distinction.
-      status: isNoShow(r) ? 'No Show' : r.status,
-      customerType: r.status !== 'Completed'
-        ? null
-        : (!r.customer_id || firstVisitByCustomer[r.customer_id] === r.date) ? 'New' : 'Repeat',
-    }));
-
-    return { data: { customers, periodStart: startDate, periodEnd: endDate }, error: null };
-  } catch (error) {
-    console.error('[API] getTherapistCustomerHistory error:', error.message);
     return { data: null, error };
   }
 }

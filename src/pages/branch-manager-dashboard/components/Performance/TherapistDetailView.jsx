@@ -1,13 +1,17 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useIndustry } from 'hooks/useIndustry';
-import { getTherapistOverview } from '../../../../services/api';
+import { getTherapistOverview, fetchTherapistCustomers } from '../../../../services/api';
 import { downloadCsv } from 'utils/csvExport';
+import { useBranch } from 'contexts/BranchContext';
+import { getTodayISO } from 'utils/periodPresets';
 import { DEFAULT_REPORT_PERIOD } from 'utils/reportPeriod';
 import { PeriodPicker } from '../Reports/ReportFrame';
 import { useTherapistPerformance } from '../Reports/useTherapistPerformance';
 import { buildRows } from '../Reports/therapistPerformanceView';
+import { build as buildCustomers } from './therapistCustomersView';
 import { csvRows, rankOf } from './therapistInnerView';
+import { csvRows as customerCsvRows } from './therapistCustomersView';
 import OverviewTab from './OverviewTab';
 import CustomersTab from './CustomersTab';
 import ServicesTab from './ServicesTab';
@@ -24,7 +28,7 @@ const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slic
 
 // The inner page of one person in the Therapist performance report (ZNLY-170). It owns the period (starts on the report's), asks the report RPC for
 // the same cohort so the score, rank and team markers equal the report row, and asks getTherapistOverview for the booking-level numbers.
-const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, periodId: startPeriod = DEFAULT_REPORT_PERIOD, custom: startCustom = null, onNeedsClosing = null, backLabel = 'Back to Therapist performance' }) => {
+const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, periodId: startPeriod = DEFAULT_REPORT_PERIOD, custom: startCustom = null, onNeedsClosing = null, onMoneyOwed = null, backLabel = 'Back to Therapist performance' }) => {
   const { staffLabel } = useIndustry();
   const [periodId, setPeriodId] = useState(startPeriod);
   const [custom, setCustom] = useState(startCustom);
@@ -40,6 +44,21 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
   }, [branchId, therapistId, range.from, range.to]);
   useEffect(() => { load(); }, [load]);
 
+  // The Customers tab's rows (mig 340), loaded here so the tab badge and the Overview footer use the same "booked" count.
+  const { branches, isOverall } = useBranch();
+  const scopeIds = useMemo(() => (isOverall ? branches.map((b) => b.id) : [branchId]).filter(Boolean), [isOverall, branches, branchId]);
+  const scopeKey = scopeIds.join(',');
+  const [cust, setCust] = useState({ rows: null, loading: true, error: null });
+  const loadCust = useCallback(async () => {
+    if (!scopeIds.length || !therapistId) return;
+    setCust((s) => ({ ...s, loading: true, error: null }));
+    const res = await fetchTherapistCustomers({ therapistId, branchIds: scopeIds, from: range.from, to: range.to });
+    setCust({ rows: res.error ? null : res.data, loading: false, error: res.error ? (res.error.message || 'Failed to load customers.') : null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [therapistId, scopeKey, range.from, range.to]);
+  useEffect(() => { loadCust(); }, [loadCust]);
+  const custView = useMemo(() => (cust.rows ? buildCustomers(cust.rows) : null), [cust.rows]);
+
   const ranked = useMemo(() => (report?.current ? buildRows(report.current, report.previous) : []), [report]);
   const row = ranked.find((r) => r.id === therapistId) || null;
   const prevRow = (report?.previous?.therapists || []).find((t) => t.therapist_id === therapistId) || null;
@@ -49,13 +68,14 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
   const d = ov.data;
 
   const counts = {
-    customers: d ? d.customersAssigned : null,
+    customers: custView ? custView.counts.booked : null,
     services: d ? new Set((d.bookingList || []).filter((b) => b.status === 'Completed').map((b) => b.service)).size : null,
     attendance: row ? `${row.att_days} day${row.att_days === 1 ? '' : 's'}` : null,
   };
 
   const onPeriod = (id) => { setPeriodId(id); if (id === 'custom' && !custom) setCustom({ from: range.from, to: range.to }); };
   const lower = staffLabel.toLowerCase();
+  const onCustomers = activeTab === 'customers';
 
   return (
     <div className="space-y-5">
@@ -78,15 +98,20 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodPicker periodId={periodId} range={range} onPeriod={onPeriod} onCustom={setCustom} />
-          <button type="button" disabled={!d?.bookingList}
-            onClick={() => downloadCsv(`${String(therapistName).toLowerCase().replace(/\s+/g, '-')}-bookings-${range.from}-to-${range.to}.csv`, csvRows(d.bookingList))}
+          <button type="button" disabled={onCustomers ? !custView : !d?.bookingList}
+            title={onCustomers ? 'Export customers, one row per customer' : 'Export bookings, one row per booking'}
+            onClick={() => {
+              const slug = String(therapistName).toLowerCase().replace(/\s+/g, '-');
+              if (onCustomers) downloadCsv(`${slug}-customers-${range.from}-to-${range.to}.csv`, customerCsvRows([...custView.served, ...custView.notClosed, ...custView.upcoming, ...custView.cancelled]));
+              else downloadCsv(`${slug}-bookings-${range.from}-to-${range.to}.csv`, csvRows(d.bookingList));
+            }}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-spa border border-border bg-surface text-sm font-body-medium text-text-primary hover:bg-black/[0.03] disabled:opacity-50">
             <Icon name="Download" size={14} />CSV
           </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-5 border-b border-border">
+      <div className="flex flex-nowrap items-center gap-5 border-b border-border overflow-x-auto whitespace-nowrap">
         {TABS.map((tab) => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
             className={`inline-flex items-center gap-1.5 pb-2.5 -mb-px text-sm font-body font-body-medium border-b-2 spa-transition-fast ${activeTab === tab.key ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
@@ -97,8 +122,8 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
       </div>
 
       <div>
-        {activeTab === 'overview' && <OverviewTab row={row} report={report} prevRow={prevRow} maxSales={maxSales} range={range} ov={ov} reportLoading={reportLoading} onRetry={load} onNeedsClosing={onNeedsClosing} />}
-        {activeTab === 'customers' && <CustomersTab therapistId={therapistId} branchId={branchId} range={tabRange} />}
+        {activeTab === 'overview' && <OverviewTab bookedCustomers={custView ? custView.counts.booked : null} row={row} report={report} prevRow={prevRow} maxSales={maxSales} range={range} ov={ov} reportLoading={reportLoading} onRetry={load} onNeedsClosing={onNeedsClosing} />}
+        {activeTab === 'customers' && <CustomersTab state={{ ...cust, retry: loadCust }} therapistName={therapistName} range={tabRange} today={getTodayISO()} onNeedsClosing={onNeedsClosing} onMoneyOwed={onMoneyOwed} />}
         {activeTab === 'services' && <ServicesTab therapistId={therapistId} branchId={branchId} range={tabRange} />}
         {activeTab === 'attendance' && <AttendanceTab therapistId={therapistId} branchId={branchId} range={tabRange} />}
       </div>

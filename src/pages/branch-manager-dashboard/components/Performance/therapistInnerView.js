@@ -58,7 +58,11 @@ export function outcomes(list, nowMs = Date.now()) {
   const dates = open.map((b) => b.date).sort();
   return {
     ...c, total: list.length, open, openByStatus: by,
-    openValue: open.reduce((n, b) => n + (b.full ?? b.final), 0), // the booking's own price (a combo is not split here)
+    // One number for the open bookings, the Needs closing rule (bookingMoney.classifyBooking): at stake = price − payments on bookings dated before today.
+    // value / paidAhead are the grey explanation: the bookings' own price (a combo is not split) and what is already paid on them.
+    openValue: open.reduce((n, b) => n + (b.full ?? b.final), 0),
+    openAtStake: open.reduce((n, b) => n + (b.atStake || 0), 0),
+    openPaid: open.reduce((n, b) => n + (b.paidAmt || 0), 0),
     openInfo: { count: open.length, firstDate: dates[0] || null, lastDate: dates[dates.length - 1] || null },
   };
 }

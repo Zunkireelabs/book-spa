@@ -27,13 +27,13 @@ describe('scoreBars', () => {
 describe('outcomes', () => {
   const now = 1000;
   const list = [
-    { date: '2026-10-16', status: 'Confirmed', endMs: 500, final: 100 }, { date: '2026-10-20', status: 'Pending', endMs: 900, final: 50 },
+    { date: '2026-10-16', status: 'Confirmed', endMs: 500, final: 100, atStake: 60, paidAmt: 40 }, { date: '2026-10-20', status: 'Pending', endMs: 900, final: 50, atStake: 50, paidAmt: 0 },
     { date: '2026-10-29', status: 'Confirmed', endMs: 5000, final: 70 }, { date: '2026-10-02', status: 'Completed', final: 9 },
     { date: '2026-10-03', status: 'Cancelled' }, { date: '2026-10-04', status: 'No Show' },
   ];
   const o = outcomes(list, now);
   it('counts and open list', () => {
-    expect(o).toMatchObject({ completed: 1, notClosed: 2, cancelled: 1, noShow: 1, total: 6, openValue: 150 });
+    expect(o).toMatchObject({ completed: 1, notClosed: 2, cancelled: 1, noShow: 1, total: 6, openValue: 150, openAtStake: 110, openPaid: 40 });
     expect(o.openByStatus).toEqual({ Confirmed: 1, Pending: 1 });
     expect(o.openInfo).toEqual({ count: 2, firstDate: '2026-10-16', lastDate: '2026-10-20' });
   });

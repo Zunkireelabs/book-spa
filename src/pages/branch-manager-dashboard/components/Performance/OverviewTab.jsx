@@ -62,7 +62,7 @@ const Marker = ({ t }) => {
 };
 const TILE_ICON = { sales: ['Wallet', 'bg-primary/10 text-primary'], completed: ['CheckCircle', 'bg-warning/10 text-warning'], busy: ['Clock', 'bg-blue-500/10 text-blue-600'], rebook: ['Repeat', 'bg-primary/10 text-primary'] };
 
-const OverviewTab = ({ row, report, prevRow, maxSales, range, ov, reportLoading, onRetry, onNeedsClosing = null }) => {
+const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, range, ov, reportLoading, onRetry, onNeedsClosing = null }) => {
   const { staffLabel } = useIndustry();
   const d = ov.data;
   const list = d?.bookingList;
@@ -178,7 +178,7 @@ const OverviewTab = ({ row, report, prevRow, maxSales, range, ov, reportLoading,
             {out.notClosed > 0 && (
               <div className="mt-3 pt-3 border-t border-border">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="text-[12.5px]"><b>{out.notClosed} not closed</b> <span className="text-text-tertiary">booking value NPR {n0(out.openValue)} · {Object.entries(out.openByStatus).map(([s, c]) => `${c} ${s}`).join(', ')} · oldest {shortDate(out.openInfo.firstDate)}</span></div>
+                  <div className="text-[12.5px]"><b>{out.notClosed} not closed · NPR {n0(out.openAtStake)} at stake</b> <span className="text-text-tertiary">booking value {n0(out.openValue)}{out.openPaid > 0 ? ` · ${n0(out.openPaid)} paid ahead` : ''} · {Object.entries(out.openByStatus).map(([s, c]) => `${c} ${s}`).join(', ')} · oldest {shortDate(out.openInfo.firstDate)}</span></div>
                   {onNeedsClosing && <button type="button" onClick={onNeedsClosing} className="h-8 px-3 rounded-spa border border-border text-[12.5px] font-medium text-text-primary hover:bg-black/[0.03]">Close them in Needs closing →</button>}
                 </div>
                 <div className="mt-2 grid sm:grid-cols-2 gap-x-6 text-[12px]">
@@ -246,7 +246,7 @@ const OverviewTab = ({ row, report, prevRow, maxSales, range, ov, reportLoading,
 
       <div className="bg-surface rounded-spa-lg border border-border px-4 py-2.5 flex flex-wrap gap-x-6 gap-y-1 text-[12px] text-text-tertiary">
         <span>Customers served <b className="font-data text-text-primary">{d.customersAttended}</b></span>
-        <span>Customers booked <b className="font-data text-text-primary">{d.customersAssigned}</b></span>
+        <span>Customers booked <b className="font-data text-text-primary">{bookedCustomers ?? '…'}</b></span>
         <span>Avg service <b className="font-data text-text-primary">{d.avgServiceDurationMinutes} min</b></span>
         <span>No-show <b className="font-data text-text-primary">{row.bookings > 0 ? `${Math.round((row.no_show / row.bookings) * 1000) / 10}%` : '—'}</b> {row.no_show} of {row.bookings}</span>
       </div>

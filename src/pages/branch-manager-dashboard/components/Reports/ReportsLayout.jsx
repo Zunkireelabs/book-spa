@@ -221,7 +221,7 @@ const ReportsLayout = ({ view, renderReport }) => {
     const allowed = canOpenReport(report, role, view);
     if (report.status === 'live') {
       if (!allowed) return <p className="py-12 text-center text-sm text-text-secondary">This report isn't available for your role.</p>;
-      const common = { reopen, onBack: openHome, onHome: openHome, onOpenView: (v) => go(v), isFavourite: favs.includes(report.id), onToggleFav: () => toggleFav(report.id) };
+      const common = { reopen, onBack: openHome, onHome: openHome, onOpenView: (v, extra) => go(v, extra), isFavourite: favs.includes(report.id), onToggleFav: () => toggleFav(report.id) };
       if (report.id === 'money-owed') return <MoneyOwedReport {...common} />;
       if (report.id === 'staff-performance') return <TherapistPerformanceReport periodId={periodId} onPeriod={setPeriod} custom={custom} onCustom={setCustom} {...common} />;
       return <BusinessHealthReport periodId={periodId} onPeriod={setPeriod} custom={custom} onCustom={setCustom} {...common} />;

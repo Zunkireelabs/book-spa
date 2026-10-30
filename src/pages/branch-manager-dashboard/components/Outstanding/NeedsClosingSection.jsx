@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import { getNeedsClosing } from '../../../../services/api';
@@ -19,7 +19,8 @@ const Sm = ({ children }) => <span className="block text-[11px] text-text-tertia
 
 // `collapsible` (Money owed report): a collapsed summary card that expands to a paged list. Deep links (?section=needs-closing or
 // #needs-closing) open it expanded. Without the prop the section renders the full list inline, as before.
-const NeedsClosingSection = ({ branchId, from, to, collapsible = false }) => {
+// `therapistId` (+ `therapistName`, `onShowAll`) narrows the list to one therapist's bookings, with a chip to drop the filter.
+const NeedsClosingSection = ({ branchId, from, to, collapsible = false, therapistId = null, therapistName = '', onShowAll = null }) => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const [searchParams] = useSearchParams();
@@ -27,15 +28,24 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false }) => {
   const sectionRef = useRef(null);
   const deepLinked = searchParams.get('section') === 'needs-closing' || hash === '#needs-closing';
   const [expanded, setExpanded] = useState(deepLinked);
-  const [data, setData] = useState(null);
+  const [raw, setRaw] = useState(null);
   const [error, setError] = useState(null);
   const [showUpcoming, setShowUpcoming] = useState(false);
 
   const load = useCallback(async () => {
     const { data: d, error: err } = await getNeedsClosing({ branchId, from, to });
-    if (err) setError(err.message || 'Could not load bookings that need closing.'); else { setError(null); setData(d); }
+    if (err) setError(err.message || 'Could not load bookings that need closing.'); else { setError(null); setRaw(d); }
   }, [branchId, from, to]);
   useEffect(() => { load(); }, [load]);
+
+  const data = useMemo(() => {
+    if (!raw || !therapistId) return raw;
+    const unclosed = raw.unclosed.filter((b) => (b.therapistIds || []).includes(therapistId));
+    return { ...raw, unclosed, unclosedAtStake: unclosed.reduce((n, b) => n + (b.atStake || 0), 0) };
+  }, [raw, therapistId]);
+  const filterChip = therapistId && onShowAll
+    ? <p className="text-xs text-text-secondary"><span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">Showing {therapistName || 'this therapist'} only</span> <button type="button" onClick={onShowAll} className="text-primary hover:underline ml-1">show all</button></p>
+    : null;
 
   // Arriving with ?section=needs-closing (e.g. from the notice): scroll here once the section has rendered.
   useEffect(() => {
@@ -83,6 +93,7 @@ const NeedsClosingSection = ({ branchId, from, to, collapsible = false }) => {
             ? 'Past bookings still Pending, Confirmed or In-Progress. Nothing is owed until they’re closed, so they’re not in the total.'
             : `Past bookings still Pending or Confirmed, and visits left In-Progress from an earlier day. Nothing extra is owed until they are closed (in-progress visits are already in Outstanding).${data.unclosed.length > 0 ? ` ${npr(data.unclosedAtStake)} at stake.` : ''}`}
         </p>
+        {filterChip}
       </div>
       {data.unclosed.length === 0 ? (
         <p className="font-body text-sm text-text-tertiary">Every past booking is closed.</p>
