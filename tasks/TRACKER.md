@@ -67,6 +67,15 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-147 | Sadin | high | Dashboard redesign: job views (Business/Branch/Front desk/My day) × Prep/Live/Close + insights. Mockup v2 approved (9.4). V36a (8b45e05), V36b (fa4b429), V36c Branch view (976821c), V36d Business/Front desk/My day/new-tenant checklist committed (owner-checked); V36e ✦ insights (mig 336, rules v1) committed (owner-checked); next Reports |
 | ZNLY-150 | Sadin | high | Login ↔ therapist: link existed (users.therapist_id, mig 324); my day uses it (fa4b429). "Login" field in Therapists panel built in V36d, owner walkthrough done |
 | ZNLY-149 | Sadin | high | Front-desk tools (Collect payment etc.) for manager/admin. Built in V36a (8b45e05), owner-checked; ships with the UI-port PR |
+| ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags. List owner-approved (9.1); mockup next |
+| ZNLY-160 | Sadin | medium | Customer source never recorded (referral_source / client_source empty locally). Prod unchecked (needs-verification) |
+| ZNLY-161 | Sadin | medium | Working hours set for only 18 of 69 therapists. Prod unchecked (needs-verification) |
+| ZNLY-162 | Sadin | medium | Dashboard branch revenue ignores refunds, pulse total subtracts them (mig 334). Code-read, needs-verification |
+| ZNLY-163 | Sadin | medium | Money owed "Remind": no payment-due outreach trigger exists (mig 103 list); build it or copy-text fallback |
+| ZNLY-164 | Sadin | low | Explain local owed drop 12,550/6 → 9,750/5 between 29 and 30 Oct (needs-verification) |
+| ZNLY-165 | Sadin | low | Local DB: 5 leftover ZZDemo therapists (26 Oct) with bookings; add to a cleanup script and remove |
+| ZNLY-166 | Sadin | medium | v36-dashboard.sql fails ROOM_AT_CAPACITY while the ZZToday seed is loaded; make the test seed-proof |
+| ZNLY-167 | Sadin | medium | Dashboard "revenue" counts advance payments; align with Reports Sales (earned) or relabel Takings (with ZNLY-162) |
 
 ## In review / on stage
 

@@ -1,5 +1,5 @@
 import { getNav, navPath } from 'navigation/navRegistry';
-import { getVisibleReports } from 'pages/branch-manager-dashboard/components/Reports/reportRegistry';
+import { getSearchableReportViews, fillLabels } from 'pages/branch-manager-dashboard/components/Reports/reportRegistry';
 import { getVisibleSettings } from 'pages/branch-manager-dashboard/components/Settings/settingsRegistry';
 import { AREAS, getVisibleTabs } from 'pages/branch-manager-dashboard/components/Area/areaTabsRegistry';
 import { searchCustomers, searchBookings } from 'services/api';
@@ -35,7 +35,7 @@ const rank = (items, query) => items
 const viewHref = (basePath, view, extra = '') => `${basePath}?view=${view}${extra}`;
 
 // ── Pages + Actions (from the registries, already role / flag / Overall filtered) ─────────────────────────────────────
-export const buildPages = ({ role, isOverall, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath }) => {
+export const buildPages = ({ role, isOverall, staffLabel, staffLabelPlural, productLabel, enableRooms, locationLabelPlural, basePath }) => {
   const nav = getNav({ role, isOverall, staffLabelPlural, productLabel });
   const pages = [];
   const seenViews = new Set();
@@ -45,8 +45,8 @@ export const buildPages = ({ role, isOverall, staffLabelPlural, productLabel, en
     add({ key: `page:${n.view || n.id}`, kind: 'page', label: n.label, icon: n.icon, view: n.view || n.id, href: navPath(n, basePath), keywords: n.keywords }));
 
   // Report pages (staff have none), settings pages, and the tabs of each area ("Bookings · New booking")
-  getVisibleReports(role).forEach((r) =>
-    add({ key: `page:${r.view}`, kind: 'page', label: r.title, secondary: 'Reports', icon: r.icon, view: r.view, href: viewHref(basePath, r.view), keywords: r.keywords }));
+  getSearchableReportViews(role).forEach((r) =>
+    add({ key: `page:${r.view}`, kind: 'page', label: fillLabels(r.title, { staffLabel, staffLabelPlural }), secondary: 'Reports', icon: r.icon, view: r.view, href: viewHref(basePath, r.view), keywords: r.keywords }));
   getVisibleSettings({ role, isOverall, enableRooms }).forEach((s) =>
     add({ key: `page:${s.view}`, kind: 'page', label: s.location ? (locationLabelPlural || s.title) : s.title, secondary: 'Settings', icon: s.icon, view: s.view, href: viewHref(basePath, s.view), keywords: s.keywords }));
   AREAS.forEach((area) => {

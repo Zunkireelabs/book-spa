@@ -400,6 +400,19 @@ export async function fetchDashboard({ branchIds, date = null }) {
   }
 }
 
+// Business health numbers in one call (get_report_business_health, migration-337): current, previous (equal-length period right before),
+// by_day, by_method, branches[]. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
+export async function fetchBusinessHealth({ branchIds, from, to }) {
+  try {
+    const { data, error } = await supabase.rpc('get_report_business_health', { p_branch_ids: branchIds, p_from: from, p_to: to });
+    if (error) throw error;
+    return { data: data || {}, error: null };
+  } catch (error) {
+    console.error('[API] fetchBusinessHealth error:', error.message);
+    return { data: {}, error };
+  }
+}
+
 // Completed, not fully paid bookings, any date (the candidates for lib/dashboardMoney's owed rule, which then keeps balance > 0).
 const owedBookingsQuery = (cols) => supabase.from('bookings').select(cols).eq('status', 'Completed').neq('payment_status', 'paid').order('date').order('start_time');
 
