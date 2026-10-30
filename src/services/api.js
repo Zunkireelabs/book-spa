@@ -280,6 +280,24 @@ export async function fetchTherapistAvailabilityWindow(orgSlug, branchId, startD
   return { bookings: data || [] };
 }
 
+// Male/female headcount among therapists eligible for serviceId at branchId
+// (migration-307, RPC public_get_service_eligible_gender_headcount) — the
+// gender-preference availability path's service-scoped sibling to the old
+// branch-wide `.from('therapists')` count. Unlike fetchServiceTherapists,
+// this is anon-callable (no RLS on service_therapists for anon) and returns
+// only counts, never therapist identities. orgSlug is required for the same
+// reason as fetchTherapistAvailabilityWindow — tenant-scoping the RPC.
+export async function fetchServiceEligibleGenderHeadcount(orgSlug, branchId, serviceId) {
+  const { data, error } = await supabase.rpc('public_get_service_eligible_gender_headcount', {
+    p_org_slug: orgSlug,
+    p_branch_id: branchId,
+    p_service_id: serviceId,
+  });
+  if (error) throw error;
+  const row = data?.[0] || { male_count: 0, female_count: 0 };
+  return { male: row.male_count || 0, female: row.female_count || 0 };
+}
+
 export async function fetchTherapists(branchId, { date } = {}) {
   try {
     let therapistsQuery = supabase

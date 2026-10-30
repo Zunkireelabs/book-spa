@@ -75,7 +75,12 @@ export function buildOccupancy(bookings) {
     const startMin = timeToMinutes(b.start_time?.slice(0, 5) || '00:00');
     const duration = b.duration_minutes || 60;
     const endMin = startMin + duration;
-    const gender = b.therapist_gender?.toLowerCase();
+    // A booking placed through the public flow has no therapist assigned yet
+    // (therapist_id NULL — assignment happens later, manually by staff), so
+    // therapist_gender is null until then. Fall back to the customer's own stated
+    // gender_preference so a pending booking still reserves its slot against the
+    // headcount, instead of being invisible to it (ZNLY-168).
+    const gender = (b.therapist_gender || b.gender_preference)?.toLowerCase();
 
     // Bookings don't always start on a 30-min boundary (e.g. 16:05) — align down to the grid so
     // every 30-min slot the booking actually overlaps gets counted, not just the raw start time.

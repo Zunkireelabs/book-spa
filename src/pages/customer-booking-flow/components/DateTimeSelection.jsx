@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
-import { supabase } from '../../../lib/supabase';
-import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchClosedDateRanges, getRoomCapacity } from '../../../services/api';
+import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchClosedDateRanges, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
 import { useTenant } from '../../../contexts/TenantContext';
 import {
   START_HOUR,
@@ -40,29 +39,29 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
   // the same 30-day default the frontend has always hardcoded.
   const effectiveWindow = selectedBranch?.advance_booking_days ?? 30;
 
-  // Fetch therapist counts for the selected branch — advisory gender signal only; real
-  // availability is gated by room capacity below. Skipped while filtering by a specific
-  // professional — genderOk is forced true in that case, so this fetch's result would go
-  // unused. Depends on !!therapistFilter too (not just branch id) so that when a filter
-  // clears mid-session (e.g. a roster refetch failure resets it to null), this re-fires
-  // instead of leaving stale {male:0,female:0} counts that would mark every slot
-  // unavailable under the gender-preference path.
+  // Fetch therapist counts for the selected branch, scoped to who's actually eligible
+  // for selectedService (ZNLY-168 — previously counted every active therapist at the
+  // branch regardless of service, so a hairdresser counted the same as a masseuse
+  // toward "female availability" for a massage). Real availability is still gated by
+  // room capacity below; this remains an advisory gender signal. Skipped while
+  // filtering by a specific professional — genderOk is forced true in that case, so
+  // this fetch's result would go unused. Depends on !!therapistFilter too (not just
+  // branch id) so that when a filter clears mid-session (e.g. a roster refetch
+  // failure resets it to null), this re-fires instead of leaving stale
+  // {male:0,female:0} counts that would mark every slot unavailable under the
+  // gender-preference path.
   useEffect(() => {
-    if (!selectedBranch?.id || therapistFilter) return;
+    if (!selectedBranch?.id || !selectedService?.id || therapistFilter) return;
     async function fetchTherapistCounts() {
-      const { data } = await supabase
-        .from('therapists')
-        .select('gender')
-        .eq('branch_id', selectedBranch.id)
-        .eq('is_active', true);
-      if (data) {
-        const male = data.filter(t => t.gender?.toLowerCase() === 'male').length;
-        const female = data.filter(t => t.gender?.toLowerCase() === 'female').length;
-        setTherapistCounts({ male, female });
+      try {
+        const counts = await fetchServiceEligibleGenderHeadcount(orgSlug, selectedBranch.id, selectedService.id);
+        setTherapistCounts(counts);
+      } catch (err) {
+        console.error('[DateTimeSelection] gender headcount fetch failed:', err.message);
       }
     }
     fetchTherapistCounts();
-  }, [selectedBranch?.id, !!therapistFilter]);
+  }, [selectedBranch?.id, selectedService?.id, orgSlug, !!therapistFilter]);
 
   // Generate the branch's effective advance-booking window (date-chip strip)
   const dates = useMemo(() => {
