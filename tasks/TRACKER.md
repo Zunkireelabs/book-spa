@@ -78,6 +78,8 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-167 | Sadin | medium | Dashboard "revenue" counts advance payments; align with Reports Sales (earned) or relabel Takings (with ZNLY-162) |
 | ZNLY-169 | Sadin | medium | Therapist Full breakdown (TherapistDetailView) still uses the old revenue rule + red utilization; align with Reports Sales (earned) |
 | ZNLY-170 | Sadin | medium | Therapist inner page UI redesign (rated 6/10): mockup first, after the V37c commit |
+| ZNLY-171 | Sadin | high | Inner page "Busy while clocked in" uses the whole month of service time over only the marked attendance days (57% shown, ~9% real) |
+| ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
 
 ## In review / on stage
 

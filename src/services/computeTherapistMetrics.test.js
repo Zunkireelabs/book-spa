@@ -40,4 +40,26 @@ describe('computeTherapistMetrics', () => {
 
     expect(withoutPeriodDays.workedHours).not.toBe(withPeriodDays.workedHours);
   });
+
+  // ZNLY-171: busy while clocked in only counts Completed bookings on days with a Present / half-day row.
+  it('counts only services on clocked-in days in the busy-while-clocked-in rate', () => {
+    const done = (date, min) => ({ status: 'Completed', date, service_duration_snapshot: min, payment_status: 'paid', final_amount: 1, customer_id: date });
+    const bookings = [done('2026-10-02', 60), done('2026-10-26', 78), done('2026-10-12', 120)];
+    const rows = [
+      { date: '2026-10-26', status: 'Present', check_in_time: '2026-10-26T04:00:00Z', check_out_time: '2026-10-26T05:30:00Z' }, // 1.5 h
+      { date: '2026-10-27', status: 'Present', check_in_time: null, check_out_time: null }, // assumed full window
+    ];
+    const m = computeTherapistMetrics(bookings, rows, 720, 30);
+    expect(m.workedHours).toBe(13.5);
+    expect(m.busyHours).toBe(1.3);
+    expect(m.occupiedHours).toBe(4.3); // delivered stays every Completed service
+    expect(m.utilizationRate).toBe(10);
+    expect(m.clockedDays).toEqual([{ date: '2026-10-26', hours: 1.5, assumed: false }, { date: '2026-10-27', hours: 12, assumed: true }]);
+  });
+
+  it('keeps every Completed service when there are no attendance rows at all (assumed worked time)', () => {
+    const m = computeTherapistMetrics([{ status: 'Completed', date: '2026-10-02', service_duration_snapshot: 60 }], [], 600, 2);
+    expect(m.busyHours).toBe(1);
+    expect(m.utilizationRate).toBe(5);
+  });
 });

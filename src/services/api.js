@@ -11968,18 +11968,18 @@ export function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinut
   let workedMinutes = 0;
   let attendedDaysTotal = 0;
   let presentOrHalfDays = 0;
+  const clockedDays = []; // { date, hours, assumed }: one per Present / half-day row (ZNLY-170's "Clocked in" note)
+  const clockedDates = new Set();
   for (const a of attendanceRows) {
     attendedDaysTotal += 1;
     const isHalf = a.status === '1st-Half Day' || a.status === '2nd-Half Day';
     if (a.status !== 'Present' && !isHalf) continue;
     presentOrHalfDays += 1;
     const dayWindow = isHalf ? dayWindowMinutes / 2 : dayWindowMinutes;
-    if (a.check_in_time && a.check_out_time) {
-      const span = (new Date(a.check_out_time) - new Date(a.check_in_time)) / 60000;
-      workedMinutes += Math.max(0, span);
-    } else {
-      workedMinutes += dayWindow;
-    }
+    const timed = !!(a.check_in_time && a.check_out_time);
+    const dayMin = timed ? Math.max(0, (new Date(a.check_out_time) - new Date(a.check_in_time)) / 60000) : dayWindow;
+    workedMinutes += dayMin;
+    if (a.date) { clockedDates.add(a.date); clockedDays.push({ date: a.date, hours: Math.round((dayMin / 60) * 10) / 10, assumed: !timed }); }
   }
   // No attendance marked at all for the period — assume the full period was worked rather
   // than reporting 0h/0% (matches the pre-refactor behavior this replaced).
@@ -11991,7 +11991,12 @@ export function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinut
   const workedHours = Math.round((workedMinutes / 60) * 10) / 10;
   const occupiedHours = Math.round((occupiedMinutes / 60) * 10) / 10;
   // Utilization = Occupied Time ÷ Actual Worked Time × 100 (capped at 100 for display safety).
-  const utilizationRate = workedMinutes > 0 ? Math.round(Math.min(occupiedMinutes / workedMinutes, 1) * 100) : 0;
+  // ZNLY-171: "busy while clocked in" counts only Completed bookings dated on a day the therapist was Present / half-day. Dividing the whole
+  // period's services by a couple of marked days (Govinda L., 1-30 Oct: 7.8 h / 13.5 h = 57%, really 1.3 h = 9%) overstated it. With no
+  // attendance rows at all the worked time is the assumed period x branch hours, so every Completed booking stays in.
+  const busyMinutes = attendedDaysTotal === 0 ? occupiedMinutes
+    : completed.filter(b => clockedDates.has(b.date)).reduce((sum, b) => sum + (b.service_duration_snapshot || 0), 0);
+  const utilizationRate = workedMinutes > 0 ? Math.round(Math.min(busyMinutes / workedMinutes, 1) * 100) : 0;
 
   return {
     servicesCompleted,
@@ -12007,6 +12012,9 @@ export function computeTherapistMetrics(bookings, attendanceRows, dayWindowMinut
     workedHours,
     occupiedHours,
     utilizationRate,
+    busyHours: Math.round((busyMinutes / 60) * 10) / 10,
+    busyMinutes: Math.round(busyMinutes),
+    clockedDays,
     avgServiceDurationMinutes,
   };
 }
@@ -12066,7 +12074,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     // 2. Fetch bookings + attendance in parallel
     let bookingsQuery = supabase
       .from('bookings')
-      .select('therapist_id, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime')
+      .select('therapist_id, date, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime')
       .gte('date', startDate)
       .lte('date', endDate)
       .in('therapist_id', therapistIds)
@@ -12077,7 +12085,7 @@ export async function getTherapistPerformance({ branchId, fromDate, toDate }) {
     // extra branch_id filter here would drop rows marked before a same-day transfer.
     const attendanceQuery = supabase
       .from('therapist_attendance')
-      .select('therapist_id, status, check_in_time, check_out_time')
+      .select('therapist_id, date, status, check_in_time, check_out_time')
       .gte('date', startDate)
       .lte('date', endDate)
       .in('therapist_id', therapistIds);
@@ -12202,17 +12210,17 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
 
     let attendanceQuery = supabase
       .from('therapist_attendance')
-      .select('status, check_in_time, check_out_time')
+      .select('date, status, check_in_time, check_out_time')
       .eq('therapist_id', therapistId)
       .gte('date', startDate)
       .lte('date', endDate);
     attendanceQuery = withBranch(attendanceQuery, branchId);
 
     const [bookingRows, attendanceResult] = await Promise.all([
-      fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns: 'status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime, end_datetime, cancellation_reason' }),
+      fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns: 'date, start_time, service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime, end_datetime, cancellation_reason' }),
       attendanceQuery,
     ]);
-    const allBookings = bookingRows.map((b) => ({ ...b, final_amount: (Number(b.final_amount) || 0) * b.share })); // a combo's price is split equally
+    const allBookings = bookingRows.map((b) => ({ ...b, full_amount: Number(b.final_amount) || 0, final_amount: (Number(b.final_amount) || 0) * b.share })); // a combo's price is split equally
     const bookings = allBookings.filter(b => ['Confirmed', 'In-Progress', 'Completed'].includes(b.status));
     const attendanceRows = (!attendanceResult.error && attendanceResult.data) || [];
 
@@ -12233,7 +12241,11 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     // No attendance rows = no worked hours to report. computeTherapistMetrics falls back to period x branch hours for the old table; here that
     // would be invented, so worked time and "busy while clocked in" are left out (null) instead.
     const noAttendance = attendanceRows.length === 0;
-    return { data: { ...metrics, ...(noAttendance ? { workedHours: null, utilizationRate: null } : {}), serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
+    // One line per booking in the period (the inner page's open list, services table and CSV). paid = final price when fully paid, as paidRevenue.
+    const bookingList = allBookings
+      .map((b) => ({ date: b.date, start: String(b.start_time || '').slice(0, 5), customer: b.customer_name || '', service: b.service_name_snapshot || '', status: b.status !== 'Completed' && (b.status === 'No Show' || isNoShow(b)) ? 'No Show' : b.status, final: Number(b.final_amount) || 0, full: b.full_amount, paid: b.payment_status === 'paid' ? Number(b.final_amount) || 0 : 0, endMs: b.end_datetime ? new Date(b.end_datetime).getTime() : null, minutes: b.service_duration_snapshot || 0 }))
+      .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+    return { data: { ...metrics, ...(noAttendance ? { workedHours: null, utilizationRate: null, busyHours: null, busyMinutes: null } : {}), bookingList, dayWindowMinutes, serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
     console.error('[API] getTherapistOverview error:', error.message);
     return { data: null, error };
