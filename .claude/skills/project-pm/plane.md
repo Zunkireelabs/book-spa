@@ -11,7 +11,6 @@ In Progress `5dbc2395-2614-442b-be4c-30950046da47` · In Review `75dfa0b7-9590-4
 On Stage `6c01f4de-ae15-486d-9b51-1c92fb13ef07` · Done `feaa4ab1-38ab-4163-9ff4-259e07c4435d` ·
 Cancelled `663fd6b3-10a6-487a-b68f-74d8432e5836`
 
-**Types:** Task `27cacd42-b1cd-4895-b749-ae106fb6795e` · Epic `89e049bf-eab2-4bae-9546-852ba787a235`
 
 **Epics (parent ids):** Domain & Rebrand `f2f0f34b-78f9-4dcc-bfc1-e1d8601c0d63` · Perf / DB Health
 `ed32d427-bc72-41f1-9898-f51b6461e2bb` · Security & Auth `c1f57588-d56b-4c94-b635-0958cb12b3ce` · Booking &
@@ -45,13 +44,13 @@ needs-verification `acf3d02a-deb0-41c3-872f-c5fd466a5f87`
 ## Commands
 
 ### "status" / "what's pending / urgent / critical?"
-1. `workitem count` · pql `stateGroup IN openStates() AND NOT isEpic()` · `group_by=state_id`.
-2. `workitem list` · pql `stateGroup IN activeStates() AND priority IN ("urgent","high") AND NOT isEpic()`.
+1. `workitem count` · pql `stateGroup IN openStates() AND NOT hasChildren()` · `group_by=state_id`.
+2. `workitem list` · pql `stateGroup IN activeStates() AND priority IN ("urgent","high") AND NOT hasChildren()`.
 3. Reply in ≤ 15 lines: counts by state → urgent/high with owner → anything urgent with no owner (flag it)
    → `In Review` items waiting on someone. Map assignee ids to names via **People**.
 
 ### "what's mine?"
-1. `workitem list` · pql `assignee = currentUser() AND stateGroup IN openStates() AND NOT isEpic()`.
+1. `workitem list` · pql `assignee = currentUser() AND stateGroup IN openStates() AND NOT hasChildren()`.
 2. `workitem list` · pql `mention = currentUser() AND updatedAt >= daysAgo(7)` (new @mentions).
 3. For mentioned or In Progress tickets only: `workitem_comment list` (`per_page` 10). Show comments newer than
    the developer's own last comment on that ticket.
@@ -75,7 +74,7 @@ New ticket (search first), linked to the same epic. Don't widen the current tick
 
 ### "sync" (regenerate the tracker)
 Rebuild `tasks/TRACKER.md` from Plane, never the other way round:
-1. `workitem list` · pql `stateGroup IN openStates() AND NOT isEpic()` · fields above · `per_page` 100.
+1. `workitem list` · pql `stateGroup IN openStates() AND NOT hasChildren()` · fields above · `per_page` 100.
 2. Write the file in this exact layout. Sort each table by priority (urgent→low), then id. Owner = assignee
    names, or `unassigned`.
    - Header: title, the "generated" note, `Last synced: YYYY-MM-DD by <name>`, the SOP section (copy it from
