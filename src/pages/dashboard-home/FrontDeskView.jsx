@@ -115,7 +115,8 @@ const FrontDeskView = ({ data, dataError, branchId, today, nowMin, role, staffLa
           </Card>
         </div>
         <div className="lg:col-span-2 space-y-3 sm:space-y-4">
-          <SuggestionsCard title="Suggestion" />
+          <SuggestionsCard title="Suggestion" view="frontdesk" branchIds={[branchId]} today={today} role={role}
+            handlers={{ booking: (id) => setPanel({ type: 'booking', id }) }} />
         </div>
       </div>
       <DashPanels panel={panel} branchId={branchId} onClose={() => setPanel(null)} onChanged={refresh} />

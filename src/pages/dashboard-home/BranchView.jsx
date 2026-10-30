@@ -12,7 +12,7 @@ import { supabase } from '../../lib/supabase';
 import { bookingSplit, splitLine, fmtClock, fmtDuration, fmtRange, fmtFreeTotal, freeNow, freeTime } from '../../lib/dashboardFloor';
 import DeskButtons from './DeskButtons';
 import { paidNote } from '../../lib/dashboardMoney';
-import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, Tile } from './dashKit';
+import { npr, plural, shortDay, clock12, LoadError, Card, Row, SuggestionsCard, Tile, sharePct } from './dashKit';
 import { dayStatus, nextClient } from '../../lib/dashboardMyDay';
 import { ofKind } from '../../lib/dashboardNeeds';
 
@@ -28,7 +28,7 @@ const Delta = ({ now, prev, unit }) => {
 const WeekStrip = ({ week }) => (
   <div className="grid grid-cols-7 gap-2">
     {(week || []).map((d, i) => {
-      const pct = d.booked_share == null ? null : Math.round(d.booked_share * 100);
+      const pct = sharePct(d.booked_share);
       const low = pct != null && pct < 45;
       return (
         <div key={d.date} className="text-center">
@@ -128,7 +128,10 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
       {unpaidRows}{unconfirmedRows}{unassignedRows}{notClosedRow}
     </Card>
   );
-  const suggestions = <SuggestionsCard />;
+  const suggestions = (
+    <SuggestionsCard view="branch" branchIds={[branchId]} today={today} role={role}
+      handlers={{ booking: openBooking, create: (day) => openCreate({ day }) }} />
+  );
   const nextSeven = <Card icon="CalendarDays" title="Next 7 days" error={bad} onRetry={refresh} meta={`Booked share of ${(staffLabel || 'staff').toLowerCase()} hours`}><WeekStrip week={data?.week} /></Card>;
   const floorCard = (title, meta) => (
     <Card icon="Users" title={title} meta={meta} error={bad} onRetry={refresh}>
@@ -237,7 +240,7 @@ const BranchView = ({ phase, data, hours, nowMin, branchId, today, role, staffLa
           <Tile label="Bookings today" value={pulse.bookings ?? 0} sub={splitLine(split)} icon="CalendarDays" onClick={() => go('bookings')} />
           <Tile label="Taken today" value={canMoney ? npr(pulse.revenue) : '—'} sub={canMoney ? (newTenant ? 'No comparison yet' : <Delta now={pulse.revenue} prev={pulse.revenue_prev} unit="%" />) : 'Managers see this'} icon="Banknote" onClick={() => go('all-reports')} />
           <Tile label="Free time left" value={newTenant ? '—' : fmtFreeTotal(free.total)} sub={newTenant ? 'Fills in once you take bookings' : free.biggest ? `${free.total >= 24 * 60 ? `across ${plural(free.people, (staffLabel || 'person').toLowerCase(), (staffLabelPlural || 'people').toLowerCase())} · ` : ''}Biggest gap ${fmtRange(free.biggest.from_min, free.biggest.to_min)}` : 'No gaps of 1h or more'} icon="Clock" onClick={() => go('calendar')} />
-          <Tile label="Booked hours" value={newTenant || share == null ? '—' : `${Math.round(share * 100)}%`} sub={newTenant ? 'No comparison yet' : <>Of {(staffLabel || 'staff').toLowerCase()} hours · <Delta now={share} prev={pulse.booked_share_prev} unit="pts" /></>} icon="Users" onClick={() => go('all-reports')} />
+          <Tile label="Booked hours" value={newTenant || share == null ? '—' : `${sharePct(share)}%`} sub={newTenant ? 'No comparison yet' : <>Of {(staffLabel || 'staff').toLowerCase()} hours · <Delta now={share} prev={pulse.booked_share_prev} unit="pts" /></>} icon="Users" onClick={() => go('all-reports')} />
         </div>}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="lg:col-span-3 space-y-3 sm:space-y-4">

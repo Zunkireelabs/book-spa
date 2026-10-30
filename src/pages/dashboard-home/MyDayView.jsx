@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Button from '../../components/ui/Button';
-import { Card, clock12, npr } from './dashKit';
+import { Card, SuggestionsCard, clock12, npr } from './dashKit';
+import { DashPanels } from './DashboardPanels';
 import { fetchAttendancePunches, punchIn, punchOut } from '../../services/api';
 import { dayStatus, myEarnings, nextClient } from '../../lib/dashboardMyDay';
 import { fmtClock, fmtDuration, upcomingGaps } from '../../lib/dashboardFloor';
@@ -18,6 +19,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
   const therapistId = mine?.therapist_ids?.[0] || null;
   const [punches, setPunches] = useState(null);
   const [punchError, setPunchError] = useState(false);
+  const [panel, setPanel] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
 
@@ -117,6 +119,9 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
         <p className="text-xs text-gray-400 mt-1">Commission counts paid, completed bookings. Pay day figures come from Payroll.</p>
       </Card>
 
+      <SuggestionsCard title="Suggestion" view="myday" branchIds={[branchId]} today={today} role={role}
+        handlers={{ booking: (id) => setPanel({ type: 'booking', id }) }} />
+
       <div className="flex gap-2">
         <Button className="flex-1" variant={open ? 'outline' : 'primary'} iconName={open ? 'LogOut' : 'LogIn'} disabled={busy || punchError || punches == null} onClick={toggle}>
           {open ? 'Check out' : 'Check in'}
@@ -126,6 +131,7 @@ const MyDayView = ({ data, dataError, branchId, today, nowHm, role, staffLabelPl
       {open && <p className="text-xs text-gray-500">Checked in at {open.checkIn}</p>}
       {punchError && <p className="text-xs text-error">Couldn't load attendance. <button type="button" className="underline font-medium" onClick={loadPunches}>Retry</button></p>}
       {message && <p className="text-xs text-error">{message}</p>}
+      <DashPanels panel={panel} branchId={branchId} onClose={() => setPanel(null)} onChanged={onReload} />
     </div>
   );
 };

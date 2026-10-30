@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
-import { Card, GroupBand, Row, SuggestionsCard, npr, pctChange, plural, shortDay, weekdayName } from './dashKit';
+import { Card, GroupBand, Row, SuggestionsCard, npr, sharePct, pctChange, plural, shortDay, weekdayName } from './dashKit';
 import { approveDiscount, fetchNeeds, rejectDiscount } from '../../services/api';
 import { adminDiscounts, groupNeeds, summarizeWaiting } from '../../lib/dashboardNeeds';
 import { friendlyError } from '../../utils/friendlyError';
@@ -96,7 +96,7 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
                   </tr></thead>
                   <tbody>
                     {rows.map((r) => {
-                      const pct = r.booked_share == null ? null : Math.round(r.booked_share * 100);
+                      const pct = sharePct(r.booked_share);
                       const n = needsOf(r.branch_id);
                       return (
                         <tr key={r.branch_id} tabIndex={0} onClick={() => onOpenBranch(r.branch_id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpenBranch(r.branch_id); }}
@@ -167,7 +167,8 @@ const BusinessView = ({ data, dataError, branchIds, today, role, onOpenBranch, o
             })}
           </Card>
         </div>
-        <div className="lg:col-span-2"><SuggestionsCard /></div>
+        <div className="lg:col-span-2"><SuggestionsCard view="business" branchIds={branchIds} today={today} role={role}
+          handlers={{ branch: onOpenBranch, booking: (id, b) => onOpenBranch(b), create: (day, b) => onOpenBranch(b) }} /></div>
       </div>
     </div>
   );

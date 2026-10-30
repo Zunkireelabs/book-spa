@@ -60,9 +60,11 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-119 | Sadin | low | Profile: Branch row in the read view + Transfer/Return now in the header menu. Built in V33b (d99f8e5); ships with the UI-port PR |
 | ZNLY-155 | Sadin | high | Dashboard Tomorrow "therapists working" overcounts (45 vs 17 at Lazimpat): tomorrow count in mig 334 skips the today filters |
 | ZNLY-156 | Sadin | high | Dashboard: one "needs someone" rule (Business 15 vs Branch 38 at Lazimpat), JS + SQL twin, any date |
+| ZNLY-157 | Sadin | medium | Dashboard needs rule: count upcoming Pending bookings waiting >2h as "unconfirmed" (gap from 156) |
+| ZNLY-158 | Sadin | medium | Dashboard RPCs slow past 5 branches (325/345 ms at 6): batch the shift rule |
 | ZNLY-125 | Sadin | medium | Decided: the branch that was home on the booking date pays. Built in V33c-fix3, ships with ZNLY-113 |
 | ZNLY-120 | Sadin | low | Pill for a transfer later today ("To Sanepa at 4:20pm"). Built in V33b (d99f8e5); ships with the UI-port PR |
-| ZNLY-147 | Sadin | high | Dashboard redesign: job views (Business/Branch/Front desk/My day) × Prep/Live/Close + insights. Mockup v2 approved (9.4). V36a (8b45e05), V36b (fa4b429), V36c Branch view (976821c), V36d Business/Front desk/My day/new-tenant checklist committed (owner-checked); next V36e insights |
+| ZNLY-147 | Sadin | high | Dashboard redesign: job views (Business/Branch/Front desk/My day) × Prep/Live/Close + insights. Mockup v2 approved (9.4). V36a (8b45e05), V36b (fa4b429), V36c Branch view (976821c), V36d Business/Front desk/My day/new-tenant checklist committed (owner-checked); V36e ✦ insights (mig 336, rules v1) committed (owner-checked); next Reports |
 | ZNLY-150 | Sadin | high | Login ↔ therapist: link existed (users.therapist_id, mig 324); my day uses it (fa4b429). "Login" field in Therapists panel built in V36d, owner walkthrough done |
 | ZNLY-149 | Sadin | high | Front-desk tools (Collect payment etc.) for manager/admin. Built in V36a (8b45e05), owner-checked; ships with the UI-port PR |
 

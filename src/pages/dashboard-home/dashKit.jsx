@@ -1,12 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Icon from '../../components/AppIcon';
 import { fmtClock } from '../../lib/dashboardFloor';
 import { npr } from '../../lib/dashboardMoney';
+import { useIndustry } from '../../hooks/useIndustry';
+import { fetchDashboardInsights, recordInsightFeedback, draftInsightMessages } from '../../services/api';
+import { rankInsights, INSIGHT_VIEWS } from '../../lib/insightRank';
+import { describeInsight } from '../../lib/insightText';
+import InsightCard from './InsightCard';
 
 // Small shared pieces of the dashboard views (cards, rows, tiles) and the copy helpers they use.
 
 export { npr };
 export const plural = (n, one, many = `${one}s`) => `${n} ${Number(n) === 1 ? one : many}`;
+/** A booked share as a whole percent, never over 100 (booked minutes can pass available ones: breaks, leave, overbooking). */
+export const sharePct = (s) => (s == null ? null : Math.min(100, Math.round(Number(s) * 100)));
 export const shortDay = (iso) => {
   const d = new Date(`${iso}T00:00:00Z`);
   const part = (o) => d.toLocaleDateString('en-GB', { timeZone: 'UTC', ...o });
@@ -49,17 +56,75 @@ export const GroupBand = ({ children }) => (
   <div className="-mx-4 px-4 py-1.5 text-[10.5px] uppercase tracking-wide text-gray-500 bg-background border-y border-gray-100 first:-mt-4 first:border-t-0">{children}</div>
 );
 
-/** Suggestions placeholder (V36e fills it): the ✦ header with the Rule-based tag, as in the mockup. ✦ appears only on suggestions. */
-export const SuggestionsCard = ({ title = 'Suggestions' }) => (
-  <section className="bg-white rounded-lg border border-gray-200">
-    <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
-      <span className="text-accent text-[15px] leading-none" aria-hidden="true">✦</span>
-      <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-      <span className="text-[10.5px] font-semibold bg-accent/10 text-[#8a6a10] rounded-full px-2 py-px">Rule-based</span>
-    </header>
-    <div className="p-4"><p className="text-sm text-gray-400">Nothing to suggest yet.</p></div>
-  </section>
-);
+/**
+ * Suggestions ✦ (V36e): the ranked, capped Insights for one view. `view` is business | branch | frontdesk | myday.
+ * `handlers` = { booking(id, branchId), create(day, branchId), branch(branchId) } opens the panel an item points at; an item whose action has no handler
+ * here shows no button. ✦ appears only on suggestions.
+ */
+export const SuggestionsCard = ({ title = 'Suggestions', view = 'branch', branchIds = [], today = null, role = 'staff', handlers = {}, reloadKey = 0 }) => {
+  const labels = useIndustry();
+  const [items, setItems] = useState(null);
+  const [gone, setGone] = useState({});     // rule|subject hidden this session (the server hides it on the next load)
+  const [busy, setBusy] = useState(null);
+  const [notes, setNotes] = useState({});
+  const key = branchIds.join(',');
+  const canDraft = role === 'manager' || role === 'admin';
+
+  useEffect(() => {
+    if (!key) { setItems([]); return undefined; }
+    let alive = true;
+    fetchDashboardInsights({ branchIds: key.split(','), date: today }).then(({ data, error }) => { if (alive) setItems(error ? [] : data); });
+    return () => { alive = false; };
+  }, [key, today, reloadKey]);
+
+  const idOf = (i) => `${i.rule}|${i.subject}`;
+  const shown = rankInsights((items || []).filter((i) => !gone[idOf(i)]), view);
+  const total = (items || []).filter((i) => !gone[idOf(i)] && INSIGHT_VIEWS[view]?.rules.includes(i.rule)).length;
+
+  const feedback = async (item, action) => {
+    if (action === 'snooze' || action === 'dismiss') setGone((g) => ({ ...g, [idOf(item)]: true }));
+    await recordInsightFeedback({ rule: item.rule, subject: item.subject, action });
+  };
+  const act = async (item) => {
+    const a = item.action || {};
+    if (a.kind === 'draft' && !canDraft && a.booking_id) handlers.booking?.(a.booking_id, item.branch_id); // staff cannot draft: open the booking
+    else if (a.kind === 'draft') {
+      setBusy(idOf(item));
+      const { data, error } = await draftInsightMessages({ rule: a.draft_rule, customerIds: a.customer_ids || [] });
+      setBusy(null);
+      setNotes((n) => ({ ...n, [idOf(item)]: error ? "Couldn't create the drafts. Try again." : data === 0 ? 'Already drafted today. Find them in Outreach, Review queue.' : `${plural(data, 'draft')} ready in Outreach, Review queue. Nothing is sent until you approve.` }));
+    } else if (a.kind === 'booking') handlers.booking?.(a.booking_id, item.branch_id);
+    else if (a.kind === 'calendar') handlers.create?.(a.date, item.branch_id);
+    else handlers.branch?.(item.branch_id);
+  };
+  const canAct = (item) => {
+    const k = item.action?.kind;
+    return k === 'draft' ? canDraft || (!!item.action.booking_id && !!handlers.booking) : k === 'booking' ? !!handlers.booking : k === 'calendar' ? !!handlers.create : !!handlers.branch;
+  };
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200">
+      <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+        <span className="text-accent text-[15px] leading-none" aria-hidden="true">✦</span>
+        <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+        <span className="text-[10.5px] font-semibold bg-accent/10 text-[#8a6a10] rounded-full px-2 py-px">Rule-based</span>
+        {total > shown.length && <span className="ml-auto text-xs text-gray-500">{shown.length} of {total}</span>}
+      </header>
+      <div className="p-4">
+        {shown.length === 0
+          ? <p className="text-sm text-gray-400">Nothing to suggest yet.</p>
+          : shown.map((item) => {
+            const copy = describeInsight(item, { staff: labels.staffLabel, staffPlural: labels.staffLabelPlural });
+            if (copy?.cta?.kind === 'draft' && !canDraft) copy.cta = { label: 'Open booking', kind: 'booking' }; // draft_insight_messages refuses staff
+            return copy && (
+              <InsightCard key={idOf(item)} item={item} copy={copy} onAct={act} onFeedback={feedback}
+                busy={busy === idOf(item)} note={notes[idOf(item)]} canAct={canAct(item)} />
+            );
+          })}
+      </div>
+    </section>
+  );
+};
 
 /** 'Thursday' for a YYYY-MM-DD Nepal day. */
 export const weekdayName = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });

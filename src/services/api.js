@@ -348,6 +348,45 @@ export async function fetchShiftsForRange({ branchId, startDate, endDate }) {
   }
 }
 
+// Rule-based suggestions for the dashboard (get_dashboard_insights, migration-336). Numbers only; src/lib/insightText.js words them.
+export async function fetchDashboardInsights({ branchIds, date = null }) {
+  try {
+    const { data, error } = await supabase.rpc('get_dashboard_insights', { p_branch_ids: branchIds, p_date: date });
+    if (error) throw error;
+    return { data: data?.items || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchDashboardInsights error:', error.message);
+    return { data: [], error };
+  }
+}
+
+// 'up' | 'down' | 'dismiss' | 'snooze' (snoozed 3 days unless `snoozeUntil`). Own rows only (RLS).
+export async function recordInsightFeedback({ rule, subject, action, snoozeUntil = null }) {
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    const { data: me, error: meErr } = await supabase.from('users').select('org_id').eq('id', u?.user?.id).maybeSingle();
+    if (meErr || !me) throw meErr || new Error('No profile');
+    const { error } = await supabase.from('insight_feedback').insert({ org_id: me.org_id, rule, subject_key: subject, action, snooze_until: snoozeUntil });
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    console.error('[API] recordInsightFeedback error:', error.message);
+    return { error };
+  }
+}
+
+// "Draft N messages": rows for the Outreach review queue (status review). Nothing is sent. Returns how many were created.
+export async function draftInsightMessages({ rule, customerIds }) {
+  try {
+    const { data, error } = await supabase.rpc('draft_insight_messages', { p_rule: rule, p_customer_ids: customerIds });
+    if (error) throw error;
+    return { data: data || 0, error: null };
+  } catch (error) {
+    console.error('[API] draftInsightMessages error:', error.message);
+    return { data: 0, error };
+  }
+}
+
 // The whole dashboard in one call (get_dashboard, migration-334): pulse, floor, week, branches (with per-kind `needs`), money,
 // tomorrow, my_day. branchIds are cut to the caller's tenant/branches server-side; money is null for staff. `date` defaults to today.
 export async function fetchDashboard({ branchIds, date = null }) {
