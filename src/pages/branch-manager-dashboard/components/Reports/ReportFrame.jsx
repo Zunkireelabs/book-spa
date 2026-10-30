@@ -70,6 +70,7 @@ export const InsightList = ({ insights, canOpen, onOpen }) => {
             </div>
             <div className="flex gap-1.5 items-start flex-shrink-0 print:hidden">
               <button type="button" onClick={() => setOpen(open === i.rule ? null : i.rule)} aria-expanded={open === i.rule} className="h-7 px-2.5 rounded-spa border border-border text-xs font-medium hover:bg-black/[0.03]">Why?</button>
+              {i.onAct && <button type="button" onClick={i.onAct} className="h-7 px-2.5 rounded-spa border border-border text-xs font-medium hover:bg-black/[0.03]">{i.actLabel}</button>}
               {i.view && canOpen(i.view) && (
                 <button type="button" onClick={() => onOpen(i.view)} className="h-7 px-2.5 rounded-spa border border-border text-xs font-medium hover:bg-black/[0.03]">Open report</button>
               )}
@@ -107,7 +108,7 @@ const HowWeCount = ({ items }) => {
 
 const ReportFrame = ({
   groupLabel, title, subtitle, titleExtra = null, reopen = null, onBack, onHome,
-  range, periodId, onPeriod, onCustom, previousNote = null, tiles = [], tabs = [], activeTab, onTab,
+  range, periodId, onPeriod, onCustom, periodSlot = null, previousNote = null, beforeTabs = null, tiles = [], tabs = [], activeTab, onTab,
   definitions = [], onExport, isFavourite, onToggleFav, children,
 }) => (
   <div className="content-scroll flex-1 min-h-0 overflow-y-auto">
@@ -130,7 +131,7 @@ const ReportFrame = ({
           {range && <p className="hidden print:block text-xs text-text-tertiary mt-1">{range.from} to {range.to} ({range.label}, {range.vsLabel})</p>}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 print:hidden">
-          {range && <PeriodPicker periodId={periodId} range={range} onPeriod={onPeriod} onCustom={onCustom} />}
+          {periodSlot || (range && <PeriodPicker periodId={periodId} range={range} onPeriod={onPeriod} onCustom={onCustom} />)}
           {onToggleFav && (
             <button type="button" onClick={onToggleFav} aria-pressed={isFavourite} className="h-9 px-3 rounded-spa border border-border bg-surface text-xs font-medium inline-flex items-center gap-1.5 hover:bg-black/[0.03]">
               <Icon name="Star" size={14} fill={isFavourite ? 'currentColor' : 'none'} className={isFavourite ? 'text-warning' : ''} /> Favourite
@@ -150,12 +151,14 @@ const ReportFrame = ({
       </div>
 
       {tiles.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
+        <div className={`grid grid-cols-2 md:grid-cols-3 gap-2.5 ${tiles.length === 5 ? 'xl:grid-cols-5' : 'xl:grid-cols-6'}`}>
           {tiles.map((t) => <Tile key={t.key} tile={t} />)}
         </div>
       )}
 
       {previousNote && <p className="-mt-2 text-xs text-text-tertiary">{previousNote}</p>}
+
+      {beforeTabs}
 
       {tabs.length > 1 && (
         <div className="flex gap-5 border-b border-border print:hidden" role="tablist">

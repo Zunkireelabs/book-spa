@@ -11,8 +11,8 @@ describe('registry shape', () => {
     expect(REPORT_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Sales & money', 'Customers', 'Team', 'Products & prepaid']);
     expect(REPORTS.every((r) => REPORT_GROUPS.some((g) => g.id === r.group))).toBe(true);
   });
-  it('only Business health is live; ids and views are unique', () => {
-    expect(REPORTS.filter((r) => r.status === 'live').map((r) => r.id)).toEqual(['business-health']);
+  it('Business health and Money owed are live; ids and views are unique', () => {
+    expect(REPORTS.filter((r) => r.status === 'live').map((r) => r.id)).toEqual(['business-health', 'money-owed']);
     expect(new Set(REPORTS.map((r) => r.id)).size).toBe(17);
     expect(new Set(REPORTS.map((r) => r.view)).size).toBe(17);
   });
@@ -43,21 +43,22 @@ describe('roles', () => {
     expect(getVisibleReports('admin_viewer').length).toBe(getVisibleReports('admin').length);
     expect(canOpenReport(getReportByView('business-health'), 'staff')).toBe(false);
   });
-  it('the all-branches Due report is admin only', () => {
-    const owed = getReportByView('due-report');
-    expect(owed.id).toBe('money-owed');
-    expect(canOpenReport(owed, 'admin', 'due-report')).toBe(true);
-    expect(canOpenReport(owed, 'manager', 'due-report')).toBe(false);
-    expect(canOpenReport(owed, 'manager', 'outstanding')).toBe(true);
-    expect(getReportTabs(owed, 'manager').map((t) => t.view)).toEqual(['outstanding']);
-    expect(getReportTabs(owed, 'admin').map((t) => t.view)).toEqual(['outstanding', 'due-report']);
+  it('the old Outstanding and Due report views open Money owed, for every report role', () => {
+    for (const view of ['outstanding', 'due-report']) {
+      const r = getReportByView(view);
+      expect(r.id).toBe('money-owed');
+      expect(r.status).toBe('live');
+      expect(canOpenReport(r, 'manager', view)).toBe(true);
+      expect(canOpenReport(r, 'admin', view)).toBe(true);
+      expect(canOpenReport(r, 'staff', view)).toBe(false);
+    }
   });
 });
 
 describe('legacy views still resolve (deep links keep working)', () => {
   const legacy = {
     reports: 'day-close', 'service-revenue': 'revenue-by-service', 'category-revenue': 'revenue-by-service', discounts: 'discounts',
-    outstanding: 'money-owed', 'due-report': 'money-owed', performance: 'staff-performance', 'attendance-report': 'attendance',
+    outstanding: 'money-owed', 'due-report': 'money-owed', 'money-owed': 'money-owed', performance: 'staff-performance', 'attendance-report': 'attendance',
     'attendance-calendar': 'attendance', 'transfer-report': 'transfers', referrals: 'sources-referrals',
     'customer-referrals': 'sources-referrals', 'referral-wallet': 'sources-referrals',
   };

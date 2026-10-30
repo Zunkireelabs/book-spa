@@ -56,8 +56,6 @@ import ReportsLayout from './components/Reports/ReportsLayout';
 import { isReportView } from './components/Reports/reportRegistry';
 import AttendanceCalendarPage from 'pages/attendance-calendar';
 import TransferReportPanel from './components/TransferReportPanel';
-import OutstandingReportPanel from './components/Outstanding/OutstandingReportPanel';
-import DueReportPanel from './components/Outstanding/DueReportPanel';
 import ReferralsReportPanel from './components/Referrals/ReferralsReportPanel';
 import CustomerReferralsReportPanel from './components/Referrals/CustomerReferralsReportPanel';
 import ReferralWalletPanel from './components/Referrals/ReferralWalletPanel';
@@ -378,8 +376,6 @@ const BranchManagerDashboard = () => {
       case 'service-revenue': return <ServiceRevenueReportPanel branchId={branchId} />;
       case 'category-revenue': return <CategoryRevenueReportPanel branchId={branchId} />;
       case 'discounts': return <DiscountsPanel branchId={branchId} />;
-      case 'outstanding': return <OutstandingReportPanel branchId={branchId} />;
-      case 'due-report': return profile?.role === 'admin' ? <DueReportPanel /> : null;
       case 'performance': return <TherapistPerformancePanel branchId={branchId} />;
       case 'attendance-report': return <AttendanceReportPanel branchId={branchId} />;
       case 'attendance-calendar': return <AttendanceCalendarPage embedded />;

@@ -92,3 +92,46 @@ export function businessHealthInsights(data, { staffLabel = 'staff', periodLabel
     .sort((a, b) => b.score - a.score || ORDER.indexOf(a.rule) - ORDER.indexOf(b.rule))
     .slice(0, REPORT_INSIGHT_MAX);
 }
+
+// ── Money owed ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; // fixed names: some ICU builds print "Sept"
+const day = (iso) => { const [, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]}`; };
+const addDaysISO = (iso, n) => { const d = new Date(`${iso}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+/**
+ * Balances about to pass 30 days (they turn 31 days old within the next 14 days). One item, or []. `data` is get_report_money_owed (migration-338).
+ * Wording is a suggestion; `why` lists the exact rows. `rows` is what a "Remind all N" button would remind.
+ */
+export function moneyOwedInsights(data, { periodLabel = 'As of now' } = {}) {
+  const rows = (data?.rows || []).filter((r) => Number(r.age_days) >= 17 && Number(r.age_days) <= 30 && Number(r.balance) > 0);
+  if (!rows.length || !data?.as_of) return [];
+  const amount = rows.reduce((s, r) => s + Number(r.balance), 0);
+  const ages = rows.map((r) => Number(r.age_days));
+  const lo = Math.min(...ages);
+  const hi = Math.max(...ages);
+  const crossings = rows.map((r) => addDaysISO(r.date, 31)).sort();
+  const first = crossings[0];
+  const last = crossings[crossings.length - 1];
+  const n = rows.length;
+  return [{
+    rule: 'passing_30',
+    score: amount,
+    headline: `${n} balance${n > 1 ? 's are' : ' is'} ${lo === hi ? `${lo}` : `${lo}–${hi}`} days old (NPR ${money(amount)})`,
+    detail: `. ${n > 1 ? 'They pass' : 'It passes'} 30 days ${first === last ? `on ${day(first)}` : `between ${day(first)} and ${day(last)}`}; a reminder this week may bring ${n > 1 ? 'them' : 'it'} in.`,
+    why: rows.map((r) => `${r.customer_name}${r.ref ? ` · ${r.ref}` : ''}: NPR ${money(r.balance)}, ${r.age_days} days old (booked ${day(r.date)})`).join('; ') + '.',
+    source: ['From completed bookings and packages not fully paid', periodLabel, clock(data.computed_at) && `computed ${clock(data.computed_at)}`].filter(Boolean).join(' · '),
+    view: null,
+    remindRows: rows,
+  }];
+}
+
+/** The short message copied for one balance. Industry-neutral: no "therapist", no "appointment". */
+export function reminderText(row) {
+  const who = row.customer_name ? `Hello ${row.customer_name}` : 'Hello';
+  const ref = row.ref ? ` (${row.ref})` : '';
+  return `${who}, a gentle reminder: NPR ${money(row.balance)} is still due for your visit on ${day(row.date)}${ref}. Please let us know when you can settle it. Thank you.`;
+}
+
+/** One block per balance, for "Remind all". */
+export const reminderAllText = (rows) => rows.map(reminderText).join('\n\n');

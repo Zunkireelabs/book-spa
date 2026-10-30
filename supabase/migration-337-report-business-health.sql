@@ -11,9 +11,10 @@
 --    - refunds paid in the period. Real = not Membership / SessionPackage / VoucherWallet / ReferralWallet / ReferralVoucher.
 --  * Prepaid sold = membership deposits (rows with voucher_payment_id set are skipped: the voucher payment is the money) + voucher_payments
 --    + packages.paid_amount (issued_date in the period). Wallet-mode rows are skipped (a wallet buying a voucher is not new money).
---  * bridge (each line from per-booking rows, so Sales - not_paid + overpaid - paid_from_prepaid - paid_before + earlier + advance + other
---    + prepaid_sold - refunds = Cash in EXACTLY):
---      not_paid  Completed in period: max(0, final - payments - refunds)      overpaid  the same, when payments + refunds exceed final
+--  * bridge (each line from per-booking rows, so Sales - not_paid + overpaid + refunded_delivered - paid_from_prepaid - paid_before + earlier + advance
+--    + other + prepaid_sold - refunds = Cash in EXACTLY):
+--      not_paid  Completed in period: max(0, final - payments), the dashboard owed rule (a refund lowers the price and the amount paid equally)
+--      overpaid  max(0, payments - final)      refunded_delivered  refunds on those Completed bookings (Sales is net of them, so the bridge adds them back)
 --      paid_from_prepaid  prepaid-mode payments on the period's Completed / No Show bookings + wallet-mode product payments
 --      paid_before  real payments taken before the period on the period's Completed / No Show bookings (cash of an earlier period)
 --      earlier  real payments in the period on Completed / No Show bookings dated before it     advance  real payments in the period on bookings not
@@ -46,7 +47,7 @@ DECLARE
   v_use_mem numeric; v_use_pkg numeric; v_use_vch numeric; v_use_oth numeric; v_use numeric; v_prod_wallet numeric;
   v_sold_mem numeric; v_sold_vch numeric; v_sold_pkg numeric; v_sold numeric;
   v_cash numeric; v_card numeric; v_qr numeric; v_other numeric; v_cash_in numeric;
-  v_notpaid numeric; v_overpaid numeric; v_before numeric; v_earlier numeric; v_advance numeric; v_other_net numeric; v_refunds_line numeric;
+  v_notpaid numeric; v_overpaid numeric; v_refunded_delivered numeric; v_before numeric; v_earlier numeric; v_advance numeric; v_other_net numeric; v_refunds_line numeric;
   v_made int; v_active int; v_completed int; v_open int; v_cancelled int; v_noshow int;
   v_rows jsonb; v_booked int; v_working int; v_custs int; v_ret int; v_top_name text; v_top_share numeric;
 BEGIN
@@ -85,7 +86,7 @@ BEGIN
 
   WITH k AS (
     SELECT t.*, (t.st = 'Completed' AND t.dt >= p_from AND t.dt <= p_to) AS is_c, (t.st = 'No Show' AND t.dt >= p_from AND t.dt <= p_to) AS is_n,
-           t.final - t.pay - t.ref_thru AS s
+           t.final - t.pay AS s
       FROM jsonb_to_recordset(v_rows) AS t(id uuid, st text, dt date, final numeric, pay numeric, bef numeric, inp numeric, pm numeric, pk numeric, pv numeric, po numeric, ref_thru numeric, ref_in numeric, svc text)
   )
   SELECT
@@ -98,8 +99,9 @@ BEGIN
     COALESCE(sum(inp - ref_in) FILTER (WHERE st = 'Cancelled'), 0),
     COALESCE(sum(ref_in) FILTER (WHERE st <> 'Cancelled'), 0),
     COALESCE(sum(pm) FILTER (WHERE is_c OR is_n), 0), COALESCE(sum(pk) FILTER (WHERE is_c OR is_n), 0),
-    COALESCE(sum(pv) FILTER (WHERE is_c OR is_n), 0), COALESCE(sum(po) FILTER (WHERE is_c OR is_n), 0)
-    INTO v_delivered, v_notpaid, v_overpaid, v_before, v_earlier, v_advance, v_other_net, v_refunds_line, v_use_mem, v_use_pkg, v_use_vch, v_use_oth
+    COALESCE(sum(pv) FILTER (WHERE is_c OR is_n), 0), COALESCE(sum(po) FILTER (WHERE is_c OR is_n), 0),
+    COALESCE(sum(ref_thru) FILTER (WHERE is_c), 0)
+    INTO v_delivered, v_notpaid, v_overpaid, v_before, v_earlier, v_advance, v_other_net, v_refunds_line, v_use_mem, v_use_pkg, v_use_vch, v_use_oth, v_refunded_delivered
     FROM k;
   v_sales := v_delivered + v_prod;
 
@@ -205,7 +207,7 @@ BEGIN
     'prepaid_sold_by', jsonb_build_object('membership', v_sold_mem, 'voucher', v_sold_vch, 'package', v_sold_pkg),
     'cash_in', v_cash_in,
     'bridge', jsonb_build_object('not_paid', v_notpaid, 'overpaid', v_overpaid, 'paid_before', v_before, 'earlier', v_earlier, 'advance', v_advance,
-                                 'other', v_other_net, 'refunds', v_refunds_line),
+                                 'other', v_other_net, 'refunds', v_refunds_line, 'refunded_delivered', v_refunded_delivered),
     'by_method', jsonb_build_object('cash', v_cash, 'card', v_card, 'qr', v_qr, 'other', v_other),
     'top_service', CASE WHEN v_top_name IS NOT NULL THEN jsonb_build_object('name', v_top_name, 'share', v_top_share) END,
     'bookings', v_active, 'made', v_made, 'completed', v_completed, 'open', v_open, 'cancelled', v_cancelled, 'no_show', v_noshow,

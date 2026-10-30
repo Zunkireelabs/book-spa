@@ -64,10 +64,12 @@ describe('bridge', () => {
     expect(b.find((r) => /cancelled/.test(r.label || '')).label).toBe('Paid on cancelled bookings (refund or keep?)');
     expect(b.find((r) => /before this period/.test(r.label || '')).value).toBe('−400');
   });
-  it('a refund on a Completed booking nets against the overpaid amount; real overpayment shows as its own line', () => {
-    expect(buildBridge({ ...c, bridge: { ...bridge, refunds: 200, overpaid: 200 } }).find((r) => r.label === '− Refunds').value).toBe('0');
-    expect(buildBridge({ ...c, bridge: { ...bridge, refunds: 200, overpaid: 50 } }).find((r) => r.label === '− Refunds').value).toBe('−150');
-    expect(buildBridge({ ...c, bridge: { ...bridge, refunds: 0, overpaid: 50 } }).find((r) => /Paid above/.test(r.label || '')).value).toBe('+50');
+  it('a refund on a delivered booking nets to 0 (Sales is already net of it); extra refunds and real overpayment show once', () => {
+    const line = (over) => buildBridge({ ...c, bridge: { ...bridge, ...over } });
+    expect(line({ refunds: 200, refunded_delivered: 200 }).find((r) => r.label === '− Refunds').value).toBe('0');
+    expect(line({ refunds: 300, refunded_delivered: 200 }).find((r) => r.label === '− Refunds').value).toBe('−100');
+    expect(line({ refunds: 200, refunded_delivered: 150, overpaid: 50 }).find((r) => r.label === '− Refunds').value).toBe('0');
+    expect(line({ refunds: 0, overpaid: 50 }).find((r) => /Paid above/.test(r.label || '')).value).toBe('+50');
   });
   it('leaves out sub-lines with no money', () => {
     expect(buildBridge({ ...c, paid_from_prepaid_by: {}, prepaid_sold_by: {} }).some((r) => r.sub)).toBe(false);

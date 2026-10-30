@@ -91,3 +91,47 @@ describe('ranking', () => {
     expect(businessHealthInsights({})).toEqual([]);
   });
 });
+
+import { moneyOwedInsights, reminderText, reminderAllText } from './reportInsights';
+
+describe('money owed: balances passing 30 days', () => {
+  const row = (over) => ({ customer_name: 'Wendy Sample', ref: 'BK-1', balance: 3500, age_days: 18, date: '2026-10-12', ...over });
+  const data = (rows) => ({ as_of: '2026-10-30', rows, computed_at: '2026-10-30T09:07:00Z' });
+  it('fires for balances 17-30 days old, with the dates they cross 30 and the exact rows in Why', () => {
+    const [i] = moneyOwedInsights(data([row(), row({ customer_name: 'Lata', ref: 'BK-2', balance: 1000, age_days: 16 + 1, date: '2026-10-13' }), row({ age_days: 3, date: '2026-10-27' })]));
+    expect(i.rule).toBe('passing_30');
+    expect(i.headline).toBe('2 balances are 17–18 days old (NPR 4,500)');
+    expect(i.detail).toContain('between 12 Nov and 13 Nov');
+    expect(i.detail).toMatch(/may bring them in/);
+    expect(i.why).toContain('Wendy Sample · BK-1: NPR 3,500, 18 days old');
+    expect(i.remindRows).toHaveLength(2);
+  });
+  it('says "is" and "on" for a single balance', () => {
+    const [i] = moneyOwedInsights(data([row()]));
+    expect(i.headline).toBe('1 balance is 18 days old (NPR 3,500)');
+    expect(i.detail).toContain('on 12 Nov');
+  });
+  it('does not fire when nothing is in that window (too new, or already past 30)', () => {
+    expect(moneyOwedInsights(data([row({ age_days: 16 }), row({ age_days: 31 })]))).toEqual([]);
+    expect(moneyOwedInsights(data([]))).toEqual([]);
+    expect(moneyOwedInsights(null)).toEqual([]);
+  });
+});
+
+describe('reminder text', () => {
+  const r = { customer_name: 'Wendy Sample', ref: 'BK-20261012-0003', balance: 3500, date: '2026-10-12' };
+  it('names the customer, booking and balance, in plain industry-neutral words', () => {
+    const t = reminderText(r);
+    expect(t).toContain('Wendy Sample');
+    expect(t).toContain('NPR 3,500');
+    expect(t).toContain('BK-20261012-0003');
+    expect(t).toContain('12 Oct');
+    expect(t).not.toMatch(/therapist|spa|appointment|massage/i);
+  });
+  it('copes with a missing name or reference', () => {
+    expect(reminderText({ balance: 100, date: '2026-10-12' })).toMatch(/^Hello, a gentle reminder: NPR 100 is still due for your visit on 12 Oct\./);
+  });
+  it('Remind all gives one block per balance', () => {
+    expect(reminderAllText([r, { ...r, customer_name: 'Lata' }]).split('\n\n')).toHaveLength(2);
+  });
+});

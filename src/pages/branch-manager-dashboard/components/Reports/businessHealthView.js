@@ -35,7 +35,7 @@ export function buildTiles(data) {
 /**
  * Sales -> Cash in, in the order of the approved mockup. Each line is its own number from the server (`bridge`), and together they add up to
  * Cash in exactly. Lines that hold no money are left out, except Not paid yet and Refunds which always show. `sub` rows explain the line above.
- * Overpaid (paid more than the booking price, mostly a refunded amount) is netted into the Refunds line so the page shows one refund figure.
+ * Refunds paid out, the refunds already taken off Sales (refunded_delivered) and overpaid (payments above the price) are netted into one refund figure.
  */
 export function buildBridge(c) {
   const b = c.bridge || {};
@@ -44,7 +44,7 @@ export function buildBridge(c) {
   const used = [['Membership', by.membership], ['Package', by.package], ['Voucher wallet', by.voucher], ['Other credit', by.other]].filter(([, v]) => Number(v) > 0).map(([l, v]) => `${l} ${num(v)}`);
   const soldBits = [['Memberships', sold.membership], ['Vouchers', sold.voucher], ['Packages', sold.package]].filter(([, v]) => Number(v) > 0).map(([l, v]) => `${l} ${num(v)}`);
   const signed = (sign, v) => `${sign}${num(v)}`;
-  const refundNet = Number(b.refunds || 0) - Number(b.overpaid || 0);
+  const refundNet = Number(b.refunds || 0) - Number(b.refunded_delivered || 0) - Number(b.overpaid || 0);
   const has = (v) => Number(v) > 0;
   return [
     { label: 'Services delivered (Completed, final price)', value: num(c.service_sales) },

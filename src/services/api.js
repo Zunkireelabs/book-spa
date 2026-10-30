@@ -413,6 +413,19 @@ export async function fetchBusinessHealth({ branchIds, from, to }) {
   }
 }
 
+// Money owed in one call (get_report_money_owed, migration-338): rows, totals, age buckets, the total 30 days earlier, rollups by customer / branch /
+// staff. `asOf` null = now. Manager/admin/admin_viewer only; branchIds are cut to the caller's branches server-side.
+export async function fetchMoneyOwed({ branchIds, asOf = null }) {
+  try {
+    const { data, error } = await supabase.rpc('get_report_money_owed', { p_branch_ids: branchIds, p_as_of: asOf });
+    if (error) throw error;
+    return { data: data || {}, error: null };
+  } catch (error) {
+    console.error('[API] fetchMoneyOwed error:', error.message);
+    return { data: {}, error };
+  }
+}
+
 // Completed, not fully paid bookings, any date (the candidates for lib/dashboardMoney's owed rule, which then keeps balance > 0).
 const owedBookingsQuery = (cols) => supabase.from('bookings').select(cols).eq('status', 'Completed').neq('payment_status', 'paid').order('date').order('start_time');
 

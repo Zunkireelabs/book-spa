@@ -4,7 +4,7 @@ import { CUSTOMER_REFERRALS_ENABLED } from 'lib/featureFlags';
 // dashboard's renderer all read this. Roles and flags mirror the sidebar's former "Reports" group exactly.
 //
 // `status` says what a report is today:
-//   live    a report built on the shared ReportFrame (Business health).
+//   live    a report built on the shared ReportFrame (Business health, Money owed). `aliases` are old view names that now open it (deep links keep working).
 //   legacy  the existing panel, kept under its new name; `tabs` are the other existing views folded into the same report.
 //   soon    not built yet: hidden from the menu and the home, and it cannot be opened. No placeholder pages.
 // Titles and subtitles may hold {staff} / {staffs}: the industry's word for the person doing the service (useIndustry), never a hard-coded one.
@@ -29,8 +29,7 @@ export const REPORTS = [
     tabs: [{ view: 'service-revenue', label: 'By service' }, { view: 'category-revenue', label: 'By category' }] },
   { id: 'payments-tips', view: 'payments-tips', status: 'soon', title: 'Payments & tips', subtitle: 'Takings by method, refunds, tips per person', icon: 'Banknote', group: 'sales', roles: STAFF_UP, keywords: 'cash qr card refunds tips' },
   { id: 'discounts', view: 'discounts', status: 'legacy', title: 'Discounts', subtitle: 'Given, requested vs approved, by whom', icon: 'Percent', group: 'sales', roles: STAFF_UP, keywords: 'offers waiver' },
-  { id: 'money-owed', view: 'outstanding', status: 'legacy', title: 'Money owed', subtitle: 'Unpaid and partly paid, one branch or all', icon: 'AlertCircle', group: 'sales', roles: STAFF_UP, keywords: 'outstanding dues unpaid balance owed receivable due report',
-    tabs: [{ view: 'outstanding', label: 'Money owed' }, { view: 'due-report', label: 'All branches', roles: ['admin'] }] },
+  { id: 'money-owed', view: 'money-owed', status: 'live', aliases: ['outstanding', 'due-report'], title: 'Money owed', subtitle: 'Unpaid and partly paid, one branch or all', icon: 'AlertCircle', group: 'sales', roles: STAFF_UP, keywords: 'outstanding dues unpaid balance owed receivable due report collect remind' },
 
   { id: 'customers-retention', view: 'customers-retention', status: 'soon', title: 'Customers & retention', subtitle: 'New vs returning, top and lapsed customers', icon: 'Users', group: 'customers', roles: STAFF_UP, keywords: 'returning lapsed regulars' },
   { id: 'no-shows', view: 'no-shows', status: 'soon', title: 'No-shows & cancellations', subtitle: 'Rate, repeat cases, revenue lost', icon: 'UserX', group: 'customers', roles: STAFF_UP, keywords: 'cancelled lost' },
@@ -56,7 +55,7 @@ export const REPORTS = [
 export const fillLabels = (text, { staffLabel, staffLabelPlural } = {}) =>
   String(text || '').replace(/\{staffs\}/g, (staffLabelPlural || 'Staff').toLowerCase()).replace(/\{staff\}/g, staffLabel || 'Staff');
 
-const entryViews = (r) => [r.view, ...(r.tabs || []).map((t) => t.view)];
+const entryViews = (r) => [r.view, ...(r.aliases || []), ...(r.tabs || []).map((t) => t.view)];
 
 // Every view a live or legacy report answers to. A `soon` report has no views: it can't be opened.
 export const REPORT_VIEWS = new Set(REPORTS.filter((r) => r.status !== 'soon').flatMap(entryViews));
