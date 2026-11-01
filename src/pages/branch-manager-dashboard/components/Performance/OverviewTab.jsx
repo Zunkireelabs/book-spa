@@ -2,9 +2,11 @@ import React, { useMemo, useState } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { previousPeriod } from 'utils/reportPeriod';
 import { useIndustry } from 'hooks/useIndustry';
+import { durationText } from 'utils/durationText';
+import Amount from './Amount';
 import { DeltaChip } from '../Reports/ReportFrame';
 import {
-  scoreBars, holdsBack, outcomes, servicesDelivered, weekLabels, kpiTiles, noPrevLine, clockedNote, attendanceFlag, hoursText, shortDate, dayRange,
+  scoreBars, holdsBack, outcomes, servicesDelivered, weekLabels, kpiTiles, noPrevLine, clockedNote, attendanceFlag, shortDate, dayRange,
 } from './therapistInnerView';
 
 const n0 = (v) => Number(v || 0).toLocaleString('en-IN');
@@ -167,13 +169,14 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
         <Card title="Booking outcomes" aside={`${out.total} booking${out.total === 1 ? '' : 's'} dated ${dayRange(range.from, range.to)}`} className="lg:col-span-2">
           <div className="px-4 pb-4">
             <div className="flex h-2.5 rounded-full overflow-hidden bg-black/[0.07]">
-              {[['completed', 'bg-primary'], ['notClosed', 'bg-warning'], ['cancelled', 'bg-black/25'], ['noShow', 'bg-black/10']].map(([k, cls]) => (out[k] > 0 ? <div key={k} className={cls} style={{ width: `${(out[k] / out.total) * 100}%` }} /> : null))}
+              {[['completed', 'bg-primary'], ['notClosed', 'bg-warning'], ['cancelled', 'bg-black/25'], ['noShow', 'bg-[#7C3AED]'], ['upcoming', 'bg-blue-500']].map(([k, cls]) => (out[k] > 0 ? <div key={k} className={cls} style={{ width: `${(out[k] / out.total) * 100}%` }} /> : null))}
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[12px] text-text-secondary">
               <span><i className="inline-block w-2 h-2 rounded-sm bg-primary mr-1.5" />Completed <b className="font-data">{out.completed}</b></span>
               <span><i className="inline-block w-2 h-2 rounded-sm bg-warning mr-1.5" />Not closed <b className="font-data">{out.notClosed}</b></span>
               <span><i className="inline-block w-2 h-2 rounded-sm bg-black/25 mr-1.5" />Cancelled <b className="font-data">{out.cancelled}</b></span>
-              <span><i className="inline-block w-2 h-2 rounded-sm bg-black/10 mr-1.5" />No-show <b className="font-data">{out.noShow}</b></span>
+              <span><i className="inline-block w-2 h-2 rounded-sm bg-[#7C3AED] mr-1.5" />No-show <b className="font-data">{out.noShow}</b></span>
+              {out.upcoming > 0 && <span><i className="inline-block w-2 h-2 rounded-sm bg-blue-500 mr-1.5" />Coming up <b className="font-data">{out.upcoming}</b></span>}
             </div>
             {out.notClosed > 0 && (
               <div className="mt-3 pt-3 border-t border-border">
@@ -203,7 +206,7 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
               <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
                 <span className="font-data text-[10.5px] text-text-secondary mb-1">{n0(v)}</span>
                 <div className={`w-full rounded-t ${v > 0 ? 'bg-primary' : 'bg-black/10'}`} style={{ height: `${v > 0 ? Math.max(4, (v / weekMax) * 100) : 2}px`, maxHeight: '100px' }} />
-                <span className="text-[10.5px] text-text-tertiary mt-1.5 whitespace-nowrap">{labels[i]}</span>
+                <span className="text-[10.5px] leading-tight text-text-tertiary mt-1.5 text-center max-w-full break-words">{labels[i].replace('–', '–\u200B')}</span>
               </div>
             ))}
           </div>
@@ -215,17 +218,17 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
         <Card title="Services delivered" aside={`Completed${d.avgServiceDurationMinutes ? ` · avg ${d.avgServiceDurationMinutes} min each` : ''}`} className="lg:col-span-2 self-start">
           {svc.rows.length === 0 ? <p className="px-4 pb-4 text-sm text-text-tertiary">No completed services in this period.</p> : (
             <table className="w-full text-[12.5px]">
-              <thead><tr className="text-[11px] text-text-tertiary border-y border-border"><th className="text-left font-medium px-4 py-1.5">Service</th><th className="text-right font-medium py-1.5">Done</th><th className="text-right font-medium py-1.5">Sales (NPR)</th><th className="text-right font-medium px-4 py-1.5 w-[28%]">Share</th></tr></thead>
+              <thead><tr className="text-[11px] text-text-tertiary border-y border-border"><th className="text-left font-medium px-4 py-1.5">Service</th><th className="text-right font-medium py-1.5">Done</th><th className="text-right font-medium py-1.5 pl-2 pr-12">Sales (NPR)</th><th className="text-right font-medium px-4 py-1.5 w-[28%]">Share</th></tr></thead>
               <tbody>
                 {svc.rows.map((r) => (
                   <tr key={r.name} className="border-b border-border/60">
                     <td className="px-4 py-2 text-text-primary">{r.name}</td>
                     <td className="text-right font-data tabular-nums">{r.done}</td>
-                    <td className="text-right font-data tabular-nums">{r.owed && <span className="mr-2 rounded-full bg-warning/10 text-warning px-1.5 text-[10.5px] font-sans">owed</span>}{n0(r.sales)}</td>
-                    <td className="px-4"><div className="flex items-center gap-2 justify-end"><div className="w-16"><Bar share={r.share} cls="bg-primary" /></div><span className="font-data tabular-nums w-9 text-right">{Math.round(r.share * 100)}%</span></div></td>
+                    <td className="pl-2 pr-12 text-right font-data tabular-nums"><Amount value={r.sales} owed={r.owed} /></td>
+                    <td className="px-4"><div className="flex items-center gap-2 justify-end"><div className="w-16"><Bar share={r.share} cls="bg-primary" /></div><span className="font-data tabular-nums w-9 text-right">{r.pct}%</span></div></td>
                   </tr>
                 ))}
-                <tr><td className="px-4 py-2 font-semibold">Total</td><td className="text-right font-data tabular-nums font-semibold">{svc.total.done}</td><td className="text-right font-data tabular-nums font-semibold">{n0(svc.total.sales)}</td><td /></tr>
+                <tr><td className="px-4 py-2 font-semibold">Total</td><td className="text-right font-data tabular-nums font-semibold">{svc.total.done}</td><td className="pl-2 pr-12 text-right font-data tabular-nums font-semibold">{n0(svc.total.sales)}</td><td /></tr>
               </tbody>
             </table>
           )}
@@ -234,11 +237,11 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
         {/* Hours */}
         <Card title="Hours" aside={dayRange(range.from, range.to)}>
           <div className="px-4 pb-4">
-            {hourRow('Rostered', 'shifts from the roster', rosteredMin > 0 ? hoursText(rosteredMin) : 'No hours set', rosteredMin > 0 ? 1 : 0)}
-            {hourRow('Booked', `all bookings not cancelled, incl. the ${out.notClosed} not closed`, hoursText(row.booked_min), share(row.booked_min), 'bg-blue-500')}
-            {hourRow('Delivered', `the ${d.servicesCompleted} completed services`, `${d.occupiedHours}\u00A0h`, share(d.occupiedHours * 60), 'bg-primary')}
-            {hourRow('Clocked in', clockedNote(d.clockedDays || []), noClock ? 'n/a' : `${d.workedHours}\u00A0h`, noClock ? 0 : share(d.workedHours * 60))}
-            {hourRow('Busy on clocked-in days', noClock ? 'no attendance marked, so no figure' : `${d.busyMinutes < 120 ? `${d.busyMinutes}\u00A0min` : `${d.busyHours}\u00A0h`} of ${d.workedHours}\u00A0h, completed services only`, busyClocked == null ? 'n/a' : `${busyClocked}%`, busyClocked == null ? 0 : busyClocked / 100, 'bg-blue-500')}
+            {hourRow('Rostered', 'shifts from the roster', rosteredMin > 0 ? durationText(rosteredMin) : 'No hours set', rosteredMin > 0 ? 1 : 0)}
+            {hourRow('Booked', `all bookings not cancelled, incl. the ${out.notClosed} not closed`, durationText(row.booked_min), share(row.booked_min), 'bg-blue-500')}
+            {hourRow('Delivered', `the ${d.servicesCompleted} completed services`, durationText(svc.total.minutes), share(svc.total.minutes), 'bg-primary')}
+            {hourRow('Clocked in', clockedNote(d.clockedDays || []), noClock ? 'n/a' : durationText(d.workedHours * 60), noClock ? 0 : share(d.workedHours * 60))}
+            {hourRow('Busy on clocked-in days', noClock ? 'no attendance marked, so no figure' : `${durationText(d.busyMinutes)} of ${durationText(d.workedHours * 60)}, completed services only`, busyClocked == null ? 'n/a' : `${busyClocked}%`, busyClocked == null ? 0 : busyClocked / 100, 'bg-blue-500')}
             {attFlag && <Flag>{attFlag}</Flag>}
           </div>
         </Card>

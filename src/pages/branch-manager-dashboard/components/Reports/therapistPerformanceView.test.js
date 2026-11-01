@@ -190,7 +190,7 @@ describe('✦ rules', () => {
     expect(i.rule).toBe('low_busy');
     expect(i.headline).toBe('3 therapists were busy less than 40% of their hours');
     expect(i.detail).toContain('Bina 30% + 2 more, all Sanepa');
-    expect(i.why).toContain('Asha T.: 36% (6 of 17 h)');
+    expect(i.why).toContain('Asha T.: 36% (6 h of 16 h 40 min)');
     expect(i.why).not.toContain('Dolma');
     expect(i.why).not.toContain('Esha');
     expect(i.view).toBe('utilization');

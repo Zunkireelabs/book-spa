@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { durationText } from 'utils/durationText';
 import Icon from '../../../../components/AppIcon';
 import { getTherapistAttendanceDetail } from '../../../../services/api';
 
@@ -95,11 +96,11 @@ const AttendanceTab = ({ therapistId, branchId, range }) => {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <StatCard icon="Calendar" iconBg="bg-background" iconColor="text-text-secondary" label="Scheduled hours" value={`${data.scheduledHours}h`} />
-        <StatCard icon="Clock" iconBg="bg-primary/10" iconColor="text-primary" label="Actual worked" value={`${data.actualWorkedHours}h`} />
+        <StatCard icon="Calendar" iconBg="bg-background" iconColor="text-text-secondary" label="Scheduled hours" value={durationText(data.scheduledHours * 60)} />
+        <StatCard icon="Clock" iconBg="bg-primary/10" iconColor="text-primary" label="Actual worked" value={durationText(data.actualWorkedHours * 60)} />
         <StatCard icon="AlertTriangle" iconBg="bg-warning/10" iconColor="text-warning" label="Late arrivals" value={data.lateArrivals} />
         <StatCard icon="LogOut" iconBg="bg-warning/10" iconColor="text-warning" label="Early departures" value={data.earlyDepartures} />
-        <StatCard icon="Plus" iconBg="bg-success/10" iconColor="text-success" label="Extra hours" value={`${data.extraHours}h`} />
+        <StatCard icon="Plus" iconBg="bg-success/10" iconColor="text-success" label="Extra hours" value={durationText(data.extraHours * 60)} />
         <StatCard icon="ClipboardList" iconBg="bg-accent/10" iconColor="text-accent" label="Partial shifts" value={data.partialShifts} />
       </div>
 
@@ -123,7 +124,7 @@ const AttendanceTab = ({ therapistId, branchId, range }) => {
                     <span className="font-data font-data-normal text-sm text-text-primary">{formatPrettyDate(row.date)}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className="font-data font-data-normal text-sm text-text-secondary">{row.scheduledHours}h</span>
+                    <span className="font-data font-data-normal text-sm text-text-secondary">{durationText(row.scheduledHours * 60)}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="font-data font-data-normal text-sm text-text-secondary">{row.checkIn || '—'}</span>
@@ -133,7 +134,7 @@ const AttendanceTab = ({ therapistId, branchId, range }) => {
                     <span className="font-data font-data-normal text-sm text-text-secondary">{row.checkOut || '—'}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className="font-data font-data-normal text-sm text-text-secondary">{row.workedHours != null ? `${row.workedHours}h` : '—'}</span>
+                    <span className="font-data font-data-normal text-sm text-text-secondary">{row.workedHours != null ? durationText(row.workedHours * 60) : '—'}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-caption font-caption-medium ${STATUS_COLORS[row.status] || 'bg-background text-text-secondary'}`}>
@@ -157,9 +158,9 @@ const AttendanceTab = ({ therapistId, branchId, range }) => {
                 </span>
               </div>
               <div className="flex items-center gap-3 text-xs text-text-tertiary">
-                <span>Sched {row.scheduledHours}h</span>
+                <span>Sched {durationText(row.scheduledHours * 60)}</span>
                 <span>{row.checkIn || '—'} → {row.checkOut || '—'}{row.workedAtNote ? ` · ${row.workedAtNote}` : ''}</span>
-                <span>{row.workedHours != null ? `${row.workedHours}h worked` : '—'}</span>
+                <span>{row.workedHours != null ? `${durationText(row.workedHours * 60)} worked` : '—'}</span>
               </div>
             </div>
           ))}

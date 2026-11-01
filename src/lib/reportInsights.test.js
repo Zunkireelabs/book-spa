@@ -18,7 +18,7 @@ describe('busy gap', () => {
     expect(i.headline).toBe('Sanepa was busy 48% of its hours');
     expect(i.detail).toContain('Lazimpat 71%');
     expect(i.detail).toContain('therapist');
-    expect(i.why).toContain('312 booked hours of 650 working hours (48%)');
+    expect(i.why).toContain('312 h booked of 650 h working (48%)');
     expect(i.source).toMatch(/^From bookings \+ roster · Last 30 days · computed \d\d:\d\d$/);
   });
   it('does not fire under 15 points, when nobody is under 50%, or with one branch / no hours', () => {

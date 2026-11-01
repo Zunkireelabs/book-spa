@@ -12256,8 +12256,16 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     const noAttendance = attendanceRows.length === 0;
     // One line per booking in the period (the inner page's open list, services table and CSV). paid = final price when fully paid, as paidRevenue.
     const todayNp = nepalNow().today;
+    // A combo's other therapists (for "with Wangmo Q." on the Services tab): one name lookup for all of them.
+    const otherIdsOf = (b) => (b.booking_therapists || []).map((t) => t.therapist_id).filter((id) => id && id !== therapistId);
+    const otherIds = [...new Set(allBookings.flatMap(otherIdsOf))];
+    const nameOf = {};
+    if (otherIds.length) {
+      const { data: others } = await supabase.from('therapists').select('id, name').in('id', otherIds);
+      for (const t of others || []) nameOf[t.id] = t.name;
+    }
     const bookingList = allBookings
-      .map((b) => ({ ...(() => { const m = classifyBooking({ id: b.id, date: b.date, status: b.status, final_amount: b.full_amount, payments: b.payments }, { today: todayNp }); return { atStake: m.atStake, paidAmt: m.paid }; })(), date: b.date, start: String(b.start_time || '').slice(0, 5), customer: b.customer_name || '', service: b.service_name_snapshot || '', status: b.status !== 'Completed' && (b.status === 'No Show' || isNoShow(b)) ? 'No Show' : b.status, final: Number(b.final_amount) || 0, full: b.full_amount, paid: b.payment_status === 'paid' ? Number(b.final_amount) || 0 : 0, endMs: b.end_datetime ? new Date(b.end_datetime).getTime() : null, minutes: b.service_duration_snapshot || 0 }))
+      .map((b) => ({ ...(() => { const m = classifyBooking({ id: b.id, date: b.date, status: b.status, final_amount: b.full_amount, payments: b.payments }, { today: todayNp }); return { atStake: m.atStake, paidAmt: m.paid }; })(), date: b.date, start: String(b.start_time || '').slice(0, 5), customer: b.customer_name || '', service: b.service_name_snapshot || '', status: b.status !== 'Completed' && (b.status === 'No Show' || isNoShow(b)) ? 'No Show' : b.status, final: Number(b.final_amount) || 0, full: b.full_amount, paid: b.payment_status === 'paid' ? Number(b.final_amount) || 0 : 0, endMs: b.end_datetime ? new Date(b.end_datetime).getTime() : null, minutes: b.service_duration_snapshot || 0, others: otherIdsOf(b).map((id) => nameOf[id]).filter(Boolean) }))
       .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     return { data: { ...metrics, ...(noAttendance ? { workedHours: null, utilizationRate: null, busyHours: null, busyMinutes: null } : {}), bookingList, dayWindowMinutes, serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
@@ -12294,62 +12302,6 @@ export async function getCustomerFirstBookingFlag(customerId, bookingId, booking
     return { data: { isFirstBooking: (priorVisits || []).length === 0 }, error: null };
   } catch (error) {
     console.error('[API] getCustomerFirstBookingFlag error:', error.message);
-    return { data: null, error };
-  }
-}
-
-// Services tab: per-service Completed/Cancelled/Missed(No Show) counts, avg duration, revenue.
-export async function getTherapistServiceBreakdown({ branchId, therapistId, fromDate, toDate }) {
-  try {
-    if (!branchId) {
-      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
-    }
-    if (!therapistId) {
-      return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
-    }
-
-    const today = new Date().toISOString().split('T')[0];
-    const endDate = toDate || today;
-    const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
-
-    const bookings = (await fetchTherapistBookings({ branchId, therapistId, startDate, endDate, statuses: ['Completed', 'Cancelled', 'No Show'],
-      columns: 'service_name_snapshot, status, payment_status, final_amount, service_duration_snapshot, cancellation_reason' }))
-      .map((b) => ({ ...b, final_amount: (Number(b.final_amount) || 0) * b.share }));
-
-    const byService = {};
-    for (const b of (bookings || [])) {
-      const name = b.service_name_snapshot || 'Unknown Service';
-      if (!byService[name]) {
-        byService[name] = { serviceName: name, completed: 0, cancelled: 0, missed: 0, revenue: 0, _durations: [] };
-      }
-      const s = byService[name];
-      if (b.status === 'Completed') {
-        s.completed += 1;
-        s.revenue += Number(b.final_amount) || 0; // service sales: Completed at final price, paid or not (same rule as the Performance report)
-        if (b.service_duration_snapshot) s._durations.push(b.service_duration_snapshot);
-      } else if (isNoShow(b)) {
-        // Must be checked before the plain-Cancelled branch below — a No-Show
-        // booking now carries status='Cancelled' + cancellation_reason='No Show'.
-        s.missed += 1;
-      } else if (b.status === 'Cancelled') {
-        s.cancelled += 1;
-      }
-    }
-
-    const services = Object.values(byService).map(s => ({
-      serviceName: s.serviceName,
-      completed: s.completed,
-      cancelled: s.cancelled,
-      missed: s.missed,
-      avgDurationMinutes: s._durations.length > 0
-        ? Math.round(s._durations.reduce((a, b) => a + b, 0) / s._durations.length)
-        : 0,
-      revenue: s.revenue,
-    })).sort((a, b) => b.completed - a.completed);
-
-    return { data: { services, periodStart: startDate, periodEnd: endDate }, error: null };
-  } catch (error) {
-    console.error('[API] getTherapistServiceBreakdown error:', error.message);
     return { data: null, error };
   }
 }

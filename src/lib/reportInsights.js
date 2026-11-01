@@ -3,6 +3,8 @@
 // Input is the get_report_business_health result (migration-337). Each item: { rule, score, headline, detail, why, source, view }.
 // `view` is the report an "Open ..." button would go to; the UI hides the button when that report is not openable (still `soon`).
 
+import { durationText } from 'utils/durationText';
+
 export const REPORT_INSIGHT_MAX = 3;
 
 /** The previous period "has data" when it holds any bookings, sales or cash. Without it nothing can be compared. */
@@ -12,7 +14,7 @@ export const hasPreviousData = (data) => {
 };
 
 const pct = (share) => Math.round(Number(share) * 100);
-const hrs = (min) => Math.round(Number(min) / 60).toLocaleString('en-IN');
+const hrs = durationText;
 const money = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const clock = (iso) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null; };
 
@@ -34,7 +36,7 @@ function busyGap(data, { staffLabel, periodLabel }) {
     score: gap,
     headline: `${low.name} was busy ${pct(low.share)}% of its hours`,
     detail: ` vs ${high.name} ${pct(high.share)}%. Lending a ${staffLabel} on its quieter days could even it out.`,
-    why: `${low.name}: ${hrs(low.booked)} booked hours of ${hrs(low.working)} working hours (${pct(low.share)}%). ${high.name}: ${hrs(high.booked)} of ${hrs(high.working)} (${pct(high.share)}%). Working hours = the dashboard "working" rule.`,
+    why: `${low.name}: ${hrs(low.booked)} booked of ${hrs(low.working)} working (${pct(low.share)}%). ${high.name}: ${hrs(high.booked)} of ${hrs(high.working)} (${pct(high.share)}%). Working hours = the dashboard "working" rule.`,
     source: sourceLine('From bookings + roster', periodLabel, data),
     view: 'utilization',
   };
@@ -120,7 +122,7 @@ export function therapistPerformanceInsights(data, { staffLabel = 'therapist', s
       score: low.length,
       headline: `${low.length} ${low.length === 1 ? one : many} ${low.length === 1 ? 'was' : 'were'} busy less than ${pct(BUSY_LOW)}% of their hours`,
       detail: ` (${low[0].name} ${pct(low[0].busy)}%${low.length > 1 ? ` + ${low.length - 1} more` : ''}${branches.length === 1 && low.length > 1 ? `, all ${branches[0]}` : ''}). Moving a shift to a busier day or branch, or trimming it, may fit better.`,
-      why: low.map((t) => `${t.name}: ${pct(t.busy)}% (${hrs(t.booked_min)} of ${hrs(t.working_min)} h)`).join('; ') + '.',
+      why: low.map((t) => `${t.name}: ${pct(t.busy)}% (${hrs(t.booked_min)} of ${hrs(t.working_min)})`).join('; ') + '.',
       source,
       view: 'utilization',
     });

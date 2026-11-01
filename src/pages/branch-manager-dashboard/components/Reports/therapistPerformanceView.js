@@ -140,7 +140,6 @@ export function buildTiles(data) {
   ];
 }
 
-export const hoursOf = (min) => `${Math.round(Number(min) / 60).toLocaleString('en-IN')} h`;
 
 /** CSV of the table on screen. Ranking = one line per therapist plus the team; By branch = the same per branch; Trend = sales per week. */
 export function exportRows(data, tab, rowsFor, staffLabel = 'Therapist') {

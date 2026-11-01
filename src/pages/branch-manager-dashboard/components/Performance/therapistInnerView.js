@@ -1,6 +1,7 @@
 // Pure view-model for the therapist inner page (ZNLY-170): the report row + the overview numbers in, bars / tiles / outcome lists / CSV out.
 // Unit-tested; no React. Every number here comes from the same source as the report row (migration 339) so the page matches ZNLY-169.
 import { computeDelta, addDays } from 'utils/reportPeriod';
+import { durationText } from 'utils/durationText';
 import { WEIGHTS } from '../Reports/therapistPerformanceView';
 
 const ratio = (a, b) => (Number(b) > 0 ? Number(a) / Number(b) : null);
@@ -43,21 +44,23 @@ export function holdsBack(row, open) {
   return { count: open.count, from: open.firstDate, to: open.lastDate };
 }
 
-/** Booking outcomes from the booking lines. "Not closed" = Pending / Confirmed / In-Progress whose end time has passed (same rule as the API). */
+/** Booking outcomes from the booking lines. "Not closed" = Pending / Confirmed / In-Progress whose end time has passed (same rule as the API); the rest of them are "upcoming". */
 export function outcomes(list, nowMs = Date.now()) {
-  const c = { completed: 0, notClosed: 0, cancelled: 0, noShow: 0 };
+  const c = { completed: 0, notClosed: 0, cancelled: 0, noShow: 0, upcoming: 0 };
   const open = [];
+  const coming = [];
   for (const b of list) {
     if (b.status === 'Completed') c.completed += 1;
     else if (b.status === 'No Show') c.noShow += 1;
     else if (b.status === 'Cancelled') c.cancelled += 1;
     else if (b.endMs != null && b.endMs <= nowMs) { c.notClosed += 1; open.push(b); }
+    else { c.upcoming += 1; coming.push(b); } // not ended yet: every booking is in exactly one bucket, so the buckets add up to total
   }
   const by = {};
   for (const b of open) by[b.status] = (by[b.status] || 0) + 1;
   const dates = open.map((b) => b.date).sort();
   return {
-    ...c, total: list.length, open, openByStatus: by,
+    ...c, total: list.length, open, coming, openByStatus: by,
     // One number for the open bookings, the Needs closing rule (bookingMoney.classifyBooking): at stake = price − payments on bookings dated before today.
     // value / paidAhead are the grey explanation: the bookings' own price (a combo is not split) and what is already paid on them.
     openValue: open.reduce((n, b) => n + (b.full ?? b.final), 0),
@@ -67,19 +70,84 @@ export function outcomes(list, nowMs = Date.now()) {
   };
 }
 
-/** Completed bookings grouped by service: done, sales, whether any is still owed, share of sales. Rows add up to the service sales. */
+/** Whole-number percentages of `values` that add up to exactly 100 (largest remainder; ties go to the earlier row). All zeros when the total is 0. */
+export function pctShares(values) {
+  const total = values.reduce((n, v) => n + v, 0);
+  if (!(total > 0)) return values.map(() => 0);
+  const base = values.map((v) => Math.floor((v * 100) / total));
+  const rem = values.map((v, i) => (v * 100) - base[i] * total);
+  let left = 100 - base.reduce((n, v) => n + v, 0);
+  [...values.keys()].sort((a, b) => rem[b] - rem[a] || a - b).forEach((i) => { if (left > 0) { base[i] += 1; left -= 1; } });
+  return base;
+}
+
+/** Completed bookings grouped by service: done, sales, avg price, minutes (a combo counts its full length), whether any is still owed, share of sales
+ *  (`pct` = whole % that adds up to 100). Rows add up to the service sales. */
 export function servicesDelivered(list) {
   const m = new Map();
   for (const b of list) {
     if (b.status !== 'Completed') continue;
     const k = b.service || 'Service';
-    const r = m.get(k) || { name: k, done: 0, sales: 0, owed: false };
-    r.done += 1; r.sales += b.final; if (b.final - b.paid > 0) r.owed = true;
+    const r = m.get(k) || { name: k, done: 0, sales: 0, minutes: 0, owed: false };
+    r.done += 1; r.sales += b.final; r.minutes += b.minutes || 0; if (b.final - b.paid > 0) r.owed = true;
     m.set(k, r);
   }
   const rows = [...m.values()].sort((a, b) => b.sales - a.sales || b.done - a.done || a.name.localeCompare(b.name));
-  const total = { done: rows.reduce((n, r) => n + r.done, 0), sales: rows.reduce((n, r) => n + r.sales, 0) };
-  return { rows: rows.map((r) => ({ ...r, share: total.sales > 0 ? r.sales / total.sales : 0 })), total };
+  const total = { done: rows.reduce((n, r) => n + r.done, 0), sales: rows.reduce((n, r) => n + r.sales, 0), minutes: rows.reduce((n, r) => n + r.minutes, 0) };
+  const pcts = pctShares(rows.map((r) => r.sales));
+  return { rows: rows.map((r, i) => ({ ...r, avg: r.done ? r.sales / r.done : 0, share: total.sales > 0 ? r.sales / total.sales : 0, pct: pcts[i] })), total };
+}
+
+const dateParts = (iso) => { const [, m, d] = String(iso).split('-').map(Number); return { m, d }; };
+
+/** The not-closed bookings grouped by service: bookings, dates ("19, 22 Oct"; a booking with a note stands alone: "16 Oct (with Wangmo Q., paid)"),
+ *  at stake. Biggest at stake first, then name. `total` = the Overview's openAtStake. */
+export function notClosedByService(open) {
+  const m = new Map();
+  for (const b of [...open].sort((a, c) => (a.date + a.start).localeCompare(c.date + c.start))) {
+    const k = b.service || 'Service';
+    const r = m.get(k) || { name: k, bookings: 0, atStake: 0, items: [] };
+    r.bookings += 1; r.atStake += b.atStake || 0;
+    const notes = [];
+    if (b.others && b.others.length) notes.push(`with ${b.others.join(' and ')}`);
+    if (!(b.atStake > 0) && b.paidAmt > 0) notes.push('paid');
+    if (b.status === 'Pending') notes.push('Pending');
+    r.items.push({ date: b.date, notes });
+    m.set(k, r);
+  }
+  const rows = [...m.values()].map((r) => {
+    const tokens = [];
+    for (const it of r.items) {
+      const { m: mon, d } = dateParts(it.date);
+      const last = tokens[tokens.length - 1];
+      if (it.notes.length) tokens.push({ mon, text: `${shortDate(it.date)} (${it.notes.join(', ')})`, plain: false });
+      else if (last && last.plain && last.mon === mon) { last.days.push(d); last.text = `${last.days.join(', ')} ${MON[mon - 1]}`; }
+      else tokens.push({ mon, days: [d], text: `${d} ${MON[mon - 1]}`, plain: true });
+    }
+    return { name: r.name, bookings: r.bookings, atStake: r.atStake, dates: tokens.map((t) => t.text).join(' · ') };
+  }).sort((a, b) => b.atStake - a.atStake || a.name.localeCompare(b.name));
+  return { rows, total: rows.reduce((n, r) => n + r.atStake, 0), bookings: rows.reduce((n, r) => n + r.bookings, 0) };
+}
+
+/** Cancelled and no-show bookings, one line each, oldest first. No money. kind = 'cancelled' | 'noShow'. */
+export const didntHappen = (list) => list
+  .filter((b) => b.status === 'Cancelled' || b.status === 'No Show')
+  .map((b) => ({ service: b.service || 'Service', date: b.date, start: b.start, kind: b.status === 'No Show' ? 'noShow' : 'cancelled' }))
+  .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+
+/** One CSV row per line of what the Services tab shows: section, service, done or bookings, avg price, hours, sales or at stake, dates. */
+export function servicesCsvRows(list, nowMs = Date.now()) {
+  const out = outcomes(list, nowMs);
+  const svc = servicesDelivered(list);
+  const nc = notClosedByService(out.open);
+  const line = (b) => `${shortDate(b.date)} ${b.start}`;
+  return [
+    ['Section', 'Service', 'Done / bookings', 'Avg price', 'Minutes', 'Sales / at stake', 'Dates'],
+    ...svc.rows.map((r) => ['Services delivered', r.name, r.done, Math.round(r.avg), r.minutes, r.sales, '']),
+    ...nc.rows.map((r) => ['Not closed yet', r.name, r.bookings, '', '', r.atStake, r.dates]),
+    ...didntHappen(list).map((b) => [b.kind === 'noShow' ? 'No-show' : 'Cancelled', b.service, 1, '', '', '', line(b)]),
+    ...[...out.coming].map((b) => ['Coming up', b.service || 'Service', 1, '', '', '', line(b)]),
+  ];
 }
 
 /** Sales-by-week bar labels: every week as its range, cut by the period ("1–4 Oct", "5–11 Oct", "26–30 Oct"). */
@@ -103,7 +171,7 @@ export function kpiTiles(row, team, prevRow, data, staffWord = 'therapist') {
       delta: hasPrev ? computeDelta(ratio(row.completed, row.due), prevComp, { unit: 'pts' }) : null,
       line: `${data.statusSplit.noShow} no-show${data.statusSplit.noShow === 1 ? '' : 's'} · ${data.statusSplit.cancelled} cancelled · ${data.statusSplit.notClosed} not closed`,
       foot: `avg ticket ${row.avg_ticket == null ? '—' : Math.round(row.avg_ticket).toLocaleString('en-IN')} · team ${team?.avg_ticket == null ? '—' : Math.round(team.avg_ticket).toLocaleString('en-IN')}` },
-    { key: 'busy', label: 'Busy', value: row.busy == null ? 'No hours set' : pct(row.busy), sub: row.busy == null ? '' : `· ${hoursText(row.booked_min)} of ${hoursText(row.working_min)}`,
+    { key: 'busy', label: 'Busy', value: row.busy == null ? 'No hours set' : pct(row.busy), sub: row.busy == null ? '' : `· ${durationText(row.booked_min)} of ${durationText(row.working_min)}`,
       delta: hasPrev && row.busy != null ? computeDelta(row.busy, prevRow.busy, { unit: 'pts' }) : null,
       line: 'booked time ÷ rostered hours (same rule as the report)', marker: mark(row.busy, team?.busy), markerText: team?.busy == null ? '' : `team ${Math.round(team.busy * 1000) / 10}%`, markerLabel: row.busy == null ? '' : `you ${pct(row.busy)}` },
     { key: 'rebook', label: 'Rebook', value: row.rebook_rate == null ? '—' : pct(row.rebook_rate), sub: row.rebook_rate == null ? `· ${row.customers} customer${row.customers === 1 ? '' : 's'} (needs 5)` : `· ${row.rebooked} of ${row.customers} customers`,
@@ -111,8 +179,6 @@ export function kpiTiles(row, team, prevRow, data, staffWord = 'therapist') {
       line: 'booked again within 60 days (any therapist)', marker: mark(row.rebook_rate, team?.rebook_rate), markerText: team?.rebook_rate == null ? '' : `team ${pct(team.rebook_rate)}`, markerLabel: row.rebook_rate == null ? '' : `you ${pct(row.rebook_rate)}` },
   ];
 }
-
-export const hoursText = (min) => `${r1(Number(min) / 60).toLocaleString('en-IN')}\u00A0h`;
 
 /** "No change vs 1–30 Sep shown: …" when the previous period has nothing to compare with. */
 export const noPrevLine = (prevRow, prevRange, firstName) =>
@@ -122,7 +188,7 @@ export const noPrevLine = (prevRow, prevRange, firstName) =>
 /** The "Clocked in" note: "attendance marked on 26 Oct (1.5 h) and 27 Oct (no times, 12 h assumed)". */
 export function clockedNote(days) {
   if (!days.length) return 'no attendance marked';
-  const bit = (d) => (d.assumed ? `${shortDate(d.date)} (no times, ${d.hours}\u00A0h assumed)` : `${shortDate(d.date)} (${d.hours}\u00A0h)`);
+  const bit = (d) => (d.assumed ? `${shortDate(d.date)} (no times, ${durationText(d.hours * 60)} assumed)` : `${shortDate(d.date)} (${durationText(d.hours * 60)})`);
   const parts = [...days].sort((a, b) => a.date.localeCompare(b.date)).map(bit);
   return `attendance marked on ${parts.length > 2 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts.join(' and ')}`;
 }

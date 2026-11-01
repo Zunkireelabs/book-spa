@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreBars, holdsBack, outcomes, servicesDelivered, weekLabels, csvRows, kpiTiles, noPrevLine, clockedNote, attendanceFlag, rankOf } from './therapistInnerView';
+import { scoreBars, holdsBack, outcomes, servicesDelivered, pctShares, notClosedByService, didntHappen, servicesCsvRows, weekLabels, csvRows, kpiTiles, noPrevLine, clockedNote, attendanceFlag, rankOf } from './therapistInnerView';
 import { buildRows } from '../Reports/therapistPerformanceView';
 
 const govinda = { therapist_id: 'g', name: 'Govinda L.', service_sales: 17400, completed: 6, due: 18, bookings: 19, no_show: 0, customers: 6, rebooked: 5, rebook_rate: 0.833, booked_min: 1248, working_min: 15060, busy: 0.083, att_days: 2, att_present: 2 };
@@ -37,6 +37,11 @@ describe('outcomes', () => {
     expect(o.openByStatus).toEqual({ Confirmed: 1, Pending: 1 });
     expect(o.openInfo).toEqual({ count: 2, firstDate: '2026-10-16', lastDate: '2026-10-20' });
   });
+  it('every booking is in exactly one bucket, a booking not ended yet is upcoming', () => {
+    expect(o.upcoming).toBe(1);
+    expect(o.completed + o.notClosed + o.cancelled + o.noShow + o.upcoming).toBe(o.total);
+    expect(o.coming).toHaveLength(1);
+  });
   it('holdsBack when completion is the lowest part and bookings are not closed', () => {
     const r = buildRows({ therapists: [govinda] })[0];
     expect(holdsBack(r, o.openInfo)).toEqual({ count: 2, from: '2026-10-16', to: '2026-10-20' });
@@ -50,7 +55,7 @@ describe('servicesDelivered', () => {
       { status: 'Completed', service: 'A', final: 6000, paid: 6000 }, { status: 'Completed', service: 'A', final: 800, paid: 800 },
       { status: 'Completed', service: 'B', final: 2000, paid: 0 }, { status: 'Cancelled', service: 'C', final: 999, paid: 0 },
     ]);
-    expect(s.total).toEqual({ done: 3, sales: 8800 });
+    expect(s.total).toEqual({ done: 3, sales: 8800, minutes: 0 });
     expect(s.rows.map((r) => [r.name, r.done, r.sales, r.owed])).toEqual([['A', 2, 6800, false], ['B', 1, 2000, true]]);
     expect(Math.round(s.rows[0].share * 100)).toBe(77);
   });
@@ -74,7 +79,7 @@ describe('csvRows / rank / notes', () => {
     expect(rankOf(rows, 'g')).toEqual({ rank: 1, of: 2 });
   });
   it('clocked note and attendance flag', () => {
-    expect(clockedNote([{ date: '2026-10-26', hours: 1.5, assumed: false }, { date: '2026-10-27', hours: 12, assumed: true }])).toBe('attendance marked on 26 Oct (1.5\u00A0h) and 27 Oct (no times, 12\u00A0h assumed)');
+    expect(clockedNote([{ date: '2026-10-26', hours: 1.5, assumed: false }, { date: '2026-10-27', hours: 12, assumed: true }])).toBe('attendance marked on 26 Oct (1 h 30 min) and 27 Oct (no times, 12 h assumed)');
     expect(attendanceFlag(2, 25)).toMatch(/only 2 days/);
     expect(attendanceFlag(10, 25)).toBeNull();
   });
@@ -87,5 +92,60 @@ describe('csvRows / rank / notes', () => {
     const t = kpiTiles(r, { active: 25, service_sales: 119150, avg_ticket: 2837, busy: 0.046, rebook_rate: 0.59 }, null, { paidRevenue: 15400, owed: 2000, statusSplit: { noShow: 0, cancelled: 1, notClosed: 12 } });
     expect(t.filter((x) => x.marker).map((x) => x.key + x.marker.good)).toEqual(['salestrue', 'busytrue', 'rebooktrue']);
     expect(t[0].delta).toBeNull();
+  });
+});
+
+describe('pctShares', () => {
+  it('adds up to 100 (largest remainder), ties go to the earlier row', () => {
+    expect(pctShares([6800, 3000, 2800, 2800, 2000])).toEqual([39, 17, 16, 16, 12]); // plain rounding gives 99
+    expect(pctShares([1, 1, 1])).toEqual([34, 33, 33]);
+    expect(pctShares([5])).toEqual([100]);
+    expect(pctShares([0, 0])).toEqual([0, 0]);
+  });
+});
+
+describe('services tab', () => {
+  const list = [
+    { date: '2026-10-02', start: '10:00', status: 'Completed', service: 'Hot Stone', final: 3500, paid: 3500, minutes: 90 },
+    { date: '2026-10-03', start: '10:00', status: 'Completed', service: 'Hot Stone', final: 3300, paid: 0, minutes: 90 },
+    { date: '2026-10-05', start: '10:00', status: 'Completed', service: 'Couples', final: 2250, paid: 2250, minutes: 120, others: ['Wangmo Q.'] },
+    { date: '2026-10-16', start: '10:00', status: 'Confirmed', service: 'Couples', final: 2250, endMs: 1, atStake: 0, paidAmt: 4500, others: ['Wangmo Q.'] },
+    { date: '2026-10-30', start: '10:00', status: 'Confirmed', service: 'Couples', final: 2250, endMs: 1, atStake: 2250, paidAmt: 0 },
+    { date: '2026-10-19', start: '10:00', status: 'Confirmed', service: 'Thai', final: 3000, endMs: 1, atStake: 3000, paidAmt: 0 },
+    { date: '2026-10-22', start: '10:00', status: 'Confirmed', service: 'Thai', final: 2300, endMs: 1, atStake: 2300, paidAmt: 0 },
+    { date: '2026-10-26', start: '10:00', status: 'Pending', service: 'Foot', final: 900, endMs: 1, atStake: 900, paidAmt: 0 },
+    { date: '2026-10-15', start: '13:30', status: 'Cancelled', service: 'Swedish', final: 2000 },
+    { date: '2026-10-14', start: '09:00', status: 'No Show', service: 'Thai', final: 3000 },
+    { date: '2026-11-20', start: '09:00', status: 'Confirmed', service: 'Thai', final: 3000, endMs: 9e15 },
+  ];
+  it('services: avg, hours (combo full length), shares add up to 100', () => {
+    const s = servicesDelivered(list);
+    expect(s.rows[0]).toMatchObject({ name: 'Hot Stone', done: 2, sales: 6800, avg: 3400, minutes: 180, owed: true });
+    expect(s.rows[1]).toMatchObject({ name: 'Couples', sales: 2250, minutes: 120 });
+    expect(s.total).toEqual({ done: 3, sales: 9050, minutes: 300 });
+    expect(s.rows.reduce((n, r) => n + r.pct, 0)).toBe(100);
+  });
+  it('not closed grouped by service with date notes', () => {
+    const nc = notClosedByService(outcomes(list, 1e12).open);
+    expect(nc.rows.map((r) => [r.name, r.bookings, r.atStake, r.dates])).toEqual([
+      ['Thai', 2, 5300, '19, 22 Oct'],
+      ['Couples', 2, 2250, '16 Oct (with Wangmo Q., paid) · 30 Oct'],
+      ['Foot', 1, 900, '26 Oct (Pending)'],
+    ]);
+    expect(nc.total).toBe(8450);
+  });
+  it("didn't happen: one line per booking, cancelled vs no-show", () => {
+    expect(didntHappen(list)).toEqual([
+      { service: 'Thai', date: '2026-10-14', start: '09:00', kind: 'noShow' },
+      { service: 'Swedish', date: '2026-10-15', start: '13:30', kind: 'cancelled' },
+    ]);
+  });
+  it('csv = what the tab shows', () => {
+    const r = servicesCsvRows(list, 1e12);
+    expect(r[0][0]).toBe('Section');
+    expect(r[1]).toEqual(['Services delivered', 'Hot Stone', 2, 3400, 180, 6800, '']);
+    expect(r.filter((x) => x[0] === 'Not closed yet')).toHaveLength(3);
+    expect(r.filter((x) => x[0] === 'Coming up')).toHaveLength(1);
+    expect(r.find((x) => x[0] === 'No-show')[6]).toBe('14 Oct 09:00');
   });
 });

@@ -10,7 +10,7 @@ import { PeriodPicker } from '../Reports/ReportFrame';
 import { useTherapistPerformance } from '../Reports/useTherapistPerformance';
 import { buildRows } from '../Reports/therapistPerformanceView';
 import { build as buildCustomers } from './therapistCustomersView';
-import { csvRows, rankOf } from './therapistInnerView';
+import { csvRows, servicesCsvRows, rankOf } from './therapistInnerView';
 import { csvRows as customerCsvRows } from './therapistCustomersView';
 import OverviewTab from './OverviewTab';
 import CustomersTab from './CustomersTab';
@@ -76,6 +76,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
   const onPeriod = (id) => { setPeriodId(id); if (id === 'custom' && !custom) setCustom({ from: range.from, to: range.to }); };
   const lower = staffLabel.toLowerCase();
   const onCustomers = activeTab === 'customers';
+  const onServices = activeTab === 'services';
 
   return (
     <div className="space-y-5">
@@ -99,10 +100,11 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodPicker periodId={periodId} range={range} onPeriod={onPeriod} onCustom={setCustom} />
           <button type="button" disabled={onCustomers ? !custView : !d?.bookingList}
-            title={onCustomers ? 'Export customers, one row per customer' : 'Export bookings, one row per booking'}
+            title={onCustomers ? 'Export customers, one row per customer' : onServices ? 'Export what this tab shows, one row per service' : 'Export bookings, one row per booking'}
             onClick={() => {
               const slug = String(therapistName).toLowerCase().replace(/\s+/g, '-');
               if (onCustomers) downloadCsv(`${slug}-customers-${range.from}-to-${range.to}.csv`, customerCsvRows([...custView.served, ...custView.notClosed, ...custView.upcoming, ...custView.cancelled]));
+              else if (onServices) downloadCsv(`${slug}-services-${range.from}-to-${range.to}.csv`, servicesCsvRows(d.bookingList));
               else downloadCsv(`${slug}-bookings-${range.from}-to-${range.to}.csv`, csvRows(d.bookingList));
             }}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-spa border border-border bg-surface text-sm font-body-medium text-text-primary hover:bg-black/[0.03] disabled:opacity-50">
@@ -124,7 +126,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
       <div>
         {activeTab === 'overview' && <OverviewTab bookedCustomers={custView ? custView.counts.booked : null} row={row} report={report} prevRow={prevRow} maxSales={maxSales} range={range} ov={ov} reportLoading={reportLoading} onRetry={load} onNeedsClosing={onNeedsClosing} />}
         {activeTab === 'customers' && <CustomersTab state={{ ...cust, retry: loadCust }} therapistName={therapistName} range={tabRange} today={getTodayISO()} onNeedsClosing={onNeedsClosing} onMoneyOwed={onMoneyOwed} />}
-        {activeTab === 'services' && <ServicesTab therapistId={therapistId} branchId={branchId} range={tabRange} />}
+        {activeTab === 'services' && <ServicesTab ov={ov} onRetry={load} therapistName={therapistName} range={tabRange} onNeedsClosing={onNeedsClosing} />}
         {activeTab === 'attendance' && <AttendanceTab therapistId={therapistId} branchId={branchId} range={tabRange} />}
       </div>
     </div>

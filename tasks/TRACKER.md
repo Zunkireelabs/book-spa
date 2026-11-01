@@ -6,7 +6,7 @@ fix this file.
 
 *Generated from Plane by `/project-pm sync`. Don't hand-edit; change Plane, then re-sync.*
 
-Last synced: **2026-10-27 evening** by bookx-d5 (lead)
+Last synced: **2026-11-01** by bookx-8f (lead)
 
 ---
 
@@ -32,6 +32,7 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-136 | Anish | medium | Group booking (Fresha-style): many people, one shared slot, one checkout |
 | ZNLY-74 | Sadin | urgent | UI-8 (V18): storage security, org-scoped service-images, private customer-files |
 | ZNLY-75 | Sadin | urgent | UI-9 (V19): cross-tenant RLS sweep. Stage test, then prod after the holidays |
 | ZNLY-70 | Sadin | high | UI-4 (V14): one money model |
@@ -52,39 +53,30 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 | ZNLY-81 | Sadin | urgent | UI-15: renumber UI-branch migrations 282–293 → 301+. Done locally in 847a5c9; ships with the UI-port PR |
 | ZNLY-101 | Sadin | medium | UI-22: make staff transfers easy to understand everywhere. Mockup first |
 | ZNLY-112 | Sadin | high | Therapists "Overall" fails (uuid "__overall__") + Add with a Branch field + no Overall for one-branch tenants. Built and owner-checked (V31), committed locally; ships with the UI-port PR |
-| ZNLY-134 | Sadin | medium | Site icon: big sizes = wordmark on white, small = Playfair "z". Preview temp_ss/mockups/site-icon-v1.html, awaiting owner OK |
 | ZNLY-135 | Sadin | high | Notifications: pop-up card + sound, bell category tabs + branch labels, Inbox page, per-user settings. V35a committed (4e762b7). V35b committed (760a7cd). Then V35c new events (+ actor column). Owner findings 29 Oct: bell groups bookings (wants each row), own-action bookings hidden (confirm) |
 | ZNLY-123 | Sadin | medium | UI-23: Attendance page redesign, payroll-grade. V34a/a2/b committed (1663683). V34c payroll guard on hold until ZNLY-135 |
 | ZNLY-113 | Sadin | high | One home-branch model for temporary transfers. V33a (a8f55f0) + V33b (d99f8e5) + V33c (3019d2d) committed locally, owner-checked. Code done; ships with the UI-port PR |
 | ZNLY-118 | Sadin | high | Lent therapist commission can go missing. Fixed in 3019d2d (V33c), owner-verified locally; ships with the UI-port PR |
 | ZNLY-119 | Sadin | low | Profile: Branch row in the read view + Transfer/Return now in the header menu. Built in V33b (d99f8e5); ships with the UI-port PR |
-| ZNLY-155 | Sadin | high | Dashboard Tomorrow "therapists working" overcounts (45 vs 17 at Lazimpat): tomorrow count in mig 334 skips the today filters |
-| ZNLY-156 | Sadin | high | Dashboard: one "needs someone" rule (Business 15 vs Branch 38 at Lazimpat), JS + SQL twin, any date |
-| ZNLY-157 | Sadin | medium | Dashboard needs rule: count upcoming Pending bookings waiting >2h as "unconfirmed" (gap from 156) |
-| ZNLY-158 | Sadin | medium | Dashboard RPCs slow past 5 branches (325/345 ms at 6): batch the shift rule |
 | ZNLY-125 | Sadin | medium | Decided: the branch that was home on the booking date pays. Built in V33c-fix3, ships with ZNLY-113 |
 | ZNLY-120 | Sadin | low | Pill for a transfer later today ("To Sanepa at 4:20pm"). Built in V33b (d99f8e5); ships with the UI-port PR |
 | ZNLY-147 | Sadin | high | Dashboard redesign: job views (Business/Branch/Front desk/My day) × Prep/Live/Close + insights. Mockup v2 approved (9.4). V36a (8b45e05), V36b (fa4b429), V36c Branch view (976821c), V36d Business/Front desk/My day/new-tenant checklist committed (owner-checked); V36e ✦ insights (mig 336, rules v1) committed (owner-checked); next Reports |
 | ZNLY-150 | Sadin | high | Login ↔ therapist: link existed (users.therapist_id, mig 324); my day uses it (fa4b429). "Login" field in Therapists panel built in V36d, owner walkthrough done |
 | ZNLY-149 | Sadin | high | Front-desk tools (Collect payment etc.) for manager/admin. Built in V36a (8b45e05), owner-checked; ships with the UI-port PR |
-| ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups, Start here row, headline vs last period, ✦ flags. List owner-approved (9.1); mockup next |
-| ZNLY-160 | Sadin | medium | Customer source never recorded (referral_source / client_source empty locally). Prod unchecked (needs-verification) |
-| ZNLY-161 | Sadin | medium | Working hours set for only 18 of 69 therapists. Prod unchecked (needs-verification) |
-| ZNLY-162 | Sadin | medium | Dashboard branch revenue ignores refunds, pulse total subtracts them (mig 334). Code-read, needs-verification |
-| ZNLY-163 | Sadin | medium | Money owed "Remind": no payment-due outreach trigger exists (mig 103 list); build it or copy-text fallback |
-| ZNLY-164 | Sadin | low | Explain local owed drop 12,550/6 → 9,750/5 between 29 and 30 Oct (needs-verification) |
-| ZNLY-165 | Sadin | low | Local DB: 5 leftover ZZDemo therapists (26 Oct) with bookings; add to a cleanup script and remove |
-| ZNLY-166 | Sadin | medium | v36-dashboard.sql fails ROOM_AT_CAPACITY while the ZZToday seed is loaded; make the test seed-proof |
-| ZNLY-167 | Sadin | medium | Dashboard "revenue" counts advance payments; align with Reports Sales (earned) or relabel Takings (with ZNLY-162) |
-| ZNLY-169 | Sadin | medium | Therapist Full breakdown (TherapistDetailView) still uses the old revenue rule + red utilization; align with Reports Sales (earned) |
-| ZNLY-170 | Sadin | medium | Therapist inner page UI redesign (rated 6/10): mockup first, after the V37c commit |
-| ZNLY-171 | Sadin | high | Inner page "Busy while clocked in" uses the whole month of service time over only the marked attendance days (57% shown, ~9% real) |
-| ZNLY-172 | Sadin | medium | Therapist inner page: redesign the Customers, Services and Attendance tabs (after ZNLY-170) |
+| ZNLY-159 | Sadin | high | Reports redesign: 17 reports in 5 groups. V37a home+Business health (df19cda), V37b Money owed (429b3a4), V37c Therapist performance (0667005) committed locally; migs 337–340 LOCAL. Next: the remaining 14 reports after ZNLY-172 |
+| ZNLY-169 | Sadin | medium | Therapist Full breakdown uses the old revenue rule. Fixed in V37c (0667005), committed locally; ships with the UI-port PR |
+| ZNLY-170 | Sadin | medium | Therapist inner page Overview redesign. V37d (9b2b10f) committed locally, owner-checked; ships with the UI-port PR |
+| ZNLY-171 | Sadin | high | Inner page "Busy while clocked in" (57% shown, ~9% real). Fixed in V37d (9b2b10f), committed locally; ships with the UI-port PR |
+| ZNLY-172 | Sadin | medium | Therapist inner page tabs. Customers done (V37e 583365c, mig 340 LOCAL). Services tab mockup v1 owner-approved, V37f brief with bookx-1d. Then Attendance |
+| ZNLY-175 | Sadin | medium | Inner page outcomes bar: upcoming bookings counted in the total but in no bucket. Fix inside V37f |
 
 ## In review / on stage
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-153 | Anish | urgent | Group booking review fixes: therapist PII leak, guest roster, availability math, discard dialog (In Review) |
+| ZNLY-134 | Sadin | medium | Site icon: favicon + app icons to the new Zennly logo (In Review) |
+| ZNLY-140 | unassigned | medium | Inbox hover quick actions (Confirm booking / Review discount / Open attendance) (In Review) |
 | ZNLY-12 | unassigned | urgent | Revoke anon EXECUTE on public_search_booking (In Review, PR #415) |
 | ZNLY-14 | unassigned | high | PIN login service-role → Edge Function (In Review, PR #30) |
 | ZNLY-34 | unassigned | high | PR #413: combo-service bookings, calendar full-day view (In Review) |
@@ -98,7 +90,6 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 |---|---|---|---|
 | ZNLY-13 | unassigned | high | Renumber colliding migration-289 (PR #413 vs #415) |
 | ZNLY-26 | unassigned | high | Verify 503 "Reconnecting" screen + login banner against a real failure |
-| ZNLY-94 | Anish | high | Get onboarded to the Plane workflow |
 | ZNLY-130 | Sadin | medium | Calendar header shows "From Lazimpat" instead of "Here <window>" for a visiting therapist (split from ZNLY-123) |
 | ZNLY-17 | unassigned | medium | Flip STAGING_DOMAIN to dev-app.zennly.io, verify stage health check |
 
@@ -106,7 +97,6 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
-| ZNLY-140 | Sadin | medium | DECIDE: Inbox hover quick actions (Confirm / Review / Open attendance) |
 | ZNLY-84 | Sadin | medium | A-2: admin_viewer sees write actions on customer-detail. Hand to Anish or fix here? |
 | ZNLY-85 | Sadin | medium | V-4: staff voucher limits. Match booking limits? |
 | ZNLY-89 | Sadin | medium | V-9: win-back emails already-booked guests. Align with At-risk rule? |
@@ -119,6 +109,23 @@ Last synced: **2026-10-27 evening** by bookx-d5 (lead)
 
 | Ticket | Owner | Priority | What |
 |---|---|---|---|
+| ZNLY-155 | Sadin | high | Dashboard Tomorrow "therapists working" overcounts (45 vs 17 at Lazimpat): tomorrow count in mig 334 skips the today filters |
+| ZNLY-156 | Sadin | high | Dashboard: one "needs someone" rule (Business 15 vs Branch 38 at Lazimpat), JS + SQL twin, any date |
+| ZNLY-157 | Sadin | medium | Dashboard needs rule: count upcoming Pending bookings waiting >2h as "unconfirmed" (gap from 156) |
+| ZNLY-158 | Sadin | medium | Dashboard RPCs slow past 5 branches (325/345 ms at 6): batch the shift rule |
+| ZNLY-160 | Sadin | medium | Customer source never recorded (referral_source / client_source empty locally). Prod unchecked (needs-verification) |
+| ZNLY-161 | Sadin | medium | Working hours set for only 18 of 69 therapists. Prod unchecked (needs-verification) |
+| ZNLY-162 | Sadin | medium | Dashboard branch revenue ignores refunds, pulse total subtracts them (mig 334). Code-read, needs-verification |
+| ZNLY-163 | Sadin | medium | Money owed "Remind": no payment-due outreach trigger exists (mig 103 list); build it or copy-text fallback |
+| ZNLY-164 | Sadin | low | Explain local owed drop 12,550/6 → 9,750/5 between 29 and 30 Oct (needs-verification) |
+| ZNLY-165 | Sadin | low | Local DB: 5 leftover ZZDemo therapists (26 Oct) with bookings; add to a cleanup script and remove |
+| ZNLY-166 | Sadin | medium | v36-dashboard.sql fails ROOM_AT_CAPACITY while the ZZToday seed is loaded; make the test seed-proof |
+| ZNLY-167 | Sadin | medium | Dashboard "revenue" counts advance payments; align with Reports Sales (earned) or relabel Takings (with ZNLY-162) |
+| ZNLY-168 | unassigned | high | Gender-preference online booking can pass with zero eligible/free therapists |
+| ZNLY-146 | unassigned | medium | Insight component + sparkle rule + audit (AI-ready insights) |
+| ZNLY-144 | unassigned | medium | Discount settings: per-role limits set by the business, enforced in the DB |
+| ZNLY-145 | unassigned | low | Inbox "Needs action" filter (Pending online bookings + open attendance gaps) |
+| ZNLY-141 | unassigned | low | Notify staff when a guest cancels/reschedules online (blocked: needs guest self-service) |
 | ZNLY-152 | Sadin | medium | Sidebar "Bookings" badge: count of bookings needing someone (same source as dashboard Needs action) |
 | ZNLY-151 | Sadin | medium | Retire the old "New booking" wizard page + old centred Booking Management modal; right-hand panels everywhere |
 | ZNLY-148 | Sadin | medium | Dashboard metrics look wrong (Unpaid 173%, utilization 0% while booked, Top performers NPR 0). Needs verification |
