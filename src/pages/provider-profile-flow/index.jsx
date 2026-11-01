@@ -37,8 +37,14 @@ const ProviderProfileFlow = () => {
     heroImageUrl,
     showStaffSelection,
     enableStaffRatings,
+    enableGroupBooking,
   } = useTenant();
   const { customerProfile } = useCustomerAuth();
+
+  // Single source of truth for whether group booking is offered: the build-time kill
+  // switch AND the per-org admin toggle must both be on. Combined once here rather than
+  // ANDing the org setting into each of the 4 call sites below separately.
+  const groupBookingAvailable = GROUP_BOOKING_ENABLED && enableGroupBooking;
 
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [branches, setBranches] = useState([]);
@@ -105,7 +111,7 @@ const ProviderProfileFlow = () => {
         // single-branch tenant has no gate screen to hang the prompt off, so it
         // fires here instead, once, right after the auto-select resolves (this
         // effect only re-runs on orgId change, not on every render).
-        if (GROUP_BOOKING_ENABLED) {
+        if (groupBookingAvailable) {
           setEntryChoiceOpen(true);
           window.history.pushState({ providerBooking: true }, '');
         }
@@ -146,7 +152,7 @@ const ProviderProfileFlow = () => {
   // there, so X there correctly lands on the profile page instead.
   const handleBranchGateSelect = useCallback((branch) => {
     handleBranchSelect(branch);
-    if (GROUP_BOOKING_ENABLED) {
+    if (groupBookingAvailable) {
       setEntryChoiceOpen(true);
       window.history.pushState({ providerBranch: true, providerBooking: true }, '');
     } else {
@@ -267,14 +273,14 @@ const ProviderProfileFlow = () => {
   // otherwise leave the site entirely instead of returning to the profile — so opening
   // pushes a history entry and Back pops it.
   const openBooking = () => {
-    if (GROUP_BOOKING_ENABLED) setEntryChoiceOpen(true);
+    if (groupBookingAvailable) setEntryChoiceOpen(true);
     else setBookingOpen(true);
     window.history.pushState({ providerBooking: true }, '');
   };
 
   // SummaryCard/MobileBookingBar's "Continue" only enables once a service is
   // already ticked in the cart -- by that point the solo/group choice has already
-  // been asked and answered (right after branch select, GROUP_BOOKING_ENABLED),
+  // been asked and answered (right after branch select, groupBookingAvailable),
   // so re-asking it here would show the same "Select an option" screen twice for
   // one visit. Goes straight to solo booking, same as openBooking() used to
   // before the choice screen existed.
@@ -502,7 +508,7 @@ const ProviderProfileFlow = () => {
           needed while group booking exists as a second path; with the flag off,
           openBooking() is solo-only anyway and the existing gated CTA is the one
           entry point, unchanged. */}
-      {GROUP_BOOKING_ENABLED && (
+      {groupBookingAvailable && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
           <Button variant="primary" onClick={openBooking} className="w-full sm:w-auto">
             <Icon name="CalendarPlus" size={16} className="mr-2" />

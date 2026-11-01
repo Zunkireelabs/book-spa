@@ -98,6 +98,11 @@ export const TenantProvider = ({ children }) => {
     // Org booking settings
     showStaffSelection: org?.settings?.show_staff_selection === true,
     enableStaffRatings: org?.settings?.enable_staff_ratings === true,
+    // Opposite default from the two toggles above: group booking is already live today
+    // for every tenant with the VITE_ENABLE_GROUP_BOOKING env flag on, via no per-org gate
+    // at all. Defaulting this to false like the opt-in toggles above would silently take
+    // it away from every one of those tenants the moment this setting ships.
+    enableGroupBooking: org?.settings?.enable_group_booking !== false,
     logoUrl: org?.logo_url || null,
     heroImageUrl: org?.hero_image_url || null,
     orgAbout: org?.settings?.about || '',

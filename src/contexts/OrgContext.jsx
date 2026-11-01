@@ -86,6 +86,10 @@ export const OrgProvider = ({ children }) => {
     paymentMethods: getOrgPaymentMethods(org?.settings),
     showStaffSelection: org?.settings?.show_staff_selection === true,
     enableStaffRatings: org?.settings?.enable_staff_ratings === true,
+    // Opposite default from the two toggles above — see TenantContext.jsx's matching
+    // field for why (group booking is already live for every tenant via the env flag
+    // alone; defaulting this to false would silently disable it on ship).
+    enableGroupBooking: org?.settings?.enable_group_booking !== false,
     refreshOrg: loadOrg,
     loading: authLoading || loading,
     error,
