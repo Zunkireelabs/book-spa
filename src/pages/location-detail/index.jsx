@@ -199,6 +199,15 @@ const LocationDetailPage = () => {
               )}
 
               <div>
+                <SettingsRow title="Branch Photo" description="Shown on the storefront picker when a customer chooses between this location and your other branches. Leave empty to show a generic icon tile instead.">
+                  <LocationPhotoField
+                    preview={photoPreview}
+                    onFileSelected={handlePhotoSelected}
+                    onRemove={handleRemovePhoto}
+                    uploading={uploadingPhoto}
+                  />
+                </SettingsRow>
+
                 <SettingsRow title="Location Details" description="Name, address, phone, and map link for this location.">
                   <div className="space-y-4 max-w-md">
                     <div>
@@ -222,15 +231,6 @@ const LocationDetailPage = () => {
 
                 <SettingsRow title="Weekly Opening Hours" description="Toggle each day on or off and set its open/close time. Shown to customers on the booking flow.">
                   <BranchHoursEditor rows={hours} onChange={setHours} />
-                </SettingsRow>
-
-                <SettingsRow title="Branch Photo" description="Shown on the storefront picker when a customer chooses between this location and your other branches. Leave empty to show a generic icon tile instead.">
-                  <LocationPhotoField
-                    preview={photoPreview}
-                    onFileSelected={handlePhotoSelected}
-                    onRemove={handleRemovePhoto}
-                    uploading={uploadingPhoto}
-                  />
                 </SettingsRow>
               </div>
             </>
