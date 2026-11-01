@@ -33,7 +33,6 @@ import RosterPanel from './components/MasterData/RosterPanel';
 import ClosedDatesPanel from './components/MasterData/ClosedDatesPanel';
 import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCapacityPanel';
 import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
-import BranchPhotoPanel from './components/MasterData/BranchPhotoPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import LocationsPanel from './components/MasterData/LocationsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
@@ -718,7 +717,6 @@ const BranchManagerDashboard = () => {
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
-              {viewMode === 'branch-photo' && !isOverall && profile?.role === 'admin' && <BranchPhotoPanel branchId={branchId} />}
               {viewMode === 'locations' && profile?.role === 'admin' && <LocationsPanel orgId={orgId} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}

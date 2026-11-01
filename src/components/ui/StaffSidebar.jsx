@@ -489,14 +489,6 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           overallHidden: true
         },
         {
-          id: 'branch-photo',
-          label: 'Branch Photo',
-          icon: 'ImagePlus',
-          path: `${basePath}?view=branch-photo`,
-          roles: ['admin'],
-          overallHidden: true
-        },
-        {
           id: 'locations',
           label: 'Locations',
           icon: 'MapPin',
