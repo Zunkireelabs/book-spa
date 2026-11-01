@@ -3,6 +3,7 @@
 import { computeDelta, addDays } from 'utils/reportPeriod';
 import { durationText } from 'utils/durationText';
 import { WEIGHTS } from '../Reports/therapistPerformanceView';
+import { deriveRow } from 'services/attendanceView';
 
 const ratio = (a, b) => (Number(b) > 0 ? Number(a) / Number(b) : null);
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -16,14 +17,14 @@ export const dayRange = (from, to) => {
 };
 
 /** The four score bars: value / max points, a sub-label, amber below half of the max, grey n/a (rest rescaled) when a part has no data. */
-export function scoreBars(row, maxSales) {
+export function scoreBars(row, maxSales, { expectCheckIn = false } = {}) {
   const p = row.parts;
   const top = Number(maxSales) > 0 && Number(row.service_sales) >= Number(maxSales);
   const busyPct = row.busy == null ? null : pct(row.busy);
   const defs = [
     { key: 'sales', label: 'Sales', sub: top ? 'top earner' : `${pct(ratio(row.service_sales, maxSales) ?? 0)} of top earner` },
     { key: 'completion', label: 'Completion', sub: `${row.completed} of ${row.due} due` },
-    { key: 'attendance', label: 'Attendance', sub: `${row.att_present} of ${row.att_days} marked`, naText: 'n/a, not marked' },
+    { key: 'attendance', label: 'Attendance', sub: `present on ${row.att_present} of ${row.att_days}${expectCheckIn ? ' marked' : ''} days`, naText: 'n/a, not marked' },
     { key: 'busy', label: 'Busy', sub: `${busyPct} of rostered`, naText: 'n/a, no hours set' },
   ];
   return defs.map((d) => {
@@ -185,15 +186,18 @@ export const noPrevLine = (prevRow, prevRange, firstName) =>
   (!prevRow || Number(prevRow.bookings) === 0)
     ? `No change vs ${dayRange(prevRange.from, prevRange.to)} shown: ${firstName} had no bookings in that period (we never show a made-up %).` : null;
 
-/** The "Clocked in" note: "attendance marked on 26 Oct (1.5 h) and 27 Oct (no times, 12 h assumed)". */
-export function clockedNote(days) {
-  if (!days.length) return 'no attendance marked';
-  const bit = (d) => (d.assumed ? `${shortDate(d.date)} (no times, ${durationText(d.hours * 60)} assumed)` : `${shortDate(d.date)} (${durationText(d.hours * 60)})`);
-  const parts = [...days].sort((a, b) => a.date.localeCompare(b.date)).map(bit);
-  return `attendance marked on ${parts.length > 2 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts.join(' and ')}`;
+/** The "Clocked in" note: "on 1 day with clock times (26 Oct); 27 Oct present, no clock times". `att` = attendanceDays() output. */
+export function clockedNote(att) {
+  const t = att?.totals;
+  if (!t || (!t.clockDays && !t.noTimeDates.length)) return 'no attendance marked';
+  const list = (dates) => (dates.length > 4 ? null : dates.map(shortDate).join(', '));
+  const parts = [];
+  if (t.clockDays) { const l = list(t.clockDates.map((c) => c.date)); parts.push(`on ${t.clockDays} day${t.clockDays === 1 ? '' : 's'} with clock times${l ? ` (${l})` : ''}`); }
+  if (t.noTimeDates.length) { const l = list(t.noTimeDates); parts.push(l ? `${l} present, no clock times` : `${t.noTimeDates.length} present days without clock times`); }
+  return parts.join('; ');
 }
 
-/** ✦ when attendance is marked on under a quarter of the rostered days. `rosteredDays` is estimated from rostered hours ÷ branch hours per day. */
+/** ✦ when attendance is marked on under a quarter of the rostered days. `rosteredDays` = the real count of rostered days (attendanceDays). */
 export function attendanceFlag(attDays, rosteredDays) {
   if (attDays === 0 || !(rosteredDays > 0) || attDays / rosteredDays >= 0.25) return null; // none marked: the n/a bar already says so
   return `Attendance is marked on only ${attDays} day${attDays === 1 ? '' : 's'} this period, so the attendance score and clocked-in figures rest on little data.`;
@@ -205,3 +209,167 @@ export const rankOf = (rows, id) => { const r = rows.find((x) => x.id === id); r
 export const CSV_HEAD = ['Date', 'Start', 'Customer', 'Service', 'Status', 'Final', 'Paid', 'Owed'];
 /** One row per booking in the period. Owed = final − paid on Completed bookings only. */
 export const csvRows = (list) => [CSV_HEAD, ...list.map((b) => [b.date, b.start, b.customer, b.service, b.status, b.final, b.paid, b.status === 'Completed' ? Math.max(0, b.final - b.paid) : 0])];
+
+// ---- Attendance (ZNLY-172 V37g) -------------------------------------------------------------------------------------------------------------
+// ONE helper turns the therapist's roster (therapist_shifts_for_range rows) + attendance rows into a day-by-day list and the totals. The Overview's
+// Clocked in / Busy lines, the tab badge and the Attendance tab all read this output, so they cannot disagree. Never assumes a time: Worked exists
+// only when BOTH clock times exist. Every minute figure is a whole number; the UI formats with durationText.
+export const DEFAULT_GRACE_MINUTES = 10; // only when a branch value is missing; the branch's late_grace_minutes is what the tab uses
+const NPT_OFFSET_MIN = 345; // Nepal is UTC+5:45 all year
+const EXCUSED = ['Leave', 'Annual Leave', 'Sick Leave', 'Day Off'];
+const secToMin = (t) => { if (t == null) return null; const [h, m, sec] = String(t).split(':').map(Number); return Math.round((h * 3600 + (m || 0) * 60 + (sec || 0)) / 60); };
+const isoMs = (iso) => { const ms = iso ? Date.parse(iso) : NaN; return Number.isNaN(ms) ? null : ms; };
+const nepalMin = (ms) => (ms == null ? null : ((Math.floor(ms / 60000) + NPT_OFFSET_MIN) % 1440 + 1440) % 1440);
+const hhmm = (min) => (min == null ? null : `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`);
+const nepalDate = (ms) => new Date(ms + NPT_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+const rangeMin = (arr) => (Array.isArray(arr) ? arr : []).reduce((sum, y) => sum + (Number(y.end_min) - Number(y.start_min) || 0), 0);
+
+/** Net shift minutes = end − start − breaks − off (the same formula as migration 339's `wrk`). */
+export function netShiftMinutes(s) {
+  if (!s || !s.works || !s.start_time || !s.end_time || s.source === 'none') return 0;
+  return Math.max(0, secToMin(s.end_time) - secToMin(s.start_time) - rangeMin(s.breaks) - rangeMin(s.off));
+}
+
+/** "1–4, 7–25 and 28–30 Oct" from sorted ISO dates (calendar-adjacent days join into one range). */
+export function rangesText(dates) {
+  const ranges = [];
+  for (const d of dates) {
+    const last = ranges[ranges.length - 1];
+    if (last && addDays(last[1], 1) === d) last[1] = d; else ranges.push([d, d]);
+  }
+  const month = (iso) => iso.slice(0, 7);
+  const same = ranges.length > 0 && ranges.every(([a, b]) => month(a) === month(ranges[0][0]) && month(b) === month(ranges[0][0]));
+  const bit = ([a, b]) => (same ? (a === b ? `${Number(a.slice(8))}` : `${Number(a.slice(8))}–${Number(b.slice(8))}`) : dayRange(a, b));
+  const parts = ranges.map(bit);
+  const joined = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] || '');
+  return same ? `${joined} ${MON[Number(month(ranges[0][0]).slice(5)) - 1]}` : joined;
+}
+
+export function attendanceDays({ shifts = [], rows = [], from, to, now = Date.now(), branchHours = null, settings = {} }) {
+  const today = nepalDate(now);
+  const expectCheckIn = !!settings.expectCheckIn; // branches.expect_check_in (default false): OFF = a rostered day with no record counts as present
+  const grace = settings.lateGraceMinutes ?? DEFAULT_GRACE_MINUTES;
+  const shiftBy = {}; for (const s of shifts) shiftBy[s.shift_date] = s;
+  const rowBy = {}; for (const r of rows) if (!rowBy[r.date]) rowBy[r.date] = r;
+  const bOpen = branchHours ? secToMin(branchHours.open) : null;
+  const bClose = branchHours ? secToMin(branchHours.close) : null;
+  const days = [];
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    const s = shiftBy[date]; const r = rowBy[date];
+    const net = netShiftMinutes(s);
+    const rostered = net > 0;
+    const offLabel = (s?.off || []).map((y) => y.label || y.reason).find(Boolean);
+    const day = { date, rostered, rosteredMin: net, shiftStart: rostered ? secToMin(s.start_time) : null, shiftEnd: rostered ? secToMin(s.end_time) : null, reason: rostered ? null : (offLabel || 'no shift'),
+      kind: 'notRostered', label: 'Not rostered', marked: !!r, checkIn: null, checkOut: null, workedMin: null, lateMin: null, earlyMin: null, longerMin: null,
+      branchHoursUsed: false, half: null, workedAt: r && r.worked_at_branch_id && r.worked_at_branch_id !== r.branch_id ? (r.worked_at?.name || 'another branch') : null, rawStatus: r?.status || null };
+    if (r) {
+      const inMs = isoMs(r.check_in_time); const outMs = isoMs(r.check_out_time);
+      const inMin = nepalMin(inMs); const outMin = nepalMin(outMs);
+      day.checkIn = hhmm(inMin); day.checkOut = hhmm(outMin);
+      if (inMs != null && outMs != null) { day.workedMin = Math.max(0, Math.round((outMs - inMs) / 60000)); day.inMs = inMs; day.outMs = outMs; }
+      const half = r.status === '1st-Half Day' ? 'morning' : r.status === '2nd-Half Day' ? 'afternoon' : null;
+      if (half) { day.kind = 'half'; day.label = 'Half day'; day.half = half; }
+      else if (r.status === 'Present') { day.kind = rostered ? 'present' : 'extra'; day.label = rostered ? 'Present' : 'Extra day'; }
+      else if (r.status === 'Absent') { day.kind = 'absent'; day.label = 'Absent'; }
+      else if (EXCUSED.includes(r.status)) { day.kind = 'leave'; day.label = r.status; }
+      else { day.kind = 'other'; day.label = r.status || 'Marked'; }
+      if (day.kind === 'present' || day.kind === 'extra') {
+        const ws = rostered ? day.shiftStart : bOpen; const we = rostered ? day.shiftEnd : bClose;
+        day.branchHoursUsed = !rostered;
+        if (ws != null && inMin != null && inMin > ws + grace) day.lateMin = inMin - ws;
+        if (we != null && outMin != null && outMin < we - grace) day.earlyMin = we - outMin;
+        if (we != null && outMin != null && outMin > we + grace) day.longerMin = outMin - we;
+      }
+    } else if (rostered) {
+      if (date > today) { day.kind = 'future'; day.label = ''; }
+      else if (date === today) { day.kind = 'today'; day.label = 'Not marked yet'; }
+      else {
+        // Same rule as the Attendance page (attendanceView.deriveRow): switch OFF = present by default, ON = Not marked (unknown).
+        const k = deriveRow({ person: {}, date, today, nowMin: null, shift: { start: hhmm(day.shiftStart), end: hhmm(day.shiftEnd) }, settings: { expectCheckIn, lateGraceMinutes: grace } }).kind;
+        if (k === 'present_default') { day.kind = 'noCheckin'; day.label = 'No check-in'; }
+        else { day.kind = 'notMarked'; day.label = 'Not marked'; }
+      }
+    }
+    days.push(day);
+  }
+  const rostered = days.filter((d) => d.rostered);
+  const clock = days.filter((d) => d.workedMin != null);
+  const notMarked = days.filter((d) => d.kind === 'notMarked').map((d) => d.date);
+  const noCheckin = days.filter((d) => d.kind === 'noCheckin').map((d) => d.date);
+  // A rostered day counts for attendance only once it has happened: up to yesterday, plus today when it is marked. So marked + not marked = this.
+  const sofar = rostered.filter((d) => d.date < today || (d.date === today && d.marked));
+  const totals = {
+    rosteredDays: rostered.length,
+    rosteredSoFar: sofar.length,
+    includesToday: today >= from && today <= to,
+    rosteredMin: rostered.reduce((a, d) => a + d.rosteredMin, 0),
+    markedDays: days.filter((d) => d.marked).length,
+    markedRostered: sofar.filter((d) => d.marked).length,
+    extraDays: days.filter((d) => d.kind === 'extra').length,
+    clockedMin: clock.reduce((a, d) => a + d.workedMin, 0),
+    clockDays: clock.length,
+    clockDates: clock.map((d) => ({ date: d.date, min: d.workedMin, rosteredMin: d.rosteredMin, inMs: d.inMs, outMs: d.outMs })),
+    onTime: clock.filter((d) => !d.lateMin && !d.earlyMin).length,
+    notMarked: notMarked.length,
+    notMarkedText: rangesText(notMarked),
+    noCheckin: noCheckin.length,
+    noCheckinDates: noCheckin,
+    noCheckinText: rangesText(noCheckin),
+    // Known days = marked rostered days + (switch OFF) the no-check-in days; Attendance % = presentDays ÷ knownDays everywhere (mig 341 = same rule).
+    knownDays: sofar.filter((d) => d.marked).length + noCheckin.length,
+    presentDays: sofar.filter((d) => d.kind === 'present' || d.kind === 'half').length + noCheckin.length,
+    markedPresent: sofar.filter((d) => d.kind === 'present' || d.kind === 'half').length,
+    expectCheckIn,
+    graceMinutes: grace,
+    todayUnmarked: days.some((d) => d.kind === 'today'),
+    noTimeDates: days.filter((d) => (d.kind === 'present' || d.kind === 'extra' || d.kind === 'half') && d.workedMin == null).map((d) => d.date),
+  };
+  return { days, totals };
+}
+
+/** Busy minutes inside the clock-in spans: for each Completed booking, the overlap of its start–end with a clocked span (whole minutes). */
+export function busyMinutesInSpans(bookings, clockDates) {
+  let ms = 0;
+  for (const b of bookings) {
+    if (b.status !== 'Completed') continue;
+    const bs = Date.parse(b.start_datetime); const be = Date.parse(b.end_datetime);
+    if (Number.isNaN(bs) || Number.isNaN(be)) continue;
+    for (const c of clockDates) ms += Math.max(0, Math.min(be, c.outMs) - Math.max(bs, c.inMs));
+  }
+  return Math.round(ms / 60000);
+}
+
+/** The "What happened" chips + a plain note for one marked day. tone: ok | warn | blue | plain. */
+export function dayChips(d) {
+  const chips = []; const notes = [];
+  if (d.kind === 'half') chips.push({ text: `Half day, ${d.half}`, tone: 'warn' });
+  else if (d.kind === 'absent') chips.push({ text: 'Absent', tone: 'warn' });
+  else if (d.kind === 'leave' || d.kind === 'other') chips.push({ text: d.label, tone: d.kind === 'leave' ? 'blue' : 'plain' });
+  else {
+    if (d.lateMin) chips.push({ text: `Late ${durationText(d.lateMin)}`, tone: 'warn' });
+    if (d.earlyMin) chips.push({ text: `Left ${durationText(d.earlyMin)} early`, tone: 'warn' });
+    if (d.longerMin) chips.push({ text: `Stayed ${durationText(d.longerMin)} longer`, tone: 'plain' });
+    if (!chips.length && d.workedMin != null) chips.push({ text: d.kind === 'extra' ? 'Extra day' : 'On time', tone: d.kind === 'extra' ? 'blue' : 'ok' });
+    else if (!chips.length) chips.push({ text: d.kind === 'extra' ? 'Extra day' : 'Present', tone: d.kind === 'extra' ? 'blue' : 'ok' });
+  }
+  if (d.kind === 'present' || d.kind === 'extra' || d.kind === 'half') {
+    if (!d.checkIn && !d.checkOut) notes.push('no clock times recorded');
+    else if (!d.checkOut) notes.push('no check-out recorded');
+    else if (!d.checkIn) notes.push('no check-in recorded');
+  }
+  if (d.branchHoursUsed) notes.push('no roster, branch hours used');
+  return { chips, note: notes.join(' · ') };
+}
+
+/** One CSV row per day of the period (the Attendance tab's export). */
+export const ATT_CSV_HEAD = ['Date', 'Status', 'Shift start', 'Shift end', 'Rostered minutes', 'In', 'Out', 'Worked minutes', 'Late minutes', 'Left early minutes', 'Note'];
+export function attendanceCsvRows(att) {
+  const body = att.days.map((d) => {
+    const { note } = dayChips(d);
+    const extra = d.kind === 'notRostered' ? d.reason : d.kind === 'today' ? 'today, not marked yet' : d.kind === 'future' ? 'upcoming' : note;
+    const status = d.kind === 'today' ? 'Not marked yet' : d.kind === 'future' ? 'Upcoming' : d.label;
+    return [d.date, status, hhmm(d.shiftStart) ?? '', hhmm(d.shiftEnd) ?? '', d.rosteredMin, d.checkIn ?? '', d.checkOut ?? '', d.workedMin ?? '', d.lateMin ?? '', d.earlyMin ?? '', (d.kind === 'noCheckin' ? 'counted present, no check-in' : extra) || ''];
+  });
+  return [ATT_CSV_HEAD, ...body];
+}
+export const hhmmOf = hhmm;

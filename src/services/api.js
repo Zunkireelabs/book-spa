@@ -43,6 +43,8 @@ import { getPeriodRange, getTodayISO } from '../utils/periodPresets';
 import { transferOccurrencesForDate } from '../utils/transferOccurrences';
 import { inChunks, failOpenAfter, IN_CHUNK, customerSearchFilter } from './queryHelpers';
 import { buildCustomerDirectory, buildPanelDetail, nepalNow } from '../utils/customerDirectory';
+import { addDays as addDaysISO } from '../utils/reportPeriod';
+import { attendanceDays, busyMinutesInSpans } from '../pages/branch-manager-dashboard/components/Performance/therapistInnerView';
 import { summarizeMoney, classifyBooking, roundMoney, paidPaisa } from '../utils/bookingMoney';
 import { planClose, runCloseSteps } from '../utils/closeBooking';
 import { friendlyError } from '../utils/friendlyError';
@@ -11910,10 +11912,7 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
 // Phase 10D-5: Therapist Performance Index (Read-Only)
 // ============================================================
 
-// Grace window before a check-in/check-out counts as "late"/"early" against the branch's
-// open_time/close_time — attendance is marked to the minute but a few minutes of slack avoids
-// flagging normal clock variance as a lateness event.
-const ATTENDANCE_GRACE_MINUTES = 10;
+// (The late / left-early grace window now lives with attendanceDays in therapistInnerView.js.)
 
 // Stable identity for de-duplicating a booking's customer even when customer_id is null
 // (walk-in/guest bookings — bookings.customer_id is nullable, migration-412-ish ALTER).
@@ -12229,10 +12228,13 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
       .lte('date', endDate);
     attendanceQuery = withBranch(attendanceQuery, branchId);
 
-    const [bookingRows, attendanceResult] = await Promise.all([
+    const [bookingRows, attendanceResult, attDetail] = await Promise.all([
       fetchTherapistBookings({ branchId, therapistId, startDate, endDate, columns: 'id, date, start_time, service_name_snapshot, payments(amount), status, payment_status, final_amount, service_duration_snapshot, customer_id, customer_name, customer_phone, start_datetime, end_datetime, cancellation_reason' }),
       attendanceQuery,
+      getTherapistAttendanceDetail({ branchId, therapistId, fromDate: startDate, toDate: endDate }),
     ]);
+    if (attDetail.error) throw attDetail.error;
+    const attendance = attDetail.data;
     const allBookings = bookingRows.map((b) => ({ ...b, full_amount: Number(b.final_amount) || 0, final_amount: (Number(b.final_amount) || 0) * b.share })); // a combo's price is split equally
     const bookings = allBookings.filter(b => ['Confirmed', 'In-Progress', 'Completed'].includes(b.status));
     const attendanceRows = (!attendanceResult.error && attendanceResult.data) || [];
@@ -12251,9 +12253,14 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     }
     const serviceSales = bookings.filter(b => b.status === 'Completed').reduce((sum, b) => sum + (Number(b.final_amount) || 0), 0);
 
-    // No attendance rows = no worked hours to report. computeTherapistMetrics falls back to period x branch hours for the old table; here that
-    // would be invented, so worked time and "busy while clocked in" are left out (null) instead.
-    const noAttendance = attendanceRows.length === 0;
+    // Clocked in = measured time only (days with BOTH clock times, from the shared attendanceDays helper). computeTherapistMetrics assumes a branch
+    // day when times are missing — right for the bulk table's old score, wrong here — so its worked / busy figures are replaced by the helper's.
+    // Busy on clocked-in days: only Completed minutes that fall inside the clock-in span (numerator) over the clocked-in minutes (denominator).
+    const clock = attendance.totals;
+    const busyMin = busyMinutesInSpans(bookings, clock.clockDates); // only the minutes of Completed services inside the clock-in span
+    const hasClock = clock.clockDays > 0;
+    const clockFigures = { workedHours: hasClock ? clock.clockedMin / 60 : null, clockedMin: hasClock ? clock.clockedMin : null, busyMinutes: hasClock ? busyMin : null, busyHours: hasClock ? busyMin / 60 : null,
+      utilizationRate: hasClock ? Math.round((busyMin / clock.clockedMin) * 100) : null };
     // One line per booking in the period (the inner page's open list, services table and CSV). paid = final price when fully paid, as paidRevenue.
     const todayNp = nepalNow().today;
     // A combo's other therapists (for "with Wangmo Q." on the Services tab): one name lookup for all of them.
@@ -12267,7 +12274,7 @@ export async function getTherapistOverview({ branchId, therapistId, fromDate, to
     const bookingList = allBookings
       .map((b) => ({ ...(() => { const m = classifyBooking({ id: b.id, date: b.date, status: b.status, final_amount: b.full_amount, payments: b.payments }, { today: todayNp }); return { atStake: m.atStake, paidAmt: m.paid }; })(), date: b.date, start: String(b.start_time || '').slice(0, 5), customer: b.customer_name || '', service: b.service_name_snapshot || '', status: b.status !== 'Completed' && (b.status === 'No Show' || isNoShow(b)) ? 'No Show' : b.status, final: Number(b.final_amount) || 0, full: b.full_amount, paid: b.payment_status === 'paid' ? Number(b.final_amount) || 0 : 0, endMs: b.end_datetime ? new Date(b.end_datetime).getTime() : null, minutes: b.service_duration_snapshot || 0, others: otherIdsOf(b).map((id) => nameOf[id]).filter(Boolean) }))
       .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
-    return { data: { ...metrics, ...(noAttendance ? { workedHours: null, utilizationRate: null, busyHours: null, busyMinutes: null } : {}), bookingList, dayWindowMinutes, serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
+    return { data: { ...metrics, ...clockFigures, attendance, bookingList, dayWindowMinutes, serviceSales, owed: Math.max(0, serviceSales - metrics.paidRevenue), statusSplit, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
     console.error('[API] getTherapistOverview error:', error.message);
     return { data: null, error };
@@ -12306,10 +12313,9 @@ export async function getCustomerFirstBookingFlag(customerId, bookingId, booking
   }
 }
 
-// Attendance tab: scheduled vs actual worked hours, late/early/extra/partial counts, and a
-// per-day shift history. "Scheduled" = branch open→close window on Present/Half-day days (no
-// shift/roster table exists in this app — see migration/plan notes). Late/early are only
-// computed for full-day Present rows with recorded check-in/out, using a ±10min grace window.
+// The therapist's day-by-day attendance for a period (ZNLY-172 V37g): the roster (therapist_shifts_for_range, filtered to this therapist) + the
+// attendance rows, turned into days and totals by the ONE pure helper attendanceDays. The Overview calls this too, so its Clocked in / Busy lines
+// and the Attendance tab can never disagree. Each day is judged against the therapist's own shift; only days with no shift fall back to branch hours.
 export async function getTherapistAttendanceDetail({ branchId, therapistId, fromDate, toDate }) {
   try {
     if (!branchId) {
@@ -12323,19 +12329,10 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
     const endDate = toDate || today;
     const startDate = fromDate || new Date(new Date(endDate).getTime() - 30 * 86400000).toISOString().split('T')[0];
 
-    // Branch hours come from the branchId PARAM (resolveBranchId), matching what the attendance
-    // query below is scoped to via withBranch() — not the therapist's live branch_id, which
-    // could point elsewhere if they've since been transferred (see getTherapistOverview).
-    const { data: branch, error: bErr } = await supabase
-      .from('branches')
-      .select('open_time, close_time')
-      .eq('id', await hoursBranchOf(branchId, therapistId))
-      .single();
+    // Branch id from the branchId PARAM (resolveBranchId), matching the attendance query's withBranch() scope (see getTherapistOverview).
+    const hoursBranch = await hoursBranchOf(branchId, therapistId);
+    const { data: branch, error: bErr } = await supabase.from('branches').select('name, open_time, close_time, expect_check_in, late_grace_minutes').eq('id', hoursBranch).single();
     if (bErr) throw bErr;
-
-    const openMin = timeToMinutes(branch.open_time);
-    const closeMin = timeToMinutes(branch.close_time);
-    const dayWindowMinutes = closeMin - openMin;
 
     let query = supabase
       .from('therapist_attendance')
@@ -12346,87 +12343,23 @@ export async function getTherapistAttendanceDetail({ branchId, therapistId, from
       .order('date', { ascending: true });
     query = withBranch(query, branchId);
 
-    const { data: rows, error } = await query;
-    if (error) throw error;
-    const attendance = rows || [];
+    // The roster RPC allows 92 days per call; longer periods go in chunks.
+    const chunks = [];
+    for (let from = startDate; from <= endDate; from = addDaysISO(from, 93)) {
+      const to = addDaysISO(from, 92);
+      chunks.push([from, to < endDate ? to : endDate]);
+    }
+    const [attResult, ...shiftResults] = await Promise.all([
+      query,
+      ...chunks.map(([f, t]) => supabase.rpc('therapist_shifts_for_range', { p_branch_id: hoursBranch, p_from_date: f, p_to_date: t }).eq('therapist_id', therapistId)), // filtered server-side: the whole branch would hit the 1,000-row API cap
+    ]);
+    if (attResult.error) throw attResult.error;
+    const shiftErr = shiftResults.find((r) => r.error);
+    if (shiftErr) throw shiftErr.error;
+    const shifts = shiftResults.flatMap((r) => r.data || []).filter((x) => x.therapist_id === therapistId);
 
-    let scheduledMinutes = 0;
-    let workedMinutes = 0;
-    let lateArrivals = 0;
-    let earlyDepartures = 0;
-    let extraMinutes = 0;
-    let partialShifts = 0;
-
-    const shiftHistory = attendance.map(a => {
-      const isHalf = a.status === '1st-Half Day' || a.status === '2nd-Half Day';
-      const isWorkDay = a.status === 'Present' || isHalf;
-      const dayWindow = isHalf ? dayWindowMinutes / 2 : dayWindowMinutes;
-
-      const checkInTime = formatTimeKathmandu(a.check_in_time);
-      const checkOutTime = formatTimeKathmandu(a.check_out_time);
-      let workedMin = null;
-      let dayStatus = a.status;
-
-      if (isWorkDay) {
-        if (isHalf) partialShifts += 1;
-        scheduledMinutes += dayWindow;
-
-        if (a.check_in_time && a.check_out_time) {
-          workedMin = Math.max(0, (new Date(a.check_out_time) - new Date(a.check_in_time)) / 60000);
-        } else {
-          workedMin = dayWindow;
-        }
-        workedMinutes += workedMin;
-
-        if (workedMin > dayWindow) extraMinutes += workedMin - dayWindow;
-
-        // Late/early are only derivable against the branch clock for full-day rows with BOTH a
-        // real check-in AND check-out — a half-day slot isn't pinned to a fixed half of
-        // open_time/close_time, and judging only one side of a partial pair (e.g. checkout
-        // recorded but check-in missing) would contradict workedMin above, which itself only
-        // uses the real span when both timestamps are present (falling back to the full
-        // scheduled window otherwise) — flagging "Early departure" against that fallback would
-        // show a self-contradicting "Worked: <full day> · Early departure" row.
-        let flagged = false;
-        const hasFullPair = !isHalf && a.check_in_time && a.check_out_time;
-        if (hasFullPair && timeToMinutes(checkInTime) > openMin + ATTENDANCE_GRACE_MINUTES) {
-          lateArrivals += 1;
-          dayStatus = 'Late';
-          flagged = true;
-        }
-        if (hasFullPair && timeToMinutes(checkOutTime) < closeMin - ATTENDANCE_GRACE_MINUTES) {
-          earlyDepartures += 1;
-          dayStatus = flagged && dayStatus === 'Late' ? 'Late' : 'Early departure';
-          flagged = true;
-        }
-        if (!flagged) dayStatus = isHalf ? a.status : (hasFullPair ? 'On time' : a.status);
-      }
-
-      return {
-        date: a.date,
-        scheduledHours: Math.round((dayWindow / 60) * 10) / 10,
-        checkIn: checkInTime,
-        checkOut: checkOutTime,
-        workedAtNote: workedAtNote({ row: { workedAtBranchId: a.worked_at_branch_id, checkInTime, checkOutTime }, homeBranchId: a.branch_id, branchNameById: { [a.worked_at_branch_id]: a.worked_at?.name } }),
-        workedHours: workedMin !== null ? Math.round((workedMin / 60) * 10) / 10 : null,
-        status: dayStatus,
-      };
-    });
-
-    return {
-      data: {
-        scheduledHours: Math.round((scheduledMinutes / 60) * 10) / 10,
-        actualWorkedHours: Math.round((workedMinutes / 60) * 10) / 10,
-        lateArrivals,
-        earlyDepartures,
-        extraHours: Math.round((extraMinutes / 60) * 10) / 10,
-        partialShifts,
-        shiftHistory,
-        periodStart: startDate,
-        periodEnd: endDate,
-      },
-      error: null,
-    };
+    const att = attendanceDays({ shifts, rows: attResult.data || [], from: startDate, to: endDate, now: Date.now(), branchHours: { open: branch.open_time, close: branch.close_time }, settings: { expectCheckIn: branch.expect_check_in, lateGraceMinutes: branch.late_grace_minutes } });
+    return { data: { ...att, branchName: branch.name, periodStart: startDate, periodEnd: endDate }, error: null };
   } catch (error) {
     console.error('[API] getTherapistAttendanceDetail error:', error.message);
     return { data: null, error };

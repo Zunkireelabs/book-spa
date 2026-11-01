@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import Icon from '../../../../components/AppIcon';
 import { useIndustry } from 'hooks/useIndustry';
 import { getTherapistOverview, fetchTherapistCustomers } from '../../../../services/api';
@@ -10,7 +10,7 @@ import { PeriodPicker } from '../Reports/ReportFrame';
 import { useTherapistPerformance } from '../Reports/useTherapistPerformance';
 import { buildRows } from '../Reports/therapistPerformanceView';
 import { build as buildCustomers } from './therapistCustomersView';
-import { csvRows, servicesCsvRows, rankOf } from './therapistInnerView';
+import { csvRows, servicesCsvRows, attendanceCsvRows, rankOf } from './therapistInnerView';
 import { csvRows as customerCsvRows } from './therapistCustomersView';
 import OverviewTab from './OverviewTab';
 import CustomersTab from './CustomersTab';
@@ -36,10 +36,13 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
   const { data: report, loading: reportLoading, range } = useTherapistPerformance(periodId, custom);
 
   const [ov, setOv] = useState({ data: null, loading: true, error: null });
+  const ovReq = useRef(0); // a slower answer for an older period must not overwrite the current one
   const load = useCallback(async () => {
     if (!branchId || !therapistId) return;
+    const req = ++ovReq.current;
     setOv((s) => ({ ...s, loading: true, error: null }));
     const res = await getTherapistOverview({ branchId, therapistId, fromDate: range.from, toDate: range.to });
+    if (req !== ovReq.current) return;
     setOv({ data: res.data, loading: false, error: res.error ? (res.error.message || 'Failed to load overview.') : null });
   }, [branchId, therapistId, range.from, range.to]);
   useEffect(() => { load(); }, [load]);
@@ -70,13 +73,14 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
   const counts = {
     customers: custView ? custView.counts.booked : null,
     services: d ? new Set((d.bookingList || []).filter((b) => b.status === 'Completed').map((b) => b.service)).size : null,
-    attendance: row ? `${row.att_days} day${row.att_days === 1 ? '' : 's'}` : null,
+    attendance: d?.attendance && d.attendance.totals.rosteredSoFar > 0 ? `${d.attendance.totals.presentDays} of ${d.attendance.totals.rosteredSoFar} days` : null,
   };
 
   const onPeriod = (id) => { setPeriodId(id); if (id === 'custom' && !custom) setCustom({ from: range.from, to: range.to }); };
   const lower = staffLabel.toLowerCase();
   const onCustomers = activeTab === 'customers';
   const onServices = activeTab === 'services';
+  const onAttendance = activeTab === 'attendance';
 
   return (
     <div className="space-y-5">
@@ -99,11 +103,12 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodPicker periodId={periodId} range={range} onPeriod={onPeriod} onCustom={setCustom} />
-          <button type="button" disabled={onCustomers ? !custView : !d?.bookingList}
-            title={onCustomers ? 'Export customers, one row per customer' : onServices ? 'Export what this tab shows, one row per service' : 'Export bookings, one row per booking'}
+          <button type="button" disabled={onCustomers ? !custView : onAttendance ? !d?.attendance : !d?.bookingList}
+            title={onCustomers ? 'Export customers, one row per customer' : onServices ? 'Export what this tab shows, one row per service' : onAttendance ? 'Export attendance, one row per day' : 'Export bookings, one row per booking'}
             onClick={() => {
               const slug = String(therapistName).toLowerCase().replace(/\s+/g, '-');
               if (onCustomers) downloadCsv(`${slug}-customers-${range.from}-to-${range.to}.csv`, customerCsvRows([...custView.served, ...custView.notClosed, ...custView.upcoming, ...custView.cancelled]));
+              else if (onAttendance) downloadCsv(`${slug}-attendance-${range.from}-to-${range.to}.csv`, attendanceCsvRows(d.attendance));
               else if (onServices) downloadCsv(`${slug}-services-${range.from}-to-${range.to}.csv`, servicesCsvRows(d.bookingList));
               else downloadCsv(`${slug}-bookings-${range.from}-to-${range.to}.csv`, csvRows(d.bookingList));
             }}
@@ -127,7 +132,7 @@ const TherapistDetailView = ({ therapistId, therapistName, branchId, onBack, per
         {activeTab === 'overview' && <OverviewTab bookedCustomers={custView ? custView.counts.booked : null} row={row} report={report} prevRow={prevRow} maxSales={maxSales} range={range} ov={ov} reportLoading={reportLoading} onRetry={load} onNeedsClosing={onNeedsClosing} />}
         {activeTab === 'customers' && <CustomersTab state={{ ...cust, retry: loadCust }} therapistName={therapistName} range={tabRange} today={getTodayISO()} onNeedsClosing={onNeedsClosing} onMoneyOwed={onMoneyOwed} />}
         {activeTab === 'services' && <ServicesTab ov={ov} onRetry={load} therapistName={therapistName} range={tabRange} onNeedsClosing={onNeedsClosing} />}
-        {activeTab === 'attendance' && <AttendanceTab therapistId={therapistId} branchId={branchId} range={tabRange} />}
+        {activeTab === 'attendance' && <AttendanceTab ov={ov} onRetry={load} therapistId={therapistId} therapistName={therapistName} range={tabRange} canMark={!isOverall} />}
       </div>
     </div>
   );

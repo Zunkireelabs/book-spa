@@ -79,7 +79,8 @@ describe('csvRows / rank / notes', () => {
     expect(rankOf(rows, 'g')).toEqual({ rank: 1, of: 2 });
   });
   it('clocked note and attendance flag', () => {
-    expect(clockedNote([{ date: '2026-10-26', hours: 1.5, assumed: false }, { date: '2026-10-27', hours: 12, assumed: true }])).toBe('attendance marked on 26 Oct (1 h 30 min) and 27 Oct (no times, 12 h assumed)');
+    expect(clockedNote({ totals: { clockDays: 1, clockDates: [{ date: '2026-10-26' }], noTimeDates: ['2026-10-27'] } })).toBe('on 1 day with clock times (26 Oct); 27 Oct present, no clock times');
+    expect(clockedNote({ totals: { clockDays: 0, clockDates: [], noTimeDates: [] } })).toBe('no attendance marked');
     expect(attendanceFlag(2, 25)).toMatch(/only 2 days/);
     expect(attendanceFlag(10, 25)).toBeNull();
   });

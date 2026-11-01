@@ -93,7 +93,7 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
   }
 
   const team = report.current.team;
-  const bars = scoreBars(row, maxSales);
+  const bars = scoreBars(row, maxSales, { expectCheckIn: d.attendance.totals.expectCheckIn });
   const back = holdsBack(row, out.openInfo);
   const tiles = kpiTiles(row, team, prevRow, d, staffLabel.toLowerCase());
   const prevR = previousPeriod(range.from, range.to);
@@ -103,10 +103,11 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
   const weekVals = (row.sales_by_week || []).map(Number);
   const weekMax = Math.max(1, ...weekVals);
   const rosteredMin = Number(row.working_min);
-  const rosteredDays = d.dayWindowMinutes > 0 ? Math.round(rosteredMin / d.dayWindowMinutes) : 0;
-  const attFlag = attendanceFlag(row.att_days, rosteredDays);
-  const noClock = d.workedHours == null;
-  const busyClocked = d.utilizationRate; // minutes-based API value (busy minutes on clocked-in days ÷ worked minutes), null with no attendance
+  const rosteredDays = d.attendance.totals.rosteredSoFar; // the real roster count, not rostered hours ÷ branch hours
+  const expectCI = d.attendance.totals.expectCheckIn;
+  const attFlag = expectCI ? attendanceFlag(row.att_days, rosteredDays) : null; // switch OFF: unmarked days count as present, so "marked on few days" is not a data gap
+  const noClock = d.clockedMin == null; // clocked in = days with BOTH clock times only (attendanceDays); none = "—", never an assumed day
+  const busyClocked = d.utilizationRate; // busy minutes on days with clock times ÷ clocked-in minutes
   const hourRow = (label, sub, value, share, cls = 'bg-black/20') => (
     <div className="py-1.5">
       <div className="flex justify-between gap-3"><div><div className="text-[13px] font-medium text-text-primary">{label}</div><div className="text-[11px] text-text-tertiary leading-snug">{sub}</div></div><b className="font-data tabular-nums text-[13px] font-medium whitespace-nowrap">{value}</b></div>
@@ -240,8 +241,8 @@ const OverviewTab = ({ bookedCustomers = null, row, report, prevRow, maxSales, r
             {hourRow('Rostered', 'shifts from the roster', rosteredMin > 0 ? durationText(rosteredMin) : 'No hours set', rosteredMin > 0 ? 1 : 0)}
             {hourRow('Booked', `all bookings not cancelled, incl. the ${out.notClosed} not closed`, durationText(row.booked_min), share(row.booked_min), 'bg-blue-500')}
             {hourRow('Delivered', `the ${d.servicesCompleted} completed services`, durationText(svc.total.minutes), share(svc.total.minutes), 'bg-primary')}
-            {hourRow('Clocked in', clockedNote(d.clockedDays || []), noClock ? 'n/a' : durationText(d.workedHours * 60), noClock ? 0 : share(d.workedHours * 60))}
-            {hourRow('Busy on clocked-in days', noClock ? 'no attendance marked, so no figure' : `${durationText(d.busyMinutes)} of ${durationText(d.workedHours * 60)}, completed services only`, busyClocked == null ? 'n/a' : `${busyClocked}%`, busyClocked == null ? 0 : busyClocked / 100, 'bg-blue-500')}
+            {hourRow('Clocked in', clockedNote(d.attendance), noClock ? '—' : durationText(d.clockedMin), noClock ? 0 : share(d.clockedMin))}
+            {hourRow('Busy on clocked-in days', noClock ? 'no clock times recorded, so no figure' : `${durationText(d.busyMinutes)} of ${durationText(d.clockedMin)}, completed services only`, busyClocked == null ? '—' : `${busyClocked}%`, busyClocked == null ? 0 : busyClocked / 100, 'bg-blue-500')}
             {attFlag && <Flag>{attFlag}</Flag>}
           </div>
         </Card>

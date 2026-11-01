@@ -67,8 +67,12 @@ Last synced: **2026-11-01** by bookx-8f (lead)
 | ZNLY-169 | Sadin | medium | Therapist Full breakdown uses the old revenue rule. Fixed in V37c (0667005), committed locally; ships with the UI-port PR |
 | ZNLY-170 | Sadin | medium | Therapist inner page Overview redesign. V37d (9b2b10f) committed locally, owner-checked; ships with the UI-port PR |
 | ZNLY-171 | Sadin | high | Inner page "Busy while clocked in" (57% shown, ~9% real). Fixed in V37d (9b2b10f), committed locally; ships with the UI-port PR |
-| ZNLY-172 | Sadin | medium | Therapist inner page tabs. Customers done (V37e 583365c, mig 340 LOCAL). Services tab mockup v1 owner-approved, V37f brief with bookx-1d. Then Attendance |
+| ZNLY-172 | Sadin | medium | Therapist inner page tabs. Customers done (V37e 583365c), Services done (V37f f9b9230). Attendance mockup v1 owner-approved, V37g brief with bookx-1d (fixes ZNLY-179/180) |
 | ZNLY-175 | Sadin | medium | Inner page outcomes bar: upcoming bookings counted in the total but in no bucket. Fix inside V37f |
+| ZNLY-179 | Sadin | high | Attendance judged against branch hours (09:00–21:00), not the therapist's roster (09:00–18:00): scheduled, assumed hours, late/early, Overview Clocked in. Fix inside the ZNLY-172 Attendance tab |
+| ZNLY-180 | Sadin | medium | Attendance worked time rounded to 0.1 h (92 min shows 1 h 30 min). Return whole minutes. Fix inside the ZNLY-172 Attendance tab |
+| ZNLY-181 | — | low | Attendance calendar exists twice (/attendance-calendar + Reports › Attendance › Calendar), read-only, Absent red. Decide in the Attendance report redesign (ZNLY-159) |
+| ZNLY-183 | Sadin | high | Attendance tab, Overview bar and Therapist performance report ignore the branch "Expect check-in" switch (OFF = unmarked rostered days count as present on the Attendance page). One rule everywhere; blocks the V37g commit |
 
 ## In review / on stage
 
