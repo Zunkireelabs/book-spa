@@ -5996,7 +5996,7 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
     specialRequests,
     serviceId: person.service.id,
     therapistId: person.therapistId,
-    customerName: person.isLead ? leadContact.name : (person.name || person.label),
+    customerName: person.isLead ? leadContact.name : (person.name || leadContact.name),
     customerEmail: leadContact.email,
     customerPhone: leadContact.phone,
     customerGender: person.isLead ? leadContact.gender : null,
