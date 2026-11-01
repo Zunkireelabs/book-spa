@@ -497,6 +497,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           overallHidden: true
         },
         {
+          id: 'locations',
+          label: 'Locations',
+          icon: 'MapPin',
+          path: `${basePath}?view=locations`,
+          roles: ['admin'],
+        },
+        {
           id: 'audit',
           label: 'Audit Log',
           icon: 'History',

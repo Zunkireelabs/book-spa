@@ -11364,6 +11364,145 @@ export async function updateBranchPhoto(branchId, photoUrl) {
 }
 
 /**
+ * All branches for an org (admin Locations management — includes inactive branches,
+ * unlike fetchBranchesByOrgId which is the customer-facing active-only list).
+ */
+export async function fetchBranchesForManagement(orgId) {
+  try {
+    if (!orgId) return { data: null, error: { code: 'ORG_REQUIRED', message: 'Organization ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, address, phone, maps_url, is_active, open_time, close_time, online_booking_capacity, advance_booking_days')
+      .eq('org_id', orgId)
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchesForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only creation of a new branch. Goes through an RPC, not a plain .insert():
+ * `branches` has RLS enabled with SELECT-only policies, so a direct insert would be
+ * rejected outright (migration-308).
+ */
+export async function createBranch({ name, address, phone, mapsUrl }) {
+  try {
+    const { data, error } = await supabase.rpc('create_branch', {
+      p_name: name,
+      p_address: address || null,
+      p_phone: phone || null,
+      p_maps_url: mapsUrl || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createBranch error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for name/address/phone/maps_url. Does NOT touch
+ * online_booking_capacity/advance_booking_days/photo_url — those keep their own
+ * dedicated RPCs (updateBranchOnlineCapacity/updateBranchAdvanceBookingWindow/
+ * updateBranchPhoto). Goes through an RPC for the same RLS reason as createBranch.
+ */
+export async function updateBranchDetails({ branchId, name, address, phone, mapsUrl }) {
+  try {
+    const { data, error } = await supabase.rpc('update_branch_details', {
+      p_branch_id: resolveBranchId(branchId),
+      p_name: name,
+      p_address: address || null,
+      p_phone: phone || null,
+      p_maps_url: mapsUrl || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchDetails error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * A branch's recurring weekly opening hours (branch_working_hours, migration-308).
+ * Mirrors fetchTherapistWorkingHours' shape (one row per weekday, defaulting to a day
+ * off when unset) but for the branch itself rather than a therapist, and with no breaks
+ * concept — branch_working_hours has no sibling breaks table.
+ */
+export async function fetchBranchOpeningHours(branchId) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('branch_working_hours')
+      .select('day_of_week, start_time, end_time, is_day_off')
+      .eq('branch_id', resolveBranchId(branchId))
+      .order('day_of_week');
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    const normalized = WORKING_HOURS_DAY_LABELS.map((label, dayOfWeek) => {
+      const row = byDay.get(dayOfWeek);
+      return row
+        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off }
+        : { dayOfWeek, dayLabel: label, startTime: null, endTime: null, isDayOff: true };
+    });
+
+    return { data: normalized, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchOpeningHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * rows: [{ dayOfWeek, startTime, endTime, isDayOff }, ...] — one per weekday.
+ * Direct .upsert() against branch_working_hours (normal RLS, admin-gated — no RPC
+ * needed, matching upsertTherapistWorkingHours' precedent of writing straight to its
+ * child table rather than routing through a scalar-field RPC).
+ */
+export async function upsertBranchOpeningHours(branchId, rows) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    for (const row of rows) {
+      const label = WORKING_HOURS_DAY_LABELS[row.dayOfWeek];
+      if (!row.isDayOff && (!row.startTime || !row.endTime || row.startTime >= row.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: start time must be before end time.` } };
+      }
+    }
+
+    const payload = rows.map(row => ({
+      branch_id: resolvedBranchId,
+      day_of_week: row.dayOfWeek,
+      start_time: row.isDayOff ? null : row.startTime,
+      end_time: row.isDayOff ? null : row.endTime,
+      is_day_off: !!row.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('branch_working_hours')
+      .upsert(payload, { onConflict: 'branch_id,day_of_week' })
+      .select('day_of_week, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertBranchOpeningHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
  * Fetch services for a specific organization (customer-facing)
  */
 export async function fetchServicesByOrgId(orgId, branchId) {

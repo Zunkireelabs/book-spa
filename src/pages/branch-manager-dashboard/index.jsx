@@ -35,6 +35,7 @@ import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCap
 import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
 import BranchPhotoPanel from './components/MasterData/BranchPhotoPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
+import LocationsPanel from './components/MasterData/LocationsPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -85,7 +86,7 @@ const BranchManagerDashboard = () => {
   // staff member (check_branch_online_capacity() exempts bookings with a therapist_id).
   // orgLoading matters because settings are null until the org loads — rendering on that
   // would briefly show the panel to orgs that have staff selection on.
-  const { showStaffSelection, loading: orgLoading } = useOrg();
+  const { showStaffSelection, loading: orgLoading, orgId } = useOrg();
   const { items: persistentNotifs, markRead: markPersistentRead, markAllRead: markAllPersistentRead } = usePersistentNotifications(user?.id);
   const { isOpen: isAssistantOpen, toggleAssistant } = useAIAssistant();
   const navigate = useNavigate();
@@ -718,6 +719,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
               {viewMode === 'branch-photo' && !isOverall && profile?.role === 'admin' && <BranchPhotoPanel branchId={branchId} />}
+              {viewMode === 'locations' && profile?.role === 'admin' && <LocationsPanel orgId={orgId} />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
               {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}
