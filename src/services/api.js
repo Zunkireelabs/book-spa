@@ -6003,9 +6003,40 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
     ...(person.isLead ? { customerAccountId, referringCustomerId, referralSource, referralSourceDetail } : {}),
   });
 
+  // ZNLY-182: if this person picked a combo service, wire up its per-component
+  // booking_combo_items rows the same way the solo path (BookingConfirmation.jsx)
+  // does — non-blocking, since the person's booking itself already succeeded by
+  // the time this runs; a combo-items failure here must not trigger the group's
+  // own rollback-on-booking-failure compensation logic below, which exists for
+  // booking creation failing, not a secondary metadata write failing afterward.
+  const createGroupComboItems = async (person, data) => {
+    if (!person.service?.is_combo || !data?.id) return;
+    const { data: components } = await fetchServiceComboComponents(person.service.id);
+    if (!components?.length) return;
+    const comboComponents = components.map((c) => ({
+      serviceId: c.serviceId,
+      componentId: c.componentId,
+      defaultTiming: c.defaultTiming,
+      therapistId: c.defaultSameStaff ? (person.therapistId || null) : null,
+    }));
+    const { error: comboError } = await createComboBookingItems({
+      bookingId: data.id,
+      branchId,
+      date,
+      startTime,
+      roomId: null,
+      components: comboComponents,
+      orgSlug,
+    });
+    if (comboError) {
+      console.error('[API] submitGroupBooking createComboBookingItems failed:', comboError.message);
+    }
+  };
+
   // Single person: no group, no compensation path — behave exactly like a plain booking.
   if (people.length === 1) {
     const { data, error } = await createBookingFn(rowArgs(people[0]));
+    if (!error && data) await createGroupComboItems(people[0], data);
     return { data: data ? { bookings: [data] } : null, error };
   }
 
@@ -6045,6 +6076,8 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
       };
     }
     created.push(data);
+    // eslint-disable-next-line no-await-in-loop
+    await createGroupComboItems(person, data);
   }
 
   return { data: { bookings: created }, error: null };
@@ -8433,10 +8466,21 @@ export async function fetchServiceComboComponents(serviceId) {
 // components: [{ serviceId, componentId, defaultTiming, therapistId }] — therapistId
 // already resolved by the caller (same as the booking's primary therapist, or a
 // staff-picked override for a "different staff" component).
-export async function createComboBookingItems({ bookingId, branchId, date, startTime, roomId, components }) {
+//
+// orgSlug: pass this when calling from the anon/online booking flow (same convention
+// as createBooking's own orgSlug param) — an anonymous customer has no `users` row,
+// so getAuthenticatedUser() would always fail for them, and booking_combo_items has
+// no anon INSERT policy anyway (migration-288 only grants staff org-scoped access).
+// The orgSlug branch skips the staff-auth check and routes the actual insert through
+// public_create_combo_booking_items (migration-310), a narrow SECURITY DEFINER RPC
+// scoped to bookings created anonymously — everything else (offset/duration
+// computation) is identical between the two paths.
+export async function createComboBookingItems({ bookingId, branchId, date, startTime, roomId, components, orgSlug }) {
   try {
-    const { error: authError } = await getAuthenticatedUser();
-    if (authError) return { data: null, error: authError };
+    if (!orgSlug) {
+      const { error: authError } = await getAuthenticatedUser();
+      if (authError) return { data: null, error: authError };
+    }
 
     if (!bookingId) return { data: null, error: { code: 'INVALID_INPUT', message: 'bookingId is required.' } };
     if (!components || components.length === 0) return { data: [], error: null };
@@ -8479,6 +8523,23 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
         base_share_amount: 0,
       };
     });
+
+    if (orgSlug) {
+      const { data, error } = await supabase.rpc('public_create_combo_booking_items', {
+        p_booking_id: bookingId,
+        p_items: rows.map((r) => ({
+          component_id: r.component_id,
+          service_id: r.service_id,
+          therapist_id: r.therapist_id,
+          room_id: r.room_id,
+          display_order: r.display_order,
+          date: r.date,
+          start_time: r.start_time,
+        })),
+      });
+      if (error) throw error;
+      return { data, error: null };
+    }
 
     const { data, error } = await supabase
       .from('booking_combo_items')
@@ -11566,6 +11627,7 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       is_on_offer: s.is_on_offer,
       original_price_npr: s.original_price_npr,
       active_campaign_name: s.active_campaign_name,
+      is_combo: s.is_combo,
     }));
 
     if (branchId) {
