@@ -8,6 +8,7 @@ import CustomSelect from '../../components/ui/CustomSelect';
 import SettingsRow from '../staff-detail/components/SettingsRow';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
+import { useOrg } from '../../contexts/OrgContext';
 import { useIndustry } from '../../hooks/useIndustry';
 import {
   fetchServicesForManagement,
@@ -22,6 +23,9 @@ import {
   setServiceComboComponents,
   fetchServiceAddons,
   setServiceAddons,
+  fetchBranchesForManagement,
+  fetchServiceBranches,
+  setServiceBranches,
 } from '../../services/api';
 
 const EMPTY_FORM = {
@@ -42,6 +46,7 @@ const ServiceDetailPage = () => {
   const { orgSlug, serviceId } = useParams();
   const { profile } = useAuth();
   const { branchId } = useBranch();
+  const { orgId } = useOrg();
   const { isBeauty } = useIndustry();
   const userRole = profile?.role || 'staff';
   const isEdit = !!serviceId;
@@ -55,6 +60,11 @@ const ServiceDetailPage = () => {
   const [eligibleTherapistIds, setEligibleTherapistIds] = useState([]);
   const [restrictStaff, setRestrictStaff] = useState(false);
   const [staffSearchQuery, setStaffSearchQuery] = useState('');
+
+  const [allBranches, setAllBranches] = useState([]);
+  const [eligibleBranchIds, setEligibleBranchIds] = useState([]);
+  const [restrictBranches, setRestrictBranches] = useState(false);
+  const [branchSearchQuery, setBranchSearchQuery] = useState('');
 
   const [allServices, setAllServices] = useState([]);
   // comboComponents: [{ serviceId, defaultTiming: 'sequential'|'concurrent', defaultSameStaff: bool }]
@@ -87,9 +97,16 @@ const ServiceDetailPage = () => {
     if (!result.error) setAllServices(result.data || []);
   }, []);
 
+  const loadBranches = useCallback(async () => {
+    if (!orgId) return;
+    const result = await fetchBranchesForManagement(orgId);
+    if (!result.error) setAllBranches(result.data || []);
+  }, [orgId]);
+
   useEffect(() => { loadCategories(); }, [loadCategories]);
   useEffect(() => { loadTherapists(); }, [loadTherapists]);
   useEffect(() => { loadAllServices(); }, [loadAllServices]);
+  useEffect(() => { loadBranches(); }, [loadBranches]);
 
   const loadService = useCallback(async () => {
     if (!isEdit) return;
@@ -98,11 +115,12 @@ const ServiceDetailPage = () => {
 
     // No fetchServiceById endpoint — fetchServicesForManagement() is the same org-wide
     // list the Service Management page already loads, so reusing it here needs no new API.
-    const [servicesResult, eligibleResult, comboResult, addonsResult] = await Promise.all([
+    const [servicesResult, eligibleResult, comboResult, addonsResult, branchScopeResult] = await Promise.all([
       fetchServicesForManagement(),
       fetchServiceTherapists(serviceId, branchId),
       fetchServiceComboComponents(serviceId),
       fetchServiceAddons(serviceId),
+      fetchServiceBranches(serviceId),
     ]);
 
     if (servicesResult.error) {
@@ -152,6 +170,10 @@ const ServiceDetailPage = () => {
     setComboComponents(
       (comboResult.data || []).map((c) => ({ serviceId: c.serviceId, defaultTiming: c.defaultTiming, defaultSameStaff: c.defaultSameStaff, defaultSameRoom: c.defaultSameRoom }))
     );
+
+    const branchIds = branchScopeResult.data || [];
+    setEligibleBranchIds(branchIds);
+    setRestrictBranches(branchIds.length > 0);
 
     setPageLoading(false);
   }, [isEdit, serviceId, branchId]);
@@ -280,6 +302,13 @@ const ServiceDetailPage = () => {
     const addonsResult = await setServiceAddons(targetId, serviceAddonIds);
     if (addonsResult.error) {
       setFormError(addonsResult.error.message || 'Service saved, but failed to save its add-ons.');
+      setSaving(false);
+      return;
+    }
+
+    const branchScopeResult = await setServiceBranches(targetId, restrictBranches ? eligibleBranchIds : []);
+    if (branchScopeResult.error) {
+      setFormError(branchScopeResult.error.message || 'Service saved, but failed to save its branch scope.');
       setSaving(false);
       return;
     }
@@ -976,6 +1005,73 @@ const ServiceDetailPage = () => {
                   </div>
                 </SettingsRow>
                 )}
+
+                <SettingsRow title="Branch Scope" description="Make this service available everywhere, or restrict it to specific branches.">
+                  <div className="space-y-2 p-3 bg-background rounded-spa border border-border max-w-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific branches?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !restrictBranches;
+                          setRestrictBranches(next);
+                          if (!next) {
+                            setEligibleBranchIds([]);
+                            setBranchSearchQuery('');
+                          }
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                          restrictBranches ? 'bg-success' : 'bg-border'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                          restrictBranches ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {restrictBranches && (
+                      <div className="space-y-2">
+                        <Input
+                          value={branchSearchQuery}
+                          onChange={(e) => setBranchSearchQuery(e.target.value)}
+                          placeholder="Search branches..."
+                        />
+                        <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
+                          {(() => {
+                            const query = branchSearchQuery.toLowerCase();
+                            const filtered = query
+                              ? allBranches.filter((b) => b.name.toLowerCase().includes(query))
+                              : allBranches;
+                            if (allBranches.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No branches found.</p>;
+                            }
+                            if (filtered.length === 0) {
+                              return <p className="text-xs text-text-secondary px-2 py-1">No branches match "{branchSearchQuery}".</p>;
+                            }
+                            return filtered.map((b) => (
+                              <label key={b.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleBranchIds.includes(b.id) ? 'bg-primary/5' : ''}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={eligibleBranchIds.includes(b.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEligibleBranchIds((ids) => [...ids, b.id]);
+                                    } else {
+                                      setEligibleBranchIds((ids) => ids.filter((id) => id !== b.id));
+                                    }
+                                  }}
+                                  className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                                />
+                                <span className="font-body text-sm text-text-primary">{b.name}</span>
+                              </label>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </SettingsRow>
 
                 <SettingsRow title="Service Image" description="Shown on the customer booking portal.">
                   <div className="space-y-2">

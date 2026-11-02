@@ -188,6 +188,25 @@ function validateStatusTransition(currentStatus, newStatus) {
 // Read-only queries
 // ============================================================
 
+// ZNLY-185: second, independent filter alongside each caller's own
+// excluded_service_categories filter — a service only shows if both admit it.
+// Mirrors branch_service_links' (migration-312) own inclusion convention: a
+// service with zero rows anywhere is Overall (kept everywhere); one with rows
+// but none for this branchId is restricted elsewhere (dropped); one with a row
+// for this branchId is kept.
+async function filterServicesByBranchScope(services, branchId) {
+  if (!branchId || !services?.length) return services;
+  const serviceIds = services.map((s) => s.id);
+  const { data: links } = await supabase
+    .from('branch_service_links')
+    .select('service_id, branch_id')
+    .in('service_id', serviceIds);
+  if (!links?.length) return services;
+  const restrictedServiceIds = new Set(links.map((l) => l.service_id));
+  const allowedHere = new Set(links.filter((l) => l.branch_id === branchId).map((l) => l.service_id));
+  return services.filter((s) => !restrictedServiceIds.has(s.id) || allowedHere.has(s.id));
+}
+
 export async function fetchServices(branchId) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -205,8 +224,9 @@ export async function fetchServices(branchId) {
 
     if (error) throw error;
 
+    let filtered = data;
     const resolvedBranchId = resolveBranchId(branchId || profile.branch_id);
-    if (resolvedBranchId && data) {
+    if (resolvedBranchId && filtered) {
       const { data: branch } = await supabase
         .from('branches')
         .select('excluded_service_categories')
@@ -214,11 +234,12 @@ export async function fetchServices(branchId) {
         .single();
       const excluded = branch?.excluded_service_categories;
       if (excluded?.length > 0) {
-        return { data: data.filter(s => !excluded.includes(s.category)), error: null };
+        filtered = filtered.filter(s => !excluded.includes(s.category));
       }
+      filtered = await filterServicesByBranchScope(filtered, resolvedBranchId);
     }
 
-    return { data, error: null };
+    return { data: filtered, error: null };
   } catch (error) {
     console.error('[API] fetchServices error:', error.message);
     return { data: null, error };
@@ -6489,6 +6510,42 @@ export async function setServiceTherapists(serviceId, therapistIds, branchId) {
   }
 }
 
+// ZNLY-185: which branches a service is restricted to (branch_service_links,
+// migration-312). Empty result = Overall (visible at every branch) — mirrors
+// fetchServiceTherapists' own "no rows = unrestricted" convention.
+export async function fetchServiceBranches(serviceId) {
+  try {
+    const { data, error } = await supabase
+      .from('branch_service_links')
+      .select('branch_id')
+      .eq('service_id', serviceId);
+
+    if (error) throw error;
+    return { data: (data || []).map((r) => r.branch_id), error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Delegates the replace to set_service_branches (migration-312), same atomic
+// delete-then-insert pattern as setServiceTherapists. branchIds = [] clears the
+// service back to Overall.
+export async function setServiceBranches(serviceId, branchIds) {
+  try {
+    const ids = (branchIds || []).filter(Boolean);
+    const { data, error } = await supabase.rpc('set_service_branches', {
+      p_service_id: serviceId,
+      p_branch_ids: ids,
+    });
+    if (error) throw error;
+    return { data: ids, error: null };
+  } catch (error) {
+    console.error('[API] setServiceBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // Reverse of fetchServiceTherapists: for a given therapist, which of the branch's
 // active services are restricted (have any eligibility rows at all) and, for
 // restricted ones, whether this therapist is in the allow-list. Unrestricted
@@ -11630,6 +11687,7 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       is_combo: s.is_combo,
     }));
 
+    let filtered = services;
     if (branchId) {
       const { data: branch } = await supabase
         .from('branches')
@@ -11638,11 +11696,12 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
         .single();
       const excluded = branch?.excluded_service_categories;
       if (excluded?.length > 0) {
-        return { data: services.filter((s) => !excluded.includes(s.category)), error: null };
+        filtered = filtered.filter((s) => !excluded.includes(s.category));
       }
+      filtered = await filterServicesByBranchScope(filtered, branchId);
     }
 
-    return { data: services, error: null };
+    return { data: filtered, error: null };
   } catch (error) {
     console.error('[API] fetchBookableServicesByOrgSlug error:', error.message);
     return { data: null, error };
