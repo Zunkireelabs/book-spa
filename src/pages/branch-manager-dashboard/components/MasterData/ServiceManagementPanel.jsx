@@ -16,12 +16,17 @@ import {
   fetchTherapistsForManagement,
   fetchServiceTherapists,
   setServiceTherapists,
+  fetchBranchesByOrgId,
+  fetchServiceBranches,
+  setServiceBranches,
 } from '../../../../services/api';
 import { useBranch } from '../../../../contexts/BranchContext';
+import { useOrg } from '../../../../contexts/OrgContext';
 import { useIndustry } from '../../../../hooks/useIndustry';
 
 const ServiceManagementPanel = () => {
   const { branchId } = useBranch();
+  const { orgId } = useOrg();
   const { isBeauty } = useIndustry();
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -29,6 +34,10 @@ const ServiceManagementPanel = () => {
   const [eligibleTherapistIds, setEligibleTherapistIds] = useState([]);
   const [restrictStaff, setRestrictStaff] = useState(false);
   const [staffSearchQuery, setStaffSearchQuery] = useState('');
+  const [allBranches, setAllBranches] = useState([]);
+  const [eligibleBranchIds, setEligibleBranchIds] = useState([]);
+  const [restrictBranches, setRestrictBranches] = useState(false);
+  const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -96,11 +105,18 @@ const ServiceManagementPanel = () => {
     if (!result.error) setAllTherapists(result.data || []);
   }, [branchId]);
 
+  const loadBranches = useCallback(async () => {
+    if (!orgId) return;
+    const result = await fetchBranchesByOrgId(orgId);
+    if (!result.error) setAllBranches(result.data || []);
+  }, [orgId]);
+
   useEffect(() => {
     loadCategories();
     loadServices();
     loadTherapists();
-  }, [loadCategories, loadServices, loadTherapists]);
+    loadBranches();
+  }, [loadCategories, loadServices, loadTherapists, loadBranches]);
 
   const handleOpenCreate = () => {
     setEditingService(null);
@@ -110,6 +126,9 @@ const ServiceManagementPanel = () => {
     setEligibleTherapistIds([]);
     setRestrictStaff(false);
     setStaffSearchQuery('');
+    setEligibleBranchIds([]);
+    setRestrictBranches(false);
+    setBranchSearchQuery('');
     setFormError(null);
     setShowModal(true);
   };
@@ -138,6 +157,9 @@ const ServiceManagementPanel = () => {
     // this one.
     setEligibleTherapistIds([]);
     setRestrictStaff(false);
+    setEligibleBranchIds([]);
+    setRestrictBranches(false);
+    setBranchSearchQuery('');
     setShowModal(true);
     // branchId filters server-side (migration-257/258 made the allow-list per-branch,
     // but storage is still org-wide) — a service restricted only at a different branch
@@ -147,6 +169,11 @@ const ServiceManagementPanel = () => {
     const ids = eligibleResult.data || [];
     setEligibleTherapistIds(ids);
     setRestrictStaff(ids.length > 0);
+
+    const branchResult = await fetchServiceBranches(service.id);
+    const bIds = branchResult.data || [];
+    setEligibleBranchIds(bIds);
+    setRestrictBranches(bIds.length > 0);
   };
 
   const handleImageChange = (e) => {
@@ -273,6 +300,17 @@ const ServiceManagementPanel = () => {
           // re-targeting it at the row just created, pressing Save again would
           // re-enter the createService branch and create a duplicate service on
           // every retry instead of just retrying the allow-list write.
+          if (!editingService) setEditingService(result.data);
+          setSaving(false);
+          await loadServices();
+          return;
+        }
+
+        const branchResult = await setServiceBranches(serviceId, restrictBranches ? eligibleBranchIds : []);
+        if (branchResult.error) {
+          // Same non-fatal handling as the eligible-staff write above: the service
+          // and staff allow-list already saved, only the branch scope failed.
+          setFormError(branchResult.error.message || 'Failed to save branch scope.');
           if (!editingService) setEditingService(result.data);
           setSaving(false);
           await loadServices();
@@ -732,6 +770,71 @@ const ServiceManagementPanel = () => {
                               className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
                             />
                             <span className="font-body text-sm text-text-primary">{t.name}</span>
+                          </label>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 p-3 bg-background rounded-spa border border-border">
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-medium text-sm text-text-primary">Restrict to specific branches?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !restrictBranches;
+                      setRestrictBranches(next);
+                      if (!next) {
+                        setEligibleBranchIds([]);
+                        setBranchSearchQuery('');
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full spa-transition-fast ${
+                      restrictBranches ? 'bg-success' : 'bg-border'
+                    }`}
+                  >
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+                      restrictBranches ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
+
+                {restrictBranches && (
+                  <div className="space-y-2">
+                    <Input
+                      value={branchSearchQuery}
+                      onChange={(e) => setBranchSearchQuery(e.target.value)}
+                      placeholder="Search branches..."
+                    />
+                    <div className="border border-border rounded-spa bg-surface max-h-[220px] overflow-y-auto p-2 space-y-1">
+                      {(() => {
+                        const query = branchSearchQuery.toLowerCase();
+                        const filtered = query
+                          ? allBranches.filter(b => b.name.toLowerCase().includes(query))
+                          : allBranches;
+                        if (allBranches.length === 0) {
+                          return <p className="text-xs text-text-secondary px-2 py-1">No branches found.</p>;
+                        }
+                        if (filtered.length === 0) {
+                          return <p className="text-xs text-text-secondary px-2 py-1">No branches match "{branchSearchQuery}".</p>;
+                        }
+                        return filtered.map(b => (
+                          <label key={b.id} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-primary/5 ${eligibleBranchIds.includes(b.id) ? 'bg-primary/5' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={eligibleBranchIds.includes(b.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEligibleBranchIds(ids => [...ids, b.id]);
+                                } else {
+                                  setEligibleBranchIds(ids => ids.filter(id => id !== b.id));
+                                }
+                              }}
+                              className="text-primary focus:ring-primary w-3.5 h-3.5 rounded"
+                            />
+                            <span className="font-body text-sm text-text-primary">{b.name}</span>
                           </label>
                         ));
                       })()}

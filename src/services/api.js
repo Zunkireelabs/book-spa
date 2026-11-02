@@ -188,6 +188,55 @@ function validateStatusTransition(currentStatus, newStatus) {
 // Read-only queries
 // ============================================================
 
+// Branch-scope filter mirroring the service_therapists "inclusion" convention
+// (migration-249): a service with zero branch_service_links rows is visible
+// everywhere (Overall); a service with rows is visible only at those branches.
+async function filterServicesByBranchScope(services, branchId) {
+  if (!services?.length || !branchId) return services;
+  const serviceIds = services.map(s => s.id);
+  const { data: links, error } = await supabase
+    .from('branch_service_links')
+    .select('service_id, branch_id')
+    .in('service_id', serviceIds);
+  if (error || !links) return services;
+
+  const restrictedServiceIds = new Set(links.map(l => l.service_id));
+  const allowedAtBranch = new Set(
+    links.filter(l => l.branch_id === branchId).map(l => l.service_id)
+  );
+
+  return services.filter(s => !restrictedServiceIds.has(s.id) || allowedAtBranch.has(s.id));
+}
+
+export async function fetchServiceBranches(serviceId) {
+  try {
+    const { data, error } = await supabase
+      .from('branch_service_links')
+      .select('branch_id')
+      .eq('service_id', serviceId);
+    if (error) throw error;
+    return { data: (data || []).map(r => r.branch_id), error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function setServiceBranches(serviceId, branchIds) {
+  try {
+    const ids = (branchIds || []).filter(Boolean);
+    const { data, error } = await supabase.rpc('set_service_branches', {
+      p_service_id: serviceId,
+      p_branch_ids: ids,
+    });
+    if (error) throw error;
+    return { data: ids, error: null };
+  } catch (error) {
+    console.error('[API] setServiceBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function fetchServices(branchId) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -205,8 +254,9 @@ export async function fetchServices(branchId) {
 
     if (error) throw error;
 
+    let filtered = data;
     const resolvedBranchId = resolveBranchId(branchId || profile.branch_id);
-    if (resolvedBranchId && data) {
+    if (resolvedBranchId && filtered) {
       const { data: branch } = await supabase
         .from('branches')
         .select('excluded_service_categories')
@@ -214,11 +264,15 @@ export async function fetchServices(branchId) {
         .single();
       const excluded = branch?.excluded_service_categories;
       if (excluded?.length > 0) {
-        return { data: data.filter(s => !excluded.includes(s.category)), error: null };
+        filtered = filtered.filter(s => !excluded.includes(s.category));
       }
     }
 
-    return { data, error: null };
+    if (resolvedBranchId && filtered) {
+      filtered = await filterServicesByBranchScope(filtered, resolvedBranchId);
+    }
+
+    return { data: filtered, error: null };
   } catch (error) {
     console.error('[API] fetchServices error:', error.message);
     return { data: null, error };
@@ -10600,7 +10654,7 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
 
     if (error) throw error;
 
-    const services = (data || []).map((s) => ({
+    let filtered = (data || []).map((s) => ({
       id: s.id,
       name: s.name,
       duration_minutes: s.duration_minutes,
@@ -10624,11 +10678,15 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
         .single();
       const excluded = branch?.excluded_service_categories;
       if (excluded?.length > 0) {
-        return { data: services.filter((s) => !excluded.includes(s.category)), error: null };
+        filtered = filtered.filter((s) => !excluded.includes(s.category));
       }
     }
 
-    return { data: services, error: null };
+    if (branchId) {
+      filtered = await filterServicesByBranchScope(filtered, branchId);
+    }
+
+    return { data: filtered, error: null };
   } catch (error) {
     console.error('[API] fetchBookableServicesByOrgSlug error:', error.message);
     return { data: null, error };
