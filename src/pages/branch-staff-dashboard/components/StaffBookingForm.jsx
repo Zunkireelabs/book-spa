@@ -73,11 +73,11 @@ const StaffBookingForm = ({ onBookingCreated }) => {
   useEffect(() => {
     (async () => {
       setLoadingServices(true);
-      const result = await fetchServices();
+      const result = await fetchServices(branchId);
       if (result.data) setServices(result.data);
       setLoadingServices(false);
     })();
-  }, []);
+  }, [branchId]);
 
   // Generate next 14 days
   const dates = useCallback(() => {
