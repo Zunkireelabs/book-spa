@@ -188,20 +188,22 @@ function validateStatusTransition(currentStatus, newStatus) {
 // Read-only queries
 // ============================================================
 
-// ZNLY-185: second, independent filter alongside each caller's own
+// ZNLY-185/186: second, independent filter alongside each caller's own
 // excluded_service_categories filter — a service only shows if both admit it.
-// Mirrors branch_service_links' (migration-312) own inclusion convention: a
-// service with zero rows anywhere is Overall (kept everywhere); one with rows
-// but none for this branchId is restricted elsewhere (dropped); one with a row
-// for this branchId is kept.
+// Mirrors branch_service_links' own inclusion convention: a service with zero
+// rows anywhere is Overall (kept everywhere); one with rows but none for this
+// branchId is restricted elsewhere (dropped); one with a row for this
+// branchId is kept.
+// fetchServiceBranches/setServiceBranches live further down, next to
+// fetchServiceTherapists/setServiceTherapists — not redeclared here.
 async function filterServicesByBranchScope(services, branchId) {
-  if (!branchId || !services?.length) return services;
+  if (!services?.length || !branchId) return services;
   const serviceIds = services.map((s) => s.id);
-  const { data: links } = await supabase
+  const { data: links, error } = await supabase
     .from('branch_service_links')
     .select('service_id, branch_id')
     .in('service_id', serviceIds);
-  if (!links?.length) return services;
+  if (error || !links?.length) return services;
   const restrictedServiceIds = new Set(links.map((l) => l.service_id));
   const allowedHere = new Set(links.filter((l) => l.branch_id === branchId).map((l) => l.service_id));
   return services.filter((s) => !restrictedServiceIds.has(s.id) || allowedHere.has(s.id));
@@ -11670,7 +11672,7 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
 
     if (error) throw error;
 
-    const services = (data || []).map((s) => ({
+    let filtered = (data || []).map((s) => ({
       id: s.id,
       name: s.name,
       duration_minutes: s.duration_minutes,
@@ -11687,7 +11689,6 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       is_combo: s.is_combo,
     }));
 
-    let filtered = services;
     if (branchId) {
       const { data: branch } = await supabase
         .from('branches')
