@@ -69,7 +69,6 @@ export function canDragBooking(booking) {
 }
 
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, hideSensitive = false, use24h = false }) => {
-  const { staffLabel } = useIndustry();
   const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
   const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
@@ -322,6 +321,7 @@ const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist'
 // itself and by OverflowPopoverRow (the "+N" hidden-bookings list) so both
 // give the same detail preview instead of just a native title tooltip.
 export const BookingHoverPreview = ({ booking, position, draggable, hideSensitive = false, use24h = false }) => {
+  const { staffLabel } = useIndustry();
   const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
   const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
