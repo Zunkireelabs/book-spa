@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import Icon from '../../../../components/AppIcon';
 import { isNoShow } from '../../../../services/bookingTransformers';
 import { formatClockTime } from './timeFormat';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 const STATUS_COLORS = {
   'Pending':     { bg: '#f59e0b', text: '#fff', light: '#fef3c7' },
@@ -68,6 +69,7 @@ export function canDragBooking(booking) {
 }
 
 const CalendarBookingCard = ({ booking, style, onClick, columnMode = 'therapist', onResize, isSelected = false, onSelect, hideSensitive = false, use24h = false }) => {
+  const { staffLabel } = useIndustry();
   const colorKey = isNoShow(booking) ? 'No Show' : booking.status;
   const colors = STATUS_COLORS[colorKey] || STATUS_COLORS['Pending'];
   const isUnpaid = booking.paymentStatus === 'unpaid';
@@ -412,7 +414,7 @@ export const BookingHoverPreview = ({ booking, position, draggable, hideSensitiv
             label="Duration"
             value={durationMins ? `${durationMins} mins` : (booking.serviceDuration ? `${booking.serviceDuration} mins` : null)}
           />
-          <DetailRow label="Therapist" value={booking.therapistName || '—'} />
+          <DetailRow label={staffLabel} value={booking.therapistName || '—'} />
           <DetailRow label="Room" value={booking.roomName || '—'} />
           <DetailRow label="Created by" value={booking.createdByName || 'Online booking'} />
         </div>

@@ -121,7 +121,7 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { paymentMethods, orgSettings } = useOrg();
+  const { paymentMethods, orgSettings, staffLabel } = useOrg();
   const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
     ? orgSettings.cancellation_reasons
     : CANCEL_REASON_OPTIONS;
@@ -1573,7 +1573,7 @@ const BookingActionModal = ({
                 {(booking.therapists?.length > 0 || booking.therapist) && !isEditing && (
                   <div className="space-y-1.5 sm:space-y-2">
                     <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">
-                      Assigned Therapist{(booking.therapists?.length || 0) > 1 ? 's' : ''}
+                      Assigned {staffLabel}{(booking.therapists?.length || 0) > 1 ? 's' : ''}
                     </label>
                     <div className="font-body font-body-normal text-sm text-text-primary">
                       {(booking.therapists?.length > 0 ? booking.therapists : [booking.therapist]).filter(Boolean).map((t, i) => (
@@ -3054,7 +3054,7 @@ const BookingActionModal = ({
 
                   {/* Therapist */}
                   <div>
-                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">Therapist</label>
+                    <label className="block font-body font-body-medium text-xs text-text-secondary mb-1">{staffLabel}</label>
                     <CustomSelect
                       value={newBookingForm.therapistId}
                       onChange={(val) => setNewBookingForm(f => ({ ...f, therapistId: val }))}

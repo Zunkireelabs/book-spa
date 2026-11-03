@@ -3,6 +3,7 @@ import Icon from '../../../../components/AppIcon';
 import Button from '../../../../components/ui/Button';
 import CustomSelect from '../../../../components/ui/CustomSelect';
 import { fetchAuditLogs } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 const TABLE_OPTIONS = [
   { value: '', label: 'All Tables' },
@@ -102,6 +103,8 @@ function ExpandableRow({ log }) {
 }
 
 const AuditPanel = ({ branchId, initialRecordId = '' }) => {
+  const { staffLabelPlural } = useIndustry();
+  const tableOptions = TABLE_OPTIONS.map((o) => o.value === 'therapists' ? { ...o, label: staffLabelPlural } : o);
   const [logs, setLogs] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -221,7 +224,7 @@ const AuditPanel = ({ branchId, initialRecordId = '' }) => {
             <CustomSelect
               value={tableName}
               onChange={(val) => setTableName(val)}
-              options={TABLE_OPTIONS}
+              options={tableOptions}
               size="md"
             />
           </div>

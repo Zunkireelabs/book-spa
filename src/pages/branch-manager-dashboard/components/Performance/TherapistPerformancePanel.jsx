@@ -4,6 +4,7 @@ import FilterBar from '../../../../components/ui/FilterBar';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getTherapistPerformance } from '../../../../services/api';
 import TherapistDetailView from './TherapistDetailView';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 function getTier(score) {
   if (score >= 85) return { label: 'Top Performer', color: 'bg-success/10 text-success' };
@@ -29,6 +30,7 @@ function formatHours(h) {
 }
 
 const TherapistPerformancePanel = ({ branchId }) => {
+  const { staffLabel, staffLabelPlural } = useIndustry();
   const today = getTodayISO();
 
   const [activePreset, setActivePreset] = useState('monthly');
@@ -98,7 +100,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
     const rows = visibleTherapists;
     if (!rows.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Rank', 'Therapist', 'Score', 'Tier', 'Services', 'Customers', 'Worked (h)', 'Occupied (h)', 'Utilization %'];
+    const header = ['Rank', staffLabel, 'Score', 'Tier', 'Services', 'Customers', 'Worked (h)', 'Occupied (h)', 'Utilization %'];
     let csv = header.join(',') + '\n';
     rows.forEach((t, idx) => {
       csv += [
@@ -170,9 +172,9 @@ const TherapistPerformancePanel = ({ branchId }) => {
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">Therapist Performance Index</h2>
+          <h2 className="font-heading font-heading-semibold text-xl text-text-primary">{staffLabel} Performance Index</h2>
           <p className="font-body text-sm text-text-secondary">
-            Ranked by weighted performance score. Click a therapist for the full breakdown.
+            Ranked by weighted performance score. Click a {staffLabel.toLowerCase()} for the full breakdown.
             {data && ` Period: ${data.periodStart} to ${data.periodEnd}`}
           </p>
         </div>
@@ -189,8 +191,8 @@ const TherapistPerformancePanel = ({ branchId }) => {
 
       {/* Filters */}
       <FilterBar
-        count={{ value: therapists.length, label: therapists.length === 1 ? 'Therapist' : 'Therapists' }}
-        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search therapist by name…' }}
+        count={{ value: therapists.length, label: therapists.length === 1 ? staffLabel : staffLabelPlural }}
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: `Search ${staffLabel.toLowerCase()} by name…` }}
         presets={PERIOD_PRESETS.map((p) => ({
           label: p.label,
           active: mode === 'preset' && activePreset === p.id,
@@ -229,7 +231,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
           <div className="p-12 text-center">
             <Icon name="Users" size={40} className="text-text-tertiary mx-auto mb-3" />
             <h3 className="font-body font-body-medium text-sm text-text-primary mb-1">No Performance Data</h3>
-            <p className="font-body text-xs text-text-tertiary">No active therapists or bookings found for this period.</p>
+            <p className="font-body text-xs text-text-tertiary">No active {staffLabelPlural.toLowerCase()} or bookings found for this period.</p>
           </div>
         ) : (
           <>
@@ -238,7 +240,7 @@ const TherapistPerformancePanel = ({ branchId }) => {
               <thead>
                 <tr className="bg-background/50 border-b border-border">
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide w-12">#</th>
-                  <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Therapist</th>
+                  <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">{staffLabel}</th>
                   <th className="px-4 py-3 text-left font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Score</th>
                   <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Services</th>
                   <th className="px-4 py-3 text-center font-body font-body-medium text-xs text-text-secondary uppercase tracking-wide">Customers</th>
