@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { getDailyOperationalReport, exportDailyReportCSV, closeDay, fetchAttendance, fetchAttendanceSummary } from '../../../services/api';
+import { useIndustry } from '../../../hooks/useIndustry';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -21,6 +22,7 @@ function formatTime(timeStr) {
 }
 
 const DailyOperationalReportPanel = ({ branchId }) => {
+  const { staffLabel } = useIndustry();
   const today = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState(today);
   const [report, setReport] = useState(null);
@@ -380,7 +382,7 @@ const DailyOperationalReportPanel = ({ branchId }) => {
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Booking #</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Customer</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Service</th>
-                      <th className="text-left px-4 py-3 font-medium text-text-secondary">Therapist</th>
+                      <th className="text-left px-4 py-3 font-medium text-text-secondary">{staffLabel}</th>
                       <th className="text-left px-4 py-3 font-medium text-text-secondary">Room</th>
                       <th className="text-right px-4 py-3 font-medium text-text-secondary">Amount</th>
                       <th className="text-center px-4 py-3 font-medium text-text-secondary">Payment</th>
@@ -465,14 +467,14 @@ const DailyOperationalReportPanel = ({ branchId }) => {
               <div className="p-4 border-b border-border">
                 <h3 className="font-heading font-heading-medium text-base text-text-primary flex items-center gap-2">
                   <Icon name="User" size={18} className="text-primary" />
-                  <span>Therapist Revenue Summary</span>
+                  <span>{staffLabel} Revenue Summary</span>
                 </h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-background">
-                      <th className="text-left px-4 py-3 font-medium text-text-secondary">Therapist</th>
+                      <th className="text-left px-4 py-3 font-medium text-text-secondary">{staffLabel}</th>
                       <th className="text-center px-4 py-3 font-medium text-text-secondary">Completed Bookings</th>
                       <th className="text-right px-4 py-3 font-medium text-text-secondary">Total Revenue</th>
                     </tr>

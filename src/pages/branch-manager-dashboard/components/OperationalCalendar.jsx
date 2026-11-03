@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useIndustry } from '../../../hooks/useIndustry';
 import FullCalendar from '@fullcalendar/react';
 import resourceTimelinePlugin from '@fullcalendar/resource-timeline';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -45,6 +46,7 @@ function buildDatetime(date, time) {
 // ── Component ────────────────────────────────────────────────
 
 const OperationalCalendar = ({ branchId }) => {
+  const { staffLabel } = useIndustry();
   const { profile } = useAuth();
   const calendarRef = useRef(null);
 
@@ -191,10 +193,10 @@ const OperationalCalendar = ({ branchId }) => {
   const handleAssignTherapist = async (bookingId, therapistIds, notes, roomId) => {
     const result = await assignTherapist({ bookingId, therapistIds, roomId });
     if (result.error) {
-      showToast(result.error.message || 'Failed to assign therapist.', 'error');
+      showToast(result.error.message || `Failed to assign ${staffLabel.toLowerCase()}.`, 'error');
       return;
     }
-    showToast('Therapist assigned successfully');
+    showToast(`${staffLabel} assigned successfully`);
   };
 
   const handleRecordPayment = async (bookingId, opts) => {
@@ -458,7 +460,7 @@ const OperationalCalendar = ({ branchId }) => {
               },
             }}
             resources={resources}
-            resourceAreaHeaderContent="Therapist"
+            resourceAreaHeaderContent={staffLabel}
             resourceAreaWidth="180px"
             resourceLabelContent={renderResourceLabel}
             events={events}
