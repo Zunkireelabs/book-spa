@@ -1,5 +1,11 @@
 -- Migration 134: public customer-match lookup (name + phone/email), gated by name match
 --
+-- ledger-collision-ack: the STAGING ledger records version 134 as "branch-online-capacity", which
+-- now lives at migration-138. Same renumbering as migration-133 — this file's content was applied
+-- to staging under version 136 (a ghost in migrate-status.sh, no 136 file exists); production
+-- records 134 correctly as "public-customer-match". Skipping this file on staging is correct.
+-- Do not renumber: production's 134 is already right.
+--
 -- Root cause of the 171 duplicate-customer pairs found on production (migration-133): the
 -- public booking flow's checkExistingCustomerByPhone (migration-074) only ever returns a
 -- boolean, never the actual matching record, so a returning customer typing their phone in

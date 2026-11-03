@@ -18,6 +18,12 @@ const TOGGLES = [
     label: 'Enable staff ratings',
     description: 'Show an admin-set rating on each staff member\'s profile.',
   },
+  {
+    key: 'enable_group_booking',
+    orgField: 'enableGroupBooking',
+    label: 'Enable group booking',
+    description: 'Let customers book appointments for themselves and others together in one online booking. Turn off to only allow solo bookings.',
+  },
 ];
 
 const BookingSettingsPanel = () => {

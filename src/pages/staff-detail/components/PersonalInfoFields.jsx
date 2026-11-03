@@ -7,7 +7,7 @@ const PersonalInfoFields = ({
   photoPreview, uploadingPhoto, onPhotoChange, onRemovePhoto,
 }) => {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-xl">
       <div className="space-y-2">
         <label className="block font-body font-body-medium text-sm text-text-primary">Photo</label>
 

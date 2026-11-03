@@ -158,6 +158,7 @@ export function transformBooking(dbBooking) {
     branchName: dbBooking.branch?.name || null,
     startTime: dbBooking.start_time || null,
     specialRequests: dbBooking.special_requests || null,
+    genderPreference: dbBooking.gender_preference || null,
     referredBy: dbBooking.referred_by || null,
     referralSource: dbBooking.referral_source || null,
     referralSourceDetail: dbBooking.referral_source_detail || null,

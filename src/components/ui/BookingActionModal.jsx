@@ -6,10 +6,10 @@ import PaymentModal from './PaymentModal';
 import ConfirmDialog, { CANCEL_REASON_OPTIONS } from './ConfirmDialog';
 import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
-import AdminCorrectionModal from './AdminCorrectionModal';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
-import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag } from '../../services/api';
-import { excludeRelatedFromPreviousDue } from '../../services/bookingTransformers';
+import PaymentMethodSelector from './PaymentMethodSelector';
+import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag, adminCorrectBooking, adminDeleteBooking, correctPaymentAmount, correctPaymentMode } from '../../services/api';
+import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
 import { getExtendOptions } from '../../utils/serviceVariants';
@@ -43,6 +43,45 @@ const STATUS_STYLES = {
   cancelled: 'bg-error/10 text-error',
   'no show': 'bg-gray-100 text-gray-500',
 };
+
+const CORRECTION_REASON_MIN = 10;
+
+// Only fields an admin can sensibly retype. The RPC enforces its own, wider
+// whitelist server-side; this is the deliberately narrower UI surface, so a
+// mis-click cannot rewrite something obscure. Adding a field here is safe only
+// if it also appears in the RPC's v_allowed array (admin_correct_booking).
+const CORRECTABLE_FIELDS = [
+  { value: 'status',          label: 'Status',            kind: 'status' },
+  { value: 'base_amount',     label: 'Base amount (NPR)', kind: 'number' },
+  { value: 'discount_amount', label: 'Discount (NPR)',    kind: 'number' },
+  { value: 'date',            label: 'Date',              kind: 'date'   },
+  { value: 'start_time',      label: 'Start time',        kind: 'time'   },
+  { value: 'customer_name',   label: 'Customer name',     kind: 'text'   },
+  { value: 'customer_phone',  label: 'Customer phone',    kind: 'text'   },
+];
+
+const CORRECTION_STATUS_OPTIONS = [
+  { value: 'Pending',     label: 'Pending' },
+  { value: 'Confirmed',   label: 'Confirmed' },
+  { value: 'In-Progress', label: 'In-Progress' },
+  { value: 'Completed',   label: 'Completed' },
+  { value: 'Cancelled',   label: 'Cancelled' },
+  { value: 'No Show',     label: 'No Show' },
+];
+
+// Current value of each correctable field, read off the transformed booking
+// object the way the rest of this modal already does.
+function correctionFieldsFromBooking(booking) {
+  return {
+    status: booking?.status ? toDbStatus(booking.status) : '',
+    base_amount: booking?.baseAmount ?? '',
+    discount_amount: booking?.discountAmount ?? '',
+    date: booking?.date || '',
+    start_time: booking?.startTime ? booking.startTime.slice(0, 5) : '',
+    customer_name: booking?.customerName || '',
+    customer_phone: booking?.customerPhone || '',
+  };
+}
 
 const BookingActionModal = ({
   isOpen = false,
@@ -82,7 +121,10 @@ const BookingActionModal = ({
   onRescheduleStart,
 }) => {
   const { branchId } = useBranch();
-  const { paymentMethods } = useOrg();
+  const { paymentMethods, orgSettings } = useOrg();
+  const cancelReasonOptions = orgSettings?.cancellation_reasons?.length
+    ? orgSettings.cancellation_reasons
+    : CANCEL_REASON_OPTIONS;
   const [activeTab, setActiveTab] = useState('details');
   const [isFirstBooking, setIsFirstBooking] = useState(false);
   const [selectedTherapists, setSelectedTherapists] = useState([]);
@@ -97,7 +139,36 @@ const BookingActionModal = ({
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  // Admin correction — inline mode replacing the tab bar/content with an
+  // edit-everything form (no separate popup modal). `showAdminCorrection`
+  // toggles the mode; the rest is the form's own local state.
   const [showAdminCorrection, setShowAdminCorrection] = useState(false);
+  const [correctionMode, setCorrectionMode] = useState('correct'); // 'correct' | 'delete'
+  const [correctionFields, setCorrectionFields] = useState(null);
+  const [correctionInitialFields, setCorrectionInitialFields] = useState(null);
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correctionDeleteText, setCorrectionDeleteText] = useState('');
+  const [correctionConfirming, setCorrectionConfirming] = useState(null); // null | 'discard' | 'save'
+  const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
+  const [correctionError, setCorrectionError] = useState(null);
+  // Payment tab, correction mode — keyed by payment.id -> string input value.
+  // Separate from correctionFields since it writes through a different RPC
+  // (admin_correct_payment_amount, one call per changed row) than the rest
+  // of the correction form (admin_correct_booking, one batched call).
+  const [correctionPaymentAmounts, setCorrectionPaymentAmounts] = useState({});
+  const [correctionPaymentInitialAmounts, setCorrectionPaymentInitialAmounts] = useState({});
+  // Payment mode per row, same keying — writes through correctPaymentMode()
+  // (migration-237) alongside correctPaymentAmount() when both changed.
+  const [correctionPaymentModes, setCorrectionPaymentModes] = useState({});
+  const [correctionPaymentInitialModes, setCorrectionPaymentInitialModes] = useState({});
+  // Discount tab, correction mode — a %/Fixed toggle like the normal Apply
+  // Discount form, kept separate from the shared discountType/discountValue
+  // state so entering/leaving correction mode never perturbs the normal
+  // (non-correction) Discount tab's own in-progress entry. Recomputes into
+  // correctionFields.discount_amount — the single source of truth also
+  // shown as a flat NPR value on the Booking Details tab.
+  const [correctionDiscountType, setCorrectionDiscountType] = useState('percentage');
+  const [correctionDiscountValue, setCorrectionDiscountValue] = useState('');
   const [correctingPayment, setCorrectingPayment] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -200,6 +271,11 @@ const BookingActionModal = ({
     setNewBookingError(null);
     setNewBookingForm({});
     setNewBookingSubmitting(false);
+    setShowAdminCorrection(false);
+    setCorrectionConfirming(null);
+    setCorrectionError(null);
+    setCorrectionPaymentAmounts({});
+    setCorrectionPaymentInitialAmounts({});
   }, [booking?.bookingId]);
 
   // "New" badge — this is the modal staff actually reach by clicking a booking card on the
@@ -557,6 +633,234 @@ const BookingActionModal = ({
     }
   };
 
+  // ── Admin correction (inline) ──────────────────────────────
+  const openCorrection = () => {
+    const initial = correctionFieldsFromBooking(booking);
+    setCorrectionInitialFields(initial);
+    setCorrectionFields(initial);
+    const paymentAmounts = {};
+    const paymentModes = {};
+    (booking?.payments || []).forEach((p) => {
+      if (!p.id) return;
+      paymentAmounts[p.id] = String(p.amount);
+      paymentModes[p.id] = p.paymentMode;
+    });
+    setCorrectionPaymentInitialAmounts(paymentAmounts);
+    setCorrectionPaymentAmounts(paymentAmounts);
+    setCorrectionPaymentInitialModes(paymentModes);
+    setCorrectionPaymentModes(paymentModes);
+    // Reverse the current discount into a starting %/Fixed toggle state —
+    // percentage by default, matching the proportion already applied.
+    const basePct = booking?.baseAmount > 0
+      ? Math.round((Number(booking.discountAmount || 0) / booking.baseAmount) * 100)
+      : 0;
+    setCorrectionDiscountType('percentage');
+    setCorrectionDiscountValue(basePct > 0 ? String(basePct) : '');
+    setCorrectionMode('correct');
+    setCorrectionReason('');
+    setCorrectionDeleteText('');
+    setCorrectionError(null);
+    setCorrectionConfirming(null);
+    setShowAdminCorrection(true);
+  };
+
+  // The %/Fixed toggle is a draft, previewed live on the Discount tab itself,
+  // but only written into correctionFields.discount_amount — the field that
+  // actually feeds admin_correct_booking, the footer's "changed" count, and
+  // the Payment tab's summary — when the admin explicitly clicks Apply.
+  const correctionDiscountComputed = () => {
+    const value = Number(correctionDiscountValue) || 0;
+    return correctionDiscountType === 'percentage'
+      ? Math.round((Number(correctionFields?.base_amount) || 0) * (value / 100))
+      : value;
+  };
+  const applyCorrectionDiscount = () => {
+    setCorrectionField('discount_amount', String(correctionDiscountComputed()));
+  };
+  const cancelCorrectionDiscount = () => {
+    const original = correctionInitialFields?.discount_amount ?? '';
+    setCorrectionField('discount_amount', original);
+    const base = Number(correctionInitialFields?.base_amount) || 0;
+    const basePct = base > 0 ? Math.round((Number(original || 0) / base) * 100) : 0;
+    setCorrectionDiscountType('percentage');
+    setCorrectionDiscountValue(basePct > 0 ? String(basePct) : '');
+  };
+
+  const correctionChangedFields = useMemo(() => {
+    if (!correctionFields || !correctionInitialFields) return {};
+    const out = {};
+    for (const f of CORRECTABLE_FIELDS) {
+      const next = correctionFields[f.value];
+      const prev = correctionInitialFields[f.value];
+      if (String(next) !== String(prev) && !(next === '' && prev === '')) {
+        out[f.value] = f.kind === 'number' ? Number(next) : next;
+      }
+    }
+    // Assigned tab, correction mode only — admin_correct_booking's whitelist
+    // covers a single therapist_id/room_id (not the multi-therapist
+    // booking_therapists junction the normal Assign flow supports), so this
+    // only picks up the primary therapist. Reuses the same selectedTherapists/
+    // selectedRoom state the ordinary Assign tab UI already edits.
+    if (showAdminCorrection) {
+      const origTherapistId = booking?.therapists?.[0]?.id || booking?.therapist?.id || null;
+      const nextTherapistId = selectedTherapists[0] || null;
+      if (nextTherapistId !== origTherapistId) out.therapist_id = nextTherapistId;
+      const origRoomId = booking?.roomId || null;
+      const nextRoomId = selectedRoom || null;
+      if (nextRoomId !== origRoomId) out.room_id = nextRoomId;
+    }
+    return out;
+  }, [correctionFields, correctionInitialFields, showAdminCorrection, selectedTherapists, selectedRoom, booking]);
+  const correctionChangedCount = Object.keys(correctionChangedFields).length;
+
+  // Payment tab — diff against the same booking.payments rows the tab
+  // already renders. Scoped to this booking's own payments only (not the
+  // "Other Day Services"/previous-due bundling shown elsewhere on the tab,
+  // which belongs to a different booking entirely and stays read-only).
+  const correctionPaymentChanged = useMemo(() => {
+    const out = {};
+    const ids = new Set([...Object.keys(correctionPaymentAmounts), ...Object.keys(correctionPaymentModes)]);
+    for (const id of ids) {
+      const nextAmount = correctionPaymentAmounts[id];
+      const prevAmount = correctionPaymentInitialAmounts[id];
+      const amountChanged = nextAmount !== '' && Number(nextAmount) !== Number(prevAmount);
+      const nextMode = correctionPaymentModes[id];
+      const prevMode = correctionPaymentInitialModes[id];
+      const modeChanged = nextMode && nextMode !== prevMode;
+      if (amountChanged || modeChanged) {
+        out[id] = {
+          ...(amountChanged ? { amount: Number(nextAmount) } : {}),
+          ...(modeChanged ? { mode: nextMode } : {}),
+        };
+      }
+    }
+    return out;
+  }, [correctionPaymentAmounts, correctionPaymentInitialAmounts, correctionPaymentModes, correctionPaymentInitialModes]);
+  const correctionPaymentChangedCount = Object.keys(correctionPaymentChanged).length;
+
+  const correctionReasonOk = correctionReason.trim().length >= CORRECTION_REASON_MIN;
+  const correctionDeleteConfirmed = correctionDeleteText.trim().toUpperCase() === 'DELETE';
+  const correctionIsDirty = correctionMode === 'correct'
+    ? (correctionChangedCount > 0 || correctionPaymentChangedCount > 0 || correctionReason.trim().length > 0)
+    : (correctionDeleteText.trim().length > 0 || correctionReason.trim().length > 0);
+
+  const setCorrectionField = (field, value) => setCorrectionFields((prev) => ({ ...prev, [field]: value }));
+  const setCorrectionPaymentAmount = (paymentId, value) =>
+    setCorrectionPaymentAmounts((prev) => ({ ...prev, [paymentId]: value }));
+  const setCorrectionPaymentMode = (paymentId, value) =>
+    setCorrectionPaymentModes((prev) => ({ ...prev, [paymentId]: value }));
+
+  // Shared by the header X and the inline footer's Discard button while in
+  // correction mode — only interrupts with a confirmation when there's
+  // actually something unsaved to lose.
+  const requestCorrectionClose = () => {
+    if (correctionIsDirty) { setCorrectionConfirming('discard'); return; }
+    setShowAdminCorrection(false);
+  };
+
+  const requestCorrectionSave = () => {
+    setCorrectionError(null);
+    if (correctionMode === 'delete') {
+      if (!correctionDeleteConfirmed) { setCorrectionError('Type DELETE to confirm.'); return; }
+    } else if (correctionChangedCount === 0 && correctionPaymentChangedCount === 0) {
+      setCorrectionError('Change at least one field before saving.');
+      return;
+    }
+    // Reason is collected in the confirm dialog itself, right before submit —
+    // not required to already be filled in while still editing.
+    setCorrectionConfirming('save');
+  };
+
+  const runCorrectionSubmit = async () => {
+    setCorrectionSubmitting(true);
+    setCorrectionError(null);
+
+    if (correctionMode === 'delete') {
+      const { error: rpcError } = await adminDeleteBooking({
+        bookingId: booking.bookingId,
+        reason: correctionReason.trim(),
+      });
+      setCorrectionSubmitting(false);
+      if (rpcError) {
+        setCorrectionError(rpcError.message || 'Failed to delete booking.');
+        return;
+      }
+      setCorrectionConfirming(null);
+      setShowAdminCorrection(false);
+      if (onClose) onClose();
+      return;
+    }
+
+    let bookingSaved = false;
+    if (correctionChangedCount > 0) {
+      const { error: rpcError } = await adminCorrectBooking({
+        bookingId: booking.bookingId,
+        changes: correctionChangedFields,
+        reason: correctionReason.trim(),
+      });
+      if (rpcError) {
+        setCorrectionSubmitting(false);
+        setCorrectionError(rpcError.message || 'Failed to correct booking.');
+        return;
+      }
+      bookingSaved = true;
+      // Snapshot so a retry (if the payment leg below fails) won't resend
+      // already-saved booking fields.
+      setCorrectionInitialFields(correctionFields);
+    }
+
+    if (correctionPaymentChangedCount > 0) {
+      // One admin_correct_payment_mode/admin_correct_payment_amount call per
+      // changed row — different RPCs/table than admin_correct_booking, so
+      // this can't be batched the same way. Stop at the first failure rather
+      // than racing ahead through rows that would leave a confusing partial-
+      // success state; already-committed rows stay committed (each is its
+      // own audited transaction) and the error names which row failed so a
+      // retry doesn't re-submit rows that already succeeded.
+      for (const [paymentId, changes] of Object.entries(correctionPaymentChanged)) {
+        if (changes.mode) {
+          const { error: rpcError } = await correctPaymentMode({
+            paymentId,
+            newMode: changes.mode,
+            reason: correctionReason.trim(),
+          });
+          if (rpcError) {
+            setCorrectionSubmitting(false);
+            setCorrectionError(
+              (bookingSaved ? 'Booking changes saved. ' : '')
+              + `Failed to correct payment ${paymentId}: ${rpcError.message || 'please try again.'}`
+            );
+            return;
+          }
+          setCorrectionPaymentInitialModes((prev) => ({ ...prev, [paymentId]: changes.mode }));
+        }
+        if (changes.amount !== undefined) {
+          const { error: rpcError } = await correctPaymentAmount({
+            paymentId,
+            newAmount: changes.amount,
+            reason: correctionReason.trim(),
+          });
+          if (rpcError) {
+            setCorrectionSubmitting(false);
+            setCorrectionError(
+              (bookingSaved ? 'Booking changes saved. ' : '')
+              + (changes.mode ? 'Payment method corrected, but the ' : 'Failed to correct payment ')
+              + `${paymentId}${changes.mode ? ' amount correction failed: ' : ': '}`
+              + (rpcError.message || 'please try again.')
+            );
+            return;
+          }
+          setCorrectionPaymentInitialAmounts((prev) => ({ ...prev, [paymentId]: String(changes.amount) }));
+        }
+      }
+    }
+
+    setCorrectionSubmitting(false);
+    setCorrectionConfirming(null);
+    setShowAdminCorrection(false);
+    if (onClose) onClose();
+  };
+
   const handleAssignTherapist = async () => {
     if (!booking) return;
 
@@ -690,7 +994,12 @@ const BookingActionModal = ({
   // terminal/day-closed) — NOT merely because it's been paid. A booking can be
   // paid before it starts (pay-after-service isn't mandatory) and reassignment
   // should still be possible right up until the service actually begins.
-  const isAssignmentBlocked = isTerminal || isLocked || isServiceStarted;
+  // Admin correction bypasses this exact same way it bypasses the Booking
+  // Details fields — the save path below routes through adminCorrectBooking
+  // (therapist_id/room_id are in its whitelist), not the normal
+  // onAssignTherapist call, which the DB immutability trigger would still
+  // reject regardless of what the UI shows.
+  const isAssignmentBlocked = !showAdminCorrection && (isTerminal || isLocked || isServiceStarted);
   // Always "Rebook" — this always creates a brand-new booking with the same
   // customer/service info, leaving the original untouched, regardless of
   // the source booking's status. "Reschedule" would wrongly imply the same
@@ -880,8 +1189,9 @@ const BookingActionModal = ({
               </div>
             </div>
             <button
-              onClick={onClose}
-              className="p-2 rounded-spa hover:bg-background spa-transition-fast min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0"
+              onClick={showAdminCorrection ? requestCorrectionClose : onClose}
+              disabled={correctionSubmitting}
+              className="p-2 rounded-spa hover:bg-background spa-transition-fast min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0 disabled:opacity-40"
             >
               <Icon name="X" size={20} className="text-text-secondary" />
             </button>
@@ -917,6 +1227,51 @@ const BookingActionModal = ({
 
           {/* Content - Scrollable area takes remaining space, extra bottom padding on mobile for bottom nav */}
           <div className="p-4 sm:p-6 pb-24 sm:pb-6 overflow-y-auto flex-1">
+            {/* Admin-correction indicator + delete toggle — visible on every tab while
+                actively correcting, so switching tabs mid-correction never hides it.
+                The reason itself is collected in the Save confirm dialog, right before
+                submit, so it's shared across whatever was edited on any tab. */}
+            {showAdminCorrection && (
+              <div className="space-y-3 border border-warning/20 bg-warning/5 rounded-spa p-3 sm:p-4 mb-4 sm:mb-6">
+                <div className="flex items-center justify-between">
+                  <span className="font-body font-body-medium text-xs text-text-secondary">Admin correction</span>
+                  <button
+                    type="button"
+                    onClick={() => setCorrectionMode((m) => (m === 'delete' ? 'correct' : 'delete'))}
+                    className="font-caption text-[11px] text-error hover:underline"
+                  >
+                    {correctionMode === 'delete' ? 'Cancel delete' : 'Delete this booking instead'}
+                  </button>
+                </div>
+
+                {correctionMode === 'delete' && (
+                  <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 space-y-2">
+                    <p className="font-body text-xs text-error">
+                      Deleting removes this booking entirely. It will disappear from past reports that counted it. A booking with a
+                      payment, refund, referral or package redemption attached cannot be deleted — cancel it instead.
+                    </p>
+                    <div>
+                      <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                        Type <span className="font-data">DELETE</span> to confirm
+                      </label>
+                      <input
+                        value={correctionDeleteText}
+                        onChange={(e) => setCorrectionDeleteText(e.target.value)}
+                        className={inputClasses}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {correctionError && (
+                  <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 flex items-start space-x-2">
+                    <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0 mt-0.5" />
+                    <p className="font-body text-xs text-error">{correctionError}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className="space-y-4 sm:space-y-6">
@@ -936,18 +1291,19 @@ const BookingActionModal = ({
                             ? { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Service Started — Locked (Discount/Payment still open)' }
                             : { bg: 'bg-gray-50', border: 'border-gray-200', iconColor: 'text-gray-500', textColor: 'text-gray-600', icon: 'Lock', label: 'Booking Locked' };
                   return (
-                    <div className={`flex items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
-                      <Icon name={banner.icon} size={16} className={banner.iconColor} />
+                    <div className={`flex items-start sm:items-center space-x-2 px-3 py-2.5 rounded-spa ${banner.bg} border ${banner.border}`}>
+                      <Icon name={banner.icon} size={16} className={`${banner.iconColor} flex-shrink-0 mt-0.5 sm:mt-0`} />
                       <span className={`font-body font-body-medium text-xs ${banner.textColor}`}>
                         {banner.label}
+                        {showAdminCorrection && ' — editing as admin. Every change is recorded in the audit log with your reason.'}
                       </span>
                       {/* The only route past this lock. Admin-only, and every use is
                           recorded in audit_logs with a mandatory reason. */}
-                      {userRole === 'admin' && (
+                      {userRole === 'admin' && !showAdminCorrection && (
                         <button
                           type="button"
-                          onClick={() => setShowAdminCorrection(true)}
-                          className="ml-auto inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px]"
+                          onClick={openCorrection}
+                          className="ml-auto inline-flex items-center space-x-1 px-2 py-1 rounded-spa border border-warning/40 text-warning hover:bg-warning/10 spa-transition-fast font-body font-body-medium text-[11px] flex-shrink-0"
                         >
                           <Icon name="Wrench" size={12} />
                           <span>Correct as admin</span>
@@ -961,11 +1317,22 @@ const BookingActionModal = ({
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center space-x-2">
                     <span className="font-body font-body-medium text-sm text-text-primary">Status:</span>
-                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal capitalize ${STATUS_STYLES[booking.status] || 'bg-gray-100 text-gray-500'}`}>
-                      {booking.status.replace('-', ' ')}
-                    </span>
+                    {showAdminCorrection ? (
+                      <div className="w-40">
+                        <CustomSelect
+                          value={correctionFields.status}
+                          onChange={(v) => setCorrectionField('status', v)}
+                          options={CORRECTION_STATUS_OPTIONS}
+                          size="sm"
+                        />
+                      </div>
+                    ) : (
+                      <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-caption font-caption-normal capitalize ${STATUS_STYLES[booking.status] || 'bg-gray-100 text-gray-500'}`}>
+                        {booking.status.replace('-', ' ')}
+                      </span>
+                    )}
                   </div>
-                  {!isTerminal && !isLocked && nextStatuses.length > 0 && (
+                  {!showAdminCorrection && !isTerminal && !isLocked && nextStatuses.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {nextStatuses.map((status) => {
                         const needsConfirm = status === 'cancelled';
@@ -1007,7 +1374,7 @@ const BookingActionModal = ({
                       <h3 className="font-heading font-heading-medium text-sm sm:text-base text-text-primary">
                         Customer Information
                       </h3>
-                      {!isMutationBlocked && !isEditing && onEditBooking && (
+                      {!isMutationBlocked && !isEditing && !showAdminCorrection && onEditBooking && (
                         <button
                           onClick={startEditing}
                           className="p-1.5 rounded-spa hover:bg-background spa-transition-fast text-text-secondary hover:text-primary"
@@ -1019,8 +1386,20 @@ const BookingActionModal = ({
                     </div>
                     <div className="space-y-2.5 sm:space-y-3">
                       <div>
-                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Name</label>
-                        {isEditing ? (
+                        <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                          Name
+                          {showAdminCorrection && Object.prototype.hasOwnProperty.call(correctionChangedFields, 'customer_name') && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                          )}
+                        </label>
+                        {showAdminCorrection ? (
+                          <input
+                            type="text"
+                            value={correctionFields.customer_name}
+                            onChange={(e) => setCorrectionField('customer_name', e.target.value)}
+                            className={inputClasses}
+                          />
+                        ) : isEditing ? (
                           <input
                             type="text"
                             value={editForm.customerName}
@@ -1031,15 +1410,28 @@ const BookingActionModal = ({
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.customerName}</p>
                         )}
                       </div>
-                      {(booking.customerEmail && !isEditing) && (
+                      {(booking.customerEmail && !isEditing && !showAdminCorrection) && (
                         <div>
                           <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Email</label>
                           <p className="font-body font-body-normal text-sm text-text-primary break-all">{booking.customerEmail}</p>
                         </div>
                       )}
                       <div>
-                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Phone</label>
-                        {isEditing ? (
+                        <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                          Phone
+                          {showAdminCorrection && Object.prototype.hasOwnProperty.call(correctionChangedFields, 'customer_phone') && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                          )}
+                        </label>
+                        {showAdminCorrection ? (
+                          <input
+                            type="tel"
+                            value={correctionFields.customer_phone}
+                            onChange={(e) => setCorrectionField('customer_phone', e.target.value)}
+                            className={inputClasses}
+                            placeholder="Phone number"
+                          />
+                        ) : isEditing ? (
                           <input
                             type="tel"
                             value={editForm.customerPhone}
@@ -1092,14 +1484,63 @@ const BookingActionModal = ({
                             <p className="font-body font-body-normal text-sm text-text-primary">{booking.duration}</p>
                           </div>
                           <div>
-                            <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Price</label>
-                            <p className="font-body font-body-normal text-sm text-text-primary">{booking.price}</p>
+                            <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                              Price
+                              {showAdminCorrection && Object.prototype.hasOwnProperty.call(correctionChangedFields, 'base_amount') && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                              )}
+                            </label>
+                            {showAdminCorrection ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={correctionFields.base_amount}
+                                onChange={(e) => setCorrectionField('base_amount', e.target.value)}
+                                className={`${inputClasses} w-28`}
+                              />
+                            ) : (
+                              <p className="font-body font-body-normal text-sm text-text-primary">{booking.price}</p>
+                            )}
                           </div>
+                          {showAdminCorrection && (
+                            <div>
+                              <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                                Discount
+                                {Object.prototype.hasOwnProperty.call(correctionChangedFields, 'discount_amount') && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                                )}
+                              </label>
+                              <p className="font-body font-body-normal text-sm text-text-primary py-2">
+                                NPR {Number(correctionFields.discount_amount || 0).toLocaleString('en-IN')}
+                              </p>
+                              <p className="font-caption text-[11px] text-text-tertiary">Edit on the Discount tab</p>
+                            </div>
+                          )}
                         </div>
                       )}
                       <div>
-                        <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Date & Time</label>
-                        {isEditing ? (
+                        <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-secondary">
+                          Date & Time
+                          {showAdminCorrection && (Object.prototype.hasOwnProperty.call(correctionChangedFields, 'date') || Object.prototype.hasOwnProperty.call(correctionChangedFields, 'start_time')) && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                          )}
+                        </label>
+                        {showAdminCorrection ? (
+                          <div className="flex gap-2">
+                            <input
+                              type="date"
+                              value={correctionFields.date}
+                              onChange={(e) => setCorrectionField('date', e.target.value)}
+                              className={inputClasses}
+                            />
+                            <input
+                              type="time"
+                              value={correctionFields.start_time}
+                              onChange={(e) => setCorrectionField('start_time', e.target.value)}
+                              className={inputClasses}
+                            />
+                          </div>
+                        ) : isEditing ? (
                           <div className="flex gap-2">
                             <input
                               type="date"
@@ -1142,6 +1583,14 @@ const BookingActionModal = ({
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Gender Preference — read-only, customer-submitted at booking time */}
+                {booking.genderPreference && booking.genderPreference !== 'no-preference' && (
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <label className="font-body font-body-medium text-xs sm:text-sm text-text-secondary">Gender Preference</label>
+                    <p className="font-body font-body-normal text-sm text-text-primary capitalize">{booking.genderPreference}</p>
                   </div>
                 )}
 
@@ -1538,7 +1987,126 @@ const BookingActionModal = ({
                   Apply Discount
                 </h3>
 
-                {!canDiscount ? (
+                {showAdminCorrection ? (
+                  <>
+                    {/* Admin-correction discount UI — a single booking, no related-row
+                        bundling and no approver routing (admin's limit is already 100%).
+                        Submits through correctionFields.discount_amount -> admin_correct_booking,
+                        same as every other correction field, not the normal applyDiscount() path
+                        (which rejects locked/terminal bookings). */}
+                    <div className="bg-background rounded-spa p-3 sm:p-4 space-y-2">
+                      {(() => {
+                        const base = Number(correctionFields.base_amount) || 0;
+                        const discount = correctionDiscountComputed();
+                        const final = Math.max(base - discount, 0);
+                        return (
+                          <>
+                            <div className="flex justify-between items-center">
+                              <span className="font-body font-body-normal text-sm text-text-secondary">Base Amount</span>
+                              <span className="font-data font-data-normal text-sm text-text-primary">NPR {base.toLocaleString('en-IN')}</span>
+                            </div>
+                            {discount > 0 && (
+                              <div className="flex justify-between items-center">
+                                <span className="font-body font-body-normal text-sm text-text-secondary">Discount Applied</span>
+                                <span className="font-data font-data-normal text-sm text-success">- NPR {discount.toLocaleString('en-IN')}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center">
+                              <span className="font-body font-body-normal text-sm text-text-secondary">Subtotal</span>
+                              <span className="font-data font-data-normal text-sm text-text-primary">NPR {final.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div className="pt-2 border-t border-border flex justify-between items-center">
+                              <span className="font-body font-body-medium text-sm text-text-primary">Final Amount</span>
+                              <span className="font-data font-data-medium text-base text-primary">NPR {final.toLocaleString('en-IN')}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-accent/5 border border-accent/20">
+                      <Icon name="Info" size={14} className="text-accent flex-shrink-0" />
+                      <span className="font-caption font-caption-normal text-xs text-accent">
+                        Your role ({userRole}) allows up to {discountLimitLabel} discount.
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                      {['percentage', 'fixed'].map(type => (
+                        <label
+                          key={type}
+                          className={`flex items-center space-x-2 p-2.5 sm:p-3 rounded-spa border-2 cursor-pointer spa-transition-fast min-h-[48px] ${
+                            correctionDiscountType === type ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="correctionDiscountType"
+                            value={type}
+                            checked={correctionDiscountType === type}
+                            onChange={() => setCorrectionDiscountType(type)}
+                            className="text-primary focus:ring-primary w-4 h-4"
+                          />
+                          <span className="font-body font-body-medium text-xs sm:text-sm text-text-primary">
+                            {type === 'percentage' ? '% Percent' : 'NPR Fixed'}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="flex items-center gap-1.5 font-body font-body-medium text-xs sm:text-sm text-text-primary">
+                        {correctionDiscountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount (NPR)'}
+                        {Object.prototype.hasOwnProperty.call(correctionChangedFields, 'discount_amount') && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                        )}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step={correctionDiscountType === 'percentage' ? 1 : 10}
+                        value={correctionDiscountValue}
+                        onWheel={(e) => e.target.blur()}
+                        onChange={(e) => setCorrectionDiscountValue(e.target.value)}
+                        placeholder={correctionDiscountType === 'percentage' ? `Max ${discountLimitLabel}` : 'NPR'}
+                        className={inputClasses}
+                      />
+                    </div>
+
+                    {(() => {
+                      const applied = String(correctionFields.discount_amount) !== String(correctionInitialFields?.discount_amount ?? '');
+                      const pending = Number(correctionFields.discount_amount) !== correctionDiscountComputed();
+                      return (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-caption text-[11px] text-text-tertiary">
+                            {applied
+                              ? <span className="text-success font-body-medium">Applied — reason is captured when you click Save.</span>
+                              : 'Not applied yet — click Apply to stage this discount.'}
+                          </span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {applied && (
+                              <button
+                                type="button"
+                                onClick={cancelCorrectionDiscount}
+                                className="px-3 py-1.5 rounded-spa border border-border text-xs font-body font-body-medium text-text-secondary hover:bg-background spa-transition-fast"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={applyCorrectionDiscount}
+                              disabled={!pending}
+                              className="px-3 py-1.5 rounded-spa bg-primary text-white text-xs font-body font-body-medium hover:bg-primary/90 disabled:opacity-40 spa-transition-fast"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : !canDiscount ? (
                   <div className="flex items-center space-x-2 px-3 py-2.5 rounded-spa bg-gray-50 border border-gray-200">
                     <Icon name="Lock" size={16} className="text-gray-500 flex-shrink-0" />
                     <span className="font-body font-body-medium text-xs text-gray-600">
@@ -2004,20 +2572,39 @@ const BookingActionModal = ({
                       <span className="font-body font-body-medium text-xs text-text-primary">{booking.service}</span>
                     </div>
                   )}
-                  <div className="flex items-center justify-between">
-                    <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
-                    <span className="font-data text-sm text-text-primary">NPR {booking.baseAmount?.toLocaleString('en-IN') || '—'}</span>
-                  </div>
-                  {booking.discountAmount > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="font-body font-body-normal text-xs text-text-secondary">Discount</span>
-                      <span className="font-data text-sm text-error">- NPR {booking.discountAmount?.toLocaleString('en-IN')} ({booking.baseAmount > 0 ? Math.round((booking.discountAmount / booking.baseAmount) * 100) : 0}%)</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between border-t border-border pt-2">
-                    <span className="font-body font-body-medium text-xs text-text-primary">{(previousDueBookings.length > 0 || relatedBookings.length > 0) ? 'Subtotal' : 'Final Amount'}</span>
-                    <span className="font-data font-data-medium text-sm text-text-primary">NPR {booking.finalAmount?.toLocaleString('en-IN') || '—'}</span>
-                  </div>
+                  {(() => {
+                    // While in admin correction, this card reflects the live correctionFields
+                    // (which the Discount tab's Apply button writes into) instead of the
+                    // original booking row — otherwise this stays stuck showing pre-correction
+                    // numbers while the admin is trying to work out the new payment amount.
+                    const payBase = showAdminCorrection ? (Number(correctionFields?.base_amount) || 0) : (booking.baseAmount || 0);
+                    const payDiscount = showAdminCorrection ? (Number(correctionFields?.discount_amount) || 0) : (booking.discountAmount || 0);
+                    const payFinal = showAdminCorrection ? Math.max(payBase - payDiscount, 0) : (booking.finalAmount || 0);
+                    const discountChanged = showAdminCorrection && Object.prototype.hasOwnProperty.call(correctionChangedFields, 'discount_amount');
+                    return (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="font-body font-body-normal text-xs text-text-secondary">Base Amount</span>
+                          <span className="font-data text-sm text-text-primary">NPR {payBase.toLocaleString('en-IN') || '—'}</span>
+                        </div>
+                        {payDiscount > 0 && (
+                          <div className="flex items-center justify-between">
+                            <span className="font-body font-body-normal text-xs text-text-secondary flex items-center gap-1.5">
+                              Discount
+                              {discountChanged && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium">changed</span>
+                              )}
+                            </span>
+                            <span className="font-data text-sm text-error">- NPR {payDiscount.toLocaleString('en-IN')} ({payBase > 0 ? Math.round((payDiscount / payBase) * 100) : 0}%)</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between border-t border-border pt-2">
+                          <span className="font-body font-body-medium text-xs text-text-primary">{(previousDueBookings.length > 0 || relatedBookings.length > 0) ? 'Subtotal' : 'Final Amount'}</span>
+                          <span className="font-data font-data-medium text-sm text-text-primary">NPR {payFinal.toLocaleString('en-IN') || '—'}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                   {booking.paymentStatus === 'partial' && (
                     <>
                       <div className="flex items-center justify-between">
@@ -2025,22 +2612,53 @@ const BookingActionModal = ({
                         <span className="font-data text-sm text-success">- NPR {Number(booking.amountPaid || 0).toLocaleString('en-IN')}</span>
                       </div>
                       {(booking.payments || []).map((p) => (
-                        <div key={p.id || `${p.paymentMode}-${p.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
-                          <span className="text-text-tertiary">{p.paymentMode}</span>
-                          <div className="flex items-center space-x-1.5">
+                        p.id ? (
+                          showAdminCorrection ? (
+                            <div key={p.id} className="flex items-center justify-between pl-2 py-1 gap-2">
+                              <div className="w-28 flex-shrink-0">
+                                <PaymentMethodSelector
+                                  value={correctionPaymentModes[p.id] ?? p.paymentMode}
+                                  onChange={(v) => setCorrectionPaymentMode(p.id, v)}
+                                  paymentMethods={paymentMethods}
+                                  size="sm"
+                                />
+                              </div>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                value={correctionPaymentAmounts[p.id] ?? ''}
+                                onChange={(e) => setCorrectionPaymentAmount(p.id, e.target.value)}
+                                className="w-24 h-9 px-2 text-[11px] border border-border rounded-spa bg-surface text-text-primary"
+                              />
+                              {Object.prototype.hasOwnProperty.call(correctionPaymentChanged, p.id) && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium flex-shrink-0">changed</span>
+                              )}
+                            </div>
+                          ) : (
+                            <div key={p.id} className="flex items-center justify-between pl-2 text-[11px] gap-2">
+                              <span className="text-text-tertiary">{p.paymentMode}</span>
+                              <div className="flex items-center space-x-1.5">
+                                <span className="font-data text-text-tertiary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
+                                {userRole === 'admin' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCorrectingPayment(p)}
+                                    title="Correct payment"
+                                    className="p-0.5 rounded hover:bg-background text-text-tertiary hover:text-primary"
+                                  >
+                                    <Icon name="Pencil" size={11} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        ) : (
+                          <div key={`${p.paymentMode}-${p.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
+                            <span className="text-text-tertiary">{p.paymentMode}</span>
                             <span className="font-data text-text-tertiary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
-                            {userRole === 'admin' && p.id && (
-                              <button
-                                type="button"
-                                onClick={() => setCorrectingPayment(p)}
-                                title="Correct payment method"
-                                className="p-0.5 rounded hover:bg-background text-text-tertiary hover:text-primary"
-                              >
-                                <Icon name="Pencil" size={11} />
-                              </button>
-                            )}
                           </div>
-                        </div>
+                        )
                       ))}
                       {(booking.tips || []).map((t) => (
                         <div key={t.id || `tip-${t.amount}`} className="flex items-center justify-between pl-2 text-[11px]">
@@ -2246,22 +2864,46 @@ const BookingActionModal = ({
                       <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
                     </div>
                     {(booking.payments || []).map((p) => (
-                      <div key={p.id || `${p.paymentMode}-${p.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs">
-                        <span className="text-text-secondary">{p.paymentMode}</span>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-data text-text-primary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
-                          {userRole === 'admin' && p.id && (
-                            <button
-                              type="button"
-                              onClick={() => setCorrectingPayment(p)}
-                              title="Correct payment method"
-                              className="p-1 rounded hover:bg-background text-text-secondary hover:text-primary"
-                            >
-                              <Icon name="Pencil" size={12} />
-                            </button>
+                      p.id && showAdminCorrection ? (
+                        <div key={p.id} className="flex items-center justify-between px-3 py-1.5 gap-2">
+                          <div className="w-28 flex-shrink-0">
+                            <PaymentMethodSelector
+                              value={correctionPaymentModes[p.id] ?? p.paymentMode}
+                              onChange={(v) => setCorrectionPaymentMode(p.id, v)}
+                              paymentMethods={paymentMethods}
+                              size="sm"
+                            />
+                          </div>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={correctionPaymentAmounts[p.id] ?? ''}
+                            onChange={(e) => setCorrectionPaymentAmount(p.id, e.target.value)}
+                            className="w-24 h-9 px-2 text-xs border border-border rounded-spa bg-surface text-text-primary"
+                          />
+                          {Object.prototype.hasOwnProperty.call(correctionPaymentChanged, p.id) && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-body-medium flex-shrink-0">changed</span>
                           )}
                         </div>
-                      </div>
+                      ) : (
+                        <div key={p.id || `${p.paymentMode}-${p.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs gap-2">
+                          <span className="text-text-secondary">{p.paymentMode}</span>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-data text-text-primary">NPR {Number(p.amount).toLocaleString('en-IN')}</span>
+                              {userRole === 'admin' && p.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => setCorrectingPayment(p)}
+                                  title="Correct payment"
+                                  className="p-1 rounded hover:bg-background text-text-secondary hover:text-primary"
+                                >
+                                  <Icon name="Pencil" size={12} />
+                                </button>
+                              )}
+                            </div>
+                        </div>
+                      )
                     ))}
                     {(booking.tips || []).map((t) => (
                       <div key={t.id || `tip-${t.amount}`} className="flex items-center justify-between px-3 py-1.5 text-xs">
@@ -2453,6 +3095,38 @@ const BookingActionModal = ({
           </div>
 
           {/* Footer - Responsive with safe area padding for iOS */}
+          {showAdminCorrection ? (
+          <div className="flex items-center justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
+            <span className="font-caption text-[11px] text-text-tertiary">
+              {correctionMode === 'correct'
+                ? [
+                    correctionChangedCount > 0 ? `${correctionChangedCount} field${correctionChangedCount === 1 ? '' : 's'} changed` : null,
+                    correctionPaymentChangedCount > 0 ? `${correctionPaymentChangedCount} payment${correctionPaymentChangedCount === 1 ? '' : 's'} changed` : null,
+                  ].filter(Boolean).join(' · ')
+                : ''}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={requestCorrectionClose} disabled={correctionSubmitting} className="min-h-[44px] sm:min-h-0">
+                Discard
+              </Button>
+              <button
+                type="button"
+                onClick={requestCorrectionSave}
+                disabled={
+                  correctionSubmitting ||
+                  (correctionMode === 'delete' && !correctionDeleteConfirmed) ||
+                  (correctionMode === 'correct' && correctionChangedCount === 0 && correctionPaymentChangedCount === 0)
+                }
+                className={`px-4 h-11 sm:h-10 rounded-spa text-white text-sm font-body font-body-medium disabled:opacity-50 spa-transition-fast inline-flex items-center space-x-1.5 ${
+                  correctionMode === 'delete' ? 'bg-error hover:bg-error/90' : 'bg-warning hover:bg-warning/90'
+                }`}
+              >
+                {correctionSubmitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                <span>{correctionMode === 'delete' ? 'Delete booking' : 'Save'}</span>
+              </button>
+            </div>
+          </div>
+          ) : (
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-4 pb-6 sm:p-6 border-t border-border flex-shrink-0">
             {/* Left side — Add another service / Rebook */}
             {!isEditing && !newBookingMode && !showExtendPanel && onCreateBooking ? (
@@ -2509,7 +3183,7 @@ const BookingActionModal = ({
                 </>
               ) : (
                 <>
-                  <Button variant="outline" onClick={onClose} className="min-h-[44px] sm:min-h-0">
+                  <Button variant="outline" onClick={showAdminCorrection ? requestCorrectionClose : onClose} className="min-h-[44px] sm:min-h-0">
                     Close
                   </Button>
                   {activeTab === 'assign' && !isAssignmentBlocked && (
@@ -2527,6 +3201,7 @@ const BookingActionModal = ({
               )}
             </div>
           </div>
+          )}
         </div>
       </div>
 
@@ -2536,31 +3211,100 @@ const BookingActionModal = ({
           title="Cancel Booking"
           message="This will cancel the booking. This cannot be undone."
           confirmLabel="Cancel Booking"
-          reasonOptions={CANCEL_REASON_OPTIONS}
+          reasonOptions={cancelReasonOptions}
           isSubmitting={isLoading}
           onClose={() => setPendingStatus(null)}
           onConfirm={(reason) => handleStatusUpdate(pendingStatus, reason)}
         />
       )}
 
-      {/* Admin correction — the only path past the lock/immutability banner.
-          On success the booking row has changed underneath us (or is gone
-          entirely, after a delete), so close this modal outright and let the
-          parent re-fetch rather than rendering stale data. */}
-      {showAdminCorrection && (
-        <AdminCorrectionModal
-          booking={booking}
-          onClose={() => setShowAdminCorrection(false)}
-          onSuccess={() => {
-            setShowAdminCorrection(false);
-            if (onClose) onClose();
-          }}
-        />
+      {/* Admin correction — discard/save confirmation. Edits happen inline in the
+          content area above (no separate popup); this is just the "are you sure"
+          step before either throwing changes away or committing them. On a
+          successful save/delete the booking row has changed underneath us (or is
+          gone entirely), so the modal closes outright and the parent re-fetches
+          rather than rendering stale data — see runCorrectionSubmit. */}
+      {showAdminCorrection && correctionConfirming && (
+        <div className="fixed inset-0 z-notification flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={correctionSubmitting ? undefined : () => setCorrectionConfirming(null)} aria-hidden="true" />
+          <div className="relative bg-surface rounded-spa-lg border border-border shadow-spa-modal w-full max-w-sm p-5 space-y-4">
+            <div className="flex items-start space-x-3">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${correctionConfirming === 'discard' ? 'bg-error/10' : 'bg-warning/10'}`}>
+                <Icon name={correctionConfirming === 'discard' ? 'AlertTriangle' : 'ShieldAlert'} size={18} className={correctionConfirming === 'discard' ? 'text-error' : 'text-warning'} />
+              </div>
+              <div>
+                <h3 className="font-heading font-heading-semibold text-sm text-text-primary">
+                  {correctionConfirming === 'discard' ? 'Discard changes?' : correctionMode === 'delete' ? 'Delete this booking?' : 'Save these corrections?'}
+                </h3>
+                <p className="font-body text-xs text-text-secondary mt-1">
+                  {correctionConfirming === 'discard'
+                    ? 'Nothing will be saved and this booking stays exactly as it is now.'
+                    : correctionMode === 'delete'
+                      ? 'This permanently removes the booking. This cannot be undone.'
+                      : [
+                          correctionChangedCount > 0 ? `${correctionChangedCount} field${correctionChangedCount === 1 ? '' : 's'}` : null,
+                          correctionPaymentChangedCount > 0 ? `${correctionPaymentChangedCount} payment${correctionPaymentChangedCount === 1 ? '' : 's'}` : null,
+                        ].filter(Boolean).join(' and ') + ' will be updated and recorded in the audit log.'}
+                </p>
+              </div>
+            </div>
+
+            {correctionConfirming === 'save' && (
+              <div>
+                <label className="block font-body font-body-medium text-xs text-text-secondary mb-1.5">
+                  Reason <span className="text-error">*</span>
+                </label>
+                <textarea
+                  value={correctionReason}
+                  onChange={(e) => setCorrectionReason(e.target.value)}
+                  rows={2}
+                  placeholder="Required. Explain what was wrong and why this change is correct."
+                  className={`${inputClasses} resize-none`}
+                  autoFocus
+                />
+                {!correctionReasonOk && correctionReason.length > 0 && (
+                  <p className="mt-1 font-caption text-[11px] text-text-tertiary">
+                    {CORRECTION_REASON_MIN - correctionReason.trim().length} more character{CORRECTION_REASON_MIN - correctionReason.trim().length === 1 ? '' : 's'} needed.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {correctionError && (
+              <div className="bg-error/5 border border-error/20 rounded-spa px-3 py-2 flex items-start space-x-2">
+                <Icon name="AlertCircle" size={14} className="text-error flex-shrink-0 mt-0.5" />
+                <p className="font-body text-xs text-error">{correctionError}</p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setCorrectionConfirming(null)}
+                disabled={correctionSubmitting}
+                className="px-3 py-2 rounded-spa border border-border text-sm font-body font-body-medium text-text-secondary hover:bg-background spa-transition-fast disabled:opacity-40"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={correctionConfirming === 'discard' ? () => { setCorrectionConfirming(null); setShowAdminCorrection(false); } : runCorrectionSubmit}
+                disabled={correctionSubmitting || (correctionConfirming === 'save' && !correctionReasonOk)}
+                className={`px-3 py-2 rounded-spa text-white text-sm font-body font-body-medium disabled:opacity-50 spa-transition-fast inline-flex items-center space-x-1.5 ${
+                  correctionConfirming === 'discard' || correctionMode === 'delete' ? 'bg-error hover:bg-error/90' : 'bg-warning hover:bg-warning/90'
+                }`}
+              >
+                {correctionSubmitting && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                <span>{correctionConfirming === 'discard' ? 'Discard' : correctionMode === 'delete' ? 'Delete booking' : 'Save changes'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Payment mode correction — admin-only, from the pencil icon next to a
           recorded payment on the Payment tab. Same "close and let the parent
-          re-fetch" posture as AdminCorrectionModal above, since this component
+          re-fetch" posture as runCorrectionSubmit above, since this component
           doesn't own the booking data it's rendering. */}
       {correctingPayment && (
         <PaymentModeCorrectionModal

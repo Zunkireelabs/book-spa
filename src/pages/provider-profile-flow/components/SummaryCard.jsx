@@ -6,7 +6,7 @@ import { formatNPR } from '../../../services/bookingTransformers';
 // Falls back to the icon tile when the URL is absent *or* fails to load — these are
 // admin-pasted URLs with nothing validating them, so a dead link is a normal state, not
 // an edge case, and a broken-image icon in the summary looks like a broken app.
-const VenueThumb = ({ orgName, logoUrl, heroImageUrl }) => {
+export const VenueThumb = ({ orgName, logoUrl, heroImageUrl }) => {
   const [failed, setFailed] = useState(false);
   const src = logoUrl || heroImageUrl;
   // A logo is typically a wide wordmark/non-square mark — object-cover crops those

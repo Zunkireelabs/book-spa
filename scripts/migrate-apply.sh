@@ -17,12 +17,10 @@ TARGET="${1:?usage: migrate-apply.sh <local|stage|prod> [--dry-run]}"
 DRY_RUN="${2:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCK_KEY=7834521099
-# Files numbered below this were baselined into the ledger as a group by
-# migration-027 (some under non-matching version keys, e.g. the two -008-
-# files were recorded as '008a'/'008b' — the filenames themselves don't
-# carry that letter). Only 028+ are expected to self-record 1:1 with their
-# own filename, so only scan those for pending application.
-LEDGER_FLOOR=28
+# Filename parsing, LEDGER_FLOOR and the version-collision guard are shared with
+# migrate-status.sh so the two can never disagree about what maps to what.
+# shellcheck source=scripts/lib/migration-ledger.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/migration-ledger.sh"
 
 : "${PGHOST:?PGHOST not set}"
 : "${PGUSER:?PGUSER not set}"
@@ -37,9 +35,9 @@ CONNECT_ERR="$(psql -v ON_ERROR_STOP=1 -tAc "SELECT 1;" 2>&1 >/dev/null)" || {
 }
 
 declare -A APPLIED
+declare -A LEDGER_NAME
 LEDGER_ERR=""
-LEDGER_OUT="$(psql -v ON_ERROR_STOP=1 -tAc \
-  "SELECT version FROM public.schema_migrations ORDER BY version;" 2>&1)" || LEDGER_ERR="1"
+LEDGER_OUT="$(psql -v ON_ERROR_STOP=1 -tAc "$(ml_ledger_sql)" 2>&1)" || LEDGER_ERR="1"
 
 if [ -n "$LEDGER_ERR" ]; then
   if [[ "$LEDGER_OUT" == *"does not exist"* ]]; then
@@ -50,18 +48,22 @@ if [ -n "$LEDGER_ERR" ]; then
     exit 1
   fi
 else
-  while IFS= read -r v; do
-    [ -n "$v" ] && APPLIED["$v"]=1
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    v="$(ml_row_version "$row")"
+    APPLIED["$v"]=1
+    LEDGER_NAME["$v"]="$(ml_row_name "$row")"
   done <<< "$LEDGER_OUT"
 fi
 
+# Before deciding what is pending: a version that IS in the ledger under a
+# different name means the matching repo file is about to be skipped silently.
+# Fail here rather than reporting a successful deploy that shipped nothing.
+ml_report_collisions "$TARGET" "$REPO_ROOT/supabase" || exit 1
+
 PENDING=()
 while IFS= read -r f; do
-  base="$(basename "$f")"
-  [[ "$base" =~ ^migration-([0-9]{3})([a-z]?)-.*\.sql$ ]] || continue
-  num10=$((10#${BASH_REMATCH[1]}))
-  [ "$num10" -lt "$LEDGER_FLOOR" ] && continue
-  version="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+  version="$(ml_file_version "$(basename "$f")")" || continue
   if [ -z "${APPLIED[$version]+x}" ]; then
     PENDING+=("$f")
   fi

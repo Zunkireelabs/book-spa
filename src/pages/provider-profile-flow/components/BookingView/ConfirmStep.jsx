@@ -10,6 +10,7 @@ const ConfirmStep = ({
   selectedBranch,
   selectedServices = [],
   selectedDateTime,
+  genderPreference,
   customerInfo,
   onCustomerInfoChange,
   customerAccountId,
@@ -31,7 +32,7 @@ const ConfirmStep = ({
         additionalServices={selectedServices}
         selectedDateTime={selectedDateTime}
         customerInfo={customerInfo}
-        genderPreference="no-preference"
+        genderPreference={genderPreference}
         customerAccountId={customerAccountId}
         therapistId={therapistId}
         therapistName={therapistName}
@@ -45,7 +46,7 @@ const ConfirmStep = ({
         selectedBranch={selectedBranch}
         selectedService={selectedServices[0] || null}
         selectedDateTime={selectedDateTime}
-        genderPreference="no-preference"
+        genderPreference={genderPreference}
         orgSlug={orgSlug}
         showSummary={false}
       />
