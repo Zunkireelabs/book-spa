@@ -6,6 +6,7 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import PaymentModal from '../../../../components/ui/PaymentModal';
 import { PERIOD_PRESETS, getPeriodRange, getTodayISO } from '../../../../utils/periodPresets';
 import { getDueReportByBranch, recordPayment, recordTip, getCustomerOutstandingBalance } from '../../../../services/api';
+import { useIndustry } from '../../../../hooks/useIndustry';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount || 0).toLocaleString('en-IN')}`;
@@ -33,6 +34,7 @@ const createdByLabel = (row) => {
 };
 
 const DueReportPanel = () => {
+  const { staffLabel } = useIndustry();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   const today = getTodayISO();
@@ -206,7 +208,7 @@ const DueReportPanel = () => {
   const handleExportCSV = () => {
     if (!filtered.length) return;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Branch', 'Date', 'Booking #', 'Stage', 'Payment', 'Due', 'Customer', 'Phone', 'Therapist', 'Created By'];
+    const header = ['Branch', 'Date', 'Booking #', 'Stage', 'Payment', 'Due', 'Customer', 'Phone', staffLabel, 'Created By'];
     let csv = header.join(',') + '\n';
     filtered.forEach((r) => {
       csv += [
@@ -297,7 +299,7 @@ const DueReportPanel = () => {
 
       <FilterBar
         count={{ value: filtered.length, label: filtered.length === 1 ? 'Booking' : 'Bookings' }}
-        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: 'Search customer, phone, booking #, therapist, created by…' }}
+        search={{ value: searchQuery, onChange: setSearchQuery, placeholder: `Search customer, phone, booking #, ${staffLabel.toLowerCase()}, created by…` }}
         presets={presetItems}
         dateRange={{
           from: customFrom, onFromChange: setCustomFrom, to: customTo, onToChange: setCustomTo,
@@ -362,7 +364,7 @@ const DueReportPanel = () => {
                       Customer <Icon name={sortIcon('customer')} size={13} />
                     </button>
                   </th>
-                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">Therapist</th>
+                  <th className="text-left px-4 py-2.5 font-body font-body-medium text-xs text-text-secondary">{staffLabel}</th>
                   <th className="text-left px-4 py-2.5">
                     <button onClick={() => handleSort('createdBy')} className="inline-flex items-center gap-1 font-body font-body-medium text-xs text-text-secondary hover:text-text-primary spa-transition-fast">
                       Created By <Icon name={sortIcon('createdBy')} size={13} />
