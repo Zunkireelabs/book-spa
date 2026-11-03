@@ -6010,21 +6010,38 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
     referralSourceDetail = leadContact.referralStaffName?.trim() || null;
   }
 
-  const rowArgs = (person) => ({
-    branchId,
-    orgSlug,
-    date,
-    startTime,
-    genderPreference,
-    specialRequests,
-    serviceId: person.service.id,
-    therapistId: person.therapistId,
-    customerName: person.isLead ? leadContact.name : (person.name || leadContact.name),
-    customerEmail: leadContact.email,
-    customerPhone: leadContact.phone,
-    customerGender: person.isLead ? leadContact.gender : null,
-    ...(person.isLead ? { customerAccountId, referringCustomerId, referralSource, referralSourceDetail } : {}),
-  });
+  // ZNLY-188: a guest who leaves firstName/lastName/email/phone/gender all blank
+  // inherits the lead's full contact info (name AND email/phone/gender — previously
+  // only name had this fallback, while email/phone were unconditionally the lead's
+  // regardless of what a guest typed). A guest who fills in ANY of their own info is
+  // validated by GroupConfirmStep's isGuestContactValid before this ever runs, so
+  // firstName/phone are guaranteed present here when guestFilled is true. Giving a
+  // guest their own phone/email lets createBooking's customer-matching create a
+  // separate customers row for them instead of repeatedly overwriting the lead's.
+  const rowArgs = (person) => {
+    const guestFilled = !person.isLead && Boolean(
+      person.firstName?.trim() || person.lastName?.trim() || person.email?.trim() ||
+      person.phone?.trim() || person.gender
+    );
+    const guestName = guestFilled ? `${person.firstName || ''} ${person.lastName || ''}`.trim() : null;
+    return {
+      branchId,
+      orgSlug,
+      date,
+      startTime,
+      genderPreference,
+      specialRequests,
+      serviceId: person.service.id,
+      therapistId: person.therapistId,
+      customerName: person.isLead ? leadContact.name : (guestName || leadContact.name),
+      customerEmail: person.isLead ? leadContact.email : (guestFilled ? (person.email || null) : leadContact.email),
+      customerPhone: person.isLead
+        ? leadContact.phone
+        : (guestFilled ? toE164(person.phone, person.phoneCountryCode || '+977') : leadContact.phone),
+      customerGender: person.isLead ? leadContact.gender : (guestFilled ? (person.gender || null) : leadContact.gender),
+      ...(person.isLead ? { customerAccountId, referringCustomerId, referralSource, referralSourceDetail } : {}),
+    };
+  };
 
   // ZNLY-182: if this person picked a combo service, wire up its per-component
   // booking_combo_items rows the same way the solo path (BookingConfirmation.jsx)

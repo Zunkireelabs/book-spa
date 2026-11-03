@@ -143,8 +143,8 @@ const GroupBookingView = ({
     onPeopleChange((prev) => updateGuestField(prev, personId, 'professional', selection));
   };
 
-  const handleGuestNameChange = (guestId, name) => {
-    onPeopleChange((prev) => updateGuestField(prev, guestId, 'name', name));
+  const handleGuestFieldChange = (guestId, field, value) => {
+    onPeopleChange((prev) => updateGuestField(prev, guestId, field, value));
   };
 
   const handleSubmit = async () => {
@@ -154,7 +154,12 @@ const GroupBookingView = ({
     const resolvedPeople = people.map((p) => ({
       isLead: p.isLead,
       label: p.label,
-      name: p.name,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      email: p.email,
+      phone: p.phone,
+      phoneCountryCode: p.phoneCountryCode,
+      gender: p.gender,
       service: p.service,
       therapistId: p.professional?.mode === 'specific' ? (p.professional.therapist?.id || null) : null,
     }));
@@ -269,7 +274,7 @@ const GroupBookingView = ({
               orgSlug={orgSlug}
               genderPreference="no-preference"
               customerAccountId={customerAccountId}
-              onGuestNameChange={handleGuestNameChange}
+              onGuestFieldChange={handleGuestFieldChange}
               onSubmit={handleSubmit}
               submitting={submitting}
               submitError={submitError}

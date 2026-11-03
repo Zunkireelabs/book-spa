@@ -16,13 +16,23 @@ const generateGuestId = () => (typeof crypto !== 'undefined' && crypto.randomUUI
 // position on every change, but ids must stay stable so a later addGuest (which
 // also derives its *label* from position) can never mint an id that collides with
 // a still-present person's id.
+// firstName/lastName/email/phone/gender are optional as a whole — a guest who
+// leaves all of them blank inherits the lead's own contact info at submit time
+// (ZNLY-184's established name-only fallback, now extended to the rest). Kept
+// blank by default rather than pre-filled with the lead's values so "did this
+// guest provide their own info" stays a simple blank check.
 export const createGuestPerson = (n, id = generateGuestId()) => ({
   id,
   label: `Guest ${n}`,
   isLead: false,
   service: null,
   professional: null,
-  name: '',
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  phoneCountryCode: '+977',
+  gender: '',
 });
 
 const relabelGuests = (people) => {
