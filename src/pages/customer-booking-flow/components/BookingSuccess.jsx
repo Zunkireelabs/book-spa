@@ -60,7 +60,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Success Animation */}
       <div className="text-center">
         <div className="relative">
