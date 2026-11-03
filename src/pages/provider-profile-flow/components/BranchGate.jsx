@@ -3,8 +3,12 @@ import Icon from '../../../components/AppIcon';
 import CustomerHeader from '../../../components/ui/CustomerHeader';
 import ProfileHero from './ProfileHero';
 import { isRealAddress } from '../utils/address';
-import { fetchClosedDateRanges } from '../../../services/api';
-import { isDateInRanges, isBranchOpenNow, formatTime12, getNepalToday } from '../../customer-booking-flow/utils/availability';
+import { fetchClosedDateRanges, fetchBranchOpeningHours } from '../../../services/api';
+import { isDateInRanges, isBranchOpenNow, formatTime12, getNepalNow, getNepalToday } from '../../customer-booking-flow/utils/availability';
+
+// 0=Monday..6=Sunday, matching branch_working_hours.day_of_week (migration-308) —
+// JS's own getDay() is 0=Sunday..6=Saturday, so shift it.
+const getNepalDayOfWeek = () => (getNepalNow().getDay() + 6) % 7;
 
 // Same onError-hides-itself guard as StorefrontPhoto/VenueThumb — these are
 // admin-pasted URLs with nothing validating them, so a dead link is a normal state.
@@ -35,10 +39,11 @@ const BranchPhoto = ({ branchName, photoUrl }) => {
 // Single-branch orgs never see this; it only renders when branches.length > 1.
 // Browser Back is the only way to change branch afterwards (the popstate handler
 // re-shows this gate) — there is no in-page switcher.
-// Per-branch Open Now/Closed Today status — mirrors BranchSelection.jsx's (grid flow)
-// closed-dates + open-hours computation exactly, reusing the same shared helpers so the
-// two flows never disagree about what "open" means. Computed here (not in the parent)
-// since BranchGate is the only consumer of this derived state.
+// Per-branch Open Now/Closed Today status, plus today's actual opening hours for the
+// card's hours line — reads branch_working_hours (migration-308's per-day hours, what
+// the staff Locations page actually edits) instead of the legacy single
+// branches.open_time/close_time pair, which Locations never writes to. Computed here
+// (not in the parent) since BranchGate is the only consumer of this derived state.
 function useBranchStatus(branches) {
   const [statusByBranchId, setStatusByBranchId] = useState({});
 
@@ -47,17 +52,24 @@ function useBranchStatus(branches) {
     let cancelled = false;
 
     Promise.all(
-      branches.map((b) => fetchClosedDateRanges(b.id).then(({ data: ranges }) => ranges || []))
-    ).then((closedRangesByBranch) => {
+      branches.map((b) => Promise.all([
+        fetchClosedDateRanges(b.id).then(({ data: ranges }) => ranges || []),
+        fetchBranchOpeningHours(b.id).then(({ data: hours }) => hours || []),
+      ]))
+    ).then((results) => {
       if (cancelled) return;
       const today = getNepalToday();
+      const todayDayOfWeek = getNepalDayOfWeek();
       const next = {};
       branches.forEach((b, i) => {
-        const closedRanges = closedRangesByBranch[i];
-        const closedToday = isDateInRanges(today, closedRanges);
+        const [closedRanges, openingHours] = results[i];
+        const todayHours = openingHours.find((h) => h.dayOfWeek === todayDayOfWeek);
+        const closedToday = isDateInRanges(today, closedRanges) || !!todayHours?.isDayOff;
         next[b.id] = {
-          openNow: !closedToday && isBranchOpenNow(b.open_time, b.close_time),
+          openNow: !closedToday && isBranchOpenNow(todayHours?.startTime, todayHours?.endTime),
           closedToday,
+          startTime: todayHours?.startTime || null,
+          endTime: todayHours?.endTime || null,
         };
       });
       setStatusByBranchId(next);
@@ -100,22 +112,22 @@ const BranchGate = ({ orgName, heroImageUrl, logoUrl, branches, onSelect }) => {
                   <span className="text-sm text-[var(--zn-muted-foreground)]">{branch.address}</span>
                 </div>
               )}
-              {(branch.open_time || branch.close_time) && (
+              {status && (status.startTime || status.endTime || status.closedToday) && (
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Icon name="Clock" size={14} className="text-[var(--zn-primary)] shrink-0" />
                     <span className="text-sm text-[var(--zn-muted-foreground)]">
-                      {branch.open_time ? formatTime12(branch.open_time) : '—'} - {branch.close_time ? formatTime12(branch.close_time) : '—'}
+                      {status.closedToday
+                        ? 'Closed today'
+                        : `${status.startTime ? formatTime12(status.startTime) : '—'} - ${status.endTime ? formatTime12(status.endTime) : '—'}`}
                     </span>
                   </div>
-                  {status && (
-                    <div className={`flex items-center gap-1 ${status.openNow ? 'text-success' : 'text-error'}`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${status.openNow ? 'bg-success animate-pulse' : 'bg-error'}`} />
-                      <span className="text-[10px] font-bold uppercase">
-                        {status.openNow ? 'Open Now' : status.closedToday ? 'Closed Today' : 'Closed Now'}
-                      </span>
-                    </div>
-                  )}
+                  <div className={`flex items-center gap-1 ${status.openNow ? 'text-success' : 'text-error'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${status.openNow ? 'bg-success animate-pulse' : 'bg-error'}`} />
+                    <span className="text-[10px] font-bold uppercase">
+                      {status.openNow ? 'Open Now' : status.closedToday ? 'Closed Today' : 'Closed Now'}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
