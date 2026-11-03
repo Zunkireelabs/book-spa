@@ -60,11 +60,11 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Success Animation */}
       <div className="text-center">
         <div className="relative">
-          <div className="w-24 h-24 bg-success/10 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+          <div className="w-24 h-24 bg-success/10 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
             <div className="w-16 h-16 bg-success/20 rounded-full flex items-center justify-center">
               <Icon name="CheckCircle" size={40} className="text-success" />
             </div>
@@ -77,14 +77,14 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
         <h2 className="font-heading font-heading-semibold text-3xl text-text-primary mb-2">
           Booking confirmed!
         </h2>
-        <p className="font-body font-body-normal text-lg text-text-secondary mb-4">
+        <p className="font-body font-body-normal text-lg text-text-secondary mb-5">
           Your {getServiceWord()} appointment has been successfully booked
         </p>
 
         {groupBookings ? (
-          <div className="inline-flex flex-col items-stretch gap-1.5 bg-success/10 text-success px-4 py-2 rounded-spa text-left">
+          <div className="inline-flex flex-col items-stretch gap-2 bg-success/10 text-success px-5 py-3 rounded-spa shadow-spa-resting divide-y divide-success/15 text-left">
             {groupBookings.map((b, i) => (
-              <div key={`${b.bookingNumber ?? 'booking'}-${i}`} className="flex items-center gap-2">
+              <div key={`${b.bookingNumber ?? 'booking'}-${i}`} className="flex items-center gap-2 py-1 first:pt-0 last:pb-0">
                 <Icon name="Calendar" size={16} className="shrink-0" />
                 <span className="font-body font-body-medium text-sm">
                   {b.label}: {b.bookingNumber}
@@ -93,7 +93,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
             ))}
           </div>
         ) : (
-          <div className="inline-flex items-center space-x-2 bg-success/10 text-success px-4 py-2 rounded-spa">
+          <div className="inline-flex items-center space-x-2 bg-success/10 text-success px-4 py-2 rounded-spa shadow-spa-resting">
             <Icon name="Calendar" size={16} />
             <span className="font-body font-body-medium text-sm">
               Booking ID: {bookingData?.bookingId}
@@ -103,9 +103,9 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
       </div>
 
       {/* Quick Summary */}
-      <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-3">
+      <div className="bg-primary/5 rounded-spa-lg border border-primary/20 p-6 shadow-spa-elevated">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-8">
+          <div className="space-y-4">
             <div className="flex items-center space-x-3">
               <Icon name="MapPin" size={16} className="text-primary" />
               <div>
@@ -129,7 +129,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
               </div>
             </div>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="flex items-center space-x-3">
               <Icon name="Calendar" size={16} className="text-primary" />
               <div>
@@ -153,7 +153,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
       </div>
 
       {/* Confirmation Details */}
-      <div className="bg-surface rounded-spa-lg border border-border p-6">
+      <div className="bg-surface rounded-spa-lg border border-border p-6 shadow-spa-resting">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-heading font-heading-medium text-lg text-text-primary">
             Confirmation details
