@@ -1,17 +1,30 @@
 -- Migration 290: expose services.is_combo (migration-288) through
 -- services_with_offer_pricing — the view fetchServicesForManagement reads from.
--- CREATE OR REPLACE VIEW can append a column without dropping the view (Postgres
--- only disallows removing/reordering existing output columns), so this is a safe,
--- additive change to an existing view.
 --
--- Idempotent: CREATE OR REPLACE VIEW is naturally re-runnable.
--- Reversible: CREATE OR REPLACE VIEW back to the pre-290 body (drop the is_combo
--- column from the SELECT list) — see migration-2xx that last defined this view for
--- the exact prior body if a rollback is ever needed.
+-- 2026-11-03 fix: originally used CREATE OR REPLACE VIEW on the (false) assumption
+-- that the view's existing column order matched this file's SELECT list exactly.
+-- It does on staging, but production's pre-existing view had `image_url` and
+-- `category` swapped (a historical drift predating this migration, from before the
+-- two databases' migration histories were kept in lockstep) — CREATE OR REPLACE
+-- VIEW refuses to reorder existing output columns, so this failed outright on
+-- production ("cannot change name of view column image_url to category") while
+-- having already succeeded on staging weeks earlier. Switched to DROP + CREATE,
+-- which rebuilds the view fresh regardless of whatever order existed before —
+-- safe here since nothing else depends on this view (checked via pg_depend on both
+-- databases) and Supabase's default ACLs (ALTER DEFAULT PRIVILEGES on schema
+-- public) auto-grant anon/authenticated/service_role on any new relation, so no
+-- explicit GRANT is needed after recreating it.
+--
+-- Idempotent: safe to re-run — DROP VIEW IF EXISTS + CREATE VIEW either way.
+-- Reversible: DROP + CREATE back to the pre-290 body (drop the is_combo column
+-- from the SELECT list) — see migration-2xx that last defined this view for the
+-- exact prior body if a rollback is ever needed.
 
 BEGIN;
 
-CREATE OR REPLACE VIEW public.services_with_offer_pricing AS
+DROP VIEW IF EXISTS public.services_with_offer_pricing;
+
+CREATE VIEW public.services_with_offer_pricing AS
 SELECT
   s.id,
   s.name,
