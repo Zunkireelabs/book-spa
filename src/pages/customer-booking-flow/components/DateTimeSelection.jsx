@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import { fetchBranchAvailabilityWindow, fetchTherapistAvailabilityWindow, fetchClosedDateRanges, fetchServiceEligibleGenderHeadcount, getRoomCapacity } from '../../../services/api';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -283,10 +283,21 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
 
   const noSlotsInWindow = computedDays.length > 0 && nearestSlots.length === 0;
 
+  // Time slots only render once a date is picked, so the ref isn't attached to
+  // anything yet at the moment the click handler runs -- rAF waits one frame for
+  // React to commit that new DOM before scrolling to it.
+  const timeSlotsRef = useRef(null);
+  const scrollToTimeSlots = () => {
+    requestAnimationFrame(() => {
+      timeSlotsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
   const handleDateSelect = (date) => {
     setSelectedDate(date);
     setSelectedTime('');
     onDateTimeSelect({ date, time: '' });
+    scrollToTimeSlots();
   };
 
   const handleTimeSelect = (time) => {
@@ -298,6 +309,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
     setSelectedDate(slot.date);
     setSelectedTime(slot.time24);
     onDateTimeSelect({ date: slot.date, time: slot.time24 });
+    scrollToTimeSlots();
   };
 
   const getTherapistIcon = (slot) => {
@@ -523,7 +535,7 @@ const DateTimeSelection = React.memo(function DateTimeSelection({ selectedDateTi
       {/* Time Selection — @container: same reasoning as the date grid above, fewer/wider
           columns when this renders inside the narrow v2 drawer than inside the wide v1 page. */}
       {selectedDate && (
-        <div className="@container bg-surface rounded-spa-lg border border-border p-6">
+        <div ref={timeSlotsRef} className="@container bg-surface rounded-spa-lg border border-border p-6 scroll-mt-20">
           <h3 className="font-heading font-heading-medium text-lg text-text-primary mb-4">
             Available time slots
           </h3>
