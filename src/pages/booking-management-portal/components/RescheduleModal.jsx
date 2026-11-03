@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
-const RescheduleModal = ({ isOpen, onClose, booking, onConfirm }) => {
+const RescheduleModal = ({ isOpen, onClose, booking, onConfirm, staffLabel = 'Therapist' }) => {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -106,7 +106,7 @@ const RescheduleModal = ({ isOpen, onClose, booking, onConfirm }) => {
                 {booking?.date} at {booking?.time}
               </span>
               <span className="font-body font-body-normal text-text-secondary">
-                {booking?.therapist?.name || 'Therapist TBA'}
+                {booking?.therapist?.name || `${staffLabel} TBA`}
               </span>
             </div>
           </div>

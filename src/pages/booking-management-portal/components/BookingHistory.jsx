@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import { to12h } from '../../../services/bookingTransformers';
 
-const BookingHistory = ({ bookings }) => {
+const BookingHistory = ({ bookings, staffLabel = 'Therapist' }) => {
   const [expandedBooking, setExpandedBooking] = useState(null);
 
   const getStatusColor = (status) => {
@@ -108,7 +108,7 @@ const BookingHistory = ({ bookings }) => {
                           <span className="font-body font-body-normal text-text-primary">{booking.duration}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="font-body font-body-normal text-text-secondary">Therapist:</span>
+                          <span className="font-body font-body-normal text-text-secondary">{staffLabel}:</span>
                           <span className="font-body font-body-normal text-text-primary">{booking.therapist?.name || 'To be assigned'}</span>
                         </div>
                         <div className="flex justify-between">

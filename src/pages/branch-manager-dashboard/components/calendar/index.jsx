@@ -175,6 +175,7 @@ function formatTimeDisplay(time) {
 // ── Quick Create Panel ────────────────────────────────────────
 
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
+  const { staffLabel } = useOrg();
   const [serviceId, setServiceId] = useState('');
   const isCoupleService = (services || []).find(s => s.id === serviceId)?.is_couple || false;
   const isComboService = (services || []).find(s => s.id === serviceId)?.is_combo || false;
@@ -1386,13 +1387,13 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     value={p.therapistId}
                     onChange={(val) => setPerson(idx, { therapistId: val })}
                     options={[
-                      { value: '', label: 'No therapist' },
+                      { value: '', label: `No ${staffLabel.toLowerCase()}` },
                       ...(therapists || []).map((t) => ({
                         value: t.id,
                         label: t.full_name || t.name,
                       })),
                     ]}
-                    placeholder="Therapist (optional)"
+                    placeholder={`${staffLabel} (optional)`}
                     size="md"
                     searchable
                   />
