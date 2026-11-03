@@ -10,6 +10,11 @@ import CustomerBookingFlowV2 from "pages/customer-booking-flow-v2";
 import StaffLoginAuthentication from "pages/login";
 import BranchStaffDashboard from "pages/branch-staff-dashboard";
 import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
+import StaffDetailPage from "pages/staff-detail";
+import LocationDetailPage from "pages/location-detail";
+import ServiceDetailPage from "pages/service-detail";
+import CustomerDetailPage from "pages/customer-detail";
+import CustomerSentMessagesPage from "pages/customer-sent-messages";
 import BranchManagerDashboard from "pages/branch-manager-dashboard";
 import AttendanceCalendarPage from "pages/attendance-calendar";
 import OrgFinder from "pages/org-finder";
@@ -139,6 +144,77 @@ const AppRoutes = () => {
           <TenantWrapper>
             <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
               <BookingDetailsAssignmentModal />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped staff detail (add/edit) — one page handles both flows,
+            :staffId present = edit, absent (/staff/new) = create */}
+        <Route path="/:orgSlug/staff/new" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+              <StaffDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+        <Route path="/:orgSlug/staff/:staffId" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin', 'admin_viewer']}>
+              <StaffDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped location detail (add/edit) — same one-page-handles-both-flows
+            pattern as staff/service detail above: :branchId present = edit, absent
+            (/locations/new) = create. Admin-only (no manager/admin_viewer — Locations
+            manages branches org-wide, unlike per-branch staff/service writes). */}
+        <Route path="/:orgSlug/locations/new" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['admin']}>
+              <LocationDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+        <Route path="/:orgSlug/locations/:branchId" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['admin']}>
+              <LocationDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped service detail (add/edit) — same one-page-handles-both-flows
+            pattern as staff detail above: :serviceId present = edit, absent
+            (/services/new) = create. */}
+        <Route path="/:orgSlug/services/new" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+              <ServiceDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+        <Route path="/:orgSlug/services/:serviceId" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['manager', 'admin']}>
+              <ServiceDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        {/* Org-scoped customer detail */}
+        <Route path="/:orgSlug/customers/:customerId" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
+              <CustomerDetailPage />
+            </ProtectedRoute>
+          </TenantWrapper>
+        } />
+
+        <Route path="/:orgSlug/customers/:customerId/messages" element={
+          <TenantWrapper>
+            <ProtectedRoute allowedRoles={['staff', 'manager', 'admin', 'admin_viewer']}>
+              <CustomerSentMessagesPage />
             </ProtectedRoute>
           </TenantWrapper>
         } />

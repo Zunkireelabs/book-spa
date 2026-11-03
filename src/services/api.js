@@ -188,53 +188,25 @@ function validateStatusTransition(currentStatus, newStatus) {
 // Read-only queries
 // ============================================================
 
-// Branch-scope filter mirroring the service_therapists "inclusion" convention
-// (migration-249): a service with zero branch_service_links rows is visible
-// everywhere (Overall); a service with rows is visible only at those branches.
+// ZNLY-185/186: second, independent filter alongside each caller's own
+// excluded_service_categories filter — a service only shows if both admit it.
+// Mirrors branch_service_links' own inclusion convention: a service with zero
+// rows anywhere is Overall (kept everywhere); one with rows but none for this
+// branchId is restricted elsewhere (dropped); one with a row for this
+// branchId is kept.
+// fetchServiceBranches/setServiceBranches live further down, next to
+// fetchServiceTherapists/setServiceTherapists — not redeclared here.
 async function filterServicesByBranchScope(services, branchId) {
   if (!services?.length || !branchId) return services;
-  const serviceIds = services.map(s => s.id);
+  const serviceIds = services.map((s) => s.id);
   const { data: links, error } = await supabase
     .from('branch_service_links')
     .select('service_id, branch_id')
     .in('service_id', serviceIds);
-  if (error || !links) return services;
-
-  const restrictedServiceIds = new Set(links.map(l => l.service_id));
-  const allowedAtBranch = new Set(
-    links.filter(l => l.branch_id === branchId).map(l => l.service_id)
-  );
-
-  return services.filter(s => !restrictedServiceIds.has(s.id) || allowedAtBranch.has(s.id));
-}
-
-export async function fetchServiceBranches(serviceId) {
-  try {
-    const { data, error } = await supabase
-      .from('branch_service_links')
-      .select('branch_id')
-      .eq('service_id', serviceId);
-    if (error) throw error;
-    return { data: (data || []).map(r => r.branch_id), error: null };
-  } catch (error) {
-    console.error('[API] fetchServiceBranches error:', error.message);
-    return { data: null, error };
-  }
-}
-
-export async function setServiceBranches(serviceId, branchIds) {
-  try {
-    const ids = (branchIds || []).filter(Boolean);
-    const { data, error } = await supabase.rpc('set_service_branches', {
-      p_service_id: serviceId,
-      p_branch_ids: ids,
-    });
-    if (error) throw error;
-    return { data: ids, error: null };
-  } catch (error) {
-    console.error('[API] setServiceBranches error:', error.message);
-    return { data: null, error };
-  }
+  if (error || !links?.length) return services;
+  const restrictedServiceIds = new Set(links.map((l) => l.service_id));
+  const allowedHere = new Set(links.filter((l) => l.branch_id === branchId).map((l) => l.service_id));
+  return services.filter((s) => !restrictedServiceIds.has(s.id) || allowedHere.has(s.id));
 }
 
 export async function fetchServices(branchId) {
@@ -247,7 +219,7 @@ export async function fetchServices(branchId) {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, effective_price_npr, is_on_offer, original_price_npr')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, requires_therapist, effective_price_npr, is_on_offer, original_price_npr')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -266,9 +238,6 @@ export async function fetchServices(branchId) {
       if (excluded?.length > 0) {
         filtered = filtered.filter(s => !excluded.includes(s.category));
       }
-    }
-
-    if (resolvedBranchId && filtered) {
       filtered = await filterServicesByBranchScope(filtered, resolvedBranchId);
     }
 
@@ -332,6 +301,24 @@ export async function fetchTherapistAvailabilityWindow(orgSlug, branchId, startD
   });
   if (error) throw error;
   return { bookings: data || [] };
+}
+
+// Male/female headcount among therapists eligible for serviceId at branchId
+// (migration-307, RPC public_get_service_eligible_gender_headcount) — the
+// gender-preference availability path's service-scoped sibling to the old
+// branch-wide `.from('therapists')` count. Unlike fetchServiceTherapists,
+// this is anon-callable (no RLS on service_therapists for anon) and returns
+// only counts, never therapist identities. orgSlug is required for the same
+// reason as fetchTherapistAvailabilityWindow — tenant-scoping the RPC.
+export async function fetchServiceEligibleGenderHeadcount(orgSlug, branchId, serviceId) {
+  const { data, error } = await supabase.rpc('public_get_service_eligible_gender_headcount', {
+    p_org_slug: orgSlug,
+    p_branch_id: branchId,
+    p_service_id: serviceId,
+  });
+  if (error) throw error;
+  const row = data?.[0] || { male_count: 0, female_count: 0 };
+  return { male: row.male_count || 0, female: row.female_count || 0 };
 }
 
 export async function fetchTherapists(branchId, { date } = {}) {
@@ -573,9 +560,9 @@ export async function updateOrgBookingSetting(key, enabled) {
 }
 
 // Admin-only org profile-settings (settings.about, settings.amenities,
-// settings.included_with_visit, settings.optional_extras, settings.cancellation_policy,
-// settings.use_provider_profile_layout). p_key is allow-listed server-side in
-// update_org_profile_settings (migration-251). p_value is jsonb — strings/arrays alike.
+// settings.included_with_visit, settings.optional_extras, settings.cancellation_policy).
+// p_key is allow-listed server-side in update_org_profile_settings (migration-251).
+// p_value is jsonb — strings/arrays alike.
 export async function updateOrgProfileSetting(key, value) {
   const { data, error } = await supabase.rpc('update_org_profile_settings', { p_key: key, p_value: value });
   if (error) {
@@ -1257,6 +1244,61 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     return { data: result, error: null };
   } catch (error) {
     console.error('[API] getOutstandingByStaff error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Org-wide outstanding (unpaid + partial) balances, grouped by branch — admin-only
+// report. Relies on RLS: role='admin' already bypasses the branch_id check on
+// "bookings" (migration-224), so an unfiltered query here returns every branch
+// in the admin's org without needing branchId/withBranch. from/to are ISO dates
+// (inclusive); omit for all-time.
+export async function getDueReportByBranch({ from, to } = {}) {
+  try {
+    let query = supabase
+      .from('bookings')
+      .select(
+        'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)'
+      )
+      .in('payment_status', ['unpaid', 'partial'])
+      .not('status', 'in', '("Cancelled","No Show")');
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    const groups = {};
+    for (const b of bookings || []) {
+      const collected = (b.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const due = Math.round((Number(b.final_amount) - collected) * 100) / 100;
+      if (due <= 0) continue;
+      const branchId = b.branch_id;
+      if (!groups[branchId]) {
+        groups[branchId] = { branchId, branchName: b.branches?.name || 'Unknown Branch', totalDue: 0, bookingCount: 0, bookings: [] };
+      }
+      groups[branchId].totalDue = Math.round((groups[branchId].totalDue + due) * 100) / 100;
+      groups[branchId].bookingCount += 1;
+      groups[branchId].bookings.push({
+        bookingId: b.id,
+        bookingNumber: b.booking_number,
+        date: b.date,
+        status: b.status,
+        paymentStatus: b.payment_status,
+        customerName: b.customer_name,
+        customerPhone: b.customer_phone,
+        therapistName: b.therapist_name_snapshot || null,
+        createdByName: b.creator?.full_name || null,
+        isOnlineBooking: !b.created_by && Boolean(b.client_request_id),
+        finalAmount: Number(b.final_amount),
+        amountPaid: collected,
+        amountDue: due,
+      });
+    }
+
+    const result = Object.values(groups).sort((a, b) => b.totalDue - a.totalDue);
+    return { data: result, error: null };
+  } catch (error) {
+    console.error('[API] getDueReportByBranch error:', error.message);
     return { data: null, error };
   }
 }
@@ -2609,7 +2651,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     if (serviceId && serviceId !== booking.service_id) {
       const { data: newService, error: svcError } = await supabase
         .from('services')
-        .select('id, name, duration_minutes, price_npr')
+        .select('id, name, duration_minutes, price_npr, effective_price_npr')
         .eq('id', serviceId)
         .single();
 
@@ -2617,13 +2659,14 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
         return { data: null, error: { code: 'SERVICE_NOT_FOUND', message: 'Selected service not found.' } };
       }
 
+      const newServicePrice = Number(newService.effective_price_npr ?? newService.price_npr);
       newServiceDurationMinutes = newService.duration_minutes;
       updatePayload.service_id = serviceId;
       updatePayload.service_name_snapshot = newService.name;
-      updatePayload.base_amount = newService.price_npr;
+      updatePayload.base_amount = newServicePrice;
       // Preserve existing discount amount
       const discountAmt = Number(booking.discount_amount || 0);
-      updatePayload.final_amount = Math.max(0, newService.price_npr - discountAmt);
+      updatePayload.final_amount = Math.max(0, newServicePrice - discountAmt);
 
       // Recalculate end_time based on new duration
       const effectiveStartTime = startTime || booking.start_time;
@@ -4884,6 +4927,7 @@ export async function fetchBookingById(bookingId) {
         therapist:therapists(id, name, gender),
         room:rooms(id, name),
         payments(id, amount, payment_mode, created_at),
+        payment_refunds(id, amount, reason, created_at),
         booking_tips(id, amount, created_at, receiver:users!received_by(full_name)),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name, gender), room:rooms(id, name))
       `)
@@ -5145,6 +5189,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         room:rooms(id, name),
         creator:users!created_by(full_name),
         booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name)),
+        booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name)),
         payments(amount)
       `)
       .eq('branch_id', resolvedBranchId)
@@ -5281,6 +5326,7 @@ export async function createBooking({
   customerPhone,
   customerGender,
   specialRequests,
+  genderPreference,
   therapistId,
   therapistIds,
   roomId,
@@ -5675,6 +5721,7 @@ export async function createBooking({
       customer_email: customerEmail || null,
       customer_phone: toE164(customerPhone),
       customer_gender: customerGender || null,
+      gender_preference: genderPreference || null,
       customer_account_id: customerAccountId || null,
       companion_name: companionName?.trim() || null,
       companion_phone: companionPhone ? toE164(companionPhone) : null,
@@ -5933,6 +5980,178 @@ export async function createBookingGroup({ services, date, startTime, therapistI
   return { data: { bookings: created, bookingGroupId }, error: null };
 }
 
+// Group booking (multiple PEOPLE at one shared time, Fresha-style) — distinct from
+// createBookingGroup above, which sequences one person through several back-to-back
+// services. Here every row shares the same date/startTime; the rollback mechanics are
+// copied from createBookingGroup's since both serve the same anonymous-customer RLS
+// shape (no anon SELECT/UPDATE on bookings, so compensation goes through the same
+// narrow public_cancel_booking_group RPC).
+export async function submitGroupBooking({ branchId, orgSlug, date, startTime, genderPreference, specialRequests, leadContact, people, customerAccountId = null, createBookingFn = createBooking }) {
+  // Referral resolution mirrors BookingConfirmation.jsx's handleConfirmBooking exactly
+  // (lead-only — guests have no account of their own to credit a referral against).
+  let referringCustomerId = null;
+  let referralSourceDetail = null;
+  const referralSource = leadContact.referralSource || null;
+
+  if (referralSource === 'client') {
+    const namePart = leadContact.referralClientName?.trim() || '';
+    const dialCode = leadContact.referralCountryCode || '+977';
+    const referralE164 = toE164(leadContact.referralPhone, dialCode);
+    const phonePart = referralE164 ? `(${referralE164})` : '';
+    referralSourceDetail = [namePart, phonePart].filter(Boolean).join(' ') || null;
+
+    if (referralE164 && referralE164 !== leadContact.phone) {
+      const { data: referrer } = await lookupReferrerByPhone(orgSlug, leadContact.referralPhone, dialCode);
+      referringCustomerId = referrer?.id || null;
+    }
+  } else if (referralSource === 'social_media') {
+    referralSourceDetail = leadContact.referralSocialPlatform || null;
+  } else if (referralSource === 'staff') {
+    referralSourceDetail = leadContact.referralStaffName?.trim() || null;
+  }
+
+  // ZNLY-188: a guest who leaves firstName/lastName/email/phone/gender all blank
+  // inherits the lead's full contact info (name AND email/phone/gender — previously
+  // only name had this fallback, while email/phone were unconditionally the lead's
+  // regardless of what a guest typed). A guest who fills in ANY of their own info is
+  // validated by GroupConfirmStep's isGuestContactValid before this ever runs, so
+  // firstName/phone are guaranteed present here when guestFilled is true. Giving a
+  // guest their own phone/email lets createBooking's customer-matching create a
+  // separate customers row for them instead of repeatedly overwriting the lead's.
+  const rowArgs = (person) => {
+    const guestFilled = !person.isLead && Boolean(
+      person.firstName?.trim() || person.lastName?.trim() || person.email?.trim() ||
+      person.phone?.trim() || person.gender
+    );
+    const guestName = guestFilled ? `${person.firstName || ''} ${person.lastName || ''}`.trim() : null;
+    return {
+      branchId,
+      orgSlug,
+      date,
+      startTime,
+      genderPreference,
+      specialRequests,
+      serviceId: person.service.id,
+      therapistId: person.therapistId,
+      customerName: person.isLead ? leadContact.name : (guestName || leadContact.name),
+      customerEmail: person.isLead ? leadContact.email : (guestFilled ? (person.email || null) : leadContact.email),
+      customerPhone: person.isLead
+        ? leadContact.phone
+        : (guestFilled ? toE164(person.phone, person.phoneCountryCode || '+977') : leadContact.phone),
+      customerGender: person.isLead ? leadContact.gender : (guestFilled ? (person.gender || null) : leadContact.gender),
+      ...(person.isLead ? { customerAccountId, referringCustomerId, referralSource, referralSourceDetail } : {}),
+    };
+  };
+
+  // ZNLY-182: if this person picked a combo service, wire up its per-component
+  // booking_combo_items rows the same way the solo path (BookingConfirmation.jsx)
+  // does — non-blocking, since the person's booking itself already succeeded by
+  // the time this runs; a combo-items failure here must not trigger the group's
+  // own rollback-on-booking-failure compensation logic below, which exists for
+  // booking creation failing, not a secondary metadata write failing afterward.
+  const createGroupComboItems = async (person, data) => {
+    if (!person.service?.is_combo || !data?.id) return;
+    const { data: components } = await fetchServiceComboComponents(person.service.id);
+    if (!components?.length) return;
+    const comboComponents = components.map((c) => ({
+      serviceId: c.serviceId,
+      componentId: c.componentId,
+      defaultTiming: c.defaultTiming,
+      therapistId: c.defaultSameStaff ? (person.therapistId || null) : null,
+    }));
+    const { error: comboError } = await createComboBookingItems({
+      bookingId: data.id,
+      branchId,
+      date,
+      startTime,
+      roomId: null,
+      components: comboComponents,
+      orgSlug,
+    });
+    if (comboError) {
+      console.error('[API] submitGroupBooking createComboBookingItems failed:', comboError.message);
+    }
+  };
+
+  // Single person: no group, no compensation path — behave exactly like a plain booking.
+  if (people.length === 1) {
+    const { data, error } = await createBookingFn(rowArgs(people[0]));
+    if (!error && data) await createGroupComboItems(people[0], data);
+    return { data: data ? { bookings: [data] } : null, error };
+  }
+
+  const bookingGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `grp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const created = [];
+  for (const person of people) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await createBookingFn({ ...rowArgs(person), bookingGroupId });
+
+    if (error) {
+      if (created.length > 0) {
+        // The rollback RPC is the only thing standing between "one person's
+        // booking failed" and "a partial group sits reserved with nobody
+        // told" -- retry a transient failure (network blip, momentary DB
+        // contention) a few times before giving up, rather than failing on
+        // the first hiccup.
+        let rollbackOk = false;
+        let lastCancelError = null;
+        for (let attempt = 0; attempt < 3 && !rollbackOk; attempt += 1) {
+          if (attempt > 0) {
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+          }
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const { error: rollbackError } = await supabase
+              .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+            if (rollbackError) throw rollbackError;
+            rollbackOk = true;
+          } catch (cancelError) {
+            lastCancelError = cancelError;
+          }
+        }
+
+        if (!rollbackOk) {
+          console.error('[API] submitGroupBooking rollback FAILED for group', bookingGroupId, lastCancelError);
+          // Best-effort: let branch staff know a group is stuck instead of
+          // relying solely on the customer to call in. Never let this
+          // throw/block the error already being returned to the customer.
+          try {
+            await supabase.rpc('public_report_booking_group_failure', {
+              p_branch_id: resolveBranchId(branchId),
+              p_booking_group_id: bookingGroupId,
+              p_people_count: created.length,
+            });
+          } catch (reportError) {
+            console.error('[API] submitGroupBooking failed to report stuck group', bookingGroupId, reportError);
+          }
+          return {
+            data: null,
+            error: {
+              code: 'BOOKING_GROUP_PARTIAL',
+              message: `${person.label || person.name || 'A person in your group'} could not be booked, and we could not automatically release the others. Please contact the branch to confirm what is reserved.`,
+            },
+          };
+        }
+      }
+      return {
+        data: null,
+        error: {
+          ...error,
+          message: `${error.message || 'could not be booked.'}${created.length > 0 ? ' The rest of your group was released — please pick another time.' : ''}`,
+        },
+      };
+    }
+    created.push(data);
+    // eslint-disable-next-line no-await-in-loop
+    await createGroupComboItems(person, data);
+  }
+
+  return { data: { bookings: created }, error: null };
+}
 
 // (booking-details-assignment-modal, calendar's Rebook-reuse-as-reschedule
 // branch), which intentionally creates a fresh booking row and cancels the
@@ -6340,6 +6559,181 @@ export async function setServiceTherapists(serviceId, therapistIds, branchId) {
   }
 }
 
+// ZNLY-185: which branches a service is restricted to (branch_service_links,
+// migration-312). Empty result = Overall (visible at every branch) — mirrors
+// fetchServiceTherapists' own "no rows = unrestricted" convention.
+export async function fetchServiceBranches(serviceId) {
+  try {
+    const { data, error } = await supabase
+      .from('branch_service_links')
+      .select('branch_id')
+      .eq('service_id', serviceId);
+
+    if (error) throw error;
+    return { data: (data || []).map((r) => r.branch_id), error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Delegates the replace to set_service_branches (migration-312), same atomic
+// delete-then-insert pattern as setServiceTherapists. branchIds = [] clears the
+// service back to Overall.
+export async function setServiceBranches(serviceId, branchIds) {
+  try {
+    const ids = (branchIds || []).filter(Boolean);
+    const { data, error } = await supabase.rpc('set_service_branches', {
+      p_service_id: serviceId,
+      p_branch_ids: ids,
+    });
+    if (error) throw error;
+    return { data: ids, error: null };
+  } catch (error) {
+    console.error('[API] setServiceBranches error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Reverse of fetchServiceTherapists: for a given therapist, which of the branch's
+// active services are restricted (have any eligibility rows at all) and, for
+// restricted ones, whether this therapist is in the allow-list. Unrestricted
+// services (no rows) are returned with isRestricted:false and isEligible:true,
+// since "no rows = everyone eligible" per migration-249. Unchecking one of
+// these here calls excludeTherapistFromService, not toggleTherapistServiceEligibility
+// — it must materialize the full allow-list (everyone but this therapist),
+// not just add this therapist, or it would silently restrict the service to
+// them alone.
+export async function fetchServicesForTherapist(therapistId, branchId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+
+    const [servicesResult, eligibilityResult] = await Promise.all([
+      supabase
+        .from('services')
+        .select('id, name, is_active')
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('service_therapists')
+        .select('service_id, therapist_id, therapists!inner(branch_id)')
+        .eq('therapists.branch_id', branchId),
+    ]);
+
+    if (servicesResult.error) throw servicesResult.error;
+    if (eligibilityResult.error) throw eligibilityResult.error;
+
+    const restrictedServiceIds = new Set();
+    const eligibleServiceIdsForTherapist = new Set();
+    (eligibilityResult.data || []).forEach(row => {
+      restrictedServiceIds.add(row.service_id);
+      if (row.therapist_id === therapistId) eligibleServiceIdsForTherapist.add(row.service_id);
+    });
+
+    const data = (servicesResult.data || []).map(s => {
+      const isRestricted = restrictedServiceIds.has(s.id);
+      return {
+        id: s.id,
+        name: s.name,
+        isRestricted,
+        isEligible: isRestricted ? eligibleServiceIdsForTherapist.has(s.id) : true,
+      };
+    });
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicesForTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Toggles a single therapist in/out of an already-restricted service's
+// eligibility list. Only meaningful for services that already have at least
+// one eligibility row (see fetchServicesForTherapist) — does not create a
+// restriction on a currently-unrestricted service.
+export async function toggleTherapistServiceEligibility(serviceId, therapistId, eligible) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    if (eligible) {
+      const { error } = await supabase
+        .from('service_therapists')
+        .upsert({ service_id: serviceId, therapist_id: therapistId }, { onConflict: 'service_id,therapist_id' });
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('service_therapists')
+        .delete()
+        .eq('service_id', serviceId)
+        .eq('therapist_id', therapistId);
+      if (error) throw error;
+    }
+
+    return { data: { serviceId, therapistId, eligible }, error: null };
+  } catch (error) {
+    console.error('[API] toggleTherapistServiceEligibility error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Excludes one therapist from one or more currently-unrestricted services
+// while keeping each open to every other active therapist in the branch —
+// materializes the "empty allow-list = everyone eligible" state into an
+// explicit allow-list covering everyone but therapistId, rather than only
+// adding therapistId (which would silently narrow the service down to just
+// them). Used when a staff member's service checkbox is unchecked for a
+// service that doesn't yet have an eligibility list. Fetches the branch's
+// other active therapists once regardless of serviceIds.length, so bulk
+// callers (e.g. "Select all") issue one query + one upsert instead of one
+// of each per service.
+export async function excludeTherapistFromServices(serviceIds, branchId, therapistId) {
+  try {
+    const ids = Array.isArray(serviceIds) ? serviceIds : [serviceIds];
+    if (ids.length === 0) return { data: [], error: null };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data: therapists, error: therapistsError } = await supabase
+      .from('therapists')
+      .select('id')
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .neq('id', therapistId);
+    if (therapistsError) throw therapistsError;
+
+    const otherTherapistIds = (therapists || []).map(t => t.id);
+    const rows = ids.flatMap(serviceId => otherTherapistIds.map(tid => ({ service_id: serviceId, therapist_id: tid })));
+    if (rows.length > 0) {
+      const { error } = await supabase
+        .from('service_therapists')
+        .upsert(rows, { onConflict: 'service_id,therapist_id' });
+      if (error) throw error;
+    }
+
+    return { data: ids.map(serviceId => ({ serviceId, excludedTherapistId: therapistId })), error: null };
+  } catch (error) {
+    console.error('[API] excludeTherapistFromServices error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function excludeTherapistFromService(serviceId, branchId, therapistId) {
+  const result = await excludeTherapistFromServices([serviceId], branchId, therapistId);
+  if (result.error) return { data: null, error: result.error };
+  return { data: result.data[0], error: null };
+}
+
 // Shared "empty allow-list = unrestricted" eligibility filter, used both at booking-creation
 // time (createBooking) and in the manual reassignment UI (TherapistAssignmentPanel).
 export function filterEligibleTherapists(therapists, eligibleTherapistIds) {
@@ -6379,7 +6773,7 @@ export async function fetchTherapistsForManagement(branchId) {
   }
 }
 
-export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating }) {
+export async function createTherapist({ name, gender, specialties, position, isServiceStaff = true, branchId, photoUrl, bio, experienceYears, rating, phone, address, city, email, pronouns }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6433,8 +6827,13 @@ export async function createTherapist({ name, gender, specialties, position, isS
         bio: bio || null,
         experience_years: experienceYears ?? null,
         rating: rating ?? null,
+        phone: phone || null,
+        address: address || null,
+        city: city || null,
+        email: email || null,
+        pronouns: pronouns || null,
       })
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating, phone, address, city, email, pronouns')
       .single();
 
     if (error) throw error;
@@ -6445,7 +6844,7 @@ export async function createTherapist({ name, gender, specialties, position, isS
   }
 }
 
-export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating }) {
+export async function updateTherapist({ therapistId, name, gender, specialties, position, isServiceStaff, photoUrl, bio, experienceYears, rating, phone, address, city, email, pronouns }) {
   try {
     name = toTitleCase(name);
     const { profile, error: authError } = await getAuthenticatedUser();
@@ -6498,18 +6897,347 @@ export async function updateTherapist({ therapistId, name, gender, specialties, 
     if (bio !== undefined) updatePayload.bio = bio || null;
     if (experienceYears !== undefined) updatePayload.experience_years = experienceYears === '' ? null : experienceYears;
     if (rating !== undefined) updatePayload.rating = rating === '' ? null : rating;
+    if (phone !== undefined) updatePayload.phone = phone || null;
+    if (address !== undefined) updatePayload.address = address || null;
+    if (city !== undefined) updatePayload.city = city || null;
+    if (email !== undefined) updatePayload.email = email || null;
+    if (pronouns !== undefined) updatePayload.pronouns = pronouns || null;
 
     const { data, error } = await supabase
       .from('therapists')
       .update(updatePayload)
       .eq('id', therapistId)
-      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, photo_url, bio, experience_years, rating, phone, address, city, email, pronouns')
       .single();
 
     if (error) throw error;
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchTherapistById(therapistId) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin', 'admin_viewer'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .select('id, name, gender, specialties, position, is_service_staff, branch_id, is_active, created_at, display_order, photo_url, bio, experience_years, rating, phone, address, city, email, pronouns')
+      .eq('id', therapistId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw error;
+    }
+
+    if (profile.role === 'manager' && data.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot view therapists outside your branch.' } };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistById error:', error.message);
+    return { data: null, error };
+  }
+}
+
+const WORKING_HOURS_DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// therapist_working_hours_breaks rows -> UI shape. Module-scoped because both
+// fetchTherapistWorkingHours (one therapist, staff-edit screen) and
+// fetchBranchWorkingHours (whole branch, roster grid + calendar shading) return
+// the same break shape and must stay identical.
+const normalizeWorkingHourBreaks = (breaks) => (breaks || [])
+  .slice()
+  .sort((a, b) => a.sort_order - b.sort_order)
+  .map(b => ({ id: b.id, name: b.name || '', startTime: b.start_time, endTime: b.end_time }));
+
+export async function fetchTherapistWorkingHours(therapistId) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .select('id, therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(id, name, start_time, end_time, sort_order)')
+      .eq('therapist_id', therapistId);
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    const normalized = WORKING_HOURS_DAY_LABELS.map((label, dayOfWeek) => {
+      const row = byDay.get(dayOfWeek);
+      return row
+        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off, breaks: normalizeWorkingHourBreaks(row.therapist_working_hours_breaks) }
+        : { dayOfWeek, dayLabel: label, startTime: null, endTime: null, isDayOff: true, breaks: [] };
+    });
+
+    return { data: normalized, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistWorkingHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// rows: [{ dayOfWeek, startTime, endTime, isDayOff, breaks: [{ name, startTime, endTime }] }, ...]
+// — one per weekday. Deliberate scope boundary: display only. Rendered as the
+// calendar's per-column roster shading (fetchBranchWorkingHours ->
+// services/rosterSchedule -> calendar/CalendarGrid), but still not read by any
+// booking availability/conflict check (see migration-275's header comment).
+export async function upsertTherapistWorkingHours(therapistId, rows) {
+  try {
+    if (!therapistId) return { data: null, error: { code: 'THERAPIST_REQUIRED', message: 'Therapist ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const { data: therapist, error: fetchError } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .eq('id', therapistId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw fetchError;
+    }
+
+    if (profile.role === 'manager' && therapist.branch_id !== profile.branch_id) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+    }
+
+    // dayOfWeek -> that day's breaks in chronological order. The validation loop
+    // below already sorts each day's breaks to check them pairwise; the SAME sorted
+    // array is what gets written, keyed here so the insert further down can reuse it.
+    // Writing the caller's unsorted array with `sort_order: index` instead meant
+    // adding a 3pm break and then a 10am one persisted them in entry order, and
+    // fetchTherapistWorkingHours (which orders by sort_order) redisplayed them
+    // reversed.
+    const sortedBreaksByDay = new Map();
+
+    for (const row of rows) {
+      const breaks = row.breaks || [];
+      const label = WORKING_HOURS_DAY_LABELS[row.dayOfWeek];
+
+      if (!row.isDayOff && (!row.startTime || !row.endTime || row.startTime >= row.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: start time must be before end time.` } };
+      }
+      if (row.isDayOff && breaks.length > 0) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: a day off cannot have breaks.` } };
+      }
+
+      const sortedBreaks = breaks.slice().sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+      sortedBreaksByDay.set(row.dayOfWeek, sortedBreaks);
+      for (let i = 0; i < sortedBreaks.length; i++) {
+        const brk = sortedBreaks[i];
+        if (!brk.startTime || !brk.endTime || brk.startTime >= brk.endTime) {
+          return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: break start must be before break end.` } };
+        }
+        if (brk.startTime < row.startTime || brk.endTime > row.endTime) {
+          return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: break must fall within the shift's hours.` } };
+        }
+        const next = sortedBreaks[i + 1];
+        if (next && brk.endTime > next.startTime) {
+          return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: breaks cannot overlap.` } };
+        }
+      }
+    }
+
+    const payload = rows.map(row => ({
+      therapist_id: therapistId,
+      branch_id: therapist.branch_id,
+      day_of_week: row.dayOfWeek,
+      start_time: row.isDayOff ? null : row.startTime,
+      end_time: row.isDayOff ? null : row.endTime,
+      is_day_off: !!row.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .upsert(payload, { onConflict: 'therapist_id,day_of_week' })
+      .select('id, therapist_id, day_of_week, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    for (const row of rows) {
+      const whRow = byDay.get(row.dayOfWeek);
+      if (!whRow) continue;
+
+      const { error: deleteError } = await supabase
+        .from('therapist_working_hours_breaks')
+        .delete()
+        .eq('working_hours_id', whRow.id);
+      if (deleteError) throw deleteError;
+
+      // Chronologically sorted copy from the validation loop above — sort_order is
+      // what fetchTherapistWorkingHours orders by, so it must be chronological.
+      const breaks = sortedBreaksByDay.get(row.dayOfWeek) || [];
+      if (breaks.length > 0) {
+        const breakPayload = breaks.map((brk, index) => ({
+          working_hours_id: whRow.id,
+          name: brk.name || '',
+          start_time: brk.startTime,
+          end_time: brk.endTime,
+          sort_order: index,
+        }));
+        const { error: insertError } = await supabase
+          .from('therapist_working_hours_breaks')
+          .insert(breakPayload);
+        if (insertError) throw insertError;
+      }
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertTherapistWorkingHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// All therapists' recurring weekly hours for a branch in one query (therapist_working_hours.
+// branch_id is denormalized — see migration-275), for the Roster grid's per-day defaults.
+// Breaks (migration-278) come along for the ride — the calendar's per-column roster
+// shading needs them in the same pass, and the join is the same one
+// fetchTherapistWorkingHours already uses.
+// Returns { data: Map<therapistId, Array<{dayOfWeek, startTime, endTime, isDayOff,
+//   breaks: [{id, name, startTime, endTime}]}>>, error }
+export async function fetchBranchWorkingHours(branchId) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('therapist_working_hours')
+      .select('therapist_id, day_of_week, start_time, end_time, is_day_off, therapist_working_hours_breaks(id, name, start_time, end_time, sort_order)')
+      .eq('branch_id', branchId);
+
+    if (error) throw error;
+
+    const byTherapist = new Map();
+    (data || []).forEach(row => {
+      if (!byTherapist.has(row.therapist_id)) byTherapist.set(row.therapist_id, []);
+      byTherapist.get(row.therapist_id).push({
+        dayOfWeek: row.day_of_week,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        isDayOff: row.is_day_off,
+        breaks: normalizeWorkingHourBreaks(row.therapist_working_hours_breaks),
+      });
+    });
+
+    return { data: byTherapist, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchWorkingHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Per-date overrides (migration-287) for every therapist in a branch across [startDate, endDate]
+// (inclusive, "YYYY-MM-DD"), for the Roster grid. A date with no row here falls back to that
+// therapist's normal weekly hours for its day-of-week (see fetchBranchWorkingHours above).
+export async function fetchRosterOverrides({ branchId, startDate, endDate }) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+    if (!startDate || !endDate) return { data: null, error: { code: 'RANGE_REQUIRED', message: 'Date range is required.' } };
+
+    const { data, error } = await supabase
+      .from('staff_roster_overrides')
+      .select('therapist_id, override_date, start_time, end_time, is_day_off')
+      .eq('branch_id', branchId)
+      .gte('override_date', startDate)
+      .lte('override_date', endDate);
+
+    if (error) throw error;
+
+    const byKey = new Map();
+    (data || []).forEach(row => {
+      byKey.set(`${row.therapist_id}_${row.override_date}`, {
+        therapistId: row.therapist_id,
+        date: row.override_date,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        isDayOff: row.is_day_off,
+      });
+    });
+
+    return { data: byKey, error: null };
+  } catch (error) {
+    console.error('[API] fetchRosterOverrides error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// overrides: [{ therapistId, date: 'YYYY-MM-DD', isDayOff, startTime, endTime }, ...] — bulk
+// upsert for the Roster grid's "Save roster" button. Same manager/admin + branch-ownership
+// gating and start<end validation as upsertTherapistWorkingHours.
+export async function upsertRosterOverrides(overrides) {
+  try {
+    if (!overrides || overrides.length === 0) return { data: [], error: null };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Insufficient permissions.' } };
+    }
+
+    const therapistIds = [...new Set(overrides.map(o => o.therapistId))];
+    const { data: therapistRows, error: fetchError } = await supabase
+      .from('therapists')
+      .select('id, branch_id')
+      .in('id', therapistIds);
+    if (fetchError) throw fetchError;
+
+    const branchById = new Map((therapistRows || []).map(t => [t.id, t.branch_id]));
+    for (const id of therapistIds) {
+      const branchId = branchById.get(id);
+      if (!branchId) return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      if (profile.role === 'manager' && branchId !== profile.branch_id) {
+        return { data: null, error: { code: 'UNAUTHORIZED', message: 'Cannot manage therapists outside your branch.' } };
+      }
+    }
+
+    for (const o of overrides) {
+      if (!o.isDayOff && (!o.startTime || !o.endTime || o.startTime >= o.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${o.date}: start time must be before end time.` } };
+      }
+    }
+
+    const payload = overrides.map(o => ({
+      therapist_id: o.therapistId,
+      branch_id: branchById.get(o.therapistId),
+      override_date: o.date,
+      start_time: o.isDayOff ? null : o.startTime,
+      end_time: o.isDayOff ? null : o.endTime,
+      is_day_off: !!o.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('staff_roster_overrides')
+      .upsert(payload, { onConflict: 'therapist_id,override_date' })
+      .select('therapist_id, override_date, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertRosterOverrides error:', error.message);
     return { data: null, error };
   }
 }
@@ -6839,6 +7567,86 @@ export async function fetchBlocksForRange(branchId, startDate, endDate) {
     console.error('[API] fetchBlocksForRange error:', error.message);
     return { data: null, error };
   }
+}
+
+// ============================================================
+// Closed Dates (Setup → "Closed dates" page) — a dedicated, Timely-style business-
+// closure list built on the existing manual_blocks primitive rather than a new table.
+// A "closed date" is recognized as a whole-location (no therapist/room), all-day
+// (start_time 00:00, duration 1440) block — the exact shape AddBlockModal's "Whole
+// location" + "Closed all day" options already produce. A multi-day range is just
+// that block set to repeat daily through recurrence_end_date, reusing manual_blocks'
+// existing recurrence machinery instead of inventing a start/end-date column.
+// ============================================================
+
+const CLOSED_DATE_START_TIME = '00:00:00';
+const CLOSED_DATE_DURATION_MINUTES = 1440;
+
+function daysBetweenInclusive(startDate, endDate) {
+  const start = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+export async function fetchClosedDateRanges(branchId) {
+  try {
+    const resolvedBranchId = resolveBranchId(branchId);
+    const { data, error } = await supabase
+      .from('manual_blocks')
+      .select('id, block_date, recurrence_end_date, recurrence_freq, description')
+      .eq('branch_id', resolvedBranchId)
+      .eq('is_cancelled', false)
+      .is('therapist_id', null)
+      .is('room_id', null)
+      .eq('start_time', CLOSED_DATE_START_TIME)
+      .eq('duration_minutes', CLOSED_DATE_DURATION_MINUTES)
+      .order('block_date', { ascending: true });
+    if (error) throw error;
+
+    const ranges = (data || []).map(row => {
+      const endDate = row.recurrence_freq ? (row.recurrence_end_date || row.block_date) : row.block_date;
+      return {
+        blockId: row.id,
+        startDate: row.block_date,
+        endDate,
+        days: daysBetweenInclusive(row.block_date, endDate),
+        description: row.description,
+      };
+    });
+    return { data: ranges, error: null };
+  } catch (error) {
+    console.error('[API] fetchClosedDateRanges error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createClosedDateRange({ orgId, branchId, startDate, endDate, description }) {
+  if (!startDate) return { data: null, error: { code: 'INVALID_INPUT', message: 'Start date is required.' } };
+  const resolvedEnd = endDate || startDate;
+  if (resolvedEnd < startDate) {
+    return { data: null, error: { code: 'INVALID_INPUT', message: 'End date must be on or after the start date.' } };
+  }
+  const isRange = resolvedEnd !== startDate;
+
+  return createBlock({
+    orgId,
+    branchId,
+    blockDate: startDate,
+    startTime: CLOSED_DATE_START_TIME,
+    durationMinutes: CLOSED_DATE_DURATION_MINUTES,
+    description,
+    preventOnlineBooking: true,
+    recurrenceFreq: isRange ? 'daily' : null,
+    recurrenceInterval: 1,
+    recurrenceEndDate: isRange ? resolvedEnd : null,
+  });
+}
+
+// No edit-in-place — manual_blocks' recurrence_end_date isn't one of updateBlock's
+// patchable fields, so "editing" a range is delete-then-recreate (see
+// ClosedDatesPanel.jsx's handleSave).
+export async function deleteClosedDateRange(blockId) {
+  return deleteBlock({ blockId, scope: 'series' });
 }
 
 // scope: 'this' (cancel just this occurrence), 'following' (split the series — this row's
@@ -7369,7 +8177,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -7432,6 +8240,90 @@ export async function uploadServiceImage(file) {
   }
 }
 
+// Admin-only org branding image upload (Provider Profile's Logo/Hero), same bucket +
+// validation as uploadStaffPhoto, path-prefixed per org since the bucket is shared
+// across tenants. kind: 'logo' | 'hero' — only used for the storage path, not stored
+// anywhere; callers persist the returned URL via updateOrgBranding.
+export async function uploadOrgBrandingImage(kind, file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can upload branding images.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${kind}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `branding/${profile.org_id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadOrgBrandingImage error:', error.message);
+    return { url: null, error };
+  }
+}
+
+// Admin-only branch storefront photo upload (BranchGate's multi-branch picker tile,
+// Setup → "Branch Photo"). Same bucket + validation as uploadOrgBrandingImage, but
+// path-prefixed per branch within the org's branding folder since a branch's photo is
+// distinct from the org-level logo/hero. Persist the returned URL via updateBranchPhoto.
+export async function uploadBranchPhoto(branchId, file) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { url: null, error: authError };
+
+    if (profile.role !== 'admin') {
+      return { url: null, error: { code: 'UNAUTHORIZED', message: 'Only admins can upload branch photos.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { url: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { url: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 5MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `branch-${resolveBranchId(branchId)}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `branding/${profile.org_id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('service-images')
+      .getPublicUrl(filePath);
+
+    return { url: publicUrl, error: null };
+  } catch (error) {
+    console.error('[API] uploadBranchPhoto error:', error.message);
+    return { url: null, error };
+  }
+}
+
 /**
  * Upload a staff photo to Supabase Storage.
  * Returns the public URL of the uploaded image.
@@ -7478,7 +8370,360 @@ export async function uploadStaffPhoto(file) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
+// Customer photo gallery (migration-280) — manager/admin upload/delete,
+// staff can read within their branch (or admin). Same storage bucket and
+// validation as uploadStaffPhoto, path-prefixed per customer instead of a
+// single replaced avatar, since a customer can have multiple photos.
+export async function uploadCustomerPhoto(customerId, branchId, file) {
+  try {
+    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can upload customer photos.' } };
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      return { data: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only JPEG, PNG, WebP, and GIF images are allowed.' } };
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      return { data: null, error: { code: 'FILE_TOO_LARGE', message: 'Image must be less than 2.0MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `customers/${customerId}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('service-images').getPublicUrl(filePath);
+
+    const { data, error } = await supabase
+      .from('customer_photos')
+      .insert({ customer_id: customerId, branch_id: branchId, photo_url: publicUrl, uploaded_by: profile.id })
+      .select('id, customer_id, photo_url, uploaded_by, created_at')
+      .single();
+    if (error) throw error;
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] uploadCustomerPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchCustomerPhotos(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('customer_photos')
+      .select('id, customer_id, photo_url, uploaded_by, created_at')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerPhotos error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCustomerPhoto(photoId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customer photos.' } };
+    }
+
+    const { error } = await supabase.from('customer_photos').delete().eq('id', photoId);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCustomerPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Customer document attachments (migration-280) — same shape as customer
+// photos, broader file-type allow-list.
+export async function uploadCustomerDocument(customerId, branchId, file) {
+  try {
+    if (!customerId || !branchId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID and branch ID are required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can upload customer documents.' } };
+    }
+
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      return { data: null, error: { code: 'INVALID_FILE_TYPE', message: 'Only PDF, Word documents, JPEG, PNG, and WebP files are allowed.' } };
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return { data: null, error: { code: 'FILE_TOO_LARGE', message: 'File must be less than 10MB.' } };
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const storedName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `customers/${customerId}/documents/${storedName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('service-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('service-images').getPublicUrl(filePath);
+
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .insert({ customer_id: customerId, branch_id: branchId, file_url: publicUrl, file_name: file.name, uploaded_by: profile.id })
+      .select('id, customer_id, file_url, file_name, uploaded_by, created_at')
+      .single();
+    if (error) throw error;
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] uploadCustomerDocument error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchCustomerDocuments(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .select('id, customer_id, file_url, file_name, uploaded_by, created_at')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('[API] fetchCustomerDocuments error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deleteCustomerDocument(documentId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customer documents.' } };
+    }
+
+    const { error } = await supabase.from('customer_documents').delete().eq('id', documentId);
+    if (error) throw error;
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCustomerDocument error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Combo bundle membership (migration-288/289) — which services make up a combo
+// service, plus the per-component defaults (default_timing: does this component
+// start alongside the previous one or only after it ends; default_same_staff:
+// prefill the booking's primary therapist for this component, or require picking
+// a separate one) the booking flow uses to prefill `booking_combo_items` rows.
+export async function fetchServiceComboComponents(serviceId) {
+  try {
+    if (!serviceId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('combo_package_components')
+      .select('id, service_id, display_order, default_timing, default_same_staff, default_same_room, service:services!combo_package_components_service_id_fkey ( id, name, duration_minutes, price_npr )')
+      .eq('combo_service_id', serviceId)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        componentId: r.id,
+        serviceId: r.service_id,
+        displayOrder: r.display_order,
+        defaultTiming: r.default_timing,
+        defaultSameStaff: r.default_same_staff,
+        defaultSameRoom: r.default_same_room,
+        service: r.service ? { id: r.service.id, name: r.service.name, durationMinutes: r.service.duration_minutes, priceNpr: Number(r.service.price_npr) } : null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchServiceComboComponents error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Creates the per-component booking_combo_items rows for a combo booking, once the
+// parent `bookings` row already exists (createBooking is used unmodified for that —
+// the combo service's own flat duration_minutes/price still covers the whole slot;
+// this just records which staff/time each bundled service actually gets, matching
+// migration-288's schema). Computes each component's start offset anchored at the
+// booking's own startTime, using the identical "concurrent starts alongside the
+// previous component, sequential starts once everything so far has finished" rule
+// the Service Detail page previews (see service-detail/index.jsx's schedule calc) —
+// keep both in sync if that algorithm ever changes.
+// components: [{ serviceId, componentId, defaultTiming, therapistId }] — therapistId
+// already resolved by the caller (same as the booking's primary therapist, or a
+// staff-picked override for a "different staff" component).
+//
+// orgSlug: pass this when calling from the anon/online booking flow (same convention
+// as createBooking's own orgSlug param) — an anonymous customer has no `users` row,
+// so getAuthenticatedUser() would always fail for them, and booking_combo_items has
+// no anon INSERT policy anyway (migration-288 only grants staff org-scoped access).
+// The orgSlug branch skips the staff-auth check and routes the actual insert through
+// public_create_combo_booking_items (migration-310), a narrow SECURITY DEFINER RPC
+// scoped to bookings created anonymously — everything else (offset/duration
+// computation) is identical between the two paths.
+export async function createComboBookingItems({ bookingId, branchId, date, startTime, roomId, components, orgSlug }) {
+  try {
+    if (!orgSlug) {
+      const { error: authError } = await getAuthenticatedUser();
+      if (authError) return { data: null, error: authError };
+    }
+
+    if (!bookingId) return { data: null, error: { code: 'INVALID_INPUT', message: 'bookingId is required.' } };
+    if (!components || components.length === 0) return { data: [], error: null };
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    // Need each component service's duration to compute offsets.
+    const serviceIds = components.map((c) => c.serviceId);
+    const { data: serviceRows, error: serviceError } = await supabase
+      .from('services')
+      .select('id, duration_minutes')
+      .in('id', serviceIds);
+    if (serviceError) throw serviceError;
+    const durationById = {};
+    (serviceRows || []).forEach((s) => { durationById[s.id] = s.duration_minutes; });
+
+    const [startH, startM] = startTime.split(':').map(Number);
+    let cursor = 0;
+    let previousStart = 0;
+    const rows = components.map((c, index) => {
+      const duration = durationById[c.serviceId] || 0;
+      const offset = c.defaultTiming === 'concurrent' ? previousStart : cursor;
+      const end = offset + duration;
+      cursor = Math.max(cursor, end);
+      previousStart = offset;
+
+      const totalMinutes = startH * 60 + startM + offset;
+      const compStartTime = `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}:00`;
+
+      return {
+        booking_id: bookingId,
+        component_id: c.componentId || null,
+        service_id: c.serviceId,
+        therapist_id: c.therapistId || null,
+        room_id: c.roomId || roomId || null,
+        display_order: index,
+        date,
+        start_time: compStartTime,
+        commission_weight: 1,
+        base_share_amount: 0,
+      };
+    });
+
+    if (orgSlug) {
+      const { data, error } = await supabase.rpc('public_create_combo_booking_items', {
+        p_booking_id: bookingId,
+        p_items: rows.map((r) => ({
+          component_id: r.component_id,
+          service_id: r.service_id,
+          therapist_id: r.therapist_id,
+          room_id: r.room_id,
+          display_order: r.display_order,
+          date: r.date,
+          start_time: r.start_time,
+        })),
+      });
+      if (error) throw error;
+      return { data, error: null };
+    }
+
+    const { data, error } = await supabase
+      .from('booking_combo_items')
+      .insert(rows)
+      .select('id, service_id, therapist_id, room_id, start_time, end_time');
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createComboBookingItems error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Atomic replace of a combo service's component list. Delegates to
+// set_service_combo_components (migration-289), mirroring setServiceTherapists.
+// components: [{ serviceId, displayOrder, defaultTiming, defaultSameStaff, defaultSameRoom }]
+export async function setServiceComboComponents(comboServiceId, components) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const payload = (components || []).map((c, index) => ({
+      service_id: c.serviceId,
+      display_order: c.displayOrder != null ? c.displayOrder : index,
+      default_timing: c.defaultTiming || 'sequential',
+      default_same_staff: c.defaultSameStaff !== false,
+      default_same_room: c.defaultSameRoom !== false,
+    }));
+
+    const { data, error } = await supabase.rpc('set_service_combo_components', {
+      p_combo_service_id: comboServiceId,
+      p_components: payload,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setServiceComboComponents error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Which other services are offered as add-ons alongside this one (migration-291/292).
+// Only services flagged is_addon=true are valid candidates — enforced by the UI's
+// candidate list, not by this read.
+export async function fetchServiceAddons(serviceId) {
+  try {
+    if (!serviceId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('service_addons')
+      .select('addon_service_id, display_order')
+      .eq('service_id', serviceId)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    return { data: (data || []).map((r) => r.addon_service_id), error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceAddons error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function setServiceAddons(serviceId, addonServiceIds) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase.rpc('set_service_addons', {
+      p_service_id: serviceId,
+      p_addon_service_ids: addonServiceIds || [],
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setServiceAddons error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -7514,13 +8759,20 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         image_url: imageUrl || null,
         category: category || 'Spa',
         is_couple: !!isCouple,
+        is_combo: !!isCombo,
         is_active: true,
         org_id: profile.org_id,
         offer_enabled: isOfferEnabled,
         offer_type: isOfferEnabled ? offerType : null,
         offer_value: isOfferEnabled ? offerValue : null,
+        bookable_online: bookableOnline !== undefined ? !!bookableOnline : true,
+        is_addon: !!isAddon,
+        padding_before_minutes: paddingBeforeMinutes || 0,
+        padding_after_minutes: paddingAfterMinutes || 0,
+        padding_after_type: paddingAfterType || 'padding',
+        requires_therapist: requiresTherapist !== undefined ? !!requiresTherapist : true,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, created_at, offer_enabled, offer_type, offer_value')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) throw error;
@@ -7531,7 +8783,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, offerEnabled, offerType, offerValue }) {
+export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -7553,12 +8805,19 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
     if (category !== undefined) updatePayload.category = category;
     if (isCouple !== undefined) updatePayload.is_couple = !!isCouple;
+    if (isCombo !== undefined) updatePayload.is_combo = !!isCombo;
     if (offerEnabled !== undefined) {
       const isOfferEnabled = !!offerEnabled;
       updatePayload.offer_enabled = isOfferEnabled;
       updatePayload.offer_type = isOfferEnabled ? offerType : null;
       updatePayload.offer_value = isOfferEnabled ? offerValue : null;
     }
+    if (bookableOnline !== undefined) updatePayload.bookable_online = !!bookableOnline;
+    if (isAddon !== undefined) updatePayload.is_addon = !!isAddon;
+    if (paddingBeforeMinutes !== undefined) updatePayload.padding_before_minutes = paddingBeforeMinutes || 0;
+    if (paddingAfterMinutes !== undefined) updatePayload.padding_after_minutes = paddingAfterMinutes || 0;
+    if (paddingAfterType !== undefined) updatePayload.padding_after_type = paddingAfterType || 'padding';
+    if (requiresTherapist !== undefined) updatePayload.requires_therapist = !!requiresTherapist;
 
     if (Object.keys(updatePayload).length === 0) {
       return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
@@ -7569,7 +8828,7 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) {
@@ -8196,6 +9455,39 @@ export async function fetchCustomersLightweight(branchId) {
   }
 }
 
+// Change-history for the customer-detail Log tab. Reads audit_logs rows written
+// by the trg_audit_customer_changes trigger (migration-297) — UPDATE/DELETE on
+// customers (profile edits, block/unblock via is_active, merge coalesce) plus
+// the explicit MERGE marker merge_customers() inserts. RLS already scopes this
+// to manager/admin/admin_viewer within their own org (audit_logs' existing
+// policies) — a staff viewer gets an empty result, not an error.
+export async function fetchCustomerLog(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('id, action_type, old_data, new_data, changed_at, changed_by, actor:users!changed_by(full_name)')
+      .eq('table_name', 'customers')
+      .eq('record_id', customerId)
+      .order('changed_at', { ascending: false });
+    if (error) throw error;
+    return {
+      data: (data || []).map((r) => ({
+        id: r.id,
+        actionType: r.action_type,
+        oldData: r.old_data,
+        newData: r.new_data,
+        changedAt: r.changed_at,
+        actorName: r.actor?.full_name || null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchCustomerLog error:', error.message);
+    return { data: null, error };
+  }
+}
+
 export async function fetchCustomerProfile(customerId) {
   try {
     if (!customerId) {
@@ -8205,7 +9497,7 @@ export async function fetchCustomerProfile(customerId) {
     // 1. Fetch customer record
     const { data: customer, error: custError } = await supabase
       .from('customers')
-      .select('id, branch_id, full_name, phone, email, notes, is_active, created_at')
+      .select('id, branch_id, full_name, phone, email, notes, is_active, created_at, client_source, referred_by, preferred_language, country, occupation, additional_email, additional_phone, gender, pronouns, date_of_birth, tags')
       .eq('id', customerId)
       .single();
 
@@ -8221,7 +9513,7 @@ export async function fetchCustomerProfile(customerId) {
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select(`
-        booking_number, date, status, payment_status,
+        id, booking_number, date, start_time, status, payment_status,
         final_amount, discount_amount,
         service_name_snapshot, therapist_name_snapshot,
         is_locked
@@ -8311,10 +9603,34 @@ export async function fetchCustomerProfile(customerId) {
       }
     }
 
-    // 5. Build history list
-    const history = all.map(b => ({
+    // 4b. Amount owing (unpaid bookings) + last/next appointment, for the
+    // Timely-style Summary tab — no extra query, `all` is already sorted by
+    // date descending.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let amountOwing = 0;
+    for (const b of all) {
+      if (b.payment_status !== 'paid') amountOwing += Number(b.final_amount);
+    }
+    const toAppointmentSummary = (b) => b ? {
+      bookingId: b.id,
       bookingNumber: b.booking_number,
       date: b.date,
+      startTime: b.start_time,
+      serviceName: b.service_name_snapshot || '—',
+      therapistName: b.therapist_name_snapshot || 'Unassigned',
+      status: b.status,
+    } : null;
+    const pastBookings = all.filter(b => b.date <= todayStr);
+    const futureBookings = all.filter(b => b.date > todayStr && !['Cancelled', 'No Show'].includes(b.status));
+    const lastAppointment = toAppointmentSummary(pastBookings[0]);
+    const nextAppointment = toAppointmentSummary(futureBookings[futureBookings.length - 1]);
+
+    // 5. Build history list
+    const history = all.map(b => ({
+      bookingId: b.id,
+      bookingNumber: b.booking_number,
+      date: b.date,
+      startTime: b.start_time,
       serviceName: b.service_name_snapshot || '—',
       therapistName: b.therapist_name_snapshot || 'Unassigned',
       finalAmount: Number(b.final_amount),
@@ -8328,12 +9644,24 @@ export async function fetchCustomerProfile(customerId) {
       data: {
         customer: {
           id: customer.id,
+          branchId: customer.branch_id,
           fullName: customer.full_name,
           phone: customer.phone,
           email: customer.email,
           notes: customer.notes,
           isActive: customer.is_active,
           createdAt: customer.created_at,
+          clientSource: customer.client_source,
+          referredBy: customer.referred_by,
+          preferredLanguage: customer.preferred_language,
+          country: customer.country,
+          occupation: customer.occupation,
+          additionalEmail: customer.additional_email,
+          additionalPhone: customer.additional_phone,
+          gender: customer.gender,
+          pronouns: customer.pronouns,
+          dateOfBirth: customer.date_of_birth,
+          tags: customer.tags || [],
         },
         stats: {
           totalVisits,
@@ -8345,9 +9673,12 @@ export async function fetchCustomerProfile(customerId) {
           unpaidCount,
           mostBookedService,
           loyaltyTier,
+          amountOwing,
         },
         membership,
         history,
+        lastAppointment,
+        nextAppointment,
       },
       error: null,
     };
@@ -8382,6 +9713,107 @@ export async function updateCustomerContact(customerId, { email = null, phone = 
     if (error.code === '23505') {
       return { data: null, error: { code: 'DUPLICATE_PHONE', message: 'This phone number is already in use by another customer.' } };
     }
+    return { data: null, error };
+  }
+}
+
+// Staff-facing "Block" action on the customer detail page — toggles the
+// same is_active flag every customer list already filters on
+// (fetchCustomersLightweight etc.), so a blocked customer stops surfacing
+// in search/autocomplete but keeps their full booking/payment history
+// intact. Reversible (call again with isActive: true to unblock).
+export async function setCustomerActive(customerId, isActive) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can block customers.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update({ is_active: isActive })
+      .eq('id', customerId)
+      .select('id, is_active')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] setCustomerActive error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-facing "Delete" action — a plain row delete, deliberately not a
+// soft-delete/RPC. customers has no ON DELETE CASCADE from bookings (or
+// memberships/packages/vouchers), so Postgres rejects this with a foreign-
+// key violation (23503) for any customer with real history — caught below
+// and turned into a message pointing at Block instead. Only succeeds for a
+// customer with zero history (e.g. an accidental duplicate entry), which is
+// the only case this is actually safe.
+export async function deleteCustomer(customerId) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete customers.' } };
+    }
+
+    const { error } = await supabase.from('customers').delete().eq('id', customerId);
+    if (error) {
+      if (error.code === '23503') {
+        return { data: null, error: { code: 'HAS_HISTORY', message: "This customer has bookings or other records and can't be deleted. Use Block instead." } };
+      }
+      throw error;
+    }
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deleteCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Staff-side: edit the Fresha-style extra profile fields (source, referral,
+// language, country, occupation, additional contact, gender, pronouns, DOB,
+// free-text tags). Plain table update under the existing row-level RLS —
+// unlike updateCustomerContact, these fields have no customer_accounts
+// email-linking behavior, so no RPC is needed.
+export async function updateCustomerProfileDetails(customerId, {
+  clientSource, referredBy, preferredLanguage, country, occupation,
+  additionalEmail, additionalPhone, gender, pronouns, dateOfBirth, tags, notes,
+} = {}) {
+  try {
+    if (!customerId) return { data: null, error: { code: 'CUSTOMER_REQUIRED', message: 'Customer ID is required.' } };
+
+    const updatePayload = {};
+    if (clientSource !== undefined) updatePayload.client_source = clientSource || null;
+    if (referredBy !== undefined) updatePayload.referred_by = referredBy || null;
+    if (preferredLanguage !== undefined) updatePayload.preferred_language = preferredLanguage || null;
+    if (country !== undefined) updatePayload.country = country || null;
+    if (occupation !== undefined) updatePayload.occupation = occupation || null;
+    if (additionalEmail !== undefined) updatePayload.additional_email = additionalEmail || null;
+    if (additionalPhone !== undefined) updatePayload.additional_phone = additionalPhone || null;
+    if (gender !== undefined) updatePayload.gender = gender || null;
+    if (pronouns !== undefined) updatePayload.pronouns = pronouns || null;
+    if (dateOfBirth !== undefined) updatePayload.date_of_birth = dateOfBirth || null;
+    if (tags !== undefined) updatePayload.tags = tags || [];
+    if (notes !== undefined) updatePayload.notes = notes || null;
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update(updatePayload)
+      .eq('id', customerId)
+      .select('id, client_source, referred_by, preferred_language, country, occupation, additional_email, additional_phone, gender, pronouns, date_of_birth, tags, notes')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateCustomerProfileDetails error:', error.message);
     return { data: null, error };
   }
 }
@@ -9966,7 +11398,9 @@ export async function fetchBranchesByOrgId(orgId) {
   try {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url')
+      // online_booking_capacity feeds DateTimeSelection's slot graying (migration-301) —
+      // it's the same cap check_branch_online_capacity() enforces at insert time.
+      .select('id, name, address, phone, is_active, open_time, close_time, maps_url, photo_url, online_booking_capacity, advance_booking_days')
       .eq('org_id', orgId)
       .eq('is_active', true)
       .order('name');
@@ -9975,6 +11409,262 @@ export async function fetchBranchesByOrgId(orgId) {
     return { data, error: null };
   } catch (error) {
     console.error('[API] fetchBranchesByOrgId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Per-branch cap on concurrent anonymous online bookings
+ * (branches.online_booking_capacity, migration-138; enforced by the
+ * check_branch_online_capacity() trigger). null = no cap.
+ */
+export async function fetchBranchOnlineCapacity(branchId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, online_booking_capacity')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchOnlineCapacity error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for the cap. Goes through an RPC, not a plain .update():
+ * `branches` has RLS enabled with SELECT-only policies, so a direct update would
+ * silently affect zero rows and report success. Pass null to clear the cap (uncapped).
+ */
+export async function updateBranchOnlineCapacity(branchId, capacity) {
+  try {
+    const { error } = await supabase.rpc('update_branch_online_capacity', {
+      p_branch_id: resolveBranchId(branchId),
+      p_capacity: capacity === null || capacity === '' ? null : Number(capacity),
+    });
+    if (error) throw error;
+    return { data: { capacity }, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchOnlineCapacity error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * How many days ahead customers can book online for this branch
+ * (branches.advance_booking_days, migration-303). null = unset, defers to the
+ * 30-day default enforced by check_branch_advance_booking_window().
+ */
+export async function fetchBranchAdvanceBookingWindow(branchId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, advance_booking_days')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchAdvanceBookingWindow error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for the window. Goes through an RPC, not a plain .update():
+ * `branches` has RLS enabled with SELECT-only policies, so a direct update would
+ * silently affect zero rows. Pass null to clear back to the 30-day default.
+ */
+export async function updateBranchAdvanceBookingWindow(branchId, days) {
+  try {
+    const { error } = await supabase.rpc('update_branch_advance_booking_window', {
+      p_branch_id: resolveBranchId(branchId),
+      p_days: days === null || days === '' ? null : Number(days),
+    });
+    if (error) throw error;
+    return { data: { days }, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchAdvanceBookingWindow error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Branch storefront photo (branches.photo_url) — shown on BranchGate's multi-branch
+ * picker tile for the customer booking flow. Falls back to a generic icon tile when empty.
+ */
+export async function fetchBranchPhoto(branchId) {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, photo_url')
+      .eq('id', resolveBranchId(branchId))
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for the branch photo. Goes through an RPC, not a plain
+ * .update(): `branches` has RLS enabled with SELECT-only policies (see
+ * update_branch_online_capacity's comment, migration-301), so a direct update would
+ * silently affect zero rows and report success. Pass null/'' to clear the photo.
+ */
+export async function updateBranchPhoto(branchId, photoUrl) {
+  try {
+    const { error } = await supabase.rpc('update_branch_photo', {
+      p_branch_id: resolveBranchId(branchId),
+      p_photo_url: photoUrl || null,
+    });
+    if (error) throw error;
+    return { data: { photoUrl: photoUrl || null }, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchPhoto error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * All branches for an org (admin Locations management — includes inactive branches,
+ * unlike fetchBranchesByOrgId which is the customer-facing active-only list).
+ */
+export async function fetchBranchesForManagement(orgId) {
+  try {
+    if (!orgId) return { data: null, error: { code: 'ORG_REQUIRED', message: 'Organization ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, address, phone, maps_url, is_active, open_time, close_time, online_booking_capacity, advance_booking_days')
+      .eq('org_id', orgId)
+      .order('name');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchesForManagement error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only creation of a new branch. Goes through an RPC, not a plain .insert():
+ * `branches` has RLS enabled with SELECT-only policies, so a direct insert would be
+ * rejected outright (migration-308).
+ */
+export async function createBranch({ name, address, phone, mapsUrl }) {
+  try {
+    const { data, error } = await supabase.rpc('create_branch', {
+      p_name: name,
+      p_address: address || null,
+      p_phone: phone || null,
+      p_maps_url: mapsUrl || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createBranch error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Admin-only write path for name/address/phone/maps_url. Does NOT touch
+ * online_booking_capacity/advance_booking_days/photo_url — those keep their own
+ * dedicated RPCs (updateBranchOnlineCapacity/updateBranchAdvanceBookingWindow/
+ * updateBranchPhoto). Goes through an RPC for the same RLS reason as createBranch.
+ */
+export async function updateBranchDetails({ branchId, name, address, phone, mapsUrl }) {
+  try {
+    const { data, error } = await supabase.rpc('update_branch_details', {
+      p_branch_id: resolveBranchId(branchId),
+      p_name: name,
+      p_address: address || null,
+      p_phone: phone || null,
+      p_maps_url: mapsUrl || null,
+    });
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateBranchDetails error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * A branch's recurring weekly opening hours (branch_working_hours, migration-308).
+ * Mirrors fetchTherapistWorkingHours' shape (one row per weekday, defaulting to a day
+ * off when unset) but for the branch itself rather than a therapist, and with no breaks
+ * concept — branch_working_hours has no sibling breaks table.
+ */
+export async function fetchBranchOpeningHours(branchId) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+
+    const { data, error } = await supabase
+      .from('branch_working_hours')
+      .select('day_of_week, start_time, end_time, is_day_off')
+      .eq('branch_id', resolveBranchId(branchId))
+      .order('day_of_week');
+
+    if (error) throw error;
+
+    const byDay = new Map((data || []).map(row => [row.day_of_week, row]));
+    const normalized = WORKING_HOURS_DAY_LABELS.map((label, dayOfWeek) => {
+      const row = byDay.get(dayOfWeek);
+      return row
+        ? { dayOfWeek, dayLabel: label, startTime: row.start_time, endTime: row.end_time, isDayOff: row.is_day_off }
+        : { dayOfWeek, dayLabel: label, startTime: null, endTime: null, isDayOff: true };
+    });
+
+    return { data: normalized, error: null };
+  } catch (error) {
+    console.error('[API] fetchBranchOpeningHours error:', error.message);
+    return { data: null, error };
+  }
+}
+
+/**
+ * rows: [{ dayOfWeek, startTime, endTime, isDayOff }, ...] — one per weekday.
+ * Direct .upsert() against branch_working_hours (normal RLS, admin-gated — no RPC
+ * needed, matching upsertTherapistWorkingHours' precedent of writing straight to its
+ * child table rather than routing through a scalar-field RPC).
+ */
+export async function upsertBranchOpeningHours(branchId, rows) {
+  try {
+    if (!branchId) return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Branch ID is required.' } };
+
+    const resolvedBranchId = resolveBranchId(branchId);
+
+    for (const row of rows) {
+      const label = WORKING_HOURS_DAY_LABELS[row.dayOfWeek];
+      if (!row.isDayOff && (!row.startTime || !row.endTime || row.startTime >= row.endTime)) {
+        return { data: null, error: { code: 'INVALID_HOURS', message: `${label}: start time must be before end time.` } };
+      }
+    }
+
+    const payload = rows.map(row => ({
+      branch_id: resolvedBranchId,
+      day_of_week: row.dayOfWeek,
+      start_time: row.isDayOff ? null : row.startTime,
+      end_time: row.isDayOff ? null : row.endTime,
+      is_day_off: !!row.isDayOff,
+    }));
+
+    const { data, error } = await supabase
+      .from('branch_working_hours')
+      .upsert(payload, { onConflict: 'branch_id,day_of_week' })
+      .select('day_of_week, start_time, end_time, is_day_off');
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] upsertBranchOpeningHours error:', error.message);
     return { data: null, error };
   }
 }
@@ -10043,6 +11733,7 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       is_on_offer: s.is_on_offer,
       original_price_npr: s.original_price_npr,
       active_campaign_name: s.active_campaign_name,
+      is_combo: s.is_combo,
     }));
 
     if (branchId) {
@@ -10055,9 +11746,6 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       if (excluded?.length > 0) {
         filtered = filtered.filter((s) => !excluded.includes(s.category));
       }
-    }
-
-    if (branchId) {
       filtered = await filterServicesByBranchScope(filtered, branchId);
     }
 
@@ -10072,8 +11760,14 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
  * Fetch bookable staff for the provider-profile "Select professional" step
  * (public_get_bookable_therapists, migration-252) — org-scoped (the raw anon RLS
  * policy on `therapists` is not) and allow-list-aware when p_service_id is passed.
+ *
+ * forGroupBooking (migration-305) bypasses the tenant's show_staff_selection=true
+ * requirement server-side: that flag only governs whether a SOLO customer is offered
+ * a staff-picker on the profile page, unrelated to group booking's need for the same
+ * roster to compute per-person availability. Defaults to false so every existing
+ * (solo-flow) caller is unaffected.
  */
-export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
+export async function fetchBookableTherapists(orgSlug, branchId, serviceIds, forGroupBooking = false) {
   try {
     // Accepts one id or an array — a multi-service visit is covered by a single
     // professional, so the roster must be narrowed to staff eligible for every
@@ -10086,6 +11780,7 @@ export async function fetchBookableTherapists(orgSlug, branchId, serviceIds) {
       p_org_slug: orgSlug,
       p_branch_id: branchId,
       p_service_ids: ids.length > 0 ? ids : null,
+      p_for_group_booking: forGroupBooking,
     });
 
     if (error) throw error;
@@ -12244,6 +13939,65 @@ export async function fetchVoucherWallets() {
   }
 }
 
+// Staff-facing "Gift Vouchers" tab on the customer detail page — every
+// voucher issued to this specific customer (not just wallet-type, unlike
+// fetchVoucherWallets), via the real vouchers.customer_id column.
+export async function fetchVouchersForCustomer(customerId) {
+  try {
+    if (!customerId) return { data: [], error: null };
+
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data: vouchers, error: vouchersError } = await supabase
+      .from('vouchers')
+      .select(`
+        id, voucher_code, issued_date, expiry_date, guest_name, guest_info,
+        total_amount_issued, remarks,
+        branch:branches ( id, name ),
+        voucher_type:voucher_types ( id, name, is_wallet ),
+        issuer:users!issued_by ( id, full_name )
+      `)
+      .eq('customer_id', customerId)
+      .order('issued_date', { ascending: false });
+    if (vouchersError) throw vouchersError;
+    if (!vouchers || vouchers.length === 0) return { data: [], error: null };
+
+    const { data: balances, error: balancesError } = await supabase
+      .from('voucher_balances')
+      .select('voucher_id, total_claimed, remaining_balance, status, last_claim_date')
+      .in('voucher_id', vouchers.map((v) => v.id));
+    if (balancesError) throw balancesError;
+
+    const balanceByVoucher = new Map((balances || []).map((b) => [b.voucher_id, b]));
+
+    const rows = vouchers.map((v) => {
+      const balance = balanceByVoucher.get(v.id) || {};
+      return {
+        id: v.id,
+        voucherCode: v.voucher_code,
+        voucherTypeName: v.voucher_type?.name || '—',
+        issuedDate: v.issued_date,
+        expiryDate: v.expiry_date,
+        issuedBranchName: v.branch?.name || '—',
+        issuedByName: v.issuer?.full_name || '—',
+        totalAmountIssued: Number(v.total_amount_issued || 0),
+        totalClaimed: Number(balance.total_claimed || 0),
+        remainingBalance: balance.remaining_balance != null
+          ? Number(balance.remaining_balance)
+          : Number(v.total_amount_issued || 0),
+        status: balance.status || 'unused',
+        lastClaimDate: balance.last_claim_date || null,
+      };
+    });
+
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchVouchersForCustomer error:', error.message);
+    return { data: null, error };
+  }
+}
+
 // ============================================================
 // SERVICE PACKAGES (migration-141) — manager/admin issue; staff/manager/
 // admin can read (redemption is a staff-facing action). Mirrors the
@@ -12396,25 +14150,28 @@ export async function issuePackage({
 // Packages joined with their live balance (from the package_balances view,
 // computed from package_redemptions — not stored). Sorted alphabetically by
 // guest name, same as fetchVouchers.
-export async function fetchPackages() {
+export async function fetchPackages(customerId) {
   try {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
+    let packagesQuery = supabase
+      .from('packages')
+      .select(`
+        id, package_code, issued_date, expiry_date, guest_name, guest_info,
+        paid_amount, sessions_total, remarks, created_at,
+        base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
+        branch:branches ( id, name ),
+        package_type:package_types ( id, name ),
+        service:services ( id, name, duration_minutes ),
+        issuer:users!issued_by ( id, full_name ),
+        customer:customers ( id, full_name, phone )
+      `)
+      .order('guest_name', { ascending: true });
+    if (customerId) packagesQuery = packagesQuery.eq('customer_id', customerId);
+
     const [packagesRes, balancesRes] = await Promise.all([
-      supabase
-        .from('packages')
-        .select(`
-          id, package_code, issued_date, expiry_date, guest_name, guest_info,
-          paid_amount, sessions_total, remarks, created_at,
-          base_amount, discount_type, discount_value, discount_amount, final_amount, due_holder_name, payment_method,
-          branch:branches ( id, name ),
-          package_type:package_types ( id, name ),
-          service:services ( id, name, duration_minutes ),
-          issuer:users!issued_by ( id, full_name ),
-          customer:customers ( id, full_name, phone )
-        `)
-        .order('guest_name', { ascending: true }),
+      packagesQuery,
       supabase
         .from('package_balances')
         .select('package_id, sessions_used, sessions_remaining, status, last_redeemed_date'),
@@ -12465,6 +14222,13 @@ export async function fetchPackages() {
     console.error('[API] fetchPackages error:', error.message);
     return { data: null, error };
   }
+}
+
+// Staff-facing "Packages" tab on the customer detail page — this specific
+// customer's packages, via the real packages.customer_id column.
+export async function fetchPackagesForCustomer(customerId) {
+  if (!customerId) return { data: [], error: null };
+  return fetchPackages(customerId);
 }
 
 // Single package + its live balance, for the detail modal.
@@ -14388,6 +16152,40 @@ export async function correctPaymentMode({ paymentId, newMode, reason }) {
     return { data: { auditLogId: data }, error: null };
   } catch (error) {
     console.error('[API] correctPaymentMode error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Admin-only correction of a recorded payment's amount (migration-283). Same
+// shape/guards as correctPaymentMode above — payments has no UPDATE RLS
+// policy at all, so this is the only path past that immutability.
+export async function correctPaymentAmount({ paymentId, newAmount, reason }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    if (profile?.role !== 'admin') {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only an admin can correct a payment amount.' } };
+    }
+    if (!reason || reason.trim().length < CORRECTION_REASON_MIN) {
+      return { data: null, error: { code: 'REASON_REQUIRED', message: `A reason of at least ${CORRECTION_REASON_MIN} characters is required.` } };
+    }
+    const parsed = Number(newAmount);
+    if (newAmount === '' || newAmount === null || Number.isNaN(parsed) || parsed < 0) {
+      return { data: null, error: { code: 'AMOUNT_REQUIRED', message: 'A valid new amount is required.' } };
+    }
+
+    const { data, error } = await supabase.rpc('admin_correct_payment_amount', {
+      p_payment_id: paymentId,
+      p_new_amount: parsed,
+      p_reason: reason.trim(),
+    });
+    if (error) throw error;
+
+    capture('admin_payment_amount_corrected', { payment_id: paymentId, new_amount: parsed });
+    return { data: { auditLogId: data }, error: null };
+  } catch (error) {
+    console.error('[API] correctPaymentAmount error:', error.message);
     return { data: null, error };
   }
 }

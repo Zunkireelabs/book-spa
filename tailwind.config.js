@@ -100,6 +100,7 @@ module.exports = {
           'fade-in': 'fadeIn 200ms cubic-bezier(0.4, 0, 0.2, 1)',
           'slide-in': 'slideIn 300ms cubic-bezier(0.4, 0, 0.2, 1)',
           'slide-in-right': 'slideInRight 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+          'settle-in': 'settleIn 380ms cubic-bezier(0.34, 1.56, 0.64, 1)',
         },
         keyframes: {
           fadeIn: {
@@ -113,6 +114,11 @@ module.exports = {
           slideInRight: {
             '0%': { transform: 'translateX(100%)' },
             '100%': { transform: 'translateX(0)' },
+          },
+          settleIn: {
+            '0%': { transform: 'scale(0.9) translateX(-6px)', opacity: '0' },
+            '60%': { transform: 'scale(1.015) translateX(1px)', opacity: '1' },
+            '100%': { transform: 'scale(1) translateX(0)', opacity: '1' },
           },
         },
       },

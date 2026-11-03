@@ -54,7 +54,17 @@ const ServiceCard = ({ service, isSelected, onClick }) => (
 // instead of thousands of pixels down below all ~53 services. "See all" swaps in the
 // full grouped UI below, permanently (Fresha has no re-collapse either — yanking content
 // out from under a mid-scroll user would be worse than leaving it expanded).
-const ServicesSection = ({ services, selectedServices, onServiceToggle }) => {
+// scrollSpyOffset mirrors stickyTop: 246 = 65 (CustomerHeader) + the sticky search+pill
+// block's own height — when a caller passes stickyTop="0" (no real header above this
+// instance), the trigger line must drop by that same 65px or category highlighting
+// fires ~65px early.
+const ServicesSection = ({
+  services,
+  selectedServices,
+  onServiceToggle,
+  stickyTop = 'var(--customer-header-h,64px)',
+  scrollSpyOffset = 246,
+}) => {
   const isSelected = (service) => selectedServices.some((s) => s.id === service.id);
 
   const [expanded, setExpanded] = useState(false);
@@ -84,7 +94,7 @@ const ServicesSection = ({ services, selectedServices, onServiceToggle }) => {
 
   const sectionRefs = useRef({});
   const ids = useMemo(() => groups.map((g) => g.name), [groups]);
-  const { activeId, scrollTo, barRef, registerPill } = useScrollSpy(ids, sectionRefs, { offset: 246 });
+  const { activeId, scrollTo, barRef, registerPill } = useScrollSpy(ids, sectionRefs, { offset: scrollSpyOffset });
 
   const searching = search.trim().length > 0;
   const filtered = useMemo(() => {
@@ -126,7 +136,7 @@ const ServicesSection = ({ services, selectedServices, onServiceToggle }) => {
         </>
       ) : (
         <>
-          <div className="sticky top-[var(--customer-header-h,64px)] z-sticky-filter bg-[var(--zn-background)] pt-1 pb-4 mb-1 border-b border-[var(--zn-border)] space-y-3">
+          <div style={{ top: stickyTop }} className="sticky z-sticky-filter bg-[var(--zn-background)] pt-1 pb-4 mb-1 border-b border-[var(--zn-border)] space-y-3">
             <div className="relative">
               <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--zn-muted-foreground)]" />
               <input

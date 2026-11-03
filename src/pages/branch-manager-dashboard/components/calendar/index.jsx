@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, pointerWithin } from '@dnd-kit/core';
 import Icon from '../../../../components/AppIcon';
 import BookingActionModal from '../../../../components/ui/BookingActionModal';
 import MiniMonthCalendar from './MiniMonthCalendar';
-import CalendarGrid, { HOUR_HEIGHT } from './CalendarGrid';
+import CalendarGrid, { HOUR_HEIGHT, MIN_ZOOM, MAX_ZOOM, clampZoom } from './CalendarGrid';
+import { formatHourLabel } from './timeFormat';
+import MonthGridView from './MonthGridView';
+import PrintReportModal from './PrintReportModal';
 import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
 import TransferFromCalendarModal from './TransferFromCalendarModal';
 import AddBlockModal from './AddBlockModal';
@@ -35,6 +38,10 @@ import {
   updateBlock,
   cancelScheduledTransfer,
   revertStaffTransferNow,
+  fetchServiceComboComponents,
+  createComboBookingItems,
+  fetchBranchWorkingHours,
+  fetchRosterOverrides,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -43,6 +50,7 @@ import CustomSelect from '../../../../components/ui/CustomSelect';
 import CountryCodeSelect, { parsePhone } from '../../../../components/ui/CountryCodeSelect';
 import CustomerAutocomplete from '../../../../components/ui/CustomerAutocomplete';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { useOrg } from '../../../../contexts/OrgContext';
 import { CUSTOMER_REFERRALS_ENABLED } from '../../../../lib/featureFlags';
 import { useAutoRefresh } from 'hooks/useAutoRefresh';
 
@@ -71,14 +79,32 @@ function addMonths(dateStr, months) {
   return toLocalISO(d);
 }
 
+// Sunday-first week start for a given date, as a local-date string.
+function startOfWeek(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return addDays(dateStr, -d.getDay());
+}
+
+// First-of-month / last-of-month, padded out to full Sunday-start weeks so a
+// month grid never shows a partial row (matches the reference month view).
+function getMonthGridRange(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const firstOfMonth = toLocalISO(new Date(d.getFullYear(), d.getMonth(), 1));
+  const lastOfMonth = toLocalISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  return { start: startOfWeek(firstOfMonth), end: addDays(startOfWeek(lastOfMonth), 6) };
+}
+
 function formatDateTitle(dateStr, viewMode) {
   const d = new Date(dateStr + 'T00:00:00');
-  if (viewMode === '4day') {
+  if (viewMode === '4day' || viewMode === 'week') {
     const end = new Date(d);
-    end.setDate(end.getDate() + 3);
+    end.setDate(end.getDate() + (viewMode === 'week' ? 6 : 3));
     const startStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
     const endStr = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     return `${startStr} – ${endStr}`;
+  }
+  if (viewMode === 'month') {
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }
   return d.toLocaleDateString('en-US', {
     weekday: 'short',
@@ -92,12 +118,28 @@ function getDateRange(dateStr, viewMode) {
   if (viewMode === '4day') {
     return { start: dateStr, end: addDays(dateStr, 3) };
   }
+  if (viewMode === 'week') {
+    const start = startOfWeek(dateStr);
+    return { start, end: addDays(start, 6) };
+  }
+  if (viewMode === 'month') {
+    return getMonthGridRange(dateStr);
+  }
   return { start: dateStr, end: dateStr };
 }
 
 function getStepDays(viewMode) {
-  return viewMode === '4day' ? 4 : 1;
+  if (viewMode === '4day') return 4;
+  if (viewMode === 'week') return 7;
+  return 1;
 }
+
+const VIEW_MODE_OPTIONS = [
+  { key: 'day', label: 'Day' },
+  { key: '4day', label: '4 Day' },
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+];
 
 const JUMP_OPTIONS = [
   { label: '1 week', unit: 'week', amount: 1 },
@@ -135,6 +177,18 @@ function formatTimeDisplay(time) {
 const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, rooms, bookings = [], onClose, onSubmit, branchId, branchHours }) => {
   const [serviceId, setServiceId] = useState('');
   const isCoupleService = (services || []).find(s => s.id === serviceId)?.is_couple || false;
+  const isComboService = (services || []).find(s => s.id === serviceId)?.is_combo || false;
+  // Combo components for the selected combo service (migration-288): each carries a
+  // default_same_staff — true means it auto-uses the single therapist picked below,
+  // false means staff must pick a separate therapist for that component here.
+  const [comboComponents, setComboComponents] = useState([]);
+  const [comboComponentsLoading, setComboComponentsLoading] = useState(false);
+  const [comboTherapistOverrides, setComboTherapistOverrides] = useState({}); // serviceId -> therapistId
+  const [comboRoomOverrides, setComboRoomOverrides] = useState({}); // serviceId -> roomId
+  // True once every component needs its own staff (none fall back to the generic
+  // Therapist picker below) — drives hiding that picker in favor of the
+  // per-component one, see the Therapist(s) block.
+  const comboAllDifferentStaff = isComboService && comboComponents.length > 0 && comboComponents.every((c) => !c.defaultSameStaff);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
@@ -264,6 +318,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setTherapistRoomOverrides({});
     setCompanionName('');
     setCompanionPhone('');
+    setComboComponents([]);
+    setComboTherapistOverrides({});
+    setComboRoomOverrides({});
     setBookingDate(slotInfo?.day || '');
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
@@ -286,6 +343,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   // Compute which therapists & rooms are busy during the selected time slot
   const selectedService = (services || []).find((s) => s.id === serviceId);
+  // Self-service amenity (sauna/steam/locker, migration-244) — no therapist picker
+  // needed or shown; staff just allocate a room if one applies.
+  const serviceRequiresTherapist = selectedService ? selectedService.requires_therapist !== false : true;
   // Parse room capacity from amenities (e.g., "3 Chair" → 3, "1 Bed" → 1)
   const getRoomCapacity = (room) => {
     if (!room.amenities || room.amenities.length === 0) return 1;
@@ -347,6 +407,25 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
       return () => clearTimeout(timer);
     }
   }, [slotInfo]);
+
+  // Load the selected combo service's component list so staff can see/assign who
+  // does what — only relevant for Individual mode (group/couple services are
+  // blocked from combos at the service-definition level, same as couple-in-group).
+  useEffect(() => {
+    if (!isComboService || !serviceId || bookingMode !== 'individual') {
+      setComboComponents([]);
+      return;
+    }
+    let cancelled = false;
+    setComboComponentsLoading(true);
+    (async () => {
+      const { data } = await fetchServiceComboComponents(serviceId);
+      if (cancelled) return;
+      setComboComponents(data || []);
+      setComboComponentsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [isComboService, serviceId, bookingMode]);
 
   // How many people the group has (Couple is always 2)
   const peopleCount = bookingMode === 'group'
@@ -525,6 +604,17 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
             : undefined,
           companionName: isCoupleService && selectedTherapistIds.length > 1 ? (companionName.trim() || null) : undefined,
           companionPhone: isCoupleService && selectedTherapistIds.length > 1 ? (companionPhone.trim() || null) : undefined,
+          // Combo bundle (migration-288): each component's own service/timing/staff, so
+          // the parent can insert booking_combo_items once the booking itself exists.
+          comboAssignments: isComboService && comboComponents.length > 0
+            ? comboComponents.map((c) => ({
+                serviceId: c.serviceId,
+                componentId: c.componentId,
+                defaultTiming: c.defaultTiming,
+                therapistId: c.defaultSameStaff ? (selectedTherapistIds[0] || null) : (comboTherapistOverrides[c.serviceId] || null),
+                roomId: c.defaultSameRoom !== false ? (roomId && roomId !== 'none' ? roomId : null) : (comboRoomOverrides[c.serviceId] || null),
+              }))
+            : undefined,
           bookingDate,
           bookingTime,
           referringCustomerId: (!isExistingCustomer && referringCustomerId) || undefined,
@@ -749,7 +839,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
               </div>
             )}
 
-            {/* Therapist(s) */}
+            {/* Therapist(s) — hidden for a combo whose every component needs its own
+                staff (none use "same staff as above"), since the generic picker below
+                would then go unused and just add a confusing second staff-picking UI
+                on top of the per-component one. Still shown when at least one
+                component reuses this picker's selection. */}
+            {!comboAllDifferentStaff && serviceRequiresTherapist && (
             <div>
               <label className="block font-body font-body-medium text-sm text-text-primary mb-1.5">
                 Therapist{selectedTherapistIds.length > 1 ? 's' : ''}
@@ -803,6 +898,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                 </div>
               </div>
             </div>
+            )}
 
             {/* Couple in separate rooms — surfaced only for a couple-flagged service with 2+
                 therapists selected, not any multi-therapist assignment. */}
@@ -852,6 +948,119 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
                     placeholder="Companion's phone (optional)"
                     className="w-full px-3 py-2 text-sm border border-border rounded-spa bg-surface text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
+                </div>
+              </div>
+            )}
+
+            {/* Combo schedule & staff — shown only for a combo-flagged service once its
+                component list has loaded. Mirrors the Service Detail page's combo
+                schedule preview (same start/end-offset algorithm, kept in sync with
+                createComboBookingItems) so staff see exactly when each component runs,
+                not just who's assigned. Components with defaultSameStaff reuse the
+                primary therapist above and need no picker here. */}
+            {isComboService && (
+              <div className="rounded-spa-lg border border-border bg-surface shadow-spa-resting overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-primary/5 border-b border-border">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <Icon name="Layers" size={13} className="text-primary" />
+                    </div>
+                    <span className="font-body font-body-medium text-sm text-text-primary">Combo schedule &amp; staff</span>
+                  </div>
+                  {comboComponents.length > 0 && (
+                    <span className="font-caption font-caption-medium text-[11px] text-text-secondary bg-surface border border-border rounded-full px-2 py-0.5 flex-shrink-0">
+                      {comboComponents.length} services
+                    </span>
+                  )}
+                </div>
+
+                <div className="px-3.5 py-3">
+                  {comboComponentsLoading ? (
+                    <p className="font-caption font-caption-normal text-xs text-text-secondary py-1">Loading combo services...</p>
+                  ) : comboComponents.length === 0 ? (
+                    <p className="font-caption font-caption-normal text-xs text-text-secondary py-1">No components configured for this combo.</p>
+                  ) : (() => {
+                    // Same offset algorithm as ServiceDetail's preview and
+                    // createComboBookingItems: "concurrent" starts alongside the
+                    // previous component, "sequential" starts once the running
+                    // total so far has finished.
+                    let cursor = 0;
+                    let previousStart = 0;
+                    const [bh, bm] = (bookingTime || '00:00').split(':').map(Number);
+                    const baseMinutes = (Number.isFinite(bh) ? bh : 0) * 60 + (Number.isFinite(bm) ? bm : 0);
+                    const toClock = (offsetMin) => {
+                      const total = ((baseMinutes + offsetMin) % 1440 + 1440) % 1440;
+                      const hh = String(Math.floor(total / 60)).padStart(2, '0');
+                      const mm = String(total % 60).padStart(2, '0');
+                      return format12h(`${hh}:${mm}`);
+                    };
+                    const schedule = comboComponents.map((c) => {
+                      const duration = c.service?.durationMinutes || 0;
+                      const start = c.defaultTiming === 'concurrent' ? previousStart : cursor;
+                      const end = start + duration;
+                      cursor = Math.max(cursor, end);
+                      previousStart = start;
+                      return { ...c, duration, start, end };
+                    });
+
+                    return (
+                      <div className="relative space-y-3.5">
+                        {schedule.map((c, index) => (
+                          <div key={c.componentId} className="flex items-start gap-3">
+                            <div className="flex flex-col items-center flex-shrink-0">
+                              <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center font-data font-data-medium text-[11px]">
+                                {index + 1}
+                              </div>
+                              {index < schedule.length - 1 && (
+                                <div className="w-px flex-1 min-h-[22px] bg-border mt-1" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0 flex items-start justify-between gap-3 pb-0.5">
+                              <div className="min-w-0">
+                                <p className="font-body font-body-medium text-sm text-text-primary leading-tight">
+                                  {c.service?.name || 'Service'}
+                                </p>
+                                <p className="font-data text-xs text-text-secondary mt-0.5">
+                                  {toClock(c.start)} – {toClock(c.end)} <span className="text-text-tertiary">· {c.duration}min</span>
+                                </p>
+                              </div>
+                              <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+                                {c.defaultSameStaff ? (
+                                  <span className="inline-flex items-center gap-1 font-caption font-caption-medium text-[11px] text-text-secondary bg-background border border-border rounded-full px-2.5 py-1 whitespace-nowrap">
+                                    <Icon name="Link" size={10} />
+                                    Same staff
+                                  </span>
+                                ) : (
+                                  <CustomSelect
+                                    value={comboTherapistOverrides[c.serviceId] || ''}
+                                    onChange={(val) => setComboTherapistOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
+                                    options={(therapists || []).map(t => ({ value: t.id, label: t.full_name || t.name }))}
+                                    placeholder="Select staff"
+                                    size="sm"
+                                    searchable
+                                    menuWidth="16rem"
+                                    menuAlign="right"
+                                  />
+                                )}
+                                {c.defaultSameRoom === false && (
+                                  <CustomSelect
+                                    value={comboRoomOverrides[c.serviceId] || ''}
+                                    onChange={(val) => setComboRoomOverrides(prev => ({ ...prev, [c.serviceId]: val }))}
+                                    options={(rooms || []).map(r => ({ value: r.id, label: r.name }))}
+                                    placeholder="Select room"
+                                    size="sm"
+                                    searchable
+                                    menuWidth="16rem"
+                                    menuAlign="right"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -1383,6 +1592,26 @@ function findManualBlockForSlot(blockOccurrences, colType, colId, day, hour, min
 const OperationalCalendar = ({ branchId }) => {
   // Industry-specific labels from auth context
   const { profile } = useAuth();
+  const { orgSettings } = useOrg();
+  const navigate = useNavigate();
+  const { orgSlug } = useParams();
+  const userRole = profile?.role || 'staff';
+  const calendarStartHour = (() => {
+    const t = orgSettings?.calendar_start_time;
+    if (!t || typeof t !== 'string') return undefined;
+    const h = parseInt(t.split(':')[0], 10);
+    return Number.isInteger(h) && h >= 0 && h < 24 ? h : undefined;
+  })();
+  const calendarEndHour = (() => {
+    const t = orgSettings?.calendar_end_time;
+    if (!t || typeof t !== 'string') return undefined;
+    const h = parseInt(t.split(':')[0], 10);
+    return Number.isInteger(h) && h > 0 && h <= 24 ? h : undefined;
+  })();
+  const calendarIntervalMinutes = [15, 30, 60].includes(orgSettings?.calendar_interval_minutes)
+    ? orgSettings.calendar_interval_minutes
+    : 30;
+  const calendarShowFullDay = orgSettings?.calendar_show_full_day === true;
   const industry = profile?.organizations?.industries;
   const staffLabel = industry?.staff_label || 'Therapist';
   const staffLabelPlural = industry?.staff_label_plural || 'Therapists';
@@ -1391,7 +1620,70 @@ const OperationalCalendar = ({ branchId }) => {
 
   // View state
   const [currentDate, setCurrentDate] = useState(todayStr());
-  const [viewMode, setViewMode] = useState('day'); // day | 4day
+  const [viewMode, setViewMode] = useState('day'); // day | 4day | week | month
+  const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
+  const viewDropdownRef = useRef(null);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const settingsMenuRef = useRef(null);
+  const [printReportOpen, setPrintReportOpen] = useState(false);
+  // Per-org, per-user client-side display preference — never sent to the
+  // server, so this intentionally doesn't go through updateOrgProfileSetting.
+  const hideSensitiveStorageKey = profile ? `bookspa_hide_calendar_sensitive_${profile.org_id}_${profile.id}` : null;
+  const [hideSensitive, setHideSensitiveState] = useState(() => {
+    if (!profile) return false;
+    try { return localStorage.getItem(`bookspa_hide_calendar_sensitive_${profile.org_id}_${profile.id}`) === '1'; }
+    catch { return false; }
+  });
+  const setHideSensitive = (updater) => {
+    setHideSensitiveState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (hideSensitiveStorageKey) {
+        try { localStorage.setItem(hideSensitiveStorageKey, next ? '1' : '0'); } catch { /* ignore */ }
+      }
+      return next;
+    });
+  };
+
+  // 12h/24h display preference — same client-side-only, per-org-per-user
+  // storage pattern as hideSensitive above (never sent to the server).
+  const use24hStorageKey = profile ? `bookspa_calendar_use24h_${profile.org_id}_${profile.id}` : null;
+  const [use24h, setUse24hState] = useState(() => {
+    if (!profile) return false;
+    try { return localStorage.getItem(`bookspa_calendar_use24h_${profile.org_id}_${profile.id}`) === '1'; }
+    catch { return false; }
+  });
+  const setUse24h = (updater) => {
+    setUse24hState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (use24hStorageKey) {
+        try { localStorage.setItem(use24hStorageKey, next ? '1' : '0'); } catch { /* ignore */ }
+      }
+      return next;
+    });
+  };
+
+  // Grid zoom (hour-row height) — lifted here so the toolbar's +/- buttons can
+  // drive it; CalendarGrid also still supports pinch-to-zoom internally and
+  // reports back through onZoomScaleChange. Persisted per-org-per-user, same
+  // pattern as the two settings above.
+  const zoomStorageKey = profile ? `bookspa_calendar_zoom_${profile.org_id}_${profile.id}` : null;
+  const [zoomScale, setZoomScaleState] = useState(() => {
+    if (!profile) return 1;
+    try {
+      const raw = parseFloat(localStorage.getItem(`bookspa_calendar_zoom_${profile.org_id}_${profile.id}`));
+      return Number.isFinite(raw) ? clampZoom(raw) : 1;
+    } catch { return 1; }
+  });
+  const setZoomScale = (updater) => {
+    setZoomScaleState((prev) => {
+      const next = clampZoom(typeof updater === 'function' ? updater(prev) : updater);
+      if (zoomStorageKey) {
+        try { localStorage.setItem(zoomStorageKey, String(next)); } catch { /* ignore */ }
+      }
+      return next;
+    });
+  };
+  const ZOOM_STEP = 0.2;
   // Default to staff view if rooms are disabled
   const [columnMode, setColumnMode] = useState('therapist'); // therapist | room
   const [freezeUnassigned, setFreezeUnassigned] = useState(true);
@@ -1415,6 +1707,10 @@ const OperationalCalendar = ({ branchId }) => {
 
   // Attendance indicators
   const [attendanceMap, setAttendanceMap] = useState({});
+  // { weeklyByTherapist: Map<therapistId, weeklyRows[]>, overridesByKey: Map<`id_date`, row> }
+  // — recurring weekly hours + breaks (migration-275/278) and per-date roster
+  // overrides (migration-287), for the grid's per-column roster shading.
+  const [rosterLookup, setRosterLookup] = useState({ weeklyByTherapist: null, overridesByKey: null });
 
   // Available position options for filter (from service staff only)
   const calendarPositionOptions = useMemo(() => {
@@ -1492,6 +1788,26 @@ const OperationalCalendar = ({ branchId }) => {
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, [jumpMenuOpen]);
+
+  // Close view-mode dropdown on outside click
+  useEffect(() => {
+    if (!viewDropdownOpen) return;
+    const handle = (e) => {
+      if (viewDropdownRef.current && !viewDropdownRef.current.contains(e.target)) setViewDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [viewDropdownOpen]);
+
+  // Close "⋮" calendar-settings menu on outside click
+  useEffect(() => {
+    if (!settingsMenuOpen) return;
+    const handle = (e) => {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target)) setSettingsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [settingsMenuOpen]);
 
   // Modal state
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -1604,10 +1920,12 @@ const OperationalCalendar = ({ branchId }) => {
     setLoading(true);
     setError(null);
 
-    const [result, attResult, blocksResult] = await Promise.all([
+    const [result, attResult, blocksResult, workingHoursResult, rosterResult] = await Promise.all([
       getCalendarBookings(branchId, startDate, endDate),
       fetchAttendance({ branchId, date: startDate }),
       fetchBlocksForRange(branchId, startDate, endDate),
+      fetchBranchWorkingHours(branchId),
+      fetchRosterOverrides({ branchId, startDate, endDate }),
     ]);
 
     if (result.error) {
@@ -1627,6 +1945,14 @@ const OperationalCalendar = ({ branchId }) => {
       }
     }
     setAttendanceMap(attMap);
+    // Roster lookup for the calendar's per-column working-hours/break shading.
+    // Display only — it never blocks a booking. Both halves are optional: a
+    // failed or empty fetch leaves every column rendering fully open, which is
+    // also what an unconfigured therapist looks like (see resolveEffectiveHours).
+    setRosterLookup({
+      weeklyByTherapist: workingHoursResult.data || null,
+      overridesByKey: rosterResult.data || null,
+    });
     setLoading(false);
   }, [branchId]);
 
@@ -1647,8 +1973,8 @@ const OperationalCalendar = ({ branchId }) => {
   // ── Navigation ─────────────────────────────────────────────
 
   const goToday = () => setCurrentDate(todayStr());
-  const goPrev = () => setCurrentDate(addDays(currentDate, -getStepDays(viewMode)));
-  const goNext = () => setCurrentDate(addDays(currentDate, getStepDays(viewMode)));
+  const goPrev = () => setCurrentDate(viewMode === 'month' ? addMonths(currentDate, -1) : addDays(currentDate, -getStepDays(viewMode)));
+  const goNext = () => setCurrentDate(viewMode === 'month' ? addMonths(currentDate, 1) : addDays(currentDate, getStepDays(viewMode)));
   const applyJump = (sign, unit, amount) => {
     const nextDate = unit === 'week'
       ? addDays(currentDate, sign * amount * 7)
@@ -2401,6 +2727,24 @@ const OperationalCalendar = ({ branchId }) => {
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
     }
+
+    if (formData.comboAssignments?.length > 0 && result.data?.id) {
+      const comboResult = await createComboBookingItems({
+        bookingId: result.data.id,
+        branchId,
+        date,
+        startTime,
+        roomId: formData.roomId && formData.roomId !== 'none' ? formData.roomId : null,
+        components: formData.comboAssignments,
+      });
+      if (comboResult.error) {
+        showToast(`Booking created, but combo components failed: ${comboResult.error.message || 'unknown error'}`, 'error');
+        setQuickCreateSlot(null);
+        refreshCalendar();
+        return null;
+      }
+    }
+
     if (result.data?._therapistAssignmentWarning) {
       showToast(`Booking created, but: ${result.data._therapistAssignmentWarning}`, 'error');
     } else {
@@ -2818,6 +3162,25 @@ const OperationalCalendar = ({ branchId }) => {
                   <span>{staffLabelPlural}</span>
                 </div>
               )}
+              {viewMode !== 'month' && (
+                /* Visible start–end hour range for the current grid, reflecting the
+                   admin's Calendar settings (start/end time) and the 12h/24h
+                   preference (⋮ menu). */
+                <div
+                  className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 text-xs font-data text-text-secondary border border-border rounded-spa bg-surface"
+                  title="Calendar visible hours — change in Calendar settings"
+                >
+                  <Icon name="Clock" size={12} className="text-text-secondary" />
+                  <span>
+                    {formatHourLabel(Number.isInteger(calendarStartHour) ? calendarStartHour : 9, use24h)}
+                    {' – '}
+                    {formatHourLabel(
+                      Number.isInteger(calendarEndHour) && calendarEndHour > (Number.isInteger(calendarStartHour) ? calendarStartHour : 9) ? calendarEndHour : 23,
+                      use24h
+                    )}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Center: Date navigation cluster */}
@@ -2908,7 +3271,7 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
 
             {/* Right: Position filter + Tip + View toggle */}
-            <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end justify-self-end">
+            <div className="flex items-center gap-2 sm:gap-3 flex-nowrap justify-end justify-self-end">
               <div className="relative" ref={tipRef}>
                 <button
                   type="button"
@@ -2974,23 +3337,142 @@ const OperationalCalendar = ({ branchId }) => {
                   )}
                 </div>
               )}
-              <div className="flex items-center border border-border rounded-spa overflow-hidden">
-                {[
-                  { key: 'day', label: 'Day' },
-                  { key: '4day', label: '4 Day' },
-                ].map(v => (
-                  <button
-                    key={v.key}
-                    onClick={() => setViewMode(v.key)}
-                    className={`px-3 py-1.5 text-sm font-body font-body-medium spa-transition-fast ${
-                      viewMode === v.key
-                        ? 'bg-primary text-white'
-                        : 'text-text-primary hover:bg-background'
-                    }`}
-                  >
-                    {v.label}
-                  </button>
-                ))}
+              <div className="relative" ref={viewDropdownRef}>
+                <button
+                  onClick={() => setViewDropdownOpen(o => !o)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-body font-body-medium border border-border rounded-spa bg-surface text-text-primary hover:bg-background spa-transition-fast"
+                >
+                  <span>{VIEW_MODE_OPTIONS.find(v => v.key === viewMode)?.label || 'Day'}</span>
+                  <Icon name="ChevronDown" size={14} className={`spa-transition-fast ${viewDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {viewDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-36 bg-surface border border-border rounded-spa shadow-lg z-dropdown py-1">
+                    {VIEW_MODE_OPTIONS.map(v => (
+                      <button
+                        key={v.key}
+                        onClick={() => { setViewMode(v.key); setViewDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-sm font-body spa-transition-fast ${
+                          viewMode === v.key ? 'text-primary font-body-medium bg-primary/5' : 'text-text-primary hover:bg-background'
+                        }`}
+                      >
+                        {v.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="relative" ref={settingsMenuRef}>
+                <button
+                  onClick={() => setSettingsMenuOpen(o => !o)}
+                  title="Calendar settings"
+                  className="flex items-center justify-center w-9 h-9 border border-border rounded-spa bg-surface text-text-secondary hover:bg-background hover:text-text-primary spa-transition-fast"
+                >
+                  <Icon name="MoreVertical" size={16} />
+                </button>
+                {settingsMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-spa shadow-lg z-dropdown py-1">
+                    <button
+                      type="button"
+                      onClick={() => { setSettingsMenuOpen(false); setPrintReportOpen(true); }}
+                      className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                    >
+                      <Icon name="Printer" size={14} className="text-text-secondary" />
+                      <span>Print this calendar view</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSettingsMenuOpen(false); navigate(`/${orgSlug}/dashboard?view=roster`); }}
+                      className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                    >
+                      <Icon name="Users" size={14} className="text-text-secondary" />
+                      <span>Edit staff roster</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSettingsMenuOpen(false); setAddBlockSlot({ day: currentDate, colType: 'location', colId: null, colName: 'Whole location' }); }}
+                      className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                    >
+                      <Icon name="Ban" size={14} className="text-text-secondary" />
+                      <span>Block time (whole calendar)</span>
+                    </button>
+                    {userRole === 'admin' && (
+                      <button
+                        type="button"
+                        onClick={() => { setSettingsMenuOpen(false); navigate(`/${orgSlug}/dashboard?view=calendar-settings`); }}
+                        className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                      >
+                        <Icon name="Settings" size={14} className="text-text-secondary" />
+                        <span>Calendar settings</span>
+                      </button>
+                    )}
+                    {userRole === 'admin' && (
+                      <button
+                        type="button"
+                        onClick={() => { setSettingsMenuOpen(false); navigate(`/${orgSlug}/dashboard?view=closed-dates`); }}
+                        className="w-full flex items-center gap-2 text-left px-3 py-2 text-sm text-text-primary hover:bg-background spa-transition-fast"
+                      >
+                        <Icon name="Lock" size={14} className="text-text-secondary" />
+                        <span>Closed dates</span>
+                      </button>
+                    )}
+                    <div className="my-1 border-t border-border" />
+                    {viewMode !== 'month' && (
+                      <div className="w-full flex items-center justify-between gap-2 px-3 py-2">
+                        <span className="text-sm text-text-primary">Zoom</span>
+                        <div className="flex items-center border border-border rounded-spa bg-background overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setZoomScale(z => z - ZOOM_STEP)}
+                            disabled={zoomScale <= MIN_ZOOM}
+                            title="Zoom out"
+                            className="flex items-center justify-center w-7 h-7 text-text-secondary hover:bg-surface hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast"
+                          >
+                            <Icon name="ZoomOut" size={13} />
+                          </button>
+                          <span className="px-1.5 h-7 flex items-center text-[11px] font-data text-text-secondary border-x border-border min-w-[38px] justify-center">
+                            {Math.round(zoomScale * 100)}%
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setZoomScale(z => z + ZOOM_STEP)}
+                            disabled={zoomScale >= MAX_ZOOM}
+                            title="Zoom in"
+                            className="flex items-center justify-center w-7 h-7 text-text-secondary hover:bg-surface hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed spa-transition-fast"
+                          >
+                            <Icon name="ZoomIn" size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="w-full flex items-center justify-between gap-2 px-3 py-2">
+                      <span className="text-sm text-text-primary">Time format</span>
+                      <div className="flex items-center p-0.5 bg-background border border-border rounded-spa">
+                        {[['12h', '12h'], ['24h', '24h']].map(([val, label]) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setUse24h(val === '24h')}
+                            className={`px-2 py-0.5 text-xs font-body font-body-medium rounded spa-transition-fast ${
+                              (use24h ? '24h' : '12h') === val ? 'bg-surface text-primary shadow-spa-resting' : 'text-text-secondary hover:text-text-primary'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="w-full flex items-center justify-between gap-2 px-3 py-2 cursor-pointer hover:bg-background spa-transition-fast">
+                      <span className="text-sm text-text-primary">Hide client names and prices</span>
+                      <button
+                        type="button"
+                        onClick={() => setHideSensitive(v => !v)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full spa-transition-fast ${hideSensitive ? 'bg-success' : 'bg-border'}`}
+                      >
+                        <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white spa-transition-fast transform ${hideSensitive ? 'translate-x-4' : 'translate-x-1'}`} />
+                      </button>
+                    </label>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2998,6 +3480,17 @@ const OperationalCalendar = ({ branchId }) => {
           {/* Calendar grid */}
           <div className="flex-1 min-h-0 overflow-x-auto md:overflow-hidden">
               {calendarData ? (
+                viewMode === 'month' ? (
+                  <MonthGridView
+                    currentDate={currentDate}
+                    bookings={calendarData.bookings}
+                    branchHours={calendarData.branchHours}
+                    hideSensitive={hideSensitive}
+                    use24h={use24h}
+                    onDayClick={(date) => { setCurrentDate(date); setViewMode('day'); }}
+                    onBookingClick={handleBookingClick}
+                  />
+                ) : (
                 <CalendarGrid
                   therapists={filteredTherapists}
                   rooms={calendarData.rooms || []}
@@ -3005,6 +3498,7 @@ const OperationalCalendar = ({ branchId }) => {
                   branchHours={calendarData.branchHours}
                   attendanceMap={attendanceMap}
                   checkedOutByTherapistAndDate={calendarData.checkedOutByTherapistAndDate}
+                  rosterLookup={rosterLookup}
                   blockOccurrences={calendarData.blockOccurrences}
                   onDeleteManualBlock={handleDeleteManualBlock}
                   onResizeManualBlock={handleResizeManualBlock}
@@ -3025,7 +3519,16 @@ const OperationalCalendar = ({ branchId }) => {
                   onToggleFreezeUnassigned={() => setFreezeUnassigned(prev => !prev)}
                   onTherapistReorder={canReorderTherapists ? handleTherapistReorder : undefined}
                   onRoomReorder={canReorderTherapists ? handleRoomReorder : undefined}
+                  hideSensitive={hideSensitive}
+                  startHour={calendarStartHour}
+                  endHour={calendarEndHour}
+                  showFullDay={calendarShowFullDay}
+                  intervalMinutes={calendarIntervalMinutes}
+                  use24h={use24h}
+                  zoomScale={zoomScale}
+                  onZoomScaleChange={setZoomScale}
                 />
+                )
               ) : (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
@@ -3134,6 +3637,15 @@ const OperationalCalendar = ({ branchId }) => {
         userRole={profile?.role || 'staff'}
         onViewBooking={(bookingId) => handleBookingClick({ bookingId })}
       />
+
+      {printReportOpen && (
+        <PrintReportModal
+          date={currentDate}
+          bookings={calendarData?.bookings || []}
+          onClose={() => setPrintReportOpen(false)}
+          use24h={use24h}
+        />
+      )}
 
       {/* Toast */}
       {actionToast && (
