@@ -90,11 +90,12 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkAllRead, 
                 const isDiscount = n.type === 'discount';
                 const isApproved = n.type === 'discount_approved';
                 const isDeclined = n.type === 'discount_declined';
-                const isDecision = isApproved || isDeclined;
-                const iconName = isDiscount ? 'Percent' : isApproved ? 'Check' : isDeclined ? 'X' : 'Calendar';
-                const iconWrap = isDiscount ? 'bg-amber-50' : isApproved ? 'bg-emerald-50' : isDeclined ? 'bg-red-50' : 'bg-primary/10';
-                const iconColor = isDiscount ? 'text-amber-600' : isApproved ? 'text-emerald-600' : isDeclined ? 'text-red-600' : 'text-primary';
-                const dotColor = isDiscount ? 'bg-amber-500' : isApproved ? 'bg-emerald-500' : isDeclined ? 'bg-red-500' : 'bg-primary';
+                const isStuckGroup = n.type === 'booking_group_stuck';
+                const isDecision = isApproved || isDeclined || isStuckGroup;
+                const iconName = isDiscount ? 'Percent' : isApproved ? 'Check' : isDeclined ? 'X' : isStuckGroup ? 'AlertTriangle' : 'Calendar';
+                const iconWrap = isDiscount ? 'bg-amber-50' : isApproved ? 'bg-emerald-50' : (isDeclined || isStuckGroup) ? 'bg-red-50' : 'bg-primary/10';
+                const iconColor = isDiscount ? 'text-amber-600' : isApproved ? 'text-emerald-600' : (isDeclined || isStuckGroup) ? 'text-red-600' : 'text-primary';
+                const dotColor = isDiscount ? 'bg-amber-500' : isApproved ? 'bg-emerald-500' : (isDeclined || isStuckGroup) ? 'bg-red-500' : 'bg-primary';
                 return (
                   <button
                     key={n.id}

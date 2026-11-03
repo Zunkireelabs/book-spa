@@ -6091,13 +6091,43 @@ export async function submitGroupBooking({ branchId, orgSlug, date, startTime, g
 
     if (error) {
       if (created.length > 0) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          const { error: rollbackError } = await supabase
-            .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
-          if (rollbackError) throw rollbackError;
-        } catch (cancelError) {
-          console.error('[API] submitGroupBooking rollback FAILED for group', bookingGroupId, cancelError);
+        // The rollback RPC is the only thing standing between "one person's
+        // booking failed" and "a partial group sits reserved with nobody
+        // told" -- retry a transient failure (network blip, momentary DB
+        // contention) a few times before giving up, rather than failing on
+        // the first hiccup.
+        let rollbackOk = false;
+        let lastCancelError = null;
+        for (let attempt = 0; attempt < 3 && !rollbackOk; attempt += 1) {
+          if (attempt > 0) {
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+          }
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const { error: rollbackError } = await supabase
+              .rpc('public_cancel_booking_group', { p_booking_group_id: bookingGroupId });
+            if (rollbackError) throw rollbackError;
+            rollbackOk = true;
+          } catch (cancelError) {
+            lastCancelError = cancelError;
+          }
+        }
+
+        if (!rollbackOk) {
+          console.error('[API] submitGroupBooking rollback FAILED for group', bookingGroupId, lastCancelError);
+          // Best-effort: let branch staff know a group is stuck instead of
+          // relying solely on the customer to call in. Never let this
+          // throw/block the error already being returned to the customer.
+          try {
+            await supabase.rpc('public_report_booking_group_failure', {
+              p_branch_id: resolveBranchId(branchId),
+              p_booking_group_id: bookingGroupId,
+              p_people_count: created.length,
+            });
+          } catch (reportError) {
+            console.error('[API] submitGroupBooking failed to report stuck group', bookingGroupId, reportError);
+          }
           return {
             data: null,
             error: {
