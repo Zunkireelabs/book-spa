@@ -372,7 +372,7 @@ const CustomerForm = ({ customerInfo, onCustomerInfoChange, selectedBranch, sele
           {/* Email */}
           <div className="space-y-2 col-span-2 sm:col-span-1">
             <label className="font-body font-body-medium text-sm text-text-primary">
-              Email address (Optional)
+              Email address
             </label>
             <Input
               type="email"

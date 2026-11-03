@@ -246,6 +246,7 @@ const CollectPaymentPanel = ({ onSuccess }) => {
           booking={{
             bookingId: primaryBooking.bookingId,
             booking_number: primaryBooking.bookingNumber,
+            branchId,
             finalAmount: primaryBooking.finalAmount,
             amountPaid: primaryBooking.amountPaid,
             service: primaryBooking.serviceName,
