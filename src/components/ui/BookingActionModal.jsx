@@ -1548,11 +1548,13 @@ const BookingActionModal = ({
                               onChange={(e) => setEditForm(f => ({ ...f, date: e.target.value }))}
                               className={inputClasses}
                             />
-                            <input
-                              type="time"
+                            <CustomSelect
                               value={editForm.startTime}
-                              onChange={(e) => setEditForm(f => ({ ...f, startTime: e.target.value }))}
-                              className={inputClasses}
+                              onChange={(val) => setEditForm(f => ({ ...f, startTime: val }))}
+                              options={timeOptions.map(t => ({ value: t, label: format12h(t) }))}
+                              placeholder="Select time..."
+                              searchable
+                              size="sm"
                             />
                           </div>
                         ) : (
