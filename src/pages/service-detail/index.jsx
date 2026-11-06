@@ -968,6 +968,9 @@ const ServiceDetailPage = () => {
 
                     {restrictStaff && (
                       <div className="space-y-2">
+                        <p className="font-caption text-xs text-text-secondary">
+                          Checked staff can perform this service. Unchecked staff cannot.
+                        </p>
                         <Input
                           value={staffSearchQuery}
                           onChange={(e) => setStaffSearchQuery(e.target.value)}
