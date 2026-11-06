@@ -89,7 +89,11 @@ const ServiceDetailPage = () => {
   const loadTherapists = useCallback(async () => {
     if (!branchId) return;
     const result = await fetchTherapistsForManagement(branchId);
-    if (!result.error) setAllTherapists(result.data || []);
+    // Eligible Staff only makes sense for staff who actually perform services —
+    // fetchTherapistsForManagement returns every staff row (service staff and
+    // front-desk/admin alike) for the broader staff-management pages that share
+    // it; filter to service staff here, scoped to this one picker.
+    if (!result.error) setAllTherapists((result.data || []).filter(t => t.is_service_staff !== false));
   }, [branchId]);
 
   const loadAllServices = useCallback(async () => {
