@@ -574,7 +574,7 @@ const BookingActionModal = ({
     const [h, m] = time24.split(':').map(Number);
     const suffix = h >= 12 ? 'pm' : 'am';
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
   };
 
   // timeOptions is generated from branch hours in 15-min steps — an existing
