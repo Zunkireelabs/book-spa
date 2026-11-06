@@ -577,6 +577,20 @@ const BookingActionModal = ({
     return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
   };
 
+  // timeOptions is generated from branch hours in 15-min steps — an existing
+  // booking's time can predate that grid (off-step, or outside current branch
+  // hours) and wouldn't appear in it, leaving the edit-mode picker showing a
+  // blank placeholder instead of the booking's actual time. Union it in so
+  // editing always shows the real current value as selected.
+  const editTimeOptions = useMemo(() => {
+    const opts = [...timeOptions];
+    if (editForm.startTime && !opts.includes(editForm.startTime)) {
+      opts.push(editForm.startTime);
+      opts.sort();
+    }
+    return opts.map(t => ({ value: t, label: format12h(t) }));
+  }, [timeOptions, editForm.startTime]);
+
   const openNewBookingForm = (mode) => {
     const today = new Date().toISOString().slice(0, 10);
     setNewBookingForm({
@@ -1548,11 +1562,13 @@ const BookingActionModal = ({
                               onChange={(e) => setEditForm(f => ({ ...f, date: e.target.value }))}
                               className={inputClasses}
                             />
-                            <input
-                              type="time"
+                            <CustomSelect
                               value={editForm.startTime}
-                              onChange={(e) => setEditForm(f => ({ ...f, startTime: e.target.value }))}
-                              className={inputClasses}
+                              onChange={(val) => setEditForm(f => ({ ...f, startTime: val }))}
+                              options={editTimeOptions}
+                              placeholder="Select time..."
+                              searchable
+                              size="sm"
                             />
                           </div>
                         ) : (
