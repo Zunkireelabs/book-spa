@@ -8,6 +8,7 @@ import Icon from '../AppIcon';
 import MembershipWalletCard from './MembershipWalletCard';
 import PaymentModeCorrectionModal from './PaymentModeCorrectionModal';
 import PaymentMethodSelector from './PaymentMethodSelector';
+import TimeBoxInput from './TimeBoxInput';
 import { fetchRelatedUnpaidBookings, fetchGroupBookings, fetchBookingCreator, fetchDiscountApprovers, fetchDueHolderNames, getCustomerOutstandingBalance, fetchMembershipForBooking, fetchCustomerReferralForBooking, resolveCustomerReferralReward, recordGroupPayment, recordTip, getCustomerFirstBookingFlag, adminCorrectBooking, adminDeleteBooking, correctPaymentAmount, correctPaymentMode } from '../../services/api';
 import { excludeRelatedFromPreviousDue, toDbStatus } from '../../services/bookingTransformers';
 import { useBranch } from '../../contexts/BranchContext';
@@ -574,22 +575,20 @@ const BookingActionModal = ({
     const [h, m] = time24.split(':').map(Number);
     const suffix = h >= 12 ? 'pm' : 'am';
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
   };
 
-  // timeOptions is generated from branch hours in 15-min steps — an existing
-  // booking's time can predate that grid (off-step, or outside current branch
-  // hours) and wouldn't appear in it, leaving the edit-mode picker showing a
-  // blank placeholder instead of the booking's actual time. Union it in so
-  // editing always shows the real current value as selected.
-  const editTimeOptions = useMemo(() => {
-    const opts = [...timeOptions];
-    if (editForm.startTime && !opts.includes(editForm.startTime)) {
-      opts.push(editForm.startTime);
-      opts.sort();
-    }
-    return opts.map(t => ({ value: t, label: format12h(t) }));
-  }, [timeOptions, editForm.startTime]);
+  // TimeBoxInput lets staff type any time, unlike the old dropdown which only
+  // ever offered times inside branch hours — not a hard rule (nothing blocks
+  // this server-side either), just a heads-up so an out-of-hours edit isn't
+  // silent.
+  const isWithinBranchHours = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const minutes = h * 60 + m;
+    const [openH, openM] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
+    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
+    return minutes >= openH * 60 + openM && minutes <= closeH * 60 + closeM;
+  };
 
   const openNewBookingForm = (mode) => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1555,21 +1554,22 @@ const BookingActionModal = ({
                             />
                           </div>
                         ) : isEditing ? (
-                          <div className="flex gap-2">
+                          <div className="space-y-1.5">
                             <input
                               type="date"
                               value={editForm.date}
                               onChange={(e) => setEditForm(f => ({ ...f, date: e.target.value }))}
                               className={inputClasses}
                             />
-                            <CustomSelect
+                            <TimeBoxInput
                               value={editForm.startTime}
                               onChange={(val) => setEditForm(f => ({ ...f, startTime: val }))}
-                              options={editTimeOptions}
-                              placeholder="Select time..."
-                              searchable
-                              size="sm"
                             />
+                            {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
+                              <p className="font-caption text-[11px] text-warning">
+                                Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
