@@ -298,11 +298,9 @@ const StaffDetailPage = () => {
                   </SettingsRow>
                 )}
 
-                <div id="working-hours">
-                  <SettingsRow title="Normal Working Hours" description="Shown as shading on the staff calendar. Does not yet block bookings outside these hours.">
-                    <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
-                  </SettingsRow>
-                </div>
+                <SettingsRow id="working-hours" title="Normal Working Hours" description="Shown as shading on the staff calendar. Does not yet block bookings outside these hours.">
+                  <WorkingHoursSection rows={workingHours} onChange={setWorkingHours} />
+                </SettingsRow>
 
                 <SettingsRow title="Personal Info" description="Photo, bio, and experience shown on the staff profile.">
                   <PersonalInfoFields
