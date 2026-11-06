@@ -2650,7 +2650,7 @@ export async function updateBookingDetails({ bookingId, customerName, customerPh
     let newServiceDurationMinutes = null;
     if (serviceId && serviceId !== booking.service_id) {
       const { data: newService, error: svcError } = await supabase
-        .from('services')
+        .from('services_with_offer_pricing')
         .select('id, name, duration_minutes, price_npr, effective_price_npr')
         .eq('id', serviceId)
         .single();
@@ -2803,7 +2803,7 @@ export async function applyDiscount({ bookingId, discountType, discountValue, di
       discountAmount = Math.round(baseAmount * effectivePercent * 100) / 100;
     } else if (discountType === 'fixed') {
       discountAmount = Number(discountValue);
-      effectivePercent = discountAmount / baseAmount;
+      effectivePercent = baseAmount > 0 ? discountAmount / baseAmount : 0;
     } else {
       return { data: null, error: { code: 'INVALID_DISCOUNT_TYPE', message: 'Discount type must be "percentage" or "fixed".' } };
     }
