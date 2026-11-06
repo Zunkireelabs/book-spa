@@ -352,7 +352,10 @@ export async function fetchTherapists(branchId, { date } = {}) {
     // though assignTherapist/createBooking (computeTherapistBranchAt) would still
     // correctly allow assigning them to a booking during their visit window. Pull
     // those in separately so they're selectable for same-day bookings in the past
-    // part of the day, not just whoever is physically here right now.
+    // part of the day, not just whoever is physically here right now. Covers
+    // permanent transfers too — the apply-cron flips branch_id on its own
+    // schedule, so a permanent transfer whose start_time has already passed today
+    // can momentarily lag the live column the exact same way a temporary one can.
     let transferredInPromise = Promise.resolve({ data: [] });
     const resolvedBranchIdForTransfers = resolveBranchId(branchId);
     if (date && !isOverallBranch(branchId) && resolvedBranchIdForTransfers) {
@@ -360,8 +363,7 @@ export async function fetchTherapists(branchId, { date } = {}) {
         .from('staff_transfers')
         .select('therapist_id')
         .eq('to_branch_id', resolvedBranchIdForTransfers)
-        .eq('effective_date', date)
-        .eq('is_permanent', false);
+        .eq('effective_date', date);
     }
 
     const [therapistsResult, attendanceResult, transferredInResult] = await Promise.all([
