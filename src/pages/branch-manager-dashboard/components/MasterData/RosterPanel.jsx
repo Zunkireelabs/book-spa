@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
@@ -64,6 +64,8 @@ const RosterPanel = ({ branchId }) => {
   const [editingKey, setEditingKey] = useState(null);
   const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '' });
   const [popoverPos, setPopoverPos] = useState(null); // {top, left} in viewport coords, for the portal-rendered time editor
+  const [anchorRect, setAnchorRect] = useState(null); // the clicked cell's rect, kept so the layout effect below can re-measure against the popover's real size
+  const popoverRef = useRef(null);
 
   const [staffLoading, setStaffLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -152,7 +154,14 @@ const RosterPanel = ({ branchId }) => {
     if (!container || editingKey === null) return;
     const close = () => setEditingKey(null);
     container.addEventListener('scroll', close);
-    return () => container.removeEventListener('scroll', close);
+    // A resize (or orientation change) invalidates the anchor cell's captured rect
+    // the same way a scroll does — close rather than try to re-anchor against stale
+    // coordinates.
+    window.addEventListener('resize', close);
+    return () => {
+      container.removeEventListener('scroll', close);
+      window.removeEventListener('resize', close);
+    };
   }, [editingKey]);
   useEffect(() => {
     if (scrollToTodayTick === 0) return;
@@ -206,21 +215,31 @@ const RosterPanel = ({ branchId }) => {
     }
   };
 
-  const POPOVER_HEIGHT = 230; // approx rendered height of the "Set start and end time" card, for flip math below
-  const POPOVER_HALF_WIDTH = 112; // half of w-56 (224px), for horizontal clamp below
-
   const startEditing = (therapistId, dateInfo, state, anchorEl) => {
     setEditingKey(cellKey(therapistId, dateInfo.date));
     setEditDraft({ startTime: state.startTime || '10:00', endTime: state.endTime || '18:00' });
     const rect = anchorEl.getBoundingClientRect();
-    // Flip above the cell when there isn't enough room below, so the popover never
-    // runs off the bottom (or, for rows near the very top, the top) of the viewport.
-    const opensBelow = rect.bottom + 6 + POPOVER_HEIGHT <= window.innerHeight;
-    const top = opensBelow ? rect.bottom + 6 : rect.top - 6 - POPOVER_HEIGHT;
-    const idealLeft = rect.left + rect.width / 2;
-    const left = Math.min(Math.max(idealLeft, POPOVER_HALF_WIDTH + 8), window.innerWidth - POPOVER_HALF_WIDTH - 8);
-    setPopoverPos({ top: Math.max(top, 8), left });
+    setAnchorRect({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+    // Rough first-paint guess (anchored below, roughly centered) — corrected against the
+    // popover's real measured size by the layout effect below before the browser paints,
+    // so this placeholder is never actually visible to the user.
+    setPopoverPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
   };
+
+  // Once the popover has actually rendered, re-anchor it using its real measured size
+  // instead of a guessed height/width — flip above the cell if there's no room below,
+  // and clamp horizontally so it can't run off either edge of the viewport.
+  useLayoutEffect(() => {
+    if (!editingKey || !anchorRect || !popoverRef.current) return;
+    const pw = popoverRef.current.offsetWidth;
+    const ph = popoverRef.current.offsetHeight;
+    const opensBelow = anchorRect.bottom + 6 + ph <= window.innerHeight;
+    const top = opensBelow ? anchorRect.bottom + 6 : anchorRect.top - 6 - ph;
+    const idealLeft = anchorRect.left + anchorRect.width / 2;
+    const left = Math.min(Math.max(idealLeft, pw / 2 + 8), window.innerWidth - pw / 2 - 8);
+    setPopoverPos({ top: Math.max(top, 8), left });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingKey, anchorRect]);
 
   const commitEdit = (therapistId, dateInfo) => {
     if (!editDraft.startTime || !editDraft.endTime || editDraft.startTime >= editDraft.endTime) {
@@ -570,6 +589,7 @@ const RosterPanel = ({ branchId }) => {
 
       {editingKey && popoverPos && createPortal(
         <div
+          ref={popoverRef}
           className="fixed z-dropdown w-56 p-4 rounded-spa bg-surface border border-border shadow-spa-elevated animate-fade-in text-left -translate-x-1/2"
           style={{ top: popoverPos.top, left: popoverPos.left }}
           onClick={(e) => e.stopPropagation()}
