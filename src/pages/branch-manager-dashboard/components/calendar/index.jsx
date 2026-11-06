@@ -2935,7 +2935,7 @@ const OperationalCalendar = ({ branchId }) => {
       showToast(result.error.message || 'Failed to update booking.', 'error');
       return { error: result.error };
     }
-    showToast('Booking updated successfully');
+    showToast(result.data?.noChanges ? 'No changes to save' : 'Booking updated successfully');
     // Re-fetch the booking to update modal data
     const refreshed = await fetchBookingById(bookingId);
     if (!refreshed.error) {
