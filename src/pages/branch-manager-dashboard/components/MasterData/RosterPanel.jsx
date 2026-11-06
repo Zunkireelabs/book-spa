@@ -206,11 +206,20 @@ const RosterPanel = ({ branchId }) => {
     }
   };
 
+  const POPOVER_HEIGHT = 230; // approx rendered height of the "Set start and end time" card, for flip math below
+  const POPOVER_HALF_WIDTH = 112; // half of w-56 (224px), for horizontal clamp below
+
   const startEditing = (therapistId, dateInfo, state, anchorEl) => {
     setEditingKey(cellKey(therapistId, dateInfo.date));
     setEditDraft({ startTime: state.startTime || '10:00', endTime: state.endTime || '18:00' });
     const rect = anchorEl.getBoundingClientRect();
-    setPopoverPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
+    // Flip above the cell when there isn't enough room below, so the popover never
+    // runs off the bottom (or, for rows near the very top, the top) of the viewport.
+    const opensBelow = rect.bottom + 6 + POPOVER_HEIGHT <= window.innerHeight;
+    const top = opensBelow ? rect.bottom + 6 : rect.top - 6 - POPOVER_HEIGHT;
+    const idealLeft = rect.left + rect.width / 2;
+    const left = Math.min(Math.max(idealLeft, POPOVER_HALF_WIDTH + 8), window.innerWidth - POPOVER_HALF_WIDTH - 8);
+    setPopoverPos({ top: Math.max(top, 8), left });
   };
 
   const commitEdit = (therapistId, dateInfo) => {
