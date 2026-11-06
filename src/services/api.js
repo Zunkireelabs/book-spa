@@ -346,19 +346,56 @@ export async function fetchTherapists(branchId, { date } = {}) {
       attendancePromise = Promise.resolve({ data: [] });
     }
 
-    const [therapistsResult, attendanceResult] = await Promise.all([
+    // live therapists.branch_id only reflects the CURRENT moment (flipped by the
+    // apply/revert cron) — a therapist who visited this branch earlier today on a
+    // temporary transfer and has already reverted won't match it anymore, even
+    // though assignTherapist/createBooking (computeTherapistBranchAt) would still
+    // correctly allow assigning them to a booking during their visit window. Pull
+    // those in separately so they're selectable for same-day bookings in the past
+    // part of the day, not just whoever is physically here right now. Covers
+    // permanent transfers too — the apply-cron flips branch_id on its own
+    // schedule, so a permanent transfer whose start_time has already passed today
+    // can momentarily lag the live column the exact same way a temporary one can.
+    let transferredInPromise = Promise.resolve({ data: [] });
+    const resolvedBranchIdForTransfers = resolveBranchId(branchId);
+    if (date && !isOverallBranch(branchId) && resolvedBranchIdForTransfers) {
+      transferredInPromise = supabase
+        .from('staff_transfers')
+        .select('therapist_id')
+        .eq('to_branch_id', resolvedBranchIdForTransfers)
+        .eq('effective_date', date);
+    }
+
+    const [therapistsResult, attendanceResult, transferredInResult] = await Promise.all([
       therapistsQuery,
       attendancePromise,
+      transferredInPromise,
     ]);
 
     if (therapistsResult.error) throw therapistsResult.error;
 
+    let data = therapistsResult.data;
+
+    const existingIds = new Set(data.map(t => t.id));
+    const transferredInIds = [...new Set((transferredInResult.data || []).map(t => t.therapist_id))]
+      .filter(id => !existingIds.has(id));
+    if (transferredInIds.length > 0) {
+      const { data: extra, error: extraError } = await supabase
+        .from('therapists')
+        .select('id, name, gender, specialties, position, is_service_staff')
+        .eq('is_active', true)
+        .eq('is_service_staff', true)
+        .in('id', transferredInIds);
+      if (extraError) throw extraError;
+      data = [...data, ...(extra || [])].sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     const absentIds = new Set(
       (attendanceResult.data || []).map(a => a.therapist_id)
     );
-    const data = absentIds.size > 0
-      ? therapistsResult.data.filter(t => !absentIds.has(t.id))
-      : therapistsResult.data;
+    if (absentIds.size > 0) {
+      data = data.filter(t => !absentIds.has(t.id));
+    }
 
     return { data, error: null };
   } catch (error) {
