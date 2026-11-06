@@ -578,6 +578,18 @@ const BookingActionModal = ({
     return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
   };
 
+  // TimeBoxInput lets staff type any time, unlike the old dropdown which only
+  // ever offered times inside branch hours — not a hard rule (nothing blocks
+  // this server-side either), just a heads-up so an out-of-hours edit isn't
+  // silent.
+  const isWithinBranchHours = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const minutes = h * 60 + m;
+    const [openH, openM] = (branchHours?.openTime || '09:00:00').split(':').map(Number);
+    const [closeH, closeM] = (branchHours?.closeTime || '21:00:00').split(':').map(Number);
+    return minutes >= openH * 60 + openM && minutes <= closeH * 60 + closeM;
+  };
+
   const openNewBookingForm = (mode) => {
     const today = new Date().toISOString().slice(0, 10);
     setNewBookingForm({
@@ -1553,6 +1565,11 @@ const BookingActionModal = ({
                               value={editForm.startTime}
                               onChange={(val) => setEditForm(f => ({ ...f, startTime: val }))}
                             />
+                            {editForm.startTime && !isWithinBranchHours(editForm.startTime) && (
+                              <p className="font-caption text-[11px] text-warning">
+                                Outside branch hours ({format12h(branchHours?.openTime?.slice(0, 5) || '09:00')} – {format12h(branchHours?.closeTime?.slice(0, 5) || '21:00')})
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <p className="font-body font-body-normal text-sm text-text-primary">{booking.date} at {to12h(booking.time || booking.startTime)}</p>
