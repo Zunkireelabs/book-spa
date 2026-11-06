@@ -184,7 +184,7 @@ const BookingDetailsAssignmentModal = () => {
       showToast(result.error.message || 'Failed to update booking.', 'error');
       return { error: result.error };
     }
-    showToast('Booking updated successfully');
+    showToast(result.data?.noChanges ? 'No changes to save' : 'Booking updated successfully');
     await loadBooking();
     return { error: null };
   };
