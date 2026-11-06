@@ -12,7 +12,7 @@ const BranchHoursEditor = ({ rows, onChange }) => {
   const toggleWorking = (row) => {
     const nowOpen = row.isDayOff;
     updateRow(row.dayOfWeek, nowOpen
-      ? { isDayOff: false, startTime: row.startTime || '09:00', endTime: row.endTime || '17:00' }
+      ? { isDayOff: false, startTime: row.startTime || '10:00', endTime: row.endTime || '18:00' }
       : { isDayOff: true });
   };
 

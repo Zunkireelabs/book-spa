@@ -16,14 +16,14 @@ const WorkingHoursSection = ({ rows, onChange }) => {
     updateRow(row.dayOfWeek, {
       isDayOff: !nowWorking,
       ...(nowWorking
-        ? { startTime: row.startTime || '09:00', endTime: row.endTime || '17:00' }
+        ? { startTime: row.startTime || '10:00', endTime: row.endTime || '18:00' }
         : { breaks: [] }),
     });
   };
 
   const addBreak = (row) => {
-    const start = row.startTime || '09:00';
-    const end = row.endTime || '17:00';
+    const start = row.startTime || '10:00';
+    const end = row.endTime || '18:00';
     const existing = row.breaks || [];
     const lastEnd = existing.length > 0 ? existing[existing.length - 1].endTime : null;
 

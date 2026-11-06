@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../../components/AppIcon';
 import CustomSelect from '../../../../components/ui/CustomSelect';
+import TimeBoxInput from '../../../../components/ui/TimeBoxInput';
 import {
   fetchTherapistsForManagement,
   fetchBranchWorkingHours,
@@ -24,7 +26,7 @@ function to12h(timeStr) {
   const [h, m] = timeStr.split(':').map(Number);
   const period = h >= 12 ? 'pm' : 'am';
   const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, '0')}${period}`;
+  return m === 0 ? `${h12}${period}` : `${h12}:${String(m).padStart(2, '0')}${period}`;
 }
 
 function initials(name) {
@@ -61,6 +63,7 @@ const RosterPanel = ({ branchId }) => {
   const [closedDates, setClosedDates] = useState(new Set());    // dates with a whole-location Calendar block ("Business closed")
   const [editingKey, setEditingKey] = useState(null);
   const [editDraft, setEditDraft] = useState({ startTime: '', endTime: '' });
+  const [popoverPos, setPopoverPos] = useState(null); // {top, left} in viewport coords, for the portal-rendered time editor
 
   const [staffLoading, setStaffLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -140,6 +143,17 @@ const RosterPanel = ({ branchId }) => {
   };
   const scrollContainerRef = useRef(null);
   const STICKY_NAME_COL_WIDTH = 200; // matches the sticky name column's min-w-[200px] below
+
+  // The time-editor popover is portaled to <body> and positioned from the anchor
+  // cell's viewport rect (see startEditing) — close it on scroll rather than tracking
+  // position, since the popover would otherwise drift away from its cell.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || editingKey === null) return;
+    const close = () => setEditingKey(null);
+    container.addEventListener('scroll', close);
+    return () => container.removeEventListener('scroll', close);
+  }, [editingKey]);
   useEffect(() => {
     if (scrollToTodayTick === 0) return;
     const raf = requestAnimationFrame(() => {
@@ -184,17 +198,19 @@ const RosterPanel = ({ branchId }) => {
     if (state.isDayOff) {
       setCell(therapistId, dateInfo.date, {
         isDayOff: false,
-        startTime: state.startTime || '09:00',
-        endTime: state.endTime || '17:00',
+        startTime: state.startTime || '10:00',
+        endTime: state.endTime || '18:00',
       });
     } else {
       setCell(therapistId, dateInfo.date, { isDayOff: true, startTime: null, endTime: null });
     }
   };
 
-  const startEditing = (therapistId, dateInfo, state) => {
+  const startEditing = (therapistId, dateInfo, state, anchorEl) => {
     setEditingKey(cellKey(therapistId, dateInfo.date));
-    setEditDraft({ startTime: state.startTime || '09:00', endTime: state.endTime || '17:00' });
+    setEditDraft({ startTime: state.startTime || '10:00', endTime: state.endTime || '18:00' });
+    const rect = anchorEl.getBoundingClientRect();
+    setPopoverPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
   };
 
   const commitEdit = (therapistId, dateInfo) => {
@@ -408,7 +424,7 @@ const RosterPanel = ({ branchId }) => {
                     </td>
                     {days.map(d => (
                       <td key={d.date} className="border-b border-border p-1.5">
-                        <div className="h-16 rounded-spa bg-background animate-pulse" />
+                        <div className="h-20 rounded-spa bg-background animate-pulse" />
                       </td>
                     ))}
                   </tr>
@@ -448,7 +464,7 @@ const RosterPanel = ({ branchId }) => {
                         return (
                           <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
                             <div
-                              className="w-full h-16 flex items-center justify-center rounded-spa bg-slate-700 text-white text-[10px] font-body font-body-medium gap-1"
+                              className="w-full h-20 flex items-center justify-center rounded-spa bg-slate-700 text-white text-[10px] font-body font-body-medium gap-1"
                               title="Business closed"
                             >
                               <Icon name="Lock" size={11} />
@@ -495,7 +511,7 @@ const RosterPanel = ({ branchId }) => {
                         return (
                           <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
                             <div
-                              className={`flex flex-col items-center justify-center h-16 rounded-spa border spa-transition-fast ${
+                              className={`flex flex-col items-center justify-center h-20 rounded-spa border spa-transition-fast ${
                                 isModified
                                   ? 'bg-amber-50 border-amber-200'
                                   : 'border-dashed border-border/70 bg-background/30 hover:bg-background/70 hover:border-border'
@@ -512,49 +528,26 @@ const RosterPanel = ({ branchId }) => {
 
                       return (
                         <td key={d.date} className={`border-b border-border text-center align-middle p-1.5 ${isToday ? 'bg-primary/5' : ''}`}>
-                          {isEditing ? (
-                            <div
-                              className="flex flex-col gap-1 p-1.5 rounded-spa bg-surface border-2 border-primary shadow-spa-elevated animate-fade-in"
-                              onClick={(e) => e.stopPropagation()}
+                          <div
+                            className={`flex flex-col items-center justify-center h-20 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
+                              isEditing ? 'ring-2 ring-primary' : ''
+                            } ${
+                              isModified
+                                ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white'
+                                : 'bg-gradient-to-br from-primary to-primary/85 text-white'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => startEditing(t.id, d, state, e.currentTarget)}
+                              title="Click to change hours"
+                              className="flex flex-col items-center leading-tight hover:underline mt-1.5"
                             >
-                              <input
-                                type="time"
-                                autoFocus
-                                value={editDraft.startTime}
-                                onChange={(e) => setEditDraft(prev => ({ ...prev, startTime: e.target.value }))}
-                                onBlur={() => commitEdit(t.id, d)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(t.id, d); if (e.key === 'Escape') setEditingKey(null); }}
-                                className="w-full text-[10px] text-text-primary border border-border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                              />
-                              <input
-                                type="time"
-                                value={editDraft.endTime}
-                                onChange={(e) => setEditDraft(prev => ({ ...prev, endTime: e.target.value }))}
-                                onBlur={() => commitEdit(t.id, d)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(t.id, d); if (e.key === 'Escape') setEditingKey(null); }}
-                                className="w-full text-[10px] text-text-primary border border-border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                              />
-                            </div>
-                          ) : (
-                            <div
-                              className={`flex flex-col items-center justify-center h-16 rounded-spa spa-transition-fast hover:shadow-spa-resting ${
-                                isModified
-                                  ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white'
-                                  : 'bg-gradient-to-br from-primary to-primary/85 text-white'
-                              }`}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => startEditing(t.id, d, state)}
-                                title="Click to change hours"
-                                className="flex flex-col items-center leading-tight hover:underline"
-                              >
-                                <span className="font-data text-[11px] font-data-medium">{to12h(state.startTime)}</span>
-                                <span className="font-data text-[11px] opacity-90">{to12h(state.endTime)}</span>
-                              </button>
-                              {renderToggle(true)}
-                            </div>
-                          )}
+                              <span className="font-data text-sm font-data-medium">{to12h(state.startTime)}</span>
+                              <span className="font-data text-sm opacity-90">{to12h(state.endTime)}</span>
+                            </button>
+                            {renderToggle(true)}
+                          </div>
                         </td>
                       );
                     })}
@@ -565,6 +558,49 @@ const RosterPanel = ({ branchId }) => {
           </table>
         </div>
       </div>
+
+      {editingKey && popoverPos && createPortal(
+        <div
+          className="fixed z-dropdown w-56 p-4 rounded-spa bg-surface border border-border shadow-spa-elevated animate-fade-in text-left -translate-x-1/2"
+          style={{ top: popoverPos.top, left: popoverPos.left }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="font-heading text-sm font-heading-medium text-text-primary">Set start and end time</span>
+            <button type="button" onClick={() => setEditingKey(null)} className="text-text-tertiary hover:text-text-primary">
+              <Icon name="X" size={14} />
+            </button>
+          </div>
+          <div className="mb-3">
+            <div className="font-caption text-[11px] font-caption-medium text-text-secondary mb-1">Start</div>
+            <TimeBoxInput
+              value={editDraft.startTime}
+              onChange={(v) => setEditDraft(prev => ({ ...prev, startTime: v }))}
+            />
+          </div>
+          <div className="mb-3">
+            <div className="font-caption text-[11px] font-caption-medium text-text-secondary mb-1">End</div>
+            <TimeBoxInput
+              value={editDraft.endTime}
+              onChange={(v) => setEditDraft(prev => ({ ...prev, endTime: v }))}
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const therapistId = editingKey.slice(0, editingKey.indexOf('_'));
+                const date = editingKey.slice(editingKey.indexOf('_') + 1);
+                commitEdit(therapistId, { date });
+              }}
+              className="px-3 py-1.5 rounded-spa bg-primary text-white text-xs font-caption-medium hover:bg-primary/90 spa-transition-fast"
+            >
+              Update
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Legend */}
       <div className="flex items-center gap-2 flex-wrap">
