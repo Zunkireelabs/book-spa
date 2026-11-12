@@ -1359,6 +1359,10 @@ const CalendarGrid = ({
     const returnsAtLabel = col.returnsAt
       ? new Date(col.returnsAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
       : null;
+    // A transfer whose revert_at has already passed is over — the column still gets a
+    // badge so today's calendar keeps a record it happened, but the badge must say so in
+    // the past tense. Without this it reads as a still-ongoing transfer indefinitely.
+    const transferHasReturned = !!col.returnsAt && new Date(col.returnsAt).getTime() <= Date.now();
     const transferReason = getTransferReasonText(col);
     const todayBlock = getManualBlockRanges(col, currentDate ?? days?.[0], blockOccurrences)[0];
     // A transfer that's been created but hasn't reached its start time yet doesn't move
@@ -1430,10 +1434,10 @@ const CalendarGrid = ({
             <span className="w-2 h-2 rounded-full bg-warning flex-shrink-0" title="On Leave" />
           )}
           {col.transferredOut && (
-            <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title="Transferred out" />
+            <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title={transferHasReturned ? 'Transferred out (returned)' : 'Transferred out'} />
           )}
           {col.transferredIn && (
-            <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title="Visiting from another branch" />
+            <Icon name="ArrowRightLeft" size={11} className="text-[#B45309] flex-shrink-0" title={transferHasReturned ? 'Visited from another branch' : 'Visiting from another branch'} />
           )}
           {!col.transferredOut && !col.transferredIn && scheduledLabel && (
             <Icon name="Clock" size={11} className="text-amber-600 flex-shrink-0" title={scheduledLabel} />
@@ -1446,12 +1450,12 @@ const CalendarGrid = ({
         )}
         {col.transferredOut && (
           <div className="text-[9px] font-caption text-[#B45309] font-bold uppercase tracking-wider mt-0.5">
-            Transferred{returnsAtLabel ? ` · back ${returnsAtLabel}` : ''}
+            {transferHasReturned ? 'Transfer ended' : 'Transferred'}{returnsAtLabel ? ` · ${transferHasReturned ? 'returned' : 'back'} ${returnsAtLabel}` : ''}
           </div>
         )}
         {col.transferredIn && (
           <div className="text-[9px] font-caption text-[#B45309] font-bold uppercase tracking-wider mt-0.5">
-            Visiting{col.fromBranch ? ` · from ${col.fromBranch}` : ''}{returnsAtLabel ? ` · until ${returnsAtLabel}` : ''}
+            {transferHasReturned ? 'Visited' : 'Visiting'}{col.fromBranch ? ` · from ${col.fromBranch}` : ''}{returnsAtLabel ? ` · ${transferHasReturned ? 'returned' : 'until'} ${returnsAtLabel}` : ''}
           </div>
         )}
         {!col.transferredOut && !col.transferredIn && scheduledLabel && (
