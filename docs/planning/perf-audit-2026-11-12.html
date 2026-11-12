@@ -1,0 +1,771 @@
+<title>Zenly Latency Audit</title>
+
+<style>
+  :root {
+    --ground:      #F2F5F6;
+    --panel:       #FFFFFF;
+    --panel-sunk:  #E8EDEF;
+    --ink:         #141C21;
+    --ink-soft:    #4A5A63;
+    --ink-faint:   #7D8E97;
+    --rule:        #CBD6DA;
+    --rule-soft:   #DFE7EA;
+    --accent:      #1F5F7D;
+    --accent-soft: #E0EDF3;
+    --crit:        #A8322E;
+    --crit-soft:   #F6E3E2;
+    --warn:        #8A6413;
+    --warn-soft:   #F5EDDA;
+    --ok:          #246B4E;
+    --ok-soft:     #E0EFE7;
+
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1418;
+      --panel:       #151D22;
+      --panel-sunk:  #1C262C;
+      --ink:         #E4ECEF;
+      --ink-soft:    #A3B4BC;
+      --ink-faint:   #6F838C;
+      --rule:        #2B383F;
+      --rule-soft:   #222D33;
+      --accent:      #6FB6D6;
+      --accent-soft: #16303D;
+      --crit:        #E5807C;
+      --crit-soft:   #351C1B;
+      --warn:        #D8B257;
+      --warn-soft:   #332912;
+      --ok:          #6FC49B;
+      --ok-soft:     #142E23;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1418;
+    --panel:       #151D22;
+    --panel-sunk:  #1C262C;
+    --ink:         #E4ECEF;
+    --ink-soft:    #A3B4BC;
+    --ink-faint:   #6F838C;
+    --rule:        #2B383F;
+    --rule-soft:   #222D33;
+    --accent:      #6FB6D6;
+    --accent-soft: #16303D;
+    --crit:        #E5807C;
+    --crit-soft:   #351C1B;
+    --warn:        #D8B257;
+    --warn-soft:   #332912;
+    --ok:          #6FC49B;
+    --ok-soft:     #142E23;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 56px 0 28px;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    line-height: 1.04;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 2.4vw, 1.3rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 64ch;
+    margin: 0;
+  }
+
+  .scope {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 6px;
+  }
+  .scope b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------- verdict ---------- */
+
+  .verdict {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--accent);
+    padding: 28px 30px;
+    margin-top: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .verdict p { margin: 0; max-width: 68ch; }
+  .verdict p + p { color: var(--ink-soft); }
+  .verdict strong { font-weight: 650; }
+
+  /* ---------- metric strip ---------- */
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-top: 32px;
+  }
+  .metric {
+    background: var(--panel);
+    padding: 20px 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .metric .n {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.85rem;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+  .metric .n.bad { color: var(--crit); }
+  .metric .n.mid { color: var(--warn); }
+  .metric .n.good { color: var(--ok); }
+  .metric .l {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.35;
+  }
+  .metric .s {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ---------- section headings ---------- */
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 1.85rem;
+    letter-spacing: -0.01em;
+    margin: 64px 0 6px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .sechint {
+    font-size: 14px;
+    color: var(--ink-faint);
+    margin: 0 0 26px;
+    max-width: 68ch;
+  }
+
+  /* ---------- findings ledger ---------- */
+
+  .ledger { display: flex; flex-direction: column; }
+
+  .finding {
+    display: grid;
+    grid-template-columns: 54px 1fr;
+    gap: 0 20px;
+    padding: 26px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: start;
+  }
+  .finding:first-child { border-top: 1px solid var(--rule); }
+
+  .rank {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.4rem;
+    color: var(--ink-faint);
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  .fbody { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  .fhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+
+  .ftitle {
+    font-family: var(--display);
+    font-size: 1.3rem;
+    line-height: 1.25;
+    margin: 0;
+    font-weight: 400;
+    text-wrap: balance;
+  }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    white-space: nowrap;
+    border: 1px solid currentColor;
+  }
+  .tag.crit { color: var(--crit); background: var(--crit-soft); }
+  .tag.warn { color: var(--warn); background: var(--warn-soft); }
+  .tag.low  { color: var(--ink-faint); background: var(--panel-sunk); }
+
+  .fbody p { margin: 0; max-width: 72ch; color: var(--ink-soft); }
+  .fbody p.lead { color: var(--ink); }
+
+  .ev {
+    background: var(--panel);
+    border: 1px solid var(--rule-soft);
+    border-left: 2px solid var(--rule);
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    overflow-x: auto;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .ev b { color: var(--ink); font-weight: 600; }
+  .ev .path { color: var(--accent); }
+
+  .fix {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0 12px;
+    align-items: baseline;
+    padding-top: 2px;
+  }
+  .fix .k {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .fix .v { margin: 0; max-width: 72ch; }
+
+  /* ---------- latency bars ---------- */
+
+  .bars {
+    display: grid;
+    grid-template-columns: minmax(130px, auto) 1fr minmax(72px, auto);
+    gap: 7px 14px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--rule-soft);
+    padding: 16px 18px;
+  }
+  .bars .bl {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+  .bars .track { background: var(--panel-sunk); height: 11px; position: relative; }
+  .bars .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+  .bars .fill.bad { background: var(--crit); }
+  .bars .fill.ok { background: var(--ok); }
+  .bars .bv {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* ---------- plain tables ---------- */
+
+  .tblwrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 560px; }
+  th, td {
+    text-align: left;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* ---------- cleared list ---------- */
+
+  .cleared { display: flex; flex-direction: column; gap: 0; }
+  .cl {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 0 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: start;
+  }
+  .cl:first-child { border-top: 1px solid var(--rule); }
+  .cl .mark { color: var(--ok); font-family: var(--mono); font-size: 14px; line-height: 1.6; }
+  .cl p { margin: 0; max-width: 72ch; }
+  .cl p b { font-weight: 650; }
+  .cl p span { color: var(--ink-soft); }
+
+  /* ---------- order of work ---------- */
+
+  .plan { display: flex; flex-direction: column; }
+  .step {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 0 20px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .step:first-child { border-top: 1px solid var(--rule); }
+  .step .when {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-top: 3px;
+  }
+  .step .what { display: flex; flex-direction: column; gap: 5px; }
+  .step .what b { font-weight: 650; }
+  .step .what span { color: var(--ink-soft); font-size: 14.5px; }
+  .step .what code { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+
+  /* ---------- method ---------- */
+
+  .method {
+    background: var(--panel-sunk);
+    border: 1px solid var(--rule);
+    padding: 22px 24px;
+    margin-top: 28px;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .method h3 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 12px;
+    font-weight: 500;
+  }
+  .method p { margin: 0 0 10px; max-width: 74ch; }
+  .method p:last-child { margin-bottom: 0; }
+  .method code { font-family: var(--mono); font-size: 12.5px; }
+
+  code { font-family: var(--mono); font-size: 0.875em; }
+
+  @media (max-width: 620px) {
+    .finding { grid-template-columns: 1fr; gap: 10px; }
+    .rank { font-size: 1.1rem; }
+    .step { grid-template-columns: 1fr; gap: 6px; }
+    .bars { grid-template-columns: 1fr; }
+    .bars .track { height: 9px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Production performance audit · Zenly</div>
+    <h1>Why the booking app feels slow</h1>
+    <p class="standfirst">The production database is small, healthy, and almost entirely in memory. Clients are not waiting on data volume — they are waiting on round trips, and on a row-security policy tree that costs more to plan than the query costs to run.</p>
+    <div class="scope">
+      <span><b>Date</b> 12 Nov 2026</span>
+      <span><b>Target</b> prod · pmbvogiphelmpjdalmtv</span>
+      <span><b>Region</b> aws-1-ap-northeast-2</span>
+      <span><b>Stats window</b> 46 days</span>
+    </div>
+  </header>
+
+  <section class="verdict">
+    <p><strong>There is no single slow query and no overloaded server.</strong> Across the 46-day window the database spent well under 1% of one core on application work, and its cache hit rate is 100.00%. The system is slow because a typical user action is assembled from a long chain of individually expensive round trips.</p>
+    <p>Three multipliers stack: every request crosses from Nepal to Seoul instead of Mumbai; every <code>payments</code> read drags in a 442-node query plan built from nested row-security policies; and the service layer issues those requests one at a time rather than in parallel. Creating a booking fires 26 sequential database calls. Each of the three fixes is independent, and the first two are small.</p>
+  </section>
+
+  <section class="verdict" style="border-top-color: var(--ok); margin-top: 24px;">
+    <p><strong>Update, same day &mdash; findings 01, 03 and 04 are fixed.</strong> Findings 03 and 04 are code changes on the <code>stage</code> branch. Finding 01 is <code>supabase/migration-317-flatten-payments-rls.sql</code>, <strong>applied to staging and held for production</strong>: it is a row-security change, so it wants a review and a deliberate promotion rather than riding along with the next merge.</p>
+    <p>Measured results: first-paint JavaScript <strong>985 KB → 288 KB gzipped</strong>; booking creation <strong>26 → 19 round trips</strong> in 4 parallel batches; the dashboard insights panel <strong>12 → 2</strong>; and the <code>payments</code> read <strong>66.4 ms → 10.8 ms</strong> in identical conditions (about 1.8 ms once warm). Findings 02, 05, 06, 07 and 08 are untouched and still stand as written below.</p>
+  </section>
+
+  <div class="metrics">
+    <div class="metric">
+      <div class="n good">288 KB</div>
+      <div class="l">First-paint JavaScript, gzipped &mdash; was 986 KB</div>
+      <div class="s">fixed &middot; finding 03</div>
+    </div>
+    <div class="metric">
+      <div class="n good">10.8 ms</div>
+      <div class="l"><code>payments</code> read &mdash; was 66.4 ms, same conditions</div>
+      <div class="s">fixed on staging &middot; finding 01</div>
+    </div>
+    <div class="metric">
+      <div class="n good">19</div>
+      <div class="l">DB calls in <code>createBooking</code> &mdash; was 26, now 4 batched</div>
+      <div class="s">fixed &middot; finding 04</div>
+    </div>
+    <div class="metric">
+      <div class="n good">100.00%</div>
+      <div class="l">Buffer cache hit rate — data is not the problem</div>
+      <div class="s">bookings = 6.7 MB</div>
+    </div>
+  </div>
+
+  <h2>Findings, ranked by user-visible impact</h2>
+  <p class="sechint">Ranked by how much latency each one removes from a real interaction, not by how alarming the raw number looks. Evidence is quoted verbatim from the production database and the production build.</p>
+
+  <div class="ledger">
+
+    <!-- F1 -->
+    <article class="finding">
+      <div class="rank">01</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">Row-security policies on <code>payments</code> expand into a 442-node plan</h3>
+          <span class="tag" style="color: var(--ok); background: var(--ok-soft);">Fixed</span>
+        </div>
+        <p class="lead">This is the single most expensive thing the application does, and it is pure overhead. <code>payments</code> carries three permissive <code>SELECT</code> policies. Postgres ORs them together, so all three are evaluated. Each one contains an <code>EXISTS</code> into <code>bookings</code>, which expands its own five permissive policies, each of which reaches <code>branches</code>, which expands four more — one of them a correlated subquery over <code>customer_accounts</code>. Three times five times four is sixty policy branches for one read.</p>
+        <p>The result is that planning the query costs roughly as much as running it, on a table holding 6,499 rows. The customer-facing policies are evaluated in full even when a staff member is reading, and vice versa.</p>
+        <div class="ev">
+<b>EXPLAIN (ANALYZE)</b> · role <b>authenticated</b> · manager JWT · 50 rows
+Plan nodes . . . . . . <b>442</b>  (278 InitPlan / SubPlan entries)
+Planning Time  . . . . <b>11.798 ms</b>
+Execution Time . . . . <b>187.659 ms</b>
+
+<b>pg_stat_statements</b> · <span class="path">payments.amount, payments.payment_mode WHERE booking_id = ANY($1)</span>
+calls  49,635   mean <b>48.2 ms</b>   max <b>14,250.9 ms</b>   total <b>2,392.3 s</b>
+→ #1 application query by total time, by a factor of 3.3x</div>
+        <div class="fix">
+          <span class="k">Done</span>
+          <p class="v">Fixed on staging in <code>supabase/migration-317-flatten-payments-rls.sql</code>, held for production. The three OR&rsquo;d SELECT policies are replaced by one calling a set-returning <code>SECURITY DEFINER</code> function, <code>accessible_booking_ids()</code>. A per-row predicate was tried first and measured <em>slower</em> than the original (planning collapsed, execution doubled) because such a function cannot be inlined and so runs once per row; phrasing it as <code>booking_id IN (SELECT ...)</code> makes the planner evaluate it once per statement instead. Same conditions, same user: 66.4 ms → 10.8 ms. Equivalence was verified by capturing the visible payment ids for all 22 staging users across four roles and five orgs before and after &mdash; identical for every user, and zero cross-org rows visible to anyone.</p>
+        </div>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Collapse the OR'd permissive policies into one policy per table per command, with the role branches inside a single <code>SECURITY DEFINER</code> helper — e.g. <code>user_can_read_booking(uuid)</code> — so the chain flattens instead of multiplying. Gate the customer-facing policies on role so they are not evaluated for staff sessions. The existing <code>scripts/check-rls-initplan.sh</code> already passes (228 policies, no unwrapped helper calls), so this is about policy <em>count and nesting</em>, not the initplan pattern that was fixed previously.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F2 -->
+    <article class="finding">
+      <div class="rank">02</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">The production database is in Seoul; the clients are in Nepal</h3>
+          <span class="tag crit">Critical</span>
+        </div>
+        <p class="lead">Production runs on <code>aws-1-ap-northeast-2</code> (Seoul). Staging runs on <code>aws-1-ap-south-1</code> (Mumbai). Kathmandu to Mumbai is roughly 1,000 km; Kathmandu to Seoul is roughly 4,500 km. Every round trip in every finding below pays this distance, and finding 04 pays it twenty-six times for one booking.</p>
+        <p>Measured from the audit machine, the same <code>SELECT 1</code> against each pooler:</p>
+        <div class="bars">
+          <span class="bl">Mumbai (staging)</span>
+          <span class="track"><span class="fill ok" style="width:28%"></span></span>
+          <span class="bv">0.32 s</span>
+
+          <span class="bl">Seoul (production)</span>
+          <span class="track"><span class="fill bad" style="width:100%"></span></span>
+          <span class="bv">1.09 s</span>
+        </div>
+        <p>Three runs each: Mumbai 0.32 / 0.43 / 0.35 s, Seoul 1.02 / 1.09 / 1.25 s — roughly 3x, including TLS handshake. The ratio, not the absolute number, is the finding; the audit machine is not in Nepal, but the geography only gets worse from there.</p>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Migrate the production project to <code>ap-south-1</code>, matching staging. This is a Supabase project migration with real downtime and a credential rotation, so it needs scheduling — but it is a configuration change, not an engineering one, and it reduces every single latency figure in this report by roughly two thirds.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F3 -->
+    <article class="finding">
+      <div class="rank">03</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">The entire app ships as one 4.19 MB JavaScript file</h3>
+          <span class="tag" style="color: var(--ok); background: var(--ok-soft);">Fixed</span>
+        </div>
+        <p class="lead">There is no code splitting anywhere. <code>src/Routes.jsx</code> has 31 static imports and zero <code>lazy()</code> calls, so Vite emits a single chunk containing every route. A customer opening the public booking page downloads and parses the manager dashboard, the payroll panel, the spreadsheet exporter and the charting library before anything renders.</p>
+        <div class="ev"><b>npm run build</b> · production
+build/assets/<span class="path">index-BJl8SxyN.js</span>   <b>4,190.85 kB</b>  │ gzip: <b>985.54 kB</b>
+build/assets/index-CtzcoZIZ.css        99.17 kB  │ gzip:    17.77 kB
+
+(!) Some chunks are larger than 2000 kB after minification.
+
+Confirmed inside the single chunk: recharts, xlsx, posthog-js,
+dompurify, lucide-react. FullCalendar and dnd-kit also route-only.
+<span class="path">src/Routes.jsx</span>: 31 static imports, <b>0</b> lazy()</div>
+        <div class="fix">
+          <span class="k">Done</span>
+          <p class="v">Fixed. Every route is now <code>React.lazy()</code> behind one <code>&lt;Suspense&gt;</code>, with vendor chunks split in <code>vite.config.mjs</code>. The larger win was <code>AppIcon.jsx</code>: it did <code>import * as LucideIcons</code> and looked icons up by name, which defeats tree-shaking and shipped all 5,293 lucide exports for the 165 the app actually uses. It now reads from a generated allowlist (<code>scripts/gen-icon-registry.mjs</code>). First paint went 985 KB → 288 KB gzipped, and the login page now pulls the entry plus one route chunk instead of everything.</p>
+        </div>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Wrap every route in <code>React.lazy()</code> behind a <code>&lt;Suspense&gt;</code> boundary, and add <code>build.rollupOptions.output.manualChunks</code> to split the vendor libraries. The biggest wins are route-only: FullCalendar and dnd-kit (calendar), recharts (reports), and <code>xlsx</code> (export). Target a first-load chunk under 300 KB gzipped. The <code>chunkSizeWarningLimit: 2000</code> currently set in <code>vite.config.mjs</code> is suppressing this warning rather than answering it.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F4 -->
+    <article class="finding">
+      <div class="rank">04</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">The service layer never parallelises — <code>createBooking</code> makes 26 sequential calls</h3>
+          <span class="tag" style="color: var(--ok); background: var(--ok-soft);">Fixed</span>
+        </div>
+        <p class="lead">Across all of <code>src/services/api.js</code> (16,364 lines, 405 <code>.select()</code> calls), <code>Promise.all</code> appears in exactly one function. Everything else awaits one statement at a time. Most of these calls are independent lookups — service, branch, rooms, therapists, availability — that could be issued together.</p>
+        <p>Multiply the call count by the Seoul round trip from finding 02 and the policy cost from finding 01, and a single booking becomes a multi-second wait with the UI blocked.</p>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr><th>Function</th><th>Line</th><th>Sequential awaits</th><th>Table ops</th><th>Promise.all</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>createBooking</code></td><td class="num">5356</td><td class="num">26</td><td class="num">18</td><td class="num">0</td></tr>
+              <tr><td><code>rescheduleBooking</code></td><td class="num">3341</td><td class="num">15</td><td class="num">14</td><td class="num">0</td></tr>
+              <tr><td><code>assignTherapist</code></td><td class="num">2225</td><td class="num">15</td><td class="num">12</td><td class="num">0</td></tr>
+              <tr><td><code>recordPayment</code></td><td class="num">628</td><td class="num">14</td><td class="num">6</td><td class="num">0</td></tr>
+              <tr><td><code>getTodayInsights</code></td><td class="num">3756</td><td class="num">12</td><td class="num">11</td><td class="num">0</td></tr>
+              <tr><td><code>updateBookingDetails</code></td><td class="num">2576</td><td class="num">11</td><td class="num">8</td><td class="num">0</td></tr>
+              <tr><td><code>submitGroupBooking</code></td><td class="num">6026</td><td class="num">10</td><td class="num">0</td><td class="num">0</td></tr>
+              <tr><td><code>getDailyOperationalReport</code></td><td class="num">4095</td><td class="num">8</td><td class="num">7</td><td class="num">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="fix">
+          <span class="k">Done</span>
+          <p class="v">Partly fixed &mdash; the read-batching pass, not the RPC consolidation. <code>createBooking</code> is 26 → 19 awaits across 4 <code>Promise.all</code> batches: its three preflight lookups became one query via an embedded <code>industries</code> resource, and all four therapist pre-checks now go out together. <code>getTodayInsights</code> went 12 round trips → 2. Guard order and error precedence are unchanged, and the query operations were diffed mechanically before and after &mdash; identical apart from the intended embed. Still outstanding: the write-chain consolidation into RPCs, and <code>recordPayment</code> / <code>assignTherapist</code> / <code>rescheduleBooking</code>.</p>
+        </div>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Two passes. First, batch the independent read phase of each function with <code>Promise.all</code> — mechanical, low risk, and it alone should cut <code>createBooking</code> roughly in half. Second, for the write-heavy flows (<code>createBooking</code>, <code>submitGroupBooking</code>, <code>recordPayment</code>) move the validate-and-insert sequence into a single Postgres function called over RPC, collapsing the chain to one round trip and making it atomic at the same time. <code>submitGroupBooking</code> and the group-creation loop at line 6125 also call <code>createBooking</code> once per person in a <code>for</code> loop, so the cost is per-guest today.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F5 -->
+    <article class="finding">
+      <div class="rank">05</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">Repeated full scans of <code>bookings</code>, <code>customers</code> and <code>staff_transfers</code></h3>
+          <span class="tag warn">Moderate</span>
+        </div>
+        <p class="lead">The tables are small enough that Postgres chooses a sequential scan, and at this size that choice is usually correct. The concern is the volume: 124 million tuples read sequentially from a 8,980-row table means the pattern is being repeated constantly, and it will stop being correct as the data grows. <code>staff_transfers</code> alone was scanned 177,118 times — it is read on nearly every request.</p>
+        <div class="ev"><b>pg_stat_user_tables</b> · public schema · 46-day window
+table                rows    seq_scan   seq_tup_read  avg rows/scan
+<span class="path">bookings</span>           8,980     16,503    124,081,392          7,518
+<span class="path">staff_transfers</span>      338    177,118     43,983,305            248
+<span class="path">customers</span>          2,768     16,146     40,185,253          2,488
+<span class="path">services</span>             452      1,644        739,317            449
+
+Index <span class="path">idx_bookings_status</span>: <b>0</b> scans — unused, droppable</div>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Revisit after finding 01 — much of this volume is policy subqueries re-reading parent tables, so flattening the policies should remove it rather than requiring new indexes. Afterwards, re-measure and add a composite index only where a scan survives. Drop <code>idx_bookings_status</code>, which has never been used.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F6 -->
+    <article class="finding">
+      <div class="rank">06</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">Multi-second stalls appear across unrelated statements</h3>
+          <span class="tag warn">Moderate</span>
+        </div>
+        <p class="lead">Mean times are modest but maximums are not, and the spikes hit statements that have nothing in common — application reads, auth token writes, and the cron bookkeeping table alike. That pattern points at a host-level pause rather than any one query: most likely CPU credit exhaustion or a checkpoint on the shared-tenant instance.</p>
+        <div class="ev"><b>Worst-case execution, 46-day window</b>
+<span class="path">cron.job_run_details</span> insert . . . . . . . max <b>41,138.8 ms</b>
+<span class="path">pg_timezone_names</span> . . . . . . . . . . . max <b>29,799.0 ms</b>
+<span class="path">realtime</span> WAL poll  . . . . . . . . . . max <b>17,714.4 ms</b>
+<span class="path">payments</span> read (finding 01) . . . . . . max <b>14,250.9 ms</b>
+<span class="path">bookings</span> status update . . . . . . . . max <b>13,952.4 ms</b>
+<span class="path">auth.refresh_tokens</span> insert . . . . . . max  <b>3,072.1 ms</b>
+
+Instance: shared_buffers <b>256 MB</b> · max_connections <b>60</b>
+          max_parallel_workers_per_gather <b>1</b>  → Micro tier</div>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Check the CPU-credit balance chart in the Supabase dashboard for the production project. If credits are being exhausted, the instance needs a larger tier — the current Micro sizing has no burst headroom, and a client reporting "it froze for ten seconds" is almost certainly hitting this rather than any of the findings above. This one is observable but not provable from SQL alone, so treat it as a lead to confirm, not a conclusion.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F7 -->
+    <article class="finding">
+      <div class="rank">07</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle">nginx compresses at the weakest setting and has no Brotli</h3>
+          <span class="tag low">Minor</span>
+        </div>
+        <p class="lead"><code>nginx.conf</code> enables gzip but leaves <code>gzip_comp_level</code> at its default of 1. Caching and the SPA fallback are otherwise correctly configured — hashed assets get <code>immutable</code> for a year and <code>index.html</code> is never cached.</p>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Set <code>gzip_comp_level 6</code> and add <code>application/wasm</code> plus the font types to <code>gzip_types</code>. Pre-compressing the build output with Brotli and serving it via <code>brotli_static</code> typically saves another 15–20% over gzip on a bundle this size. Worth doing, but it is a discount on finding 03 — shrinking the bundle matters far more than compressing it harder.</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- F8 -->
+    <article class="finding">
+      <div class="rank">08</div>
+      <div class="fbody">
+        <div class="fhead">
+          <h3 class="ftitle"><code>audit_logs</code> is 96% of the database and is never read</h3>
+          <span class="tag low">Minor</span>
+        </div>
+        <p class="lead">178 MB across 90,575 rows — about 2 KB per row — against a total application footprint of a few megabytes everywhere else. Its four indexes have logged 10 scans between them in 46 days. Write volume is low (143 rows in the last 24 hours), so this is a storage and backup cost rather than a latency one, but it distorts every size figure and slows restores.</p>
+        <div class="ev">relname     rows     total size   idx_scan
+<span class="path">audit_logs</span>  90,575   <b>178 MB</b>       <b>~10</b>  (4 indexes)
+<span class="path">bookings</span>    8,980   6,744 kB    3,224,298
+<span class="path">payments</span>    6,499   1,488 kB    2,212,300</div>
+        <div class="fix">
+          <span class="k">Fix</span>
+          <p class="v">Decide the retention period, then add a scheduled prune — there is already a <code>prune_cron_job_run_details</code> job to copy the pattern from. Drop <code>idx_audit_logs_table_name</code> and <code>idx_audit_logs_record_id</code> unless a compliance query needs them. Check whether the row payload is storing full before/after JSON where a diff would do.</p>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <h2>What is <em>not</em> wrong</h2>
+  <p class="sechint">Ruling things out matters as much as finding them — each of these is a plausible theory that the measurements disprove, and chasing any of them would waste the sprint.</p>
+
+  <div class="cleared">
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>Data volume.</b> <span>The largest application table is 8,980 rows and 6.7 MB. Nothing here is slow because there is too much of it.</span></p>
+    </div>
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>Disk I/O.</b> <span>Buffer cache hit rate is 100.00% across 10,026,756 transactions. The working set is entirely in memory.</span></p>
+    </div>
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>Table bloat and autovacuum.</b> <span>Worst dead-tuple ratio is 8.0% on <code>booking_therapists</code>. Autovacuum and autoanalyze are both current. Zero deadlocks, 16 temp files in 46 days.</span></p>
+    </div>
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>Supabase Realtime.</b> <span>The WAL poller looks alarming at 3,263,077 calls and 20,825 s of total execution — but spread across the 46-day window that is 0.52% of one core. It is the largest single consumer and still nowhere near a bottleneck. 32 active subscriptions; the publication covers only <code>bookings</code> and <code>notifications</code>.</span></p>
+    </div>
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>Connection pool exhaustion.</b> <span>21 idle authenticator connections against a 60-connection limit, with 2 active at sample time. There is ample headroom.</span></p>
+    </div>
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>The RLS initplan pattern.</b> <span><code>scripts/check-rls-initplan.sh</code> passes clean against production: 228 policies inspected, no unwrapped helper calls. All four helpers are correctly <code>STABLE</code> and <code>SECURITY DEFINER</code>. That earlier fix held — finding 01 is a different problem in the same area.</span></p>
+    </div>
+    <div class="cl">
+      <span class="mark">✓</span>
+      <p><b>Static asset caching.</b> <span>Hashed assets are served <code>public, immutable</code> for one year and <code>index.html</code> is correctly never cached. Only the compression level needs attention.</span></p>
+    </div>
+  </div>
+
+  <h2>Suggested order of work</h2>
+  <p class="sechint">Sequenced so that each step is measurable before the next begins, and so the cheap wins land before the one that needs a maintenance window. Steps 1 and 2 together should be the bulk of the perceived improvement.</p>
+
+  <div class="plan">
+    <div class="step">
+      <span class="when">First</span>
+      <span class="what">
+        <b>Flatten the RLS policies on <code>payments</code>, <code>bookings</code> and <code>branches</code></b>
+        <span>Finding 01. One migration. Re-run the same <code>EXPLAIN (ANALYZE)</code> afterwards and confirm the plan drops from 442 nodes to double digits. This is the highest ratio of latency removed to risk taken.</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="when">First</span>
+      <span class="what">
+        <b>Lazy-load the routes and split the vendor chunks</b>
+        <span>Finding 03. Frontend-only, independent of the database work, so it can run in parallel. <code>src/Routes.jsx</code> plus <code>vite.config.mjs</code>.</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="when">Then</span>
+      <span class="what">
+        <b>Batch the independent reads with <code>Promise.all</code></b>
+        <span>Finding 04, first pass. Start with <code>createBooking</code>, <code>recordPayment</code> and <code>getTodayInsights</code> — the three users hit most often.</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="when">Then</span>
+      <span class="what">
+        <b>Confirm the CPU-credit theory in the dashboard</b>
+        <span>Finding 06. Five minutes of looking at a chart, and it decides whether the instance tier needs to change before anything else is measured.</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="when">Schedule</span>
+      <span class="what">
+        <b>Move production to <code>ap-south-1</code></b>
+        <span>Finding 02. Needs a maintenance window and a credential rotation, and it touches the promotion runbook in <code>supabase/PROMOTION.md</code>. Largest single improvement, longest lead time — start the planning now even though it lands last.</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="when">Cleanup</span>
+      <span class="what">
+        <b>Collapse write chains into RPCs; prune <code>audit_logs</code>; tune nginx</b>
+        <span>Findings 04 (second pass), 07 and 08. Worth doing, but none of them is what the clients are feeling right now.</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="method">
+    <h3>Method and caveats</h3>
+    <p>Measurements were taken on 12 Nov 2026 directly against the production database (<code>pmbvogiphelmpjdalmtv</code>) over the pooler, using read-only queries only: <code>pg_stat_statements</code>, <code>pg_stat_user_tables</code>, <code>pg_stat_user_indexes</code>, <code>pg_policies</code> and <code>pg_settings</code>. The <code>EXPLAIN (ANALYZE)</code> runs were executed inside a transaction as <code>SET LOCAL ROLE authenticated</code> with a real manager's JWT claims, then rolled back. No data was modified.</p>
+    <p>Cumulative statistics have never been reset, so all totals cover the full 46 days since the postmaster started on 26 Sep 2026. Per-day and per-core figures in this report are derived from that window — the raw totals look far more dramatic than the rates they represent, which is why finding 04 outranks the Realtime poller despite the poller's larger absolute number.</p>
+    <p>Two limits worth stating plainly. The round-trip figures in finding 02 were measured from the audit machine, not from a client device in Nepal, so the ratio between regions is sound but the absolute numbers are not what an end user experiences. And finding 06 is inferred from the shape of the outliers rather than observed directly — it needs the dashboard's CPU-credit chart to be confirmed or dismissed.</p>
+  </div>
+
+</div>
