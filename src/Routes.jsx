@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes as RouterRoutes, Route, useLocation, useParams, Navigate } from "react-router-dom";
 import ScrollToTop from "components/ScrollToTop";
 import BrandMark from "components/ui/BrandMark";
@@ -6,29 +6,35 @@ import ErrorBoundary from "components/ErrorBoundary";
 import ProtectedRoute from "components/ProtectedRoute";
 import { TenantProvider } from "contexts/TenantContext";
 import { useAuth } from "contexts/AuthContext";
-import CustomerBookingFlowV2 from "pages/customer-booking-flow-v2";
-import StaffLoginAuthentication from "pages/login";
-import BranchStaffDashboard from "pages/branch-staff-dashboard";
-import BookingDetailsAssignmentModal from "pages/booking-details-assignment-modal";
-import StaffDetailPage from "pages/staff-detail";
-import LocationDetailPage from "pages/location-detail";
-import ServiceDetailPage from "pages/service-detail";
-import CustomerDetailPage from "pages/customer-detail";
-import CustomerSentMessagesPage from "pages/customer-sent-messages";
-import BranchManagerDashboard from "pages/branch-manager-dashboard";
-import AttendanceCalendarPage from "pages/attendance-calendar";
-import OrgFinder from "pages/org-finder";
-import CustomerOrgFinder from "pages/customer-org-finder";
-import CustomerLoginAuthentication from "pages/customer-login";
-import CustomerSignup from "pages/customer-signup";
-import CustomerAccount from "pages/customer-account";
-import NotFound from "pages/NotFound";
 import { PlatformAuthProvider } from 'contexts/PlatformAuthContext';
 import ProtectedPlatformRoute from 'components/ProtectedPlatformRoute';
-import PlatformLogin from 'pages/platform/PlatformLogin';
-import PlatformDashboard from 'pages/platform/PlatformDashboard';
-import PlatformOrgDetail from 'pages/platform/PlatformOrgDetail';
 import { PLATFORM_ADMIN_ENABLED } from 'lib/featureFlags';
+
+// Route components are lazy-loaded so a visitor only downloads the page they
+// asked for. Before this, all 20 pages were static imports, so Vite emitted a
+// single 4.19 MB chunk (986 kB gzipped) and a customer opening /:orgSlug/book
+// paid for the manager dashboard, payroll panel, charts and the XLSX exporter
+// before anything rendered. See docs/planning/perf-audit-2026-11-12.html.
+const CustomerBookingFlowV2 = lazy(() => import("pages/customer-booking-flow-v2"));
+const StaffLoginAuthentication = lazy(() => import("pages/login"));
+const BranchStaffDashboard = lazy(() => import("pages/branch-staff-dashboard"));
+const BookingDetailsAssignmentModal = lazy(() => import("pages/booking-details-assignment-modal"));
+const StaffDetailPage = lazy(() => import("pages/staff-detail"));
+const LocationDetailPage = lazy(() => import("pages/location-detail"));
+const ServiceDetailPage = lazy(() => import("pages/service-detail"));
+const CustomerDetailPage = lazy(() => import("pages/customer-detail"));
+const CustomerSentMessagesPage = lazy(() => import("pages/customer-sent-messages"));
+const BranchManagerDashboard = lazy(() => import("pages/branch-manager-dashboard"));
+const AttendanceCalendarPage = lazy(() => import("pages/attendance-calendar"));
+const OrgFinder = lazy(() => import("pages/org-finder"));
+const CustomerOrgFinder = lazy(() => import("pages/customer-org-finder"));
+const CustomerLoginAuthentication = lazy(() => import("pages/customer-login"));
+const CustomerSignup = lazy(() => import("pages/customer-signup"));
+const CustomerAccount = lazy(() => import("pages/customer-account"));
+const NotFound = lazy(() => import("pages/NotFound"));
+const PlatformLogin = lazy(() => import("pages/platform/PlatformLogin"));
+const PlatformDashboard = lazy(() => import("pages/platform/PlatformDashboard"));
+const PlatformOrgDetail = lazy(() => import("pages/platform/PlatformOrgDetail"));
 
 // External redirect component for root URL
 const ExternalRedirect = ({ to }) => {
@@ -108,6 +114,7 @@ const AppRoutes = () => {
   return (
       <ErrorBoundary key={location.pathname}>
       <ScrollToTop />
+      <Suspense fallback={<LoadingScreen />}>
       <RouterRoutes>
         {/* Root redirects to Zunkireelabs product page */}
         <Route path="/" element={<ExternalRedirect to="https://www.zunkireelabs.com/products/ai-booking-engine/" />} />
@@ -281,6 +288,7 @@ const AppRoutes = () => {
 
         <Route path="*" element={<NotFound />} />
       </RouterRoutes>
+      </Suspense>
       </ErrorBoundary>
   );
 };
