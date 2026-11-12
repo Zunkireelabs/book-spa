@@ -3762,14 +3762,108 @@ export async function getTodayInsights(branchId, from, to) {
     const rangeStart = from || new Date().toISOString().split('T')[0];
     const rangeEnd = to || rangeStart;
 
-    // 1. Bookings for the branch in range, settled or partially settled
+    // rangeEnd is a Nepal calendar date; the exclusive upper bound used by the
+    // timestamp-based queries below is the next day's Nepal midnight (+05:45).
+    const nextDayBoundary = new Date(`${rangeEnd}T00:00:00+05:45`);
+    nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
+
+    // This panel is ten independent branch+range aggregates plus two follow-up
+    // lookups that need ids from the first round. It used to issue all twelve
+    // one after another, so the dashboard paid twelve serial round trips before
+    // it could render. They go out as two batches instead — everything that
+    // only needs (branchId, rangeStart, rangeEnd), then the two that depend on
+    // ids from the first batch. Each numbered section below still processes its
+    // own result in the original order, and the error checks keep their
+    // original precedence, so a caller sees the same first error as before.
     let bookingsQuery = supabase
       .from('bookings')
       .select('id, payment_status')
       .gte('date', rangeStart)
       .lte('date', rangeEnd);
     bookingsQuery = withBranch(bookingsQuery, branchId);
-    const { data: bookings, error: bookingsError } = await bookingsQuery;
+
+    let vouchersInRangeQuery = supabase
+      .from('vouchers')
+      .select('id')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    vouchersInRangeQuery = withBranch(vouchersInRangeQuery, branchId, 'branch_id');
+
+    let claimsQuery = supabase
+      .from('voucher_claims')
+      .select('amount_claimed')
+      .gte('redeemed_date', rangeStart)
+      .lte('redeemed_date', rangeEnd);
+    claimsQuery = withBranch(claimsQuery, branchId, 'branch_claimed_id');
+
+    let issuedQuery = supabase
+      .from('vouchers')
+      .select('total_amount_issued')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    issuedQuery = withBranch(issuedQuery, branchId, 'branch_id');
+
+    let depositsQuery = supabase
+      .from('membership_transactions')
+      .select('amount, created_at, payment_mode')
+      .eq('kind', 'deposit')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    depositsQuery = withBranch(depositsQuery, branchId);
+
+    let deductionsQuery = supabase
+      .from('membership_transactions')
+      .select('amount, created_at')
+      .eq('kind', 'deduction')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    deductionsQuery = withBranch(deductionsQuery, branchId);
+
+    let packagesIssuedQuery = supabase
+      .from('packages')
+      .select('paid_amount, payment_method')
+      .gte('issued_date', rangeStart)
+      .lte('issued_date', rangeEnd);
+    packagesIssuedQuery = withBranch(packagesIssuedQuery, branchId);
+
+    let packageRedemptionsQuery = supabase
+      .from('package_redemptions')
+      .select('id')
+      .gte('redeemed_date', rangeStart)
+      .lte('redeemed_date', rangeEnd);
+    packageRedemptionsQuery = withBranch(packageRedemptionsQuery, branchId);
+
+    let productSalesQuery = supabase
+      .from('product_sales')
+      .select('total_amount, payment_mode, refunded_at')
+      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+      .lt('created_at', nextDayBoundary.toISOString());
+    productSalesQuery = withBranch(productSalesQuery, branchId);
+
+    const [
+      { data: bookings, error: bookingsError },
+      { data: vouchersInRange, error: vouchersInRangeError },
+      { data: claims, error: claimsError },
+      { data: issued, error: issuedError },
+      { data: deposits, error: depositsError },
+      { data: deductions, error: deductionsError },
+      { data: packagesIssued, error: packagesIssuedError },
+      { data: packagesRedeemed, error: packagesRedeemedError },
+      { data: productSalesRows, error: productSalesError },
+      { data: utilization, error: utilizationError },
+    ] = await Promise.all([
+      bookingsQuery,
+      vouchersInRangeQuery,
+      claimsQuery,
+      issuedQuery,
+      depositsQuery,
+      deductionsQuery,
+      packagesIssuedQuery,
+      packageRedemptionsQuery,
+      productSalesQuery,
+      getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd }),
+    ]);
+
     if (bookingsError) throw bookingsError;
 
     const settledBookingIds = (bookings || [])
@@ -3784,11 +3878,30 @@ export async function getTodayInsights(branchId, from, to) {
     let membershipRedeemed = { count: 0, value: 0 };
     const modeTotals = {}; // { 'Cash': 17600, 'Nabil Card': 16200, 'MobileBanking': 31860, ... }
 
+    if (vouchersInRangeError) throw vouchersInRangeError;
+    const voucherIdsInRange = (vouchersInRange || []).map(v => v.id);
+
+    // Second and final batch: the two lookups that need ids from the first.
+    // Each is skipped exactly as before when its id list is empty.
+    const [
+      { data: payments, error: paymentsError },
+      { data: voucherPayments, error: voucherPaymentsError },
+    ] = await Promise.all([
+      settledBookingIds.length > 0
+        ? supabase
+            .from('payments')
+            .select('amount, payment_mode')
+            .in('booking_id', settledBookingIds)
+        : Promise.resolve({ data: null }),
+      voucherIdsInRange.length > 0
+        ? supabase
+            .from('voucher_payments')
+            .select('amount, payment_mode')
+            .in('voucher_id', voucherIdsInRange)
+        : Promise.resolve({ data: null }),
+    ]);
+
     if (settledBookingIds.length > 0) {
-      const { data: payments, error: paymentsError } = await supabase
-        .from('payments')
-        .select('amount, payment_mode')
-        .in('booking_id', settledBookingIds);
       if (paymentsError) throw paymentsError;
 
       for (const p of (payments || [])) {
@@ -3812,21 +3925,7 @@ export async function getTodayInsights(branchId, from, to) {
     // Total Sales and the Cash/Card/Digital bars on this Dashboard panel, even
     // though getDailySummary/getDailyOperationalReport already fold the exact
     // same voucher_payments rows into their own totals. Mirrors that fold-in.
-    let vouchersInRangeQuery = supabase
-      .from('vouchers')
-      .select('id')
-      .gte('issued_date', rangeStart)
-      .lte('issued_date', rangeEnd);
-    vouchersInRangeQuery = withBranch(vouchersInRangeQuery, branchId, 'branch_id');
-    const { data: vouchersInRange, error: vouchersInRangeError } = await vouchersInRangeQuery;
-    if (vouchersInRangeError) throw vouchersInRangeError;
-
-    const voucherIdsInRange = (vouchersInRange || []).map(v => v.id);
     if (voucherIdsInRange.length > 0) {
-      const { data: voucherPayments, error: voucherPaymentsError } = await supabase
-        .from('voucher_payments')
-        .select('amount, payment_mode')
-        .in('voucher_id', voucherIdsInRange);
       if (voucherPaymentsError) throw voucherPaymentsError;
 
       for (const p of (voucherPayments || [])) {
@@ -3838,13 +3937,6 @@ export async function getTodayInsights(branchId, from, to) {
     }
 
     // 3. Gift vouchers claimed in range (redemption ledger)
-    let claimsQuery = supabase
-      .from('voucher_claims')
-      .select('amount_claimed')
-      .gte('redeemed_date', rangeStart)
-      .lte('redeemed_date', rangeEnd);
-    claimsQuery = withBranch(claimsQuery, branchId, 'branch_claimed_id');
-    const { data: claims, error: claimsError } = await claimsQuery;
     if (claimsError) throw claimsError;
     const voucherClaimed = {
       count: (claims || []).length,
@@ -3852,13 +3944,6 @@ export async function getTodayInsights(branchId, from, to) {
     };
 
     // 4. Gift vouchers distributed (issued) in range
-    let issuedQuery = supabase
-      .from('vouchers')
-      .select('total_amount_issued')
-      .gte('issued_date', rangeStart)
-      .lte('issued_date', rangeEnd);
-    issuedQuery = withBranch(issuedQuery, branchId, 'branch_id');
-    const { data: issued, error: issuedError } = await issuedQuery;
     if (issuedError) throw issuedError;
     const voucherDistributed = {
       count: (issued || []).length,
@@ -3866,18 +3951,6 @@ export async function getTodayInsights(branchId, from, to) {
     };
 
     // 5. Memberships sold (deposits) in range, branch-scoped (migration-156).
-    // rangeEnd is a Nepal calendar date; the exclusive upper bound is the next
-    // day's Nepal midnight (+05:45).
-    const nextDayBoundary = new Date(`${rangeEnd}T00:00:00+05:45`);
-    nextDayBoundary.setUTCDate(nextDayBoundary.getUTCDate() + 1);
-    let depositsQuery = supabase
-      .from('membership_transactions')
-      .select('amount, created_at, payment_mode')
-      .eq('kind', 'deposit')
-      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
-      .lt('created_at', nextDayBoundary.toISOString());
-    depositsQuery = withBranch(depositsQuery, branchId);
-    const { data: deposits, error: depositsError } = await depositsQuery;
     if (depositsError) throw depositsError;
     const membershipSold = {
       count: (deposits || []).length,
@@ -3897,14 +3970,6 @@ export async function getTodayInsights(branchId, from, to) {
 
     // 5b. Memberships redeemed (deductions) in range, branch-scoped — direct
     // ledger filter, consistent with Sold (migration-156).
-    let deductionsQuery = supabase
-      .from('membership_transactions')
-      .select('amount, created_at')
-      .eq('kind', 'deduction')
-      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
-      .lt('created_at', nextDayBoundary.toISOString());
-    deductionsQuery = withBranch(deductionsQuery, branchId);
-    const { data: deductions, error: deductionsError } = await deductionsQuery;
     if (deductionsError) throw deductionsError;
     membershipRedeemed = {
       count: (deductions || []).length,
@@ -3912,13 +3977,6 @@ export async function getTodayInsights(branchId, from, to) {
     };
 
     // 6. Packages sold (issued) in range, branch-scoped.
-    let packagesIssuedQuery = supabase
-      .from('packages')
-      .select('paid_amount, payment_method')
-      .gte('issued_date', rangeStart)
-      .lte('issued_date', rangeEnd);
-    packagesIssuedQuery = withBranch(packagesIssuedQuery, branchId);
-    const { data: packagesIssued, error: packagesIssuedError } = await packagesIssuedQuery;
     if (packagesIssuedError) throw packagesIssuedError;
     const packageSold = {
       count: (packagesIssued || []).length,
@@ -3936,13 +3994,6 @@ export async function getTodayInsights(branchId, from, to) {
 
     // 7. Packages redeemed (sessions used) in range, branch-scoped. No per-redemption
     // currency amount — sessions are counted, not priced individually.
-    let packageRedemptionsQuery = supabase
-      .from('package_redemptions')
-      .select('id')
-      .gte('redeemed_date', rangeStart)
-      .lte('redeemed_date', rangeEnd);
-    packageRedemptionsQuery = withBranch(packageRedemptionsQuery, branchId);
-    const { data: packagesRedeemed, error: packagesRedeemedError } = await packageRedemptionsQuery;
     if (packagesRedeemedError) throw packagesRedeemedError;
     const packageRedeemed = { count: (packagesRedeemed || []).length };
 
@@ -3951,13 +4002,6 @@ export async function getTodayInsights(branchId, from, to) {
     // into totalSales/modeTotals. Timestamp-based (created_at) like
     // memberships (5/5b) rather than a plain date column, same Nepal-
     // midnight boundary logic.
-    let productSalesQuery = supabase
-      .from('product_sales')
-      .select('total_amount, payment_mode, refunded_at')
-      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
-      .lt('created_at', nextDayBoundary.toISOString());
-    productSalesQuery = withBranch(productSalesQuery, branchId);
-    const { data: productSalesRows, error: productSalesError } = await productSalesQuery;
     if (productSalesError) throw productSalesError;
     const activeProductSales = (productSalesRows || []).filter(p => !p.refunded_at);
     const productsSold = {
@@ -3971,7 +4015,6 @@ export async function getTodayInsights(branchId, from, to) {
     }
 
     // 8. Staff utilization (reuse existing intelligence function)
-    const { data: utilization, error: utilizationError } = await getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd });
     if (utilizationError) throw utilizationError;
 
     return {
@@ -5388,14 +5431,32 @@ export async function createBooking({
     customerName = toTitleCase(customerName);
     const resolvedBranchId = resolveBranchId(branchId);
 
-    // 1. Fetch service for duration + price
-    const { data: service, error: serviceError } = await supabase
-      .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category')
-      .eq('id', serviceId)
-      .single();
+    // 1. Fetch service for duration + price, and the branch's industry config.
+    // These two don't depend on each other, so they go out together rather than
+    // back to back. The industry's enable_rooms used to be a third round trip
+    // keyed off branchData.organizations.industry_type; it's embedded here
+    // instead (same organizations → industries relationship AuthContext already
+    // selects through), which folds three sequential queries into one.
+    const [
+      { data: service, error: serviceError },
+      { data: branchData, error: branchError },
+    ] = await Promise.all([
+      supabase
+        .from('services_with_offer_pricing')
+        .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category')
+        .eq('id', serviceId)
+        .single(),
+      supabase
+        .from('branches')
+        .select('org_id, organizations(industry_type, industries(enable_rooms))')
+        .eq('id', resolvedBranchId)
+        .single(),
+    ]);
 
+    // Error precedence is checked in the original sequential order so callers
+    // see the same error they did before these were batched.
     if (serviceError) throw serviceError;
+    if (branchError) throw branchError;
 
     // Group-booking creates one independent bookings row per person, each carrying the
     // full service price -- a couple service (priced once for the pair) picked there
@@ -5415,25 +5476,14 @@ export async function createBooking({
     // 2. Compute end time for overlap check
     const endTime = addMinutesToTime(startTime, service.duration_minutes);
 
-    // 2b. Check if this industry requires rooms
-    const { data: branchData, error: branchError } = await supabase
-      .from('branches')
-      .select('org_id, organizations(industry_type)')
-      .eq('id', resolvedBranchId)
-      .single();
-
-    if (branchError) throw branchError;
-
+    // 2b. Check if this industry requires rooms. Resolved from the embedded
+    // industries row fetched above; same default as before (require rooms
+    // unless the industry explicitly opts out).
     const industryType = branchData?.organizations?.industry_type;
     let enableRooms = true; // default to requiring rooms
 
     if (industryType) {
-      const { data: industryData } = await supabase
-        .from('industries')
-        .select('enable_rooms')
-        .eq('id', industryType)
-        .single();
-      enableRooms = industryData?.enable_rooms !== false;
+      enableRooms = branchData?.organizations?.industries?.enable_rooms !== false;
     }
 
     // Room handling - only required for industries that use rooms
@@ -5465,20 +5515,24 @@ export async function createBooking({
         // which this JS pre-check must agree with or staff get told a room is free
         // right before the stricter DB trigger rejects it.
         const capacity = getRoomCapacity(selectedRoom);
-        const { data: roomOverlaps } = await supabase
-          .from('bookings')
-          .select('id')
-          .eq('room_id', roomId)
-          .eq('branch_id', resolvedBranchId)
-          .eq('date', date)
-          .not('status', 'in', '("Cancelled","No Show")')
-          .lt('start_time', endTime)
-          .gt('end_time', startTime);
-
-        const { data: companionOverlapRows } = await supabase
-          .from('booking_therapists')
-          .select('booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
-          .eq('room_id', roomId);
+        // Both halves of the capacity check are independent reads — issue them
+        // together instead of waiting for the primary-room count before asking
+        // for the override-room rows.
+        const [{ data: roomOverlaps }, { data: companionOverlapRows }] = await Promise.all([
+          supabase
+            .from('bookings')
+            .select('id')
+            .eq('room_id', roomId)
+            .eq('branch_id', resolvedBranchId)
+            .eq('date', date)
+            .not('status', 'in', '("Cancelled","No Show")')
+            .lt('start_time', endTime)
+            .gt('end_time', startTime),
+          supabase
+            .from('booking_therapists')
+            .select('booking_id, start_time, end_time, bookings(branch_id, date, status, start_time, end_time)')
+            .eq('room_id', roomId),
+        ]);
         const companionOverlapCount = countOverlappingRoomRows(companionOverlapRows, {
           branchId: resolvedBranchId, date, startTime, endTime,
         });
@@ -5489,29 +5543,34 @@ export async function createBooking({
 
         availableRoom = selectedRoom;
       } else {
-        // 3. Fetch active rooms for branch (with capacity)
-        const { data: rooms, error: roomsError } = await supabase
-          .from('rooms')
-          .select('id, name, capacity')
-          .eq('branch_id', resolvedBranchId)
-          .eq('is_active', true)
-          .order('name');
+        // 3+4. Fetch active rooms for the branch and the overlapping bookings in
+        // the slot. Neither depends on the other — only the companion-override
+        // lookup below needs the room ids, so it stays sequential.
+        const [
+          { data: rooms, error: roomsError },
+          { data: overlapping, error: overlapError },
+        ] = await Promise.all([
+          supabase
+            .from('rooms')
+            .select('id, name, capacity')
+            .eq('branch_id', resolvedBranchId)
+            .eq('is_active', true)
+            .order('name'),
+          supabase
+            .from('bookings')
+            .select('room_id')
+            .eq('branch_id', resolvedBranchId)
+            .eq('date', date)
+            .not('status', 'in', '("Cancelled","No Show")')
+            .lt('start_time', endTime)
+            .gt('end_time', startTime),
+        ]);
 
+        // Same checks in the same order as before they were batched.
         if (roomsError) throw roomsError;
         if (!rooms || rooms.length === 0) {
           return { data: null, error: { code: 'ROOMS_FULL', message: 'No rooms available at this branch.' } };
         }
-
-        // 4. Count overlapping bookings per room
-        const { data: overlapping, error: overlapError } = await supabase
-          .from('bookings')
-          .select('room_id')
-          .eq('branch_id', resolvedBranchId)
-          .eq('date', date)
-          .not('status', 'in', '("Cancelled","No Show")')
-          .lt('start_time', endTime)
-          .gt('end_time', startTime);
-
         if (overlapError) throw overlapError;
 
         // 5. Count bookings per room and pick first with remaining capacity. Also count
@@ -5630,10 +5689,47 @@ export async function createBooking({
 
     let therapistNameSnapshot = null;
     if (allTherapistIds.length > 0) {
-      const { data: therapistsData, error: therapistLookupError } = await supabase
-        .from('therapists')
-        .select('id, name, is_active, branch_id')
-        .in('id', allTherapistIds);
+      // All four therapist pre-flight reads depend only on values known before
+      // this block (the therapist ids, the date, the service and the branch),
+      // so they go out as one batch rather than four sequential round trips.
+      // The guard checks below still run in their original order, so the first
+      // failure a caller sees is unchanged.
+      const atDate = toKathmanduDate(date, startTime);
+      const [
+        { data: therapistsData, error: therapistLookupError },
+        { data: transferRows },
+        { data: attendanceRecords },
+        { data: eligibleIds },
+      ] = await Promise.all([
+        supabase
+          .from('therapists')
+          .select('id, name, is_active, branch_id')
+          .in('id', allTherapistIds),
+        // A therapist's static branch_id is only their home branch — visiting
+        // therapists on an active staff_transfers window must also be bookable at
+        // the destination branch. Reconstruct each therapist's effective branch at
+        // the booking's date/time instead of trusting branch_id directly (same
+        // approach as the reassignment path, see therapistBranchWindow.js).
+        supabase
+          .from('staff_transfers')
+          .select('therapist_id, from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at, transferred_at')
+          .in('therapist_id', allTherapistIds),
+        date
+          ? supabase
+              .from('therapist_attendance')
+              .select('therapist_id, status, check_out_time')
+              .in('therapist_id', allTherapistIds)
+              .eq('date', date)
+          : Promise.resolve({ data: null }),
+        // Service↔staff eligibility allow-list (migration-249), per-branch since
+        // migration-257/258 — no rows for this service AT THIS BRANCH means
+        // unrestricted here, otherwise every selected therapist must be on the
+        // list. This is a nicer pre-flight for staff sessions only (real
+        // enforcement — the part anon can't bypass — now lives in the
+        // enforce_booking_therapist_guards DB trigger, migration-252/258, which
+        // applies the same branch scoping).
+        fetchServiceTherapists(serviceId, resolvedBranchId),
+      ]);
       if (therapistLookupError) throw therapistLookupError;
 
       if (!therapistsData || therapistsData.length !== allTherapistIds.length) {
@@ -5643,17 +5739,6 @@ export async function createBooking({
       if (inactive) {
         return { data: null, error: { code: 'THERAPIST_INACTIVE', message: `Therapist ${inactive.name} is not active.` } };
       }
-
-      // A therapist's static branch_id is only their home branch — visiting therapists on
-      // an active staff_transfers window must also be bookable at the destination branch.
-      // Reconstruct each therapist's effective branch at the booking's date/time instead of
-      // trusting branch_id directly (same approach as the reassignment path, see
-      // therapistBranchWindow.js).
-      const atDate = toKathmanduDate(date, startTime);
-      const { data: transferRows } = await supabase
-        .from('staff_transfers')
-        .select('therapist_id, from_branch_id, to_branch_id, is_permanent, effective_date, start_time, revert_at, transferred_at')
-        .in('therapist_id', allTherapistIds);
 
       const transfersByTherapist = {};
       (transferRows || []).forEach(t => {
@@ -5668,12 +5753,6 @@ export async function createBooking({
       }
 
       if (date) {
-        const { data: attendanceRecords } = await supabase
-          .from('therapist_attendance')
-          .select('therapist_id, status, check_out_time')
-          .in('therapist_id', allTherapistIds)
-          .eq('date', date);
-
         const absent = (attendanceRecords || []).find(a =>
           a.status === 'Absent' || LEAVE_LIKE_ATTENDANCE_STATUSES.includes(a.status)
         );
@@ -5694,13 +5773,6 @@ export async function createBooking({
       const primary = therapistsData.find(t => t.id === primaryTherapistId);
       therapistNameSnapshot = primary?.name || null;
 
-      // Service↔staff eligibility allow-list (migration-249), per-branch since
-      // migration-257/258 — no rows for this service AT THIS BRANCH means unrestricted
-      // here, otherwise every selected therapist must be on the list. This is a nicer
-      // pre-flight for staff sessions only (real enforcement — the part anon can't
-      // bypass — now lives in the enforce_booking_therapist_guards DB trigger,
-      // migration-252/258, which applies the same branch scoping).
-      const { data: eligibleIds } = await fetchServiceTherapists(serviceId, resolvedBranchId);
       if (eligibleIds && eligibleIds.length > 0) {
         const eligibleSet = new Set(eligibleIds);
         const ineligible = therapistsData.find(t => !eligibleSet.has(t.id));
