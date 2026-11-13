@@ -5,6 +5,7 @@ import StaffSidebar from '../../components/ui/StaffSidebar';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLock } from '../../contexts/LockContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { useOrg } from '../../contexts/OrgContext';
 import BranchSwitcher from '../../components/ui/BranchSwitcher';
@@ -80,6 +81,7 @@ import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
 const BranchManagerDashboard = () => {
   const { profile, signOut, user } = useAuth();
+  const { lock } = useLock();
   const { branchId, branchName, isOverall } = useBranch();
   // Gates the online-booking-limit panel: the cap only bites when customers DON'T pick a
   // staff member (check_branch_online_capacity() exempts bookings with a therapist_id).
@@ -590,6 +592,16 @@ const BranchManagerDashboard = () => {
                         >
                           <Icon name="Settings" size={16} className="text-gray-500" />
                           <span>Settings</span>
+                        </button>
+
+                        {/* Lock Screen */}
+                        <button
+                          onClick={() => { setShowProfileDropdown(false); lock(); }}
+                          aria-label="Lock screen"
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Icon name="Lock" size={16} className="text-gray-500" />
+                          <span>Lock Screen</span>
                         </button>
 
                         {/* Logout */}
