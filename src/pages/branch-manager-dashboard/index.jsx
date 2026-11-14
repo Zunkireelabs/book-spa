@@ -459,7 +459,13 @@ const BranchManagerDashboard = () => {
               <div className="flex items-center justify-between">
                 {/* Left: Branch name + date/time */}
                 <div className="flex items-center space-x-3 min-w-0">
-                  <BranchSwitcher />
+                  {/* Customers is deliberately org-wide (see getCustomerIntelligence —
+                      made org-scoped in 2bda696f so a customer who first visited another
+                      branch isn't invisible). The branch switcher has no effect on that
+                      list, so showing it there implies a filter that doesn't exist.
+                      Selection lives in BranchContext, so hiding the control doesn't
+                      change it — it reappears intact on every other view. */}
+                  {viewMode !== 'customers' && <BranchSwitcher />}
                   {viewMode === 'dashboard' && (
                     <PeriodFilter value={period} onChange={setPeriod} />
                   )}

@@ -30,6 +30,49 @@ function withBranch(query, branchId, col = 'branch_id') {
   return isOverallBranch(branchId) ? query : query.eq(col, resolveBranchId(branchId));
 }
 
+// PostgREST caps unpaginated responses at 1000 rows and returns no error when it
+// truncates — any read that can exceed that must page through explicitly.
+// Takes a builder FACTORY (a function that returns a fresh query), not a built
+// query object, so the parallel branch below can safely call it once per page.
+const PAGE_SIZE = 1000;
+export async function fetchAllPages(buildQuery) {
+  const first = await buildQuery().range(0, PAGE_SIZE - 1);
+  if (first.error) throw first.error;
+  const firstPage = first.data || [];
+  const total = typeof first.count === 'number' ? first.count : null;
+
+  // Caller requested { count: 'exact' }: the total is already known, so there's
+  // no need to probe page-by-page to find the end.
+  if (total !== null) {
+    if (firstPage.length >= total) return firstPage; // first page already has everything
+    // More pages remain — fetch them all concurrently instead of one at a time.
+    // Turns an N-page sequential read into 2 round trips regardless of N.
+    const ranges = [];
+    for (let offset = PAGE_SIZE; offset < total; offset += PAGE_SIZE) {
+      ranges.push([offset, Math.min(offset + PAGE_SIZE, total) - 1]);
+    }
+    const restPages = await Promise.all(ranges.map(([from, to]) => buildQuery().range(from, to)));
+    const rows = [...firstPage];
+    for (const page of restPages) {
+      if (page.error) throw page.error;
+      rows.push(...(page.data || []));
+    }
+    return rows;
+  }
+
+  // No usable count (caller didn't pass { count: 'exact' }) — fall back to the
+  // original sequential loop. Still correct, just one round trip per page.
+  const rows = [...firstPage];
+  if (firstPage.length < PAGE_SIZE) return rows;
+  for (let offset = PAGE_SIZE; ; offset += PAGE_SIZE) {
+    const { data, error } = await buildQuery().range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 function addMinutesToTime(timeStr, minutes) {
   const [h, m] = timeStr.split(':').map(Number);
   const total = h * 60 + m + minutes;
@@ -1238,18 +1281,16 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
     // against prod (Lazimpat, all-time: 1095 outstanding bookings, failing
     // consistently above ~500-700 IDs). Embedding returns everything in one
     // request regardless of dataset size, so there's no ceiling to hit again.
-    let query = supabase
-      .from('bookings')
-      .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot, payments(amount)')
-      .in('payment_status', ['unpaid', 'partial'])
-      .not('status', 'in', '("Cancelled","No Show")');
-    if (from) query = query.gte('date', from);
-    if (to) query = query.lte('date', to);
-    query = withBranch(query, branchId);
-    const { data: bookings, error } = await query;
-    if (error) throw error;
-
-    const all = bookings || [];
+    const all = await fetchAllPages(() => {
+      let query = supabase
+        .from('bookings')
+        .select('id, booking_number, customer_name, customer_phone, date, final_amount, payment_status, due_holder_name, service_name_snapshot, payments(amount)', { count: 'exact' })
+        .in('payment_status', ['unpaid', 'partial'])
+        .not('status', 'in', '("Cancelled","No Show")');
+      if (from) query = query.gte('date', from);
+      if (to) query = query.lte('date', to);
+      return withBranch(query, branchId);
+    });
 
     const groups = {};
     for (const b of all) {
@@ -1292,17 +1333,19 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
 // (inclusive); omit for all-time.
 export async function getDueReportByBranch({ from, to } = {}) {
   try {
-    let query = supabase
-      .from('bookings')
-      .select(
-        'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)'
-      )
-      .in('payment_status', ['unpaid', 'partial'])
-      .not('status', 'in', '("Cancelled","No Show")');
-    if (from) query = query.gte('date', from);
-    if (to) query = query.lte('date', to);
-    const { data: bookings, error } = await query;
-    if (error) throw error;
+    const bookings = await fetchAllPages(() => {
+      let query = supabase
+        .from('bookings')
+        .select(
+          'id, booking_number, branch_id, branches(name), customer_name, customer_phone, date, status, final_amount, payment_status, therapist_name_snapshot, client_request_id, created_by, creator:users!created_by(full_name), payments(amount)',
+          { count: 'exact' }
+        )
+        .in('payment_status', ['unpaid', 'partial'])
+        .not('status', 'in', '("Cancelled","No Show")');
+      if (from) query = query.gte('date', from);
+      if (to) query = query.lte('date', to);
+      return query;
+    });
 
     const groups = {};
     for (const b of bookings || []) {
@@ -1958,21 +2001,15 @@ export async function fetchCustomerReferralForBooking(bookingId) {
 // from/to are ISO dates (inclusive); omit for all-time.
 export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
   try {
-    const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
-    const bookings = [];
-    for (let offset = 0; ; offset += PAGE_SIZE) {
+    const bookings = await fetchAllPages(() => {
       let query = supabase
         .from('bookings')
-        .select('service_name_snapshot, final_amount, branch_id, branches(name)')
+        .select('service_name_snapshot, final_amount, branch_id, branches(name)', { count: 'exact' })
         .eq('payment_status', 'paid');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
-      query = withBranch(query, branchId);
-      const { data: page, error } = await query.range(offset, offset + PAGE_SIZE - 1);
-      if (error) throw error;
-      bookings.push(...(page || []));
-      if (!page || page.length < PAGE_SIZE) break;
-    }
+      return withBranch(query, branchId);
+    });
 
     const branchMap = new Map();     // branch_id -> branch name
     const serviceMap = new Map();    // service name -> { [branchId]: { revenue, count } }
@@ -2028,21 +2065,15 @@ export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
 
 export async function getCategoryRevenueByBranch({ branchId, from, to } = {}) {
   try {
-    const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
-    const bookings = [];
-    for (let offset = 0; ; offset += PAGE_SIZE) {
+    const bookings = await fetchAllPages(() => {
       let query = supabase
         .from('bookings')
-        .select('final_amount, branch_id, service_category_snapshot, branches(name)')
+        .select('final_amount, branch_id, service_category_snapshot, branches(name)', { count: 'exact' })
         .eq('payment_status', 'paid');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
-      query = withBranch(query, branchId);
-      const { data: page, error } = await query.range(offset, offset + PAGE_SIZE - 1);
-      if (error) throw error;
-      bookings.push(...(page || []));
-      if (!page || page.length < PAGE_SIZE) break;
-    }
+      return withBranch(query, branchId);
+    });
 
     const branchMap = new Map();     // branch_id -> branch name
     const categoryMap = new Map();   // category name -> { [branchId]: { revenue, count } }
@@ -3057,24 +3088,22 @@ export async function fetchDiscountApprovers() {
  */
 export async function fetchAllDiscounts(branchId) {
   try {
-    let query = supabase
-      .from('bookings')
-      .select(`
-        id, booking_number, customer_name, date, start_time,
-        base_amount, discount_amount, final_amount, discount_reason,
-        discount_status, status, service_id,
-        services:service_id(name),
-        requester:users!discount_requested_by(full_name),
-        approver:users!discount_approved_by(full_name),
-        requestedTo:users!discount_requested_to(full_name)
-      `)
-      .neq('discount_status', 'none')
-      .order('created_at', { ascending: false });
-    query = withBranch(query, branchId);
-
-    const { data, error } = await query;
-
-    if (error) throw error;
+    const data = await fetchAllPages(() => {
+      let query = supabase
+        .from('bookings')
+        .select(`
+          id, booking_number, customer_name, date, start_time,
+          base_amount, discount_amount, final_amount, discount_reason,
+          discount_status, status, service_id,
+          services:service_id(name),
+          requester:users!discount_requested_by(full_name),
+          approver:users!discount_approved_by(full_name),
+          requestedTo:users!discount_requested_to(full_name)
+        `, { count: 'exact' })
+        .neq('discount_status', 'none')
+        .order('created_at', { ascending: false });
+      return withBranch(query, branchId);
+    });
 
     return {
       data: (data || []).map(b => ({
@@ -9511,23 +9540,14 @@ export async function fetchCustomersLightweight(branchId) {
       orgId = branch.org_id;
     }
 
-    const pageAllCustomers = async () => {
-      const PAGE_SIZE = 1000; // PostgREST caps unpaginated responses at 1000 rows
-      const customers = [];
-      for (let offset = 0; ; offset += PAGE_SIZE) {
-        const { data: page, error: pageErr } = await supabase
-          .from('customers')
-          .select('id, full_name, phone, email, gender')
-          .eq('org_id', orgId)
-          .eq('is_active', true)
-          .order('full_name')
-          .range(offset, offset + PAGE_SIZE - 1);
-        if (pageErr) throw pageErr;
-        customers.push(...(page || []));
-        if (!page || page.length < PAGE_SIZE) break;
-      }
-      return customers;
-    };
+    const pageAllCustomers = () => fetchAllPages(() =>
+      supabase
+        .from('customers')
+        .select('id, full_name, phone, email, gender', { count: 'exact' })
+        .eq('org_id', orgId)
+        .eq('is_active', true)
+        .order('full_name')
+    );
 
     const [data, statusRes] = await Promise.all([
       pageAllCustomers(),
@@ -9971,29 +9991,27 @@ export async function getCustomerIntelligence({ branchId }) {
     if (orgBranchesErr) throw orgBranchesErr;
     const orgBranchIds = (orgBranches || []).map((b) => b.id);
 
-    // 1. Parallel fetch: customers + bookings, both org-wide
-    const custQuery = supabase
-      .from('customers')
-      .select('id, full_name, phone, email, is_active, created_at')
-      .eq('org_id', orgId)
-      .order('full_name');
+    // 1. Parallel fetch: customers + bookings, both org-wide, both paginated —
+    // 2,798 customers and 8,562 bookings at Nuad Thai Spa alone, well past the
+    // PostgREST 1000-row cap (see fetchAllPages above).
     // bookings has no org_id column — scope via the org's branch_id list instead.
-    const bookQuery = supabase
-      .from('bookings')
-      .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot')
-      .not('customer_id', 'is', null)
-      .in('branch_id', orgBranchIds);
-    const [custResult, bookResult, statusResult] = await Promise.all([
-      custQuery,
-      bookQuery,
+    const [customers, bookings, statusResult] = await Promise.all([
+      fetchAllPages(() =>
+        supabase
+          .from('customers')
+          .select('id, full_name, phone, email, is_active, created_at', { count: 'exact' })
+          .eq('org_id', orgId)
+          .order('full_name')
+      ),
+      fetchAllPages(() =>
+        supabase
+          .from('bookings')
+          .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot', { count: 'exact' })
+          .not('customer_id', 'is', null)
+          .in('branch_id', orgBranchIds)
+      ),
       MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
     ]);
-
-    if (custResult.error) throw custResult.error;
-    if (bookResult.error) throw bookResult.error;
-
-    const customers = custResult.data || [];
-    const bookings = bookResult.data || [];
     // Same staff-safe status RPC (migration-087) + shape used by fetchCustomersLightweight —
     // status/tier only, readable regardless of role.
     const membershipByCustomer = new Map((statusResult.data || []).map((r) => [r.customerId, r]));
@@ -12449,14 +12467,17 @@ export async function generatePayroll({ branchId, periodMonth }) {
     // past the cap WITHIN this period are deducted (days already over the cap before this
     // period were — or will be — deducted in the period they actually landed in).
     const yearStart = `${year}-01-01`;
-    const { data: ytdLeaveRows, error: ytdErr } = await supabase
-      .from('therapist_attendance')
-      .select('therapist_id, status, date')
-      .in('therapist_id', therapistIds)
-      .in('status', ['Sick Leave', 'Annual Leave'])
-      .gte('date', yearStart)
-      .lte('date', lastDay);
-    if (ytdErr) throw ytdErr;
+    // A full year of leave rows across a branch's therapists can exceed the
+    // PostgREST 1000-row cap (confirmed 3,117 at Nuad Thai Spa) — paginate.
+    const ytdLeaveRows = await fetchAllPages(() =>
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, status, date', { count: 'exact' })
+        .in('therapist_id', therapistIds)
+        .in('status', ['Sick Leave', 'Annual Leave'])
+        .gte('date', yearStart)
+        .lte('date', lastDay)
+    );
 
     const ytdMap = {};
     for (const therapistId of therapistIds) {
@@ -12861,13 +12882,23 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
 
     const membershipIds = rows.map((m) => m.id);
     if (membershipIds.length > 0) {
-      const { data: depositTxns, error: txnError } = await supabase
-        .from('membership_transactions')
-        .select('membership_id, amount, notes, created_at')
-        .in('membership_id', membershipIds)
-        .eq('kind', 'deposit')
-        .order('created_at', { ascending: true });
-      const cycleDeposited = txnError ? new Map() : computeCycleDeposited(depositTxns || []);
+      // Deposit transactions across all memberships can exceed the PostgREST
+      // 1000-row cap — paginate. Preserves the original swallow-on-error
+      // behavior: a failure here degrades cycleDeposited, it doesn't fail the page.
+      let depositTxns = null;
+      try {
+        depositTxns = await fetchAllPages(() =>
+          supabase
+            .from('membership_transactions')
+            .select('membership_id, amount, notes, created_at', { count: 'exact' })
+            .in('membership_id', membershipIds)
+            .eq('kind', 'deposit')
+            .order('created_at', { ascending: true })
+        );
+      } catch (txnError) {
+        depositTxns = null;
+      }
+      const cycleDeposited = depositTxns === null ? new Map() : computeCycleDeposited(depositTxns);
       rows.forEach((m) => { m.cycleDeposited = cycleDeposited.get(m.id) ?? m.totalDeposited; });
     }
 
@@ -12968,20 +12999,23 @@ export async function fetchMembershipLedgerReport() {
     const { error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
 
-    const { data, error } = await supabase
-      .from('membership_transactions')
-      .select(`
-        id, membership_id, kind, amount, notes, created_at, booking_id, voucher_payment_id,
-        membership:memberships (
-          membership_number,
-          customer:customers ( full_name ),
-          tier:membership_tiers ( name )
-        ),
-        booking:bookings ( service_name_snapshot )
-      `)
-      .order('membership_id', { ascending: true })
-      .order('created_at', { ascending: true });
-    if (error) throw error;
+    // Org-wide membership_transactions can exceed the PostgREST 1000-row cap
+    // (confirmed 1,311 at Nuad Thai Spa) — paginate.
+    const data = await fetchAllPages(() =>
+      supabase
+        .from('membership_transactions')
+        .select(`
+          id, membership_id, kind, amount, notes, created_at, booking_id, voucher_payment_id,
+          membership:memberships (
+            membership_number,
+            customer:customers ( full_name ),
+            tier:membership_tiers ( name )
+          ),
+          booking:bookings ( service_name_snapshot )
+        `, { count: 'exact' })
+        .order('membership_id', { ascending: true })
+        .order('created_at', { ascending: true })
+    );
 
     const runningByMembership = new Map();
     const cycleDeposited = new Map();
