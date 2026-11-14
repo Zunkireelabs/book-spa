@@ -78,6 +78,10 @@ import CheckBookingPanel from '../branch-staff-dashboard/components/CheckBooking
 import { AIAssistantPanel } from '../../components/ui/AIAssistant';
 import { useAIAssistant } from '../../contexts/AIAssistantContext';
 
+// Views that render org-wide data and therefore hide the branch switcher —
+// see the comment at its render site for why each one qualifies.
+const ORG_WIDE_VIEWS = new Set(['customers', 'transfer-report']);
+
 const BranchManagerDashboard = () => {
   const { profile, signOut, user } = useAuth();
   const { branchId, branchName, isOverall } = useBranch();
@@ -459,13 +463,18 @@ const BranchManagerDashboard = () => {
               <div className="flex items-center justify-between">
                 {/* Left: Branch name + date/time */}
                 <div className="flex items-center space-x-3 min-w-0">
-                  {/* Customers is deliberately org-wide (see getCustomerIntelligence —
-                      made org-scoped in 2bda696f so a customer who first visited another
-                      branch isn't invisible). The branch switcher has no effect on that
-                      list, so showing it there implies a filter that doesn't exist.
-                      Selection lives in BranchContext, so hiding the control doesn't
-                      change it — it reappears intact on every other view. */}
-                  {viewMode !== 'customers' && <BranchSwitcher />}
+                  {/* Views whose data is org-wide by design, where the branch switcher
+                      would imply a filter that does not exist:
+                        customers       — getCustomerIntelligence is org-scoped (2bda696f),
+                                          so a customer who first visited another branch
+                                          isn't invisible; branchId only resolves the org.
+                        transfer-report — TransferReportPanel takes no branchId and makes
+                                          no branch reference at all.
+                      Everything else here genuinely filters by branch (including
+                      ProductsPanel, which reads it from BranchContext rather than a prop),
+                      so the control stays. Selection lives in BranchContext — hiding the
+                      control doesn't change it, and it reappears intact elsewhere. */}
+                  {!ORG_WIDE_VIEWS.has(viewMode) && <BranchSwitcher />}
                   {viewMode === 'dashboard' && (
                     <PeriodFilter value={period} onChange={setPeriod} />
                   )}
