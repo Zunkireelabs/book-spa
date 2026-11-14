@@ -107,6 +107,21 @@ export async function fetchAllPages(buildQuery) {
   return rows;
 }
 
+// fetchAllPages throws on error. Several call sites run multiple legs through
+// Promise.all and deliberately check each leg's error in a fixed order
+// afterwards, so a caller always sees the same "first" error regardless of
+// which leg actually failed fastest — Promise.all would otherwise surface
+// whichever rejection settles first, not the one earliest in that order.
+// Wraps a fetchAllPages call back into the { data, error } shape those sites
+// already destructure, so paginating a leg doesn't change that ordering.
+async function pagedResult(buildQuery) {
+  try {
+    return { data: await fetchAllPages(buildQuery), error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
 function addMinutesToTime(timeStr, minutes) {
   const [h, m] = timeStr.split(':').map(Number);
   const total = h * 60 + m + minutes;
@@ -1492,33 +1507,74 @@ export async function getCustomerOutstandingBalance({ customerPhone, branchId, e
 // cleared it. from/to filter by settlement date (the latest payment's created_at).
 export async function getSettledDueHistory({ branchId, from, to } = {}) {
   try {
-    let query = supabase
-      .from('bookings')
-      .select('id, booking_number, customer_name, customer_phone, date, final_amount, due_holder_name, service_name_snapshot')
-      .eq('payment_status', 'paid')
-      .not('due_holder_name', 'is', null);
-    query = withBranch(query, branchId);
-    const { data: bookings, error } = await query;
-    if (error) throw error;
+    // "settledAt" is not a stored column — it's the LATEST of possibly several
+    // payments on a booking, computed in JS. from/to were then also filtered in
+    // JS (after fetching every paid+due-holder booking ever for the branch), so
+    // the date picker did nothing at the query level.
+    //
+    // schema.sql declares payments.booking_id UNIQUE, but that constraint is NOT
+    // actually present on the live database — confirmed via psql: some bookings
+    // carry 2-3 payment rows in production. So "the latest payment" genuinely
+    // needs every payment for a booking, not just whichever one falls in
+    // [from, to] — an earlier payment landing inside the window doesn't mean
+    // that's the true settledAt if a later one (possibly outside the window)
+    // exists. Two passes instead of one query:
+    //   1. Candidates — paid+due-holder bookings with >= 1 payment in [from, to].
+    //      This is what actually bounds the query by date instead of reading
+    //      all-time history.
+    //   2. For just those candidates, fetch every payment (unfiltered by date)
+    //      to compute the true settledAt and re-check it's actually in range —
+    //      a booking whose true latest payment lands outside [from, to] is
+    //      correctly excluded even though pass 1 found an earlier match.
+    const candidateRows = await fetchAllPages((opts) => {
+      let query = supabase
+        .from('payments')
+        .select('booking_id, booking:bookings!inner(id)', opts)
+        .eq('booking.payment_status', 'paid')
+        .not('booking.due_holder_name', 'is', null);
+      if (!isOverallBranch(branchId)) {
+        query = query.eq('booking.branch_id', resolveBranchId(branchId));
+      }
+      if (from) query = query.gte('created_at', `${from}T00:00:00+05:45`);
+      if (to) {
+        // Exclusive upper bound at the next Nepal midnight, same convention as
+        // getTodayInsights' nextDayBoundary.
+        const nextDay = new Date(`${to}T00:00:00+05:45`);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        query = query.lt('created_at', nextDay.toISOString());
+      }
+      return query.order('id');
+    });
 
-    const all = bookings || [];
-    if (all.length === 0) return { data: [], error: null };
+    const candidateIds = [...new Set(candidateRows.map((r) => r.booking_id))];
+    if (candidateIds.length === 0) return { data: [], error: null };
 
-    const bookingIds = all.map((b) => b.id);
-    const { data: payments, error: payError } = await supabase
-      .from('payments')
-      .select('booking_id, amount, payment_mode, created_at')
-      .in('booking_id', bookingIds)
-      .order('created_at', { ascending: true });
-    if (payError) throw payError;
+    const [allPayments, bookingRows] = await Promise.all([
+      fetchAllPages((opts) =>
+        supabase
+          .from('payments')
+          .select('booking_id, amount, payment_mode, created_at', opts)
+          .in('booking_id', candidateIds)
+          .order('id')
+      ),
+      fetchAllPages((opts) =>
+        supabase
+          .from('bookings')
+          .select('id, booking_number, customer_name, customer_phone, date, final_amount, due_holder_name, service_name_snapshot', opts)
+          .in('id', candidateIds)
+          .order('id')
+      ),
+    ]);
 
     const paymentsByBooking = {};
-    for (const p of (payments || [])) {
+    for (const p of allPayments) {
       (paymentsByBooking[p.booking_id] ||= []).push(p);
     }
 
-    let rows = all.map((b) => {
-      const tenders = paymentsByBooking[b.id] || [];
+    let rows = bookingRows.map((b) => {
+      const tenders = (paymentsByBooking[b.id] || [])
+        .slice()
+        .sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
       const settledAt = tenders.length > 0 ? tenders[tenders.length - 1].created_at : null;
       const paymentModes = [...new Set(tenders.map((t) => t.payment_mode))];
       return {
@@ -1535,6 +1591,8 @@ export async function getSettledDueHistory({ branchId, from, to } = {}) {
       };
     }).filter((r) => r.settledAt);
 
+    // Re-check against the TRUE settledAt — pass 1 only guarantees *a* payment
+    // in range, not necessarily the latest one.
     if (from) rows = rows.filter((r) => r.settledAt.slice(0, 10) >= from);
     if (to) rows = rows.filter((r) => r.settledAt.slice(0, 10) <= to);
 
@@ -3840,70 +3898,83 @@ export async function getTodayInsights(branchId, from, to) {
     // ids from the first batch. Each numbered section below still processes its
     // own result in the original order, and the error checks keep their
     // original precedence, so a caller sees the same first error as before.
-    let bookingsQuery = supabase
-      .from('bookings')
-      .select('id, payment_status')
-      .gte('date', rangeStart)
-      .lte('date', rangeEnd);
-    bookingsQuery = withBranch(bookingsQuery, branchId);
+    // Every leg below is now paginated — an Annually/Custom preset can push
+    // any of them past the PostgREST 1000-row cap (confirmed 9,204 bookings/yr
+    // at Nuad Thai Spa). pagedResult keeps each leg's { data, error } shape so
+    // the ordered error-checking below (and Promise.all's position) is unaffected.
+    const bookingsResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('bookings').select('id, payment_status', opts).gte('date', rangeStart).lte('date', rangeEnd),
+        branchId
+      ).order('id')
+    );
 
-    let vouchersInRangeQuery = supabase
-      .from('vouchers')
-      .select('id')
-      .gte('issued_date', rangeStart)
-      .lte('issued_date', rangeEnd);
-    vouchersInRangeQuery = withBranch(vouchersInRangeQuery, branchId, 'branch_id');
+    const vouchersInRangeResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('vouchers').select('id', opts).gte('issued_date', rangeStart).lte('issued_date', rangeEnd),
+        branchId, 'branch_id'
+      ).order('id')
+    );
 
-    let claimsQuery = supabase
-      .from('voucher_claims')
-      .select('amount_claimed')
-      .gte('redeemed_date', rangeStart)
-      .lte('redeemed_date', rangeEnd);
-    claimsQuery = withBranch(claimsQuery, branchId, 'branch_claimed_id');
+    const claimsResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('voucher_claims').select('amount_claimed', opts).gte('redeemed_date', rangeStart).lte('redeemed_date', rangeEnd),
+        branchId, 'branch_claimed_id'
+      ).order('id')
+    );
 
-    let issuedQuery = supabase
-      .from('vouchers')
-      .select('total_amount_issued')
-      .gte('issued_date', rangeStart)
-      .lte('issued_date', rangeEnd);
-    issuedQuery = withBranch(issuedQuery, branchId, 'branch_id');
+    const issuedResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('vouchers').select('total_amount_issued', opts).gte('issued_date', rangeStart).lte('issued_date', rangeEnd),
+        branchId, 'branch_id'
+      ).order('id')
+    );
 
-    let depositsQuery = supabase
-      .from('membership_transactions')
-      .select('amount, created_at, payment_mode')
-      .eq('kind', 'deposit')
-      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
-      .lt('created_at', nextDayBoundary.toISOString());
-    depositsQuery = withBranch(depositsQuery, branchId);
+    const depositsResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('membership_transactions')
+          .select('amount, created_at, payment_mode', opts)
+          .eq('kind', 'deposit')
+          .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+          .lt('created_at', nextDayBoundary.toISOString()),
+        branchId
+      ).order('id')
+    );
 
-    let deductionsQuery = supabase
-      .from('membership_transactions')
-      .select('amount, created_at')
-      .eq('kind', 'deduction')
-      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
-      .lt('created_at', nextDayBoundary.toISOString());
-    deductionsQuery = withBranch(deductionsQuery, branchId);
+    const deductionsResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('membership_transactions')
+          .select('amount, created_at', opts)
+          .eq('kind', 'deduction')
+          .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+          .lt('created_at', nextDayBoundary.toISOString()),
+        branchId
+      ).order('id')
+    );
 
-    let packagesIssuedQuery = supabase
-      .from('packages')
-      .select('paid_amount, payment_method')
-      .gte('issued_date', rangeStart)
-      .lte('issued_date', rangeEnd);
-    packagesIssuedQuery = withBranch(packagesIssuedQuery, branchId);
+    const packagesIssuedResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('packages').select('paid_amount, payment_method', opts).gte('issued_date', rangeStart).lte('issued_date', rangeEnd),
+        branchId
+      ).order('id')
+    );
 
-    let packageRedemptionsQuery = supabase
-      .from('package_redemptions')
-      .select('id')
-      .gte('redeemed_date', rangeStart)
-      .lte('redeemed_date', rangeEnd);
-    packageRedemptionsQuery = withBranch(packageRedemptionsQuery, branchId);
+    const packageRedemptionsResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('package_redemptions').select('id', opts).gte('redeemed_date', rangeStart).lte('redeemed_date', rangeEnd),
+        branchId
+      ).order('id')
+    );
 
-    let productSalesQuery = supabase
-      .from('product_sales')
-      .select('total_amount, payment_mode, refunded_at')
-      .gte('created_at', `${rangeStart}T00:00:00+05:45`)
-      .lt('created_at', nextDayBoundary.toISOString());
-    productSalesQuery = withBranch(productSalesQuery, branchId);
+    const productSalesResult = pagedResult((opts) =>
+      withBranch(
+        supabase.from('product_sales')
+          .select('total_amount, payment_mode, refunded_at', opts)
+          .gte('created_at', `${rangeStart}T00:00:00+05:45`)
+          .lt('created_at', nextDayBoundary.toISOString()),
+        branchId
+      ).order('id')
+    );
 
     const [
       { data: bookings, error: bookingsError },
@@ -3917,15 +3988,15 @@ export async function getTodayInsights(branchId, from, to) {
       { data: productSalesRows, error: productSalesError },
       { data: utilization, error: utilizationError },
     ] = await Promise.all([
-      bookingsQuery,
-      vouchersInRangeQuery,
-      claimsQuery,
-      issuedQuery,
-      depositsQuery,
-      deductionsQuery,
-      packagesIssuedQuery,
-      packageRedemptionsQuery,
-      productSalesQuery,
+      bookingsResult,
+      vouchersInRangeResult,
+      claimsResult,
+      issuedResult,
+      depositsResult,
+      deductionsResult,
+      packagesIssuedResult,
+      packageRedemptionsResult,
+      productSalesResult,
       getUtilizationIntelligence({ branchId, from: rangeStart, to: rangeEnd }),
     ]);
 
@@ -4824,20 +4895,19 @@ export async function getUtilizationIntelligence({ branchId, date, from, to }) {
     // Available therapists = active minus absent/leave (single-day only; see isRange above)
     const availableTherapists = therapists.filter(t => !absentIds.has(t.id));
 
-    // 3. Fetch qualifying bookings: Confirmed, In-Progress, Completed only
-    let bookingsQuery = supabase
-      .from('bookings')
-      .select('id, room_id, therapist_id, start_time, end_time, service_duration_snapshot, status')
-      .in('status', ['Confirmed', 'In-Progress', 'Completed']);
-    bookingsQuery = isRange
-      ? bookingsQuery.gte('date', rangeStart).lte('date', rangeEnd)
-      : bookingsQuery.eq('date', targetDate);
-    bookingsQuery = withBranch(bookingsQuery, branchId);
-    const { data: bookings, error: bookingsError } = await bookingsQuery;
-
-    if (bookingsError) throw bookingsError;
-
-    const allBookings = bookings || [];
+    // 3. Fetch qualifying bookings: Confirmed, In-Progress, Completed only.
+    // Range mode can span a full year (Annually preset) — confirmed 9,204
+    // bookings/yr at Nuad Thai Spa, past the PostgREST 1000-row cap — paginate.
+    const allBookings = await fetchAllPages((opts) => {
+      let query = supabase
+        .from('bookings')
+        .select('id, room_id, therapist_id, start_time, end_time, service_duration_snapshot, status', opts)
+        .in('status', ['Confirmed', 'In-Progress', 'Completed']);
+      query = isRange
+        ? query.gte('date', rangeStart).lte('date', rangeEnd)
+        : query.eq('date', targetDate);
+      return withBranch(query, branchId).order('id');
+    });
 
     // 4. Compute per-room utilization
     const roomMinutesMap = {};
@@ -10732,12 +10802,17 @@ export async function fetchAttendanceReport({ branchId, startDate, endDate }) {
       .eq('is_active', true)
       .order('name');
     therapistsQuery = withBranch(therapistsQuery, branchId);
-    const attendanceQuery = supabase
-      .from('therapist_attendance')
-      .select('therapist_id, date, status')
-      .gte('date', startDate)
-      .lte('date', endDate);
-    const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceQuery]);
+    // Org-wide attendance over a date range can exceed the PostgREST 1000-row
+    // cap (confirmed 3,117 rows at Nuad Thai Spa) — paginate.
+    const attendanceResultPromise = pagedResult((opts) =>
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, date, status', opts)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('id')
+    );
+    const [therapistsResult, attendanceResult] = await Promise.all([therapistsQuery, attendanceResultPromise]);
     if (therapistsResult.error) throw therapistsResult.error;
     if (attendanceResult.error) throw attendanceResult.error;
 
@@ -12476,14 +12551,18 @@ export async function generatePayroll({ branchId, periodMonth }) {
       therapistByName[t.name.trim().toLowerCase()] = t.id;
     }
 
-    // Fetch attendance in the period.
-    const { data: attendance, error: attErr } = await supabase
-      .from('therapist_attendance')
-      .select('therapist_id, status')
-      .in('therapist_id', therapistIds)
-      .gte('date', firstDay)
-      .lte('date', lastDay);
-    if (attErr) throw attErr;
+    // Fetch attendance in the period. Measured 608 rows at the busiest branch's
+    // busiest month (Lazimpat, Oct) — under the PostgREST 1000-row cap today, so
+    // not truncating yet, but growing. Paginate now rather than wait for it to break.
+    const attendance = await fetchAllPages((opts) =>
+      supabase
+        .from('therapist_attendance')
+        .select('therapist_id, status', opts)
+        .in('therapist_id', therapistIds)
+        .gte('date', firstDay)
+        .lte('date', lastDay)
+        .order('id')
+    );
 
     // Tally attendance per therapist.
     const attMap = {};
@@ -12540,16 +12619,20 @@ export async function generatePayroll({ branchId, periodMonth }) {
     };
 
     // Fetch completed+paid bookings in the period to compute service revenue.
-    let bookingQuery = supabase
-      .from('bookings')
-      .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value')
-      .eq('status', 'Completed')
-      .eq('payment_status', 'paid')
-      .gte('date', firstDay)
-      .lte('date', lastDay);
-    bookingQuery = withBranch(bookingQuery, branchId);
-    const { data: bookings, error: bErr } = await bookingQuery;
-    if (bErr) throw bErr;
+    // Measured 787 rows at the busiest branch's busiest month (Lazimpat, Oct) —
+    // under the cap today but at 79% of it and growing; this month alone is
+    // ALL bookings regardless of status at 956. Paginate now rather than wait
+    // for service revenue (and commission) to start under-counting.
+    const bookings = await fetchAllPages((opts) => {
+      let query = supabase
+        .from('bookings')
+        .select('therapist_id, final_amount, referred_by, referral_commission_type, referral_commission_value', opts)
+        .eq('status', 'Completed')
+        .eq('payment_status', 'paid')
+        .gte('date', firstDay)
+        .lte('date', lastDay);
+      return withBranch(query, branchId).order('id');
+    });
 
     // Sum service revenue per therapist, and referral commission per therapist name.
     const serviceRevenueMap = {};
