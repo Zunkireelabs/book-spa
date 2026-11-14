@@ -1289,7 +1289,10 @@ export async function getOutstandingByStaff({ branchId, from, to } = {}) {
         .not('status', 'in', '("Cancelled","No Show")');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
-      return withBranch(query, branchId);
+      // Total order: pagination over a non-unique (or absent) sort key lets
+      // Postgres return tied rows differently per page, duplicating or skipping
+      // them across the boundary. id is the PK, so this makes the order total.
+      return withBranch(query, branchId).order('id');
     });
 
     const groups = {};
@@ -1344,7 +1347,7 @@ export async function getDueReportByBranch({ from, to } = {}) {
         .not('status', 'in', '("Cancelled","No Show")');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
-      return query;
+      return query.order('id'); // total order — see getOutstandingByStaff
     });
 
     const groups = {};
@@ -2008,7 +2011,7 @@ export async function getServiceRevenueByBranch({ branchId, from, to } = {}) {
         .eq('payment_status', 'paid');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
-      return withBranch(query, branchId);
+      return withBranch(query, branchId).order('id'); // total order — see getOutstandingByStaff
     });
 
     const branchMap = new Map();     // branch_id -> branch name
@@ -2072,7 +2075,7 @@ export async function getCategoryRevenueByBranch({ branchId, from, to } = {}) {
         .eq('payment_status', 'paid');
       if (from) query = query.gte('date', from);
       if (to) query = query.lte('date', to);
-      return withBranch(query, branchId);
+      return withBranch(query, branchId).order('id'); // total order — see getOutstandingByStaff
     });
 
     const branchMap = new Map();     // branch_id -> branch name
@@ -3101,7 +3104,8 @@ export async function fetchAllDiscounts(branchId) {
           requestedTo:users!discount_requested_to(full_name)
         `, { count: 'exact' })
         .neq('discount_status', 'none')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .order('id'); // tiebreaker — created_at is not unique
       return withBranch(query, branchId);
     });
 
@@ -9547,6 +9551,7 @@ export async function fetchCustomersLightweight(branchId) {
         .eq('org_id', orgId)
         .eq('is_active', true)
         .order('full_name')
+        .order('id') // tiebreaker — duplicate names exist
     );
 
     const [data, statusRes] = await Promise.all([
@@ -10002,6 +10007,7 @@ export async function getCustomerIntelligence({ branchId }) {
           .select('id, full_name, phone, email, is_active, created_at', { count: 'exact' })
           .eq('org_id', orgId)
           .order('full_name')
+          .order('id') // tiebreaker — 348 duplicate-name groups in prod
       ),
       fetchAllPages(() =>
         supabase
@@ -10009,6 +10015,7 @@ export async function getCustomerIntelligence({ branchId }) {
           .select('customer_id, status, payment_status, final_amount, discount_amount, date, service_name_snapshot', { count: 'exact' })
           .not('customer_id', 'is', null)
           .in('branch_id', orgBranchIds)
+          .order('id') // total order — see getOutstandingByStaff
       ),
       MEMBERSHIP_ENABLED ? fetchMembershipStatus() : Promise.resolve({ data: [] }),
     ]);
@@ -12477,6 +12484,7 @@ export async function generatePayroll({ branchId, periodMonth }) {
         .in('status', ['Sick Leave', 'Annual Leave'])
         .gte('date', yearStart)
         .lte('date', lastDay)
+        .order('id') // total order — see getOutstandingByStaff
     );
 
     const ytdMap = {};
@@ -12894,6 +12902,7 @@ export async function fetchMemberships({ search, statusFilter } = {}) {
             .in('membership_id', membershipIds)
             .eq('kind', 'deposit')
             .order('created_at', { ascending: true })
+            .order('id') // tiebreaker — created_at is not unique
         );
       } catch (txnError) {
         depositTxns = null;
@@ -13015,6 +13024,8 @@ export async function fetchMembershipLedgerReport() {
         `, { count: 'exact' })
         .order('membership_id', { ascending: true })
         .order('created_at', { ascending: true })
+        .order('id') // tiebreaker — 245 tied (membership_id, created_at) groups in prod;
+                     // running balances corrupt if a row repeats or vanishes
     );
 
     const runningByMembership = new Map();
