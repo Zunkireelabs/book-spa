@@ -9365,7 +9365,7 @@ export async function fetchAuditLogs({
     // 3. Build query
     let query = supabase
       .from('audit_logs')
-      .select('id, branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, changed_at', opts);
+      .select('id, branch_id, table_name, record_id, action_type, old_data, new_data, changed_by, changed_at', { count: 'exact' });
 
     // Branch filter (manager always scoped; admin optional; skipped in Overall view)
     if (effectiveBranchId && !isOverallBranch(effectiveBranchId)) {
