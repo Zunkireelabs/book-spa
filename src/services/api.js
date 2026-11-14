@@ -1526,6 +1526,24 @@ export async function getSettledDueHistory({ branchId, from, to } = {}) {
     //      to compute the true settledAt and re-check it's actually in range —
     //      a booking whose true latest payment lands outside [from, to] is
     //      correctly excluded even though pass 1 found an earlier match.
+    //
+    // Both the query bound AND the re-check below must agree on what "in
+    // range" means. Computed once, as actual instants (Date objects), and
+    // reused for both — a prior version recomputed the re-check via
+    // `settledAt.slice(0, 10)` (a UTC calendar-date string) against the same
+    // Nepal-midnight `from`/`to`, which disagree for any payment taken between
+    // Nepal midnight and 05:45 UTC: pass 1 (Nepal-correct) would include it,
+    // the UTC-naive re-check would drop it. A due settled at 2am Nepal on the
+    // first day of the range vanished from the report for that whole 5h45m
+    // window, every day.
+    const fromInstant = from ? new Date(`${from}T00:00:00+05:45`) : null;
+    const toInstant = (() => {
+      if (!to) return null;
+      const nextDay = new Date(`${to}T00:00:00+05:45`);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      return nextDay; // exclusive upper bound, same convention as getTodayInsights' nextDayBoundary
+    })();
+
     const candidateRows = await fetchAllPages((opts) => {
       let query = supabase
         .from('payments')
@@ -1535,20 +1553,19 @@ export async function getSettledDueHistory({ branchId, from, to } = {}) {
       if (!isOverallBranch(branchId)) {
         query = query.eq('booking.branch_id', resolveBranchId(branchId));
       }
-      if (from) query = query.gte('created_at', `${from}T00:00:00+05:45`);
-      if (to) {
-        // Exclusive upper bound at the next Nepal midnight, same convention as
-        // getTodayInsights' nextDayBoundary.
-        const nextDay = new Date(`${to}T00:00:00+05:45`);
-        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-        query = query.lt('created_at', nextDay.toISOString());
-      }
+      if (fromInstant) query = query.gte('created_at', fromInstant.toISOString());
+      if (toInstant) query = query.lt('created_at', toInstant.toISOString());
       return query.order('id');
     });
 
     const candidateIds = [...new Set(candidateRows.map((r) => r.booking_id))];
     if (candidateIds.length === 0) return { data: [], error: null };
 
+    // candidateIds is unbounded in principle — api.js:~1235 documents a bare
+    // .in() list rejected by PostgREST above ~500-700 ids. Only 12 settled-due
+    // bookings exist in production today, so this can't bite yet; chunk it
+    // (see fetchAllPages' sibling pattern elsewhere in this file) if that
+    // table ever grows past a few hundred.
     const [allPayments, bookingRows] = await Promise.all([
       fetchAllPages((opts) =>
         supabase
@@ -1592,9 +1609,11 @@ export async function getSettledDueHistory({ branchId, from, to } = {}) {
     }).filter((r) => r.settledAt);
 
     // Re-check against the TRUE settledAt — pass 1 only guarantees *a* payment
-    // in range, not necessarily the latest one.
-    if (from) rows = rows.filter((r) => r.settledAt.slice(0, 10) >= from);
-    if (to) rows = rows.filter((r) => r.settledAt.slice(0, 10) <= to);
+    // in range, not necessarily the latest one. Same fromInstant/toInstant as
+    // the query bound above — comparing real instants, not a UTC date-string
+    // slice, so this can't disagree with pass 1 the way it did before.
+    if (fromInstant) rows = rows.filter((r) => new Date(r.settledAt) >= fromInstant);
+    if (toInstant) rows = rows.filter((r) => new Date(r.settledAt) < toInstant);
 
     rows.sort((a, b) => new Date(b.settledAt) - new Date(a.settledAt));
     return { data: rows, error: null };
