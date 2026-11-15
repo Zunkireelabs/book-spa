@@ -951,6 +951,9 @@ const CalendarGrid = ({
         baseAmount: b.base_amount,
         discountAmount: b.discount_amount,
         finalAmount: b.final_amount,
+        // Set by the API when this account isn't permitted to see money, so the
+        // card can show ••• rather than the "—" it uses for a genuinely absent amount.
+        pricesWithheld: b.pricesWithheld === true,
         specialRequests: b.special_requests || null,
         createdByName: b.creator?.full_name || null,
         // Only ever NULL for the public customer self-service booking flow —

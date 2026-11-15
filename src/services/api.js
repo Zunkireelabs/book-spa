@@ -309,9 +309,19 @@ export async function fetchServices(branchId) {
       return { data: [], error: null };
     }
 
+    // A staff member with prices hidden must not see the SERVICE MENU prices
+    // either — hiding the amount on a booking card while the service list
+    // still shows NPR 4,200 for the same treatment achieves nothing. The price
+    // columns are left out of the select rather than blanked afterwards, so
+    // they never reach the browser.
+    const vis = await resolveVisibility(profile);
+    const priceCols = vis.canViewPrices
+      ? ', price_npr, effective_price_npr, is_on_offer, original_price_npr'
+      : '';
+
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, requires_therapist, effective_price_npr, is_on_offer, original_price_npr')
+      .select(`id, name, duration_minutes, description, image_url, category, is_couple, is_combo, requires_therapist${priceCols}`)
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -5550,6 +5560,14 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
         customer_name: maskCustomerName(b.customer_name),
         customer_phone: maskPhone(b.customer_phone),
       }));
+    }
+
+    // Tell the UI the amount was WITHHELD, rather than leaving it to infer
+    // that from an absent field. Without this a restricted booking renders the
+    // same "—" as a booking that genuinely has no amount recorded, which reads
+    // as missing data instead of a deliberate restriction.
+    if (!vis.canViewPrices) {
+      bookings = (bookings || []).map((b) => ({ ...b, pricesWithheld: true }));
     }
       bookings = bookingsData || [];
     }
