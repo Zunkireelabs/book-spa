@@ -16626,6 +16626,15 @@ export async function adminVoidPackageRedemption({ redemptionId, reason }) {
 const ROLES_MANAGER_CAN_GRANT = ['staff', 'manager'];
 const ALL_GRANTABLE_ROLES = ['staff', 'manager', 'admin', 'admin_viewer'];
 
+// Which roles `actorRole` is allowed to hand out. Exported so the UI can show
+// only grantable options instead of offering one that assertCanGrantRole will
+// reject on save — same list, one definition, so the two cannot drift.
+export function grantableRolesFor(actorRole) {
+  if (actorRole === 'admin') return [...ALL_GRANTABLE_ROLES];
+  if (actorRole === 'manager') return [...ROLES_MANAGER_CAN_GRANT];
+  return [];
+}
+
 function assertCanGrantRole(granterRole, targetRole) {
   if (!ALL_GRANTABLE_ROLES.includes(targetRole)) {
     return { code: 'VALIDATION', message: 'Invalid role.' };
@@ -16666,7 +16675,7 @@ export async function fetchStaffAccess(branchId) {
       fetchAllPages((opts) =>
         supabase
           .from('therapists')
-          .select('id, name, branch_id, position, gender, is_active, user_id', opts)
+          .select('id, name, branch_id, position, gender, is_active, is_service_staff, user_id', opts)
           .eq('org_id', orgId)
           .eq('is_active', true)
           .order('name')
@@ -16682,14 +16691,38 @@ export async function fetchStaffAccess(branchId) {
       ),
     ]);
 
-    const usersById = new Map(users.map((u) => [u.id, u]));
+    // Manually-ticked extra branches, per user — folded onto each user object
+    // so the detail screen's Locations card doesn't need a second round trip
+    // (and a second loading state) just to pre-check its boxes.
+    const userIds = users.map((u) => u.id);
+    // Paginated like every other list read in this file: one row per
+    // (user, branch), so a tenant with ~200+ accounts crosses PostgREST's
+    // 1000-row cap and would silently lose branch grants — the same silent
+    // truncation fixed in #457/#459.
+    const grants = userIds.length > 0
+      ? await fetchAllPages((opts) =>
+          supabase
+            .from('user_branches')
+            .select('user_id, branch_id', opts)
+            .in('user_id', userIds)
+            .order('user_id')
+            .order('branch_id')
+        )
+      : [];
+    const branchIdsByUser = new Map();
+    (grants || []).forEach((g) => {
+      if (!branchIdsByUser.has(g.user_id)) branchIdsByUser.set(g.user_id, []);
+      branchIdsByUser.get(g.user_id).push(g.branch_id);
+    });
+
+    const usersById = new Map(users.map((u) => [u.id, { ...u, branchIds: branchIdsByUser.get(u.id) || [] }]));
     const linkedUserIds = new Set(therapists.filter((t) => t.user_id).map((t) => t.user_id));
 
     const linked = therapists
       .filter((t) => t.user_id && usersById.has(t.user_id))
       .map((t) => ({ therapist: t, user: usersById.get(t.user_id) }));
     const noLogin = therapists.filter((t) => !t.user_id);
-    const accountOnly = users.filter((u) => !linkedUserIds.has(u.id));
+    const accountOnly = Array.from(usersById.values()).filter((u) => !linkedUserIds.has(u.id));
 
     return { data: { linked, noLogin, accountOnly }, error: null };
   } catch (error) {

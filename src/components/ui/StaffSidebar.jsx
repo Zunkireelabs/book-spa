@@ -441,6 +441,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
       icon: 'Settings',
       roles: ['manager', 'admin', 'admin_viewer'],
       children: [
+        {
+          id: 'staff-access',
+          label: 'Staff access',
+          icon: 'KeyRound',
+          path: `${basePath}?view=staff-access`,
+          roles: ['manager', 'admin', 'admin_viewer'],
+        },
         // Only show rooms/locations for industries that use them
         ...(enableRooms ? [{
           id: 'rooms',
