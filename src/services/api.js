@@ -1,4 +1,4 @@
-import { supabase, supabaseCustomer } from '../lib/supabase';
+import { supabase, supabaseCustomer, supabaseProvision } from '../lib/supabase';
 import { transformMembership, transformMemberships, toTitleCase, isNoShow } from './bookingTransformers';
 import { dedupeTransfersByKey, sortTransfersByTime } from './transferDedup';
 import { capture } from '../lib/analytics';
@@ -16612,4 +16612,440 @@ export async function adminVoidPackageRedemption({ redemptionId, reason }) {
   return callAdminCorrection('admin_void_package_redemption',
     { p_redemption_id: redemptionId },
     { reason, event: 'admin_package_redemption_voided', meta: { redemption_id: redemptionId } });
+}
+
+// ============================================================
+// Staff access (migration-318): link a therapist to a login account.
+// therapists.user_id <-> users.id, both nullable, partial-unique on the
+// therapist side. See migration-318-staff-access.sql for the full rationale.
+// ============================================================
+
+// Who may grant which role. A manager can hand out staff/manager; only an
+// admin can hand out admin or admin_viewer — same ceiling as every other
+// privilege-escalation check in this file (DISCOUNT_LIMITS, setStaffCompensation).
+const ROLES_MANAGER_CAN_GRANT = ['staff', 'manager'];
+const ALL_GRANTABLE_ROLES = ['staff', 'manager', 'admin', 'admin_viewer'];
+
+function assertCanGrantRole(granterRole, targetRole) {
+  if (!ALL_GRANTABLE_ROLES.includes(targetRole)) {
+    return { code: 'VALIDATION', message: 'Invalid role.' };
+  }
+  if (granterRole === 'admin') return null;
+  if (granterRole === 'manager' && ROLES_MANAGER_CAN_GRANT.includes(targetRole)) return null;
+  return { code: 'UNAUTHORIZED', message: 'Managers cannot grant admin or admin_viewer access.' };
+}
+
+async function resolveOrgIdForBranch(branchId) {
+  if (isOverallBranch(branchId)) {
+    const { profile, error } = await getAuthenticatedUser();
+    if (error) return { orgId: null, error };
+    return { orgId: profile.org_id, error: null };
+  }
+  const resolvedBranchId = resolveBranchId(branchId);
+  const { data: branch, error } = await supabase
+    .from('branches')
+    .select('org_id')
+    .eq('id', resolvedBranchId)
+    .single();
+  if (error) return { orgId: null, error };
+  return { orgId: branch.org_id, error: null };
+}
+
+// The list screen's one read: every active therapist in the org (linked or
+// not) plus every org user with no therapist (account-only). Org-scoped, not
+// branch-scoped — branchId only resolves the org, same reasoning as
+// getCustomerIntelligence. Paginated: 63 therapists today, but this is
+// exactly the function that lists all of them, and migration-316/postgrest
+// truncation already burned two PRs on an unpaginated "list everyone" read.
+export async function fetchStaffAccess(branchId) {
+  try {
+    const { orgId, error: orgErr } = await resolveOrgIdForBranch(branchId);
+    if (orgErr) return { data: null, error: orgErr };
+
+    const [therapists, users] = await Promise.all([
+      fetchAllPages((opts) =>
+        supabase
+          .from('therapists')
+          .select('id, name, branch_id, position, gender, is_active, user_id', opts)
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .order('name')
+          .order('id')
+      ),
+      fetchAllPages((opts) =>
+        supabase
+          .from('users')
+          .select('id, email, full_name, role, branch_id, is_active, login_access, calendar_visibility', opts)
+          .eq('org_id', orgId)
+          .order('full_name')
+          .order('id')
+      ),
+    ]);
+
+    const usersById = new Map(users.map((u) => [u.id, u]));
+    const linkedUserIds = new Set(therapists.filter((t) => t.user_id).map((t) => t.user_id));
+
+    const linked = therapists
+      .filter((t) => t.user_id && usersById.has(t.user_id))
+      .map((t) => ({ therapist: t, user: usersById.get(t.user_id) }));
+    const noLogin = therapists.filter((t) => !t.user_id);
+    const accountOnly = users.filter((u) => !linkedUserIds.has(u.id));
+
+    return { data: { linked, noLogin, accountOnly }, error: null };
+  } catch (error) {
+    console.error('[API] fetchStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Links a therapist to an EXISTING login account and sets its access settings.
+// Cannot create a brand-new auth account from the client: public.users.id is a
+// FK into auth.users, and creating that row needs the service-role key, which
+// never belongs in client code (see CLAUDE.md). A new hire with no account yet
+// must be invited via the Supabase dashboard (or a future admin-side Edge
+// Function, same pattern as pin-login) BEFORE this is called — this function
+// only wires an already-existing account to a therapist.
+// Create a brand-new staff login and its public.users row.
+//
+// public.users.id is a hard FK into auth.users, and an auth.users row can only
+// be created by the service-role key (which must never reach the browser) or
+// by signUp. We use signUp on `supabaseProvision`, an isolated client — signUp
+// returns a session for the account it creates, and on the shared client that
+// would silently swap the admin's session for the staff member's mid-task.
+//
+// The generated password is deliberately never shown to anyone. Staff sign in
+// with email + 4-digit PIN through the pin-login Edge Function, or set their
+// own password via a reset link. Handing a shared password around would be
+// worse than not having one.
+//
+// Requires public signup to be enabled on the Supabase project (it is, with
+// mailer_autoconfirm on, so the account works immediately). If signup is ever
+// disabled for hardening, this is the one place that breaks and the work moves
+// to a service-role Edge Function mirroring pin-login.
+async function provisionStaffLogin({ email, fullName, orgId, branchId, role, loginAccess, calendarVisibility }) {
+  // A password nobody needs to know or type. crypto.randomUUID is available in
+  // every browser this app supports and is CSPRNG-backed.
+  const throwawayPassword = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+
+  const { data: signUpData, error: signUpError } = await supabaseProvision.auth.signUp({
+    email,
+    password: throwawayPassword,
+  });
+
+  if (signUpError) {
+    // An auth account can exist without a public.users row — a half-finished
+    // earlier attempt, or an account from another org. Either way the admin
+    // cannot fix it from here, so say what happened rather than retrying.
+    if (/already registered|already exists/i.test(signUpError.message || '')) {
+      return {
+        data: null,
+        error: {
+          code: 'AUTH_ACCOUNT_EXISTS',
+          message: `An account for ${email} already exists but isn't set up for this organization. Ask an admin to check it in Supabase, or use a different email.`,
+        },
+      };
+    }
+    return { data: null, error: signUpError };
+  }
+
+  const authUserId = signUpData?.user?.id;
+  if (!authUserId) {
+    return { data: null, error: { code: 'PROVISION_FAILED', message: 'The login was not created. Try again.' } };
+  }
+
+  // Drop the session signUp just handed us. persistSession:false keeps it out
+  // of storage, but it still lives on this client in memory and would be sent
+  // on that client's next request.
+  await supabaseProvision.auth.signOut().catch(() => {});
+
+  const { data: created, error: insertError } = await supabase
+    .from('users')
+    .insert({
+      id: authUserId,
+      email,
+      full_name: fullName,
+      role,
+      org_id: orgId,
+      branch_id: branchId,
+      is_active: true,
+      login_access: loginAccess,
+      calendar_visibility: calendarVisibility || 'all',
+    })
+    .select('id, org_id')
+    .single();
+
+  if (insertError) {
+    // The auth.users row now exists with no public.users row behind it. We
+    // cannot delete it without the service-role key, so it is an orphan.
+    // Surfacing that plainly beats a generic failure: retrying with the same
+    // email will hit AUTH_ACCOUNT_EXISTS above and look inexplicable.
+    console.error('[API] provisionStaffLogin: auth user created but users insert failed', insertError.message);
+    return {
+      data: null,
+      error: {
+        code: 'PROVISION_INCOMPLETE',
+        message: `The login for ${email} was created but could not be set up. An admin needs to remove it in Supabase before trying this email again.`,
+      },
+    };
+  }
+
+  return { data: created, error: null };
+}
+
+export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can grant staff access.' } };
+    }
+
+    const roleError = assertCanGrantRole(profile.role, role);
+    if (roleError) return { data: null, error: roleError };
+
+    if (!['email', 'pin', 'none'].includes(loginAccess)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid login access value.' } };
+    }
+    if (!email || !email.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Email is required to find the account to link.' } };
+    }
+
+    const { data: therapist, error: therapistErr } = await supabase
+      .from('therapists')
+      .select('id, org_id, user_id, name, branch_id')
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (therapistErr) {
+      if (therapistErr.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found in your organization.' } };
+      }
+      throw therapistErr;
+    }
+    if (therapist.user_id) {
+      return { data: null, error: { code: 'ALREADY_LINKED', message: `${therapist.name} already has a linked login.` } };
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    let { data: account, error: accountErr } = await supabase
+      .from('users')
+      .select('id, org_id')
+      .eq('org_id', profile.org_id)
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+    if (accountErr) throw accountErr;
+
+    if (!account) {
+      // No login exists for this email yet — provision one.
+      const provisioned = await provisionStaffLogin({
+        email: cleanEmail,
+        fullName: therapist.name,
+        orgId: profile.org_id,
+        branchId: therapist.branch_id,
+        role,
+        loginAccess,
+        calendarVisibility,
+      });
+      if (provisioned.error) return { data: null, error: provisioned.error };
+      account = provisioned.data;
+    }
+
+    // therapists_user_id_uniq (partial unique on user_id) rejects a second
+    // therapist pointing at the same account — catch and return a clean error
+    // instead of a raw Postgres constraint message.
+    const { data: linkedTherapist, error: linkErr } = await supabase
+      .from('therapists')
+      .update({ user_id: account.id })
+      .eq('id', therapistId)
+      .select('id, name, user_id')
+      .single();
+    if (linkErr) {
+      if (linkErr.code === '23505') {
+        return { data: null, error: { code: 'ACCOUNT_ALREADY_LINKED', message: 'This account is already linked to another therapist.' } };
+      }
+      throw linkErr;
+    }
+
+    const { error: settingsErr } = await supabase
+      .from('users')
+      .update({ role, login_access: loginAccess, calendar_visibility: calendarVisibility || 'all' })
+      .eq('id', account.id);
+    if (settingsErr) {
+      // Roll back the link rather than leave a therapist pointing at an
+      // account whose settings never landed.
+      await supabase.from('therapists').update({ user_id: null }).eq('id', therapistId);
+      throw settingsErr;
+    }
+
+    // Branch access is ticked manually — write exactly what was given, no
+    // defaulting to the therapist's home branch and no "all branches" fallback.
+    const ids = [...new Set((branchIds || []).filter(Boolean))];
+    if (ids.length > 0) {
+      const { error: branchErr } = await supabase
+        .from('user_branches')
+        .upsert(ids.map((branch_id) => ({ user_id: account.id, branch_id })), { onConflict: 'user_id,branch_id', ignoreDuplicates: true });
+      if (branchErr) throw branchErr;
+    }
+
+    capture('staff_access_granted', { therapist_id: therapistId, role, login_access: loginAccess });
+    return { data: linkedTherapist, error: null };
+  } catch (error) {
+    console.error('[API] grantStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// The inverse of grantStaffAccess: attach an existing login to an existing
+// therapist without changing the account's settings. Rejects if either side
+// is already linked.
+export async function linkStaffToAccount({ therapistId, userId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can link staff accounts.' } };
+    }
+
+    const { data: therapist, error: therapistErr } = await supabase
+      .from('therapists')
+      .select('id, org_id, user_id, name')
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (therapistErr) throw therapistErr;
+    if (therapist.user_id) {
+      return { data: null, error: { code: 'ALREADY_LINKED', message: `${therapist.name} already has a linked login.` } };
+    }
+
+    const { data: account, error: accountErr } = await supabase
+      .from('users')
+      .select('id, org_id')
+      .eq('id', userId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (accountErr) throw accountErr;
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .update({ user_id: account.id })
+      .eq('id', therapistId)
+      .select('id, name, user_id')
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'ACCOUNT_ALREADY_LINKED', message: 'This account is already linked to another therapist.' } };
+      }
+      throw error;
+    }
+
+    capture('staff_account_linked', { therapist_id: therapistId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] linkStaffToAccount error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Unlinking is not deletion: the users row survives, it just stops being
+// anyone's "who am I" link. The therapist goes back to no-login.
+export async function unlinkStaffAccess({ therapistId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can unlink staff access.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .update({ user_id: null })
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, user_id')
+      .single();
+    if (error) throw error;
+
+    capture('staff_access_unlinked', { therapist_id: therapistId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] unlinkStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Detail screen's Save: role / login_access / calendar_visibility / branch
+// grants for an already-linked (or account-only) user. Branch grants, when
+// provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
+export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update staff access.' } };
+    }
+
+    const { data: target, error: targetErr } = await supabase
+      .from('users')
+      .select('id, org_id, role')
+      .eq('id', userId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (targetErr) throw targetErr;
+
+    const updatePayload = {};
+    if (role !== undefined && role !== target.role) {
+      const roleError = assertCanGrantRole(profile.role, role);
+      if (roleError) return { data: null, error: roleError };
+      updatePayload.role = role;
+    }
+    if (loginAccess !== undefined) {
+      if (!['email', 'pin', 'none'].includes(loginAccess)) {
+        return { data: null, error: { code: 'VALIDATION', message: 'Invalid login access value.' } };
+      }
+      updatePayload.login_access = loginAccess;
+    }
+    if (calendarVisibility !== undefined) {
+      if (!['own', 'own_view', 'all', 'all_view'].includes(calendarVisibility)) {
+        return { data: null, error: { code: 'VALIDATION', message: 'Invalid calendar visibility value.' } };
+      }
+      updatePayload.calendar_visibility = calendarVisibility;
+    }
+
+    if (Object.keys(updatePayload).length > 0) {
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update(updatePayload)
+        .eq('id', userId);
+      if (updateErr) throw updateErr;
+    }
+
+    if (branchIds !== undefined) {
+      const ids = [...new Set((branchIds || []).filter(Boolean))];
+      const { error: deleteErr } = await supabase
+        .from('user_branches')
+        .delete()
+        .eq('user_id', userId);
+      if (deleteErr) throw deleteErr;
+      if (ids.length > 0) {
+        const { error: insertErr } = await supabase
+          .from('user_branches')
+          .insert(ids.map((branch_id) => ({ user_id: userId, branch_id })));
+        if (insertErr) throw insertErr;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, email, full_name, role, login_access, calendar_visibility')
+      .eq('id', userId)
+      .single();
+    if (error) throw error;
+
+    capture('staff_access_updated', { user_id: userId });
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateStaffAccess error:', error.message);
+    return { data: null, error };
+  }
 }
