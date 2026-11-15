@@ -31,10 +31,26 @@ const ServiceCard = ({ service, isSelected, onClick }) => (
       )}
     </div>
     <span className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
-      {formatNPR(service.effective_price_npr ?? service.price_npr)}
+      {servicePriceLabel(service)}
     </span>
   </div>
 );
+
+// calendar_only is priced internally but never shown to a customer booking
+// online (migration-323) — staff see the amount elsewhere, this flow doesn't.
+// tiered shows the range across every tier price + the Unassigned rate, from
+// min_price/max_price (migration-325), not reimplemented client-side.
+function servicePriceLabel(service) {
+  if (service.price_type === 'calendar_only') return null;
+  if (service.price_type === 'free') return 'Free';
+  if (service.price_type === 'no_default') return null;
+  if (service.price_type === 'tiered' && service.min_price != null && service.max_price != null) {
+    return service.min_price === service.max_price
+      ? formatNPR(service.min_price)
+      : `NPR ${Number(service.min_price).toLocaleString('en-IN')} - ${Number(service.max_price).toLocaleString('en-IN')}`;
+  }
+  return formatNPR(service.effective_price_npr ?? service.price_npr);
+}
 
 // Same grouped-category + scroll-spy model the page always used, now rendering the
 // booking view's old "Select services" checklist in place — ticking a service here

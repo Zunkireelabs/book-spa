@@ -321,7 +321,7 @@ export async function fetchServices(branchId) {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select(`id, name, duration_minutes, description, image_url, category, is_couple, is_combo, requires_therapist${priceCols}`)
+      .select(`id, name, duration_minutes, description, image_url, category, is_couple, is_combo, requires_therapist, price_type${priceCols}`)
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name');
@@ -2381,6 +2381,36 @@ export async function updateBookingStatus({ bookingId, newStatus, reason }) {
   }
 }
 
+// Tiered pricing: what base_amount should a booking carry, given who is now
+// assigned? Returns null when the service isn't tiered, so callers can leave
+// the amount alone.
+//
+// Shared by assignTherapist and rescheduleBooking because BOTH change who is
+// assigned. rescheduleBooking takes a newTherapistId and rewrites the
+// booking_therapists junction, so a tiered booking moved onto a cheaper or
+// dearer therapist would otherwise keep the old price — the charge is
+// supposed to follow whoever actually delivers (migration-319).
+async function tieredBaseAmountFor(serviceId, therapistId) {
+  if (!serviceId) return null;
+  const { data: svc, error: svcErr } = await supabase
+    .from('services')
+    .select('price_type, price_npr')
+    .eq('id', serviceId)
+    .single();
+  if (svcErr) throw svcErr;
+  if (svc.price_type !== 'tiered') return null;
+
+  // Unassigned rate is the floor: no therapist, or a therapist whose tier has
+  // no price for this service, both charge it. Never zero.
+  let amount = Number(svc.price_npr);
+  if (therapistId) {
+    const { data: tierPrice, error: tierErr } = await fetchServicePriceForTherapist(serviceId, therapistId);
+    if (tierErr) throw tierErr;
+    if (tierPrice != null) amount = tierPrice;
+  }
+  return amount;
+}
+
 export async function assignTherapist({ bookingId, therapistIds = [], roomId, therapistRoomOverrides, companionName, companionPhone }) {
   try {
     // Support legacy single therapistId param
@@ -2389,7 +2419,7 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     // 1. Fetch booking (include room_id + date for attendance check)
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, branch_id, room_id, date, start_time')
+      .select('id, status, is_locked, branch_id, room_id, date, start_time, service_id')
       .eq('id', bookingId)
       .single();
 
@@ -2482,6 +2512,19 @@ export async function assignTherapist({ bookingId, therapistIds = [], roomId, th
     };
     if (companionName !== undefined) updatePayload.companion_name = companionName?.trim() || null;
     if (companionPhone !== undefined) updatePayload.companion_phone = companionPhone ? toE164(companionPhone) : null;
+
+    // Tiered pricing: the charge follows whoever actually delivers, not who
+    // was originally quoted (migration-319's standing decision) — reassigning
+    // the primary therapist here recomputes the price right now, through the
+    // same DB function the booking and payment screens use, so none of the
+    // three can disagree about what this person costs. final_amount recomputes
+    // itself from base_amount via the existing compute_final_amount trigger.
+    if (booking.service_id) {
+      const newBaseAmount = await tieredBaseAmountFor(booking.service_id, primaryId);
+      if (newBaseAmount !== null) {
+        updatePayload.base_amount = newBaseAmount;
+      }
+    }
 
     // 6. Room assignment (if roomId provided)
     if (roomId !== undefined) {
@@ -3501,7 +3544,7 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
     // 1. Fetch booking with service duration, room, therapist, and branch
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
-      .select('id, status, is_locked, payment_status, room_id, therapist_id, branch_id, service:services(duration_minutes)')
+      .select('id, status, is_locked, payment_status, room_id, therapist_id, branch_id, service_id, service:services(duration_minutes)')
       .eq('id', bookingId)
       .single();
 
@@ -3673,6 +3716,22 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
           data: null,
           error: { code: 'ROOM_CONFLICT', message: `Room ${roomData?.name || 'unknown'} is fully booked at this time (${conflicts.length}/${capacity} slots used). Change the room or pick a different time.` },
         };
+      }
+    }
+
+    // 7b. Tiered pricing: a reschedule can also change WHO is assigned, via
+    // newTherapistId. The charge follows whoever delivers (migration-319), so
+    // recompute here too — assignTherapist is not the only path that reassigns,
+    // and without this a tiered booking moved onto a cheaper or dearer
+    // therapist would keep the old price. Same shared helper, so the two paths
+    // cannot disagree. final_amount follows base_amount via the existing
+    // compute_final_amount trigger.
+    if (newTherapistId !== undefined && booking.service_id) {
+      const resolvedTherapistId =
+        newTherapistId === 'unassigned' || newTherapistId === null ? null : newTherapistId;
+      const newBaseAmount = await tieredBaseAmountFor(booking.service_id, resolvedTherapistId);
+      if (newBaseAmount !== null) {
+        updatePayload.base_amount = newBaseAmount;
       }
     }
 
@@ -5735,7 +5794,7 @@ export async function createBooking({
     ] = await Promise.all([
       supabase
         .from('services_with_offer_pricing')
-        .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category')
+        .select('id, name, duration_minutes, price_npr, effective_price_npr, is_couple, category, price_type')
         .eq('id', serviceId)
         .single(),
       supabase
@@ -6112,6 +6171,20 @@ export async function createBooking({
     // reject the whole insert. Instead skip .select() below and read the row back
     // through public_get_booking_by_request_id (migration-223), keyed on this id.
     const clientRequestId = orgSlug ? crypto.randomUUID() : null;
+
+    // Tiered pricing: the quote at booking time follows whoever is actually
+    // requested, same as every other price type — "Any available" (no
+    // primaryTherapistId yet) still charges the Unassigned rate
+    // (effective_price_npr, already services.price_npr for a tiered service).
+    // Reassignment later recomputes this at payment time per the standing
+    // quote-vs-final decision (migration-319) — this is only the quote.
+    let resolvedBaseAmount = Number(service.effective_price_npr);
+    if (service.price_type === 'tiered' && primaryTherapistId) {
+      const { data: tierPrice, error: tierPriceError } = await fetchServicePriceForTherapist(serviceId, primaryTherapistId);
+      if (tierPriceError) throw tierPriceError;
+      if (tierPrice != null) resolvedBaseAmount = tierPrice;
+    }
+
     const insertPayload = {
       branch_id: resolvedBranchId,
       room_id: availableRoom?.id || null,
@@ -6128,7 +6201,7 @@ export async function createBooking({
       companion_phone: companionPhone ? toE164(companionPhone) : null,
       date: date,
       start_time: startTime,
-      base_amount: Number(service.effective_price_npr),
+      base_amount: resolvedBaseAmount,
       discount_amount: 0,
       special_requests: specialRequests || null,
       created_by: authUser?.id || null,
@@ -6139,7 +6212,7 @@ export async function createBooking({
       // Phase 9A: Snapshot fields — preserve original values at booking time
       service_name_snapshot: service.name,
       service_duration_snapshot: service.duration_minutes,
-      service_price_snapshot: Number(service.effective_price_npr),
+      service_price_snapshot: resolvedBaseAmount,
       service_category_snapshot: service.category,
       room_name_snapshot: availableRoom?.name || null,
       therapist_name_snapshot: therapistNameSnapshot,
@@ -8578,7 +8651,7 @@ export async function fetchServicesForManagement() {
 
     const { data, error } = await supabase
       .from('services_with_offer_pricing')
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
+      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, category_offer_enabled, category_offer_percent, effective_price_npr, is_on_offer, original_price_npr, active_campaign_name, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist, price_type')
       .eq('org_id', profile.org_id)
       .order('name');
 
@@ -9124,7 +9197,9 @@ export async function setServiceAddons(serviceId, addonServiceIds) {
   }
 }
 
-export async function createService({ name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
+const SERVICE_PRICE_TYPES = ['fixed', 'free', 'calendar_only', 'no_default', 'tiered'];
+
+export async function createService({ name, priceNpr, priceType, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9135,6 +9210,20 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
 
     if (!name || !name.trim()) {
       return { data: null, error: { code: 'VALIDATION', message: 'Service name is required.' } };
+    }
+
+    const resolvedPriceType = priceType || 'fixed';
+    if (!SERVICE_PRICE_TYPES.includes(resolvedPriceType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid price type.' } };
+    }
+    // free/no_default carry no meaningful amount — services.price_npr still
+    // needs SOME number (NOT NULL, no default-removal migration), so it's
+    // pinned to 0 rather than asking the form for one that means nothing.
+    // fixed/calendar_only/tiered all need a real amount — tiered's is the
+    // Unassigned rate (migration-323), not a tier price.
+    const resolvedPriceNpr = ['free', 'no_default'].includes(resolvedPriceType) ? 0 : priceNpr;
+    if (['fixed', 'calendar_only', 'tiered'].includes(resolvedPriceType) && (!resolvedPriceNpr || resolvedPriceNpr <= 0)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
     }
 
     // Check for duplicate name within the same organization
@@ -9154,7 +9243,8 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
       .from('services')
       .insert({
         name: name.trim(),
-        price_npr: priceNpr,
+        price_npr: resolvedPriceNpr,
+        price_type: resolvedPriceType,
         duration_minutes: durationMinutes,
         description: description || null,
         image_url: imageUrl || null,
@@ -9173,7 +9263,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
         padding_after_type: paddingAfterType || 'padding',
         requires_therapist: requiresTherapist !== undefined ? !!requiresTherapist : true,
       })
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
+      .select('id, name, duration_minutes, price_npr, price_type, description, image_url, category, is_couple, is_combo, is_active, created_at, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) throw error;
@@ -9184,7 +9274,7 @@ export async function createService({ name, priceNpr, durationMinutes, descripti
   }
 }
 
-export async function updateServicePricing({ serviceId, name, priceNpr, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
+export async function updateServicePricing({ serviceId, name, priceNpr, priceType, durationMinutes, description, imageUrl, category, isCouple, isCombo, offerEnabled, offerType, offerValue, bookableOnline, isAddon, paddingBeforeMinutes, paddingAfterMinutes, paddingAfterType, requiresTherapist }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -9198,9 +9288,21 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
       return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
     }
 
+    if (priceType !== undefined && !SERVICE_PRICE_TYPES.includes(priceType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid price type.' } };
+    }
+    // Same rule as createService: free/no_default carry no meaningful amount,
+    // so price_npr is forced to 0 for them rather than trusting whatever the
+    // form last held (e.g. a value typed before switching price type).
+    const resolvedPriceNpr = priceType !== undefined && ['free', 'no_default'].includes(priceType) ? 0 : priceNpr;
+    if (priceType !== undefined && ['fixed', 'calendar_only', 'tiered'].includes(priceType) && (!resolvedPriceNpr || resolvedPriceNpr <= 0)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Price must be a positive number.' } };
+    }
+
     const updatePayload = {};
     if (name !== undefined) updatePayload.name = name;
-    if (priceNpr !== undefined) updatePayload.price_npr = priceNpr;
+    if (priceType !== undefined) updatePayload.price_type = priceType;
+    if (resolvedPriceNpr !== undefined) updatePayload.price_npr = resolvedPriceNpr;
     if (durationMinutes !== undefined) updatePayload.duration_minutes = durationMinutes;
     if (description !== undefined) updatePayload.description = description;
     if (imageUrl !== undefined) updatePayload.image_url = imageUrl;
@@ -9229,7 +9331,7 @@ export async function updateServicePricing({ serviceId, name, priceNpr, duration
       .update(updatePayload)
       .eq('id', serviceId)
       .eq('org_id', profile.org_id)  // Tenant isolation filter
-      .select('id, name, duration_minutes, price_npr, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
+      .select('id, name, duration_minutes, price_npr, price_type, description, image_url, category, is_couple, is_active, offer_enabled, offer_type, offer_value, bookable_online, is_addon, padding_before_minutes, padding_after_minutes, padding_after_type, requires_therapist')
       .single();
 
     if (error) {
@@ -12132,6 +12234,9 @@ export async function fetchBookableServicesByOrgSlug(orgSlug, branchId) {
       original_price_npr: s.original_price_npr,
       active_campaign_name: s.active_campaign_name,
       is_combo: s.is_combo,
+      price_type: s.price_type,
+      min_price: s.min_price,
+      max_price: s.max_price,
     }));
 
     if (branchId) {
@@ -17396,6 +17501,369 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
     return { data, error: null };
   } catch (error) {
     console.error('[API] updateStaffAccess error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Tiered pricing (migration-319/323/324): named staff tiers, per-service
+// per-tier prices, and the two DB functions that resolve what a service
+// actually costs. service_price_range/service_price_for_therapist are called
+// via rpc() rather than reimplemented here — see their own comments in
+// migration-323 for why (so the booking screen, payment screen and reports
+// can't drift apart). Neither is gated behind canViewPrices: both are used
+// either by the anonymous customer booking flow (no profile to gate on) or
+// internally by a write path that must compute the real charge regardless of
+// the acting staff member's own visibility — exactly like recordPayment's
+// `remaining` is computed unconditionally and only the DISPLAYED message is
+// withheld.
+// ============================================================
+
+export async function fetchPriceTiers() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const tiers = await fetchAllPages((opts) =>
+      supabase
+        .from('price_tiers')
+        .select('id, name, sort_order', opts)
+        .eq('org_id', profile.org_id)
+        .order('sort_order')
+        .order('id')
+    );
+    return { data: tiers, error: null };
+  } catch (error) {
+    console.error('[API] fetchPriceTiers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function createPriceTier({ name }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can create price tiers.' } };
+    }
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Tier name is required.' } };
+    }
+
+    const { data: existing } = await supabase
+      .from('price_tiers')
+      .select('id')
+      .eq('org_id', profile.org_id)
+      .ilike('name', name.trim())
+      .maybeSingle();
+    if (existing) {
+      return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A tier with this name already exists.' } };
+    }
+
+    const { data: maxRow } = await supabase
+      .from('price_tiers')
+      .select('sort_order')
+      .eq('org_id', profile.org_id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextSortOrder = (maxRow?.sort_order ?? -1) + 1;
+
+    const { data, error } = await supabase
+      .from('price_tiers')
+      .insert({ org_id: profile.org_id, name: name.trim(), sort_order: nextSortOrder })
+      .select('id, name, sort_order')
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A tier with this name already exists.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] createPriceTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function renamePriceTier({ tierId, name }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can rename price tiers.' } };
+    }
+    if (!name || !name.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Tier name is required.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('price_tiers')
+      .update({ name: name.trim() })
+      .eq('id', tierId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, sort_order')
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return { data: null, error: { code: 'DUPLICATE_NAME', message: 'A tier with this name already exists.' } };
+      }
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Tier not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] renamePriceTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Reassigns sort_order to match the given order exactly — the drag-to-reorder
+// write. Caller passes every tier's id in its new order, not a partial list.
+export async function reorderPriceTiers({ orderedIds }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can reorder price tiers.' } };
+    }
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+      return { data: null, error: { code: 'VALIDATION', message: 'No tiers to reorder.' } };
+    }
+
+    const results = await Promise.all(
+      orderedIds.map((id, index) =>
+        supabase
+          .from('price_tiers')
+          .update({ sort_order: index })
+          .eq('id', id)
+          .eq('org_id', profile.org_id)
+      )
+    );
+    const failed = results.find((r) => r.error);
+    if (failed) throw failed.error;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] reorderPriceTiers error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Deleting a tier SET NULLs therapists.price_tier_id (untiers its staff, see
+// migration-319) and CASCADEs service_tier_prices (loses its per-service
+// prices). The caller surfaces both counts in a confirmation before calling
+// this — fetched here so the warning can't drift from what the delete
+// actually does.
+export async function fetchPriceTierImpact({ tierId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const [{ count: staffCount, error: staffErr }, { count: priceCount, error: priceErr }] = await Promise.all([
+      supabase.from('therapists').select('id', { count: 'exact', head: true }).eq('price_tier_id', tierId).eq('org_id', profile.org_id),
+      supabase.from('service_tier_prices').select('id', { count: 'exact', head: true }).eq('price_tier_id', tierId),
+    ]);
+    if (staffErr) throw staffErr;
+    if (priceErr) throw priceErr;
+
+    return { data: { staffCount: staffCount || 0, servicePriceCount: priceCount || 0 }, error: null };
+  } catch (error) {
+    console.error('[API] fetchPriceTierImpact error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function deletePriceTier({ tierId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can delete price tiers.' } };
+    }
+
+    const { error } = await supabase
+      .from('price_tiers')
+      .delete()
+      .eq('id', tierId)
+      .eq('org_id', profile.org_id);
+    if (error) throw error;
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] deletePriceTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Every active therapist in the org plus their tier (or none), for the tier
+// manager's staff-count pill and assignment popover. Paginated — same reason
+// as fetchStaffAccess: this is exactly the function that lists all of them.
+export async function fetchTherapistsForTierAssignment() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!profile.org_id) {
+      return { data: null, error: { code: 'NO_ORG', message: 'User is not associated with an organization.' } };
+    }
+
+    const therapists = await fetchAllPages((opts) =>
+      supabase
+        .from('therapists')
+        .select('id, name, position, price_tier_id', opts)
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name')
+        .order('id')
+    );
+    return { data: therapists, error: null };
+  } catch (error) {
+    console.error('[API] fetchTherapistsForTierAssignment error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// tierId: null un-tiers the therapist (back to charging the Unassigned rate).
+export async function assignTherapistTier({ therapistId, tierId }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can assign price tiers.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('therapists')
+      .update({ price_tier_id: tierId || null })
+      .eq('id', therapistId)
+      .eq('org_id', profile.org_id)
+      .select('id, name, price_tier_id')
+      .single();
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Therapist not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] assignTherapistTier error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Every tier price set for one service (sparse — a tier with no row charges
+// the Unassigned rate, services.price_npr, never zero). Manager/admin only,
+// same gate as the Service Detail page these feed — a price-restricted
+// account can never reach this screen (createService/updateServicePricing
+// already require manager/admin, and that restriction only ever applies to
+// the staff role), so no separate canViewPrices check is needed here.
+export async function fetchServiceTierPrices(serviceId) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can view tier prices.' } };
+    }
+
+    const rows = await fetchAllPages((opts) =>
+      supabase
+        .from('service_tier_prices')
+        .select('id, price_tier_id, price_npr', opts)
+        .eq('service_id', serviceId)
+        .order('id')
+    );
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error('[API] fetchServiceTierPrices error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Replaces the full set of tier prices for a service. `prices` is
+// [{ priceTierId, priceNpr }] — a tier left out of the array (not just given
+// a falsy price) is the one true way to mean "same as Unassigned"; passing
+// price_npr: 0 would make that tier free, which is a different thing.
+export async function setServiceTierPrices(serviceId, prices) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['manager', 'admin'].includes(profile.role)) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can set tier prices.' } };
+    }
+
+    const { error: serviceErr } = await supabase
+      .from('services')
+      .select('id, org_id')
+      .eq('id', serviceId)
+      .eq('org_id', profile.org_id)
+      .single();
+    if (serviceErr) {
+      if (serviceErr.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Service not found.' } };
+      }
+      throw serviceErr;
+    }
+
+    const entries = (prices || []).filter((p) => p.priceNpr !== null && p.priceNpr !== undefined && p.priceNpr !== '');
+    const invalid = entries.find((p) => Number(p.priceNpr) < 0);
+    if (invalid) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Tier prices cannot be negative.' } };
+    }
+
+    const { error: deleteErr } = await supabase
+      .from('service_tier_prices')
+      .delete()
+      .eq('service_id', serviceId);
+    if (deleteErr) throw deleteErr;
+
+    if (entries.length > 0) {
+      const { error: insertErr } = await supabase
+        .from('service_tier_prices')
+        .insert(entries.map((p) => ({ service_id: serviceId, price_tier_id: p.priceTierId, price_npr: Number(p.priceNpr) })));
+      if (insertErr) throw insertErr;
+    }
+
+    return { data: { success: true }, error: null };
+  } catch (error) {
+    console.error('[API] setServiceTierPrices error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// { min_price, max_price } across the Unassigned rate and every tier price
+// (migration-323). Drives the "Rs 160 - 380" range shown to customers online.
+export async function fetchServicePriceRange(serviceId) {
+  try {
+    const { data, error } = await supabase.rpc('service_price_range', { p_service_id: serviceId });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return { data: row ? { minPrice: Number(row.min_price), maxPrice: Number(row.max_price) } : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicePriceRange error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// What this specific therapist charges for this service — their tier price,
+// or the Unassigned rate if they have none (migration-323's own COALESCE,
+// never reimplemented here).
+export async function fetchServicePriceForTherapist(serviceId, therapistId) {
+  try {
+    const { data, error } = await supabase.rpc('service_price_for_therapist', {
+      p_service_id: serviceId,
+      p_therapist_id: therapistId,
+    });
+    if (error) throw error;
+    return { data: data != null ? Number(data) : null, error: null };
+  } catch (error) {
+    console.error('[API] fetchServicePriceForTherapist error:', error.message);
     return { data: null, error };
   }
 }

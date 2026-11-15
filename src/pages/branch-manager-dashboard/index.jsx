@@ -37,6 +37,7 @@ import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWin
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import LocationsPanel from './components/MasterData/LocationsPanel';
 import StaffAccessPanel from './components/MasterData/StaffAccessPanel';
+import PriceTiersPanel from './components/MasterData/PriceTiersPanel';
 import AuditPanel from './components/Governance/AuditPanel';
 import CustomersPanel from './components/CRM/CustomersPanel';
 import BookingsViewPanel from './components/BookingsViewPanel';
@@ -744,6 +745,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'provider-profile' && profile?.role === 'admin' && <ProviderProfilePanel />}
               {viewMode === 'therapists' && <TherapistManagementPanel branchId={branchId} readOnly={isOverall} />}
               {viewMode === 'staff-access' && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) && <StaffAccessPanel branchId={branchId} readOnly={profile?.role === 'admin_viewer'} />}
+              {viewMode === 'price-tiers' && !isOverall && ['manager', 'admin', 'admin_viewer'].includes(profile?.role) && <PriceTiersPanel readOnly={profile?.role === 'admin_viewer'} />}
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
               {viewMode === 'locations' && profile?.role === 'admin' && <LocationsPanel orgId={orgId} />}

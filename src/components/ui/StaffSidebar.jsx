@@ -448,6 +448,14 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           path: `${basePath}?view=staff-access`,
           roles: ['manager', 'admin', 'admin_viewer'],
         },
+        {
+          id: 'price-tiers',
+          label: 'Price Tiers',
+          icon: 'Tags',
+          path: `${basePath}?view=price-tiers`,
+          roles: ['manager', 'admin', 'admin_viewer'],
+          overallHidden: true
+        },
         // Only show rooms/locations for industries that use them
         ...(enableRooms ? [{
           id: 'rooms',
