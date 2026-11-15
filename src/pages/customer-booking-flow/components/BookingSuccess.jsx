@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import { useTenant } from '../../../contexts/TenantContext';
-import { formatNPR, customerFacingServicePrice } from '../../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../../hooks/useCustomerServicePricing';
 
 const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   const navigate = useNavigate();
@@ -48,11 +48,22 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   // dedicated list once there's more than one -- a 1-person "group" (or the solo
   // path, which never sets this at all) falls through to the single chip below.
   const groupBookings = bookingData?.groupBookings?.length > 1 ? bookingData.groupBookings : null;
-  const priceOf = customerFacingServicePrice;
-  const total = services.reduce((sum, s) => sum + (priceOf(s) ?? 0), 0);
-  // Every selected service was calendar_only — there's nothing to show at all,
-  // not even a "Total Amount" line reading NPR 0.
-  const totalIsHidden = services.length > 0 && services.every((s) => priceOf(s) == null);
+  // Solo booking: one therapist for every service (selectedProfessional). Group
+  // booking: a different therapist per person, parallel to `services` by index
+  // (selectedProfessionals) — both threaded through by provider-profile-flow's
+  // handleConfirmBooking/handleGroupBookingComplete.
+  const pricingItems = services.map((s, i) => ({
+    key: s?.id ?? i,
+    service: s,
+    therapistId: (() => {
+      const prof = bookingData?.selectedProfessionals?.[i] ?? bookingData?.selectedProfessional;
+      return prof?.mode === 'specific' ? (prof.therapist?.id || null) : null;
+    })(),
+  }));
+  const { perItem: pricedServices, totalLabel, totalIsRange } = useResolvedServicePricing(pricingItems);
+  // Every selected service was calendar_only/no_default — there's nothing to show at
+  // all, not even a "Total Amount" line reading NPR 0.
+  const totalIsHidden = services.length > 0 && !totalIsRange && pricedServices.every((p) => p.amount == null);
 
   const handleNewBooking = () => {
     if (onBookAnother) {
@@ -148,7 +159,7 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
                 <div>
                   <span className="font-body font-body-medium text-sm text-text-secondary">Total Amount</span>
                   <p className="font-heading font-heading-semibold text-lg text-primary">
-                    {formatNPR(total)}
+                    {totalLabel}
                   </p>
                 </div>
               </div>

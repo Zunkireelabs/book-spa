@@ -4,7 +4,7 @@ import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerForm from '../../../customer-booking-flow/components/CustomerForm';
-import { formatNPR, customerFacingServicePrice } from '../../../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../../../hooks/useCustomerServicePricing';
 
 const GUEST_GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
@@ -29,8 +29,6 @@ export const mapBookingError = (error) => {
     ? error.message
     : 'Something went wrong while confirming your booking. Please try again.';
 };
-
-const priceOf = customerFacingServicePrice;
 
 // Mirrors BookingView/index.jsx's isCustomerInfoValid, plus a required-phone check:
 // createBooking() hard-rejects a missing phone ("Phone number is required", with no
@@ -69,7 +67,13 @@ export const isGuestContactValid = (person) => {
 };
 
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestFieldChange, onSubmit, submitting, submitError }) => {
-  const total = people.reduce((sum, p) => sum + (priceOf(p.service) ?? 0), 0);
+  const pricingItems = people.map((p) => ({
+    key: p.id,
+    service: p.service,
+    therapistId: p.professional?.mode === 'specific' ? (p.professional.therapist?.id || null) : null,
+  }));
+  const { perItem, totalLabel } = useResolvedServicePricing(pricingItems);
+  const labelFor = (personId) => perItem.find((p) => p.key === personId)?.label ?? null;
 
   // Collapsed by default — a guest already carrying info (e.g. navigated back to
   // this step) starts expanded so their filled-in fields stay visible, not hidden
@@ -109,9 +113,9 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
                   </p>
                   <p className="text-xs text-[var(--zn-muted-foreground)] truncate">{person.service?.name}</p>
                 </div>
-                {priceOf(person.service) != null && (
+                {labelFor(person.id) != null && (
                   <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
-                    {formatNPR(priceOf(person.service))}
+                    {labelFor(person.id)}
                   </span>
                 )}
               </>
@@ -119,9 +123,9 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
               <>
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-medium text-[var(--zn-muted-foreground)]">{person.label}</p>
-                  {priceOf(person.service) != null && (
+                  {labelFor(person.id) != null && (
                     <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
-                      {formatNPR(priceOf(person.service))}
+                      {labelFor(person.id)}
                     </span>
                   )}
                 </div>
@@ -214,7 +218,7 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
 
         <div className="pt-3 border-t border-[var(--zn-border)] flex items-center justify-between">
           <span className="font-medium text-sm text-[var(--zn-foreground)]">Total</span>
-          <span className="font-semibold text-base text-[var(--zn-foreground)] font-mono">{formatNPR(total)}</span>
+          <span className="font-semibold text-base text-[var(--zn-foreground)] font-mono">{totalLabel}</span>
         </div>
       </div>
 
@@ -231,7 +235,7 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
         disabled={submitting || !isLeadContactValid(leadContact) || people.some((p) => !p.isLead && !isGuestContactValid(p))}
         className="w-full justify-center"
       >
-        {submitting ? 'Booking…' : `Confirm group booking — ${formatNPR(total)}`}
+        {submitting ? 'Booking…' : `Confirm group booking — ${totalLabel}`}
       </Button>
     </div>
   );

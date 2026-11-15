@@ -6,7 +6,7 @@ import Icon from '../../components/AppIcon';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { fetchBranchesByOrgId, fetchBookableServicesByOrgSlug, fetchBookableTherapists } from '../../services/api';
-import { customerFacingServicePrice } from '../../services/bookingTransformers';
+import { useResolvedServicePricing } from '../../hooks/useCustomerServicePricing';
 import { splitE164 } from '../../utils/phone';
 import { scrollToTopInstant } from '../../utils/scroll';
 import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
@@ -186,6 +186,11 @@ const ProviderProfileFlow = () => {
     [selectedServices],
   );
 
+  const cartTherapistId = selectedProfessional?.mode === 'specific' ? (selectedProfessional.therapist?.id || null) : null;
+  const { totalLabel: cartTotalLabel } = useResolvedServicePricing(
+    useMemo(() => selectedServices.map((s) => ({ key: s.id, service: s, therapistId: cartTherapistId })), [selectedServices, cartTherapistId])
+  );
+
   const handleBookAnother = useCallback(() => {
     setBookingData(null);
     setSelectedServices([]);
@@ -339,6 +344,7 @@ const ProviderProfileFlow = () => {
       ...confirmationData,
       selectedBranch,
       selectedServices,
+      selectedProfessional,
       selectedDateTime,
       customerInfo,
       bookingDate: new Date().toISOString(),
@@ -360,6 +366,9 @@ const ProviderProfileFlow = () => {
       groupBookings: groupedPeople.map((p, i) => ({ label: p.label, bookingNumber: bookings[i]?.booking_number })),
       selectedBranch,
       selectedServices: groupedPeople.map((p) => p.service).filter(Boolean),
+      // Parallel to selectedServices (same filter, same order) — each person's own
+      // therapist, since a group booking can have a different one per service.
+      selectedProfessionals: groupedPeople.filter((p) => p.service).map((p) => p.professional),
       selectedDateTime: groupDateTime,
       customerInfo: leadContact,
       bookingDate: new Date().toISOString(),
@@ -553,7 +562,7 @@ const ProviderProfileFlow = () => {
       </div>
 
       <MobileBookingBar
-        total={selectedServices.reduce((sum, s) => sum + (customerFacingServicePrice(s) ?? 0), 0)}
+        totalLabel={cartTotalLabel}
         count={selectedServices.length}
         totalMinutes={totalMinutes}
         onContinue={continueSoloBooking}
