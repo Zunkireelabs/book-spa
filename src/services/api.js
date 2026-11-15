@@ -18114,7 +18114,7 @@ export async function removeFromWaitlist(id) {
 const BILLING_SETTING_KEYS = [
   'billing_legal_name', 'billing_pan', 'billing_address', 'billing_phone',
   'billing_email', 'billing_tax_mode', 'billing_vat_rate',
-  'billing_invoice_prefix', 'billing_footer_text',
+  'billing_invoice_prefix', 'billing_footer_text', 'billing_enabled',
 ];
 
 // Every billing_* key read off organizations.settings in one call — the
@@ -18135,6 +18135,7 @@ export async function fetchBillingSettings() {
     return {
       data: {
         orgName: org.name,
+        billingEnabled: settings.billing_enabled === true,
         legalName: settings.billing_legal_name || '',
         pan: settings.billing_pan || '',
         address: settings.billing_address || '',

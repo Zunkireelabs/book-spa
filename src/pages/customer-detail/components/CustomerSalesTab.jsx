@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import InvoicePrintModal from '../../../components/ui/InvoicePrintModal';
+import { useOrg } from '../../../contexts/OrgContext';
 
 function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
@@ -12,6 +13,8 @@ function formatNPR(amount) {
 const CustomerSalesTab = ({ data }) => {
   const navigate = useNavigate();
   const { orgSlug } = useParams();
+  const { orgSettings } = useOrg();
+  const billingEnabled = orgSettings?.billing_enabled === true;
   const [invoiceBookingId, setInvoiceBookingId] = useState(null);
   const sales = data.history.filter(b => b.paymentStatus === 'paid');
 
@@ -51,7 +54,7 @@ const CustomerSalesTab = ({ data }) => {
                   <span className="text-[10px] font-caption text-text-tertiary">−{formatNPR(b.discountAmount)} discount</span>
                 )}
               </div>
-              {b.bookingId && (
+              {billingEnabled && b.bookingId && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setInvoiceBookingId(b.bookingId); }}

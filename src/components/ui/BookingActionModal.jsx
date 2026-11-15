@@ -2882,14 +2882,16 @@ const BookingActionModal = ({
                         <Icon name="CheckCircle" size={14} className="text-success flex-shrink-0" />
                         <span className="font-body font-body-normal text-xs sm:text-sm text-success">Payment has been recorded.</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowInvoiceModal(true)}
-                        className="flex items-center gap-1 text-xs font-body-medium text-primary hover:underline flex-shrink-0"
-                      >
-                        <Icon name="Receipt" size={14} />
-                        Print invoice
-                      </button>
+                      {orgSettings?.billing_enabled === true && (
+                        <button
+                          type="button"
+                          onClick={() => setShowInvoiceModal(true)}
+                          className="flex items-center gap-1 text-xs font-body-medium text-primary hover:underline flex-shrink-0"
+                        >
+                          <Icon name="Receipt" size={14} />
+                          Print invoice
+                        </button>
+                      )}
                     </div>
                     {(booking.payments || []).map((p) => (
                       p.id && showAdminCorrection ? (

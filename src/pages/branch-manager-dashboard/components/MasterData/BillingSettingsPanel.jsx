@@ -19,7 +19,7 @@ const TAX_MODE_OPTIONS = [
 const PAN_PATTERN = /^\d{9}$/;
 
 const EMPTY = {
-  orgName: '', legalName: '', pan: '', address: '', phone: '', email: '',
+  orgName: '', billingEnabled: false, legalName: '', pan: '', address: '', phone: '', email: '',
   taxMode: '', vatRate: 13, invoicePrefix: '', footerText: '',
 };
 
@@ -57,6 +57,7 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
     setSavedMsg(null);
 
     const fields = [
+      ['billing_enabled', !!form.billingEnabled, 'billingEnabled'],
       ['billing_legal_name', form.legalName.trim(), 'legalName'],
       ['billing_pan', form.pan.trim(), 'pan'],
       ['billing_address', form.address.trim(), 'address'],
@@ -124,6 +125,36 @@ const BillingSettingsPanel = ({ readOnly = false }) => {
           <Icon name="CheckCircle" size={16} />
           <span>{savedMsg}</span>
         </div>
+      )}
+
+      {/* Master switch — off by default. Everything below exists to set this
+          up correctly; it stays reachable even while off so there's a way to
+          turn it on. */}
+      <label className="flex items-center justify-between p-4 border border-border rounded-spa-lg cursor-pointer hover:bg-background">
+        <div className="pr-4">
+          <span className="font-body font-body-medium text-sm text-text-primary">Enable billing (tax invoices)</span>
+          <p className="font-caption text-xs text-text-secondary">
+            Off by default. Turn this on once the company details and tax mode below are correct — staff can't print an invoice until then.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => setForm((f) => ({ ...f, billingEnabled: !f.billingEnabled }))}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full spa-transition-fast ${
+            form.billingEnabled ? 'bg-success' : 'bg-border'
+          }`}
+        >
+          <span className={`inline-block h-4 w-4 rounded-full bg-white spa-transition-fast transform ${
+            form.billingEnabled ? 'translate-x-6' : 'translate-x-1'
+          }`} />
+        </button>
+      </label>
+
+      {!form.billingEnabled && (
+        <p className="font-caption text-xs text-text-tertiary -mt-2">
+          The fields below are what "Enable billing" checks before it can be turned on — set them up, then flip the switch above.
+        </p>
       )}
 
       {/* Live preview — the one thing that makes a typo obvious on screen
