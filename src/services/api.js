@@ -16891,13 +16891,17 @@ export async function fetchStaffAccess(branchId) {
   }
 }
 
-// Links a therapist to an EXISTING login account and sets its access settings.
-// Cannot create a brand-new auth account from the client: public.users.id is a
-// FK into auth.users, and creating that row needs the service-role key, which
-// never belongs in client code (see CLAUDE.md). A new hire with no account yet
-// must be invited via the Supabase dashboard (or a future admin-side Edge
-// Function, same pattern as pin-login) BEFORE this is called — this function
-// only wires an already-existing account to a therapist.
+// 4-digit plaintext PIN, same format as the column already holds for every
+// existing account (migration-018). Shared by provisionStaffLogin (new
+// account), grantStaffAccess (existing account) and updateStaffAccess (edit).
+function validatePin(pin) {
+  if (pin === undefined || pin === null || pin === '') return null;
+  if (!/^\d{4}$/.test(pin)) {
+    return { code: 'VALIDATION', message: 'PIN must be exactly 4 digits.' };
+  }
+  return null;
+}
+
 // Create a brand-new staff login and its public.users row.
 //
 // public.users.id is a hard FK into auth.users, and an auth.users row can only
@@ -16906,23 +16910,31 @@ export async function fetchStaffAccess(branchId) {
 // returns a session for the account it creates, and on the shared client that
 // would silently swap the admin's session for the staff member's mid-task.
 //
-// The generated password is deliberately never shown to anyone. Staff sign in
-// with email + 4-digit PIN through the pin-login Edge Function, or set their
-// own password via a reset link. Handing a shared password around would be
-// worse than not having one.
+// The admin types the password themselves and hands it to the staff member in
+// person — a spa admin does this face to face, so there's no email round trip
+// and no reset link nobody can get to. Left blank, a password nobody needs is
+// generated instead; that account then relies on its PIN (or a future reset
+// flow) to ever sign in. Never surfaced in a return value or a log line — the
+// admin typed it, they already know it.
 //
 // Requires public signup to be enabled on the Supabase project (it is, with
 // mailer_autoconfirm on, so the account works immediately). If signup is ever
 // disabled for hardening, this is the one place that breaks and the work moves
 // to a service-role Edge Function mirroring pin-login.
-async function provisionStaffLogin({ email, fullName, orgId, branchId, role, loginAccess, calendarVisibility }) {
-  // A password nobody needs to know or type. crypto.randomUUID is available in
-  // every browser this app supports and is CSPRNG-backed.
-  const throwawayPassword = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+async function provisionStaffLogin({ email, fullName, orgId, branchId, role, loginAccess, calendarVisibility, password, pin }) {
+  const pinError = validatePin(pin);
+  if (pinError) return { data: null, error: pinError };
+
+  if (password && password.length > 0 && password.length < 6) {
+    return { data: null, error: { code: 'VALIDATION', message: 'Password must be at least 6 characters.' } };
+  }
+  // crypto.randomUUID is available in every browser this app supports and is
+  // CSPRNG-backed — good enough for a password nobody is meant to use.
+  const finalPassword = (password && password.length >= 6) ? password : `${crypto.randomUUID()}${crypto.randomUUID()}`;
 
   const { data: signUpData, error: signUpError } = await supabaseProvision.auth.signUp({
     email,
-    password: throwawayPassword,
+    password: finalPassword,
   });
 
   if (signUpError) {
@@ -16963,6 +16975,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
       is_active: true,
       login_access: loginAccess,
       calendar_visibility: calendarVisibility || 'all',
+      pin: pin || null,
     })
     .select('id, org_id')
     .single();
@@ -16985,7 +16998,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
   return { data: created, error: null };
 }
 
-export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices }) {
+export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices, password, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -17002,6 +17015,8 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
     if (!email || !email.trim()) {
       return { data: null, error: { code: 'VALIDATION', message: 'Email is required to find the account to link.' } };
     }
+    const pinError = validatePin(pin);
+    if (pinError) return { data: null, error: pinError };
 
     const { data: therapist, error: therapistErr } = await supabase
       .from('therapists')
@@ -17039,10 +17054,19 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
         role,
         loginAccess,
         calendarVisibility,
+        password,
+        pin,
       });
       if (provisioned.error) return { data: null, error: provisioned.error };
       account = provisioned.data;
     }
+    // `password` only ever applies to the branch above — changing an EXISTING
+    // account's password from here would mean changing someone else's auth
+    // credential from the admin's own session, which Supabase's client API
+    // doesn't allow without the service-role key. Silently dropped rather than
+    // pretended to work; the UI doesn't even collect it once an email matches
+    // an existing account, so this is a belt-and-suspenders no-op, not a gap
+    // the caller can hit by surprise.
 
     // therapists_user_id_uniq (partial unique on user_id) rejects a second
     // therapist pointing at the same account — catch and return a clean error
@@ -17065,15 +17089,20 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
     // UI only offers the toggles for the staff role. Ignore any attempt to
     // set them on a higher role rather than trust the caller.
     const restrictable = role === 'staff';
+    const settingsUpdate = {
+      role,
+      login_access: loginAccess,
+      calendar_visibility: calendarVisibility || 'all',
+      can_view_customer_details: restrictable ? canViewCustomerDetails !== false : true,
+      can_view_prices: restrictable ? canViewPrices !== false : true,
+    };
+    // Only touch the PIN when one was actually given — an empty value here
+    // must mean "leave it alone", never "clear it", especially on the
+    // existing-account path where provisionStaffLogin never ran.
+    if (pin) settingsUpdate.pin = pin;
     const { error: settingsErr } = await supabase
       .from('users')
-      .update({
-        role,
-        login_access: loginAccess,
-        calendar_visibility: calendarVisibility || 'all',
-        can_view_customer_details: restrictable ? canViewCustomerDetails !== false : true,
-        can_view_prices: restrictable ? canViewPrices !== false : true,
-      })
+      .update(settingsUpdate)
       .eq('id', account.id);
     if (settingsErr) {
       // Roll back the link rather than leave a therapist pointing at an
@@ -17181,13 +17210,15 @@ export async function unlinkStaffAccess({ therapistId }) {
 // Detail screen's Save: role / login_access / calendar_visibility / branch
 // grants for an already-linked (or account-only) user. Branch grants, when
 // provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
-export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices }) {
+export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices, pin }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
     if (!['manager', 'admin'].includes(profile.role)) {
       return { data: null, error: { code: 'UNAUTHORIZED', message: 'Only managers and admins can update staff access.' } };
     }
+    const pinError = validatePin(pin);
+    if (pinError) return { data: null, error: pinError };
 
     const { data: target, error: targetErr } = await supabase
       .from('users')
@@ -17229,6 +17260,10 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
         updatePayload.can_view_prices = restrictable ? canViewPrices !== false : true;
       }
     }
+
+    // A blank PIN here means "leave it alone", never "clear it" — same as
+    // grantStaffAccess.
+    if (pin) updatePayload.pin = pin;
 
     if (Object.keys(updatePayload).length > 0) {
       const { error: updateErr } = await supabase

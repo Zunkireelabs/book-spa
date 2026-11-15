@@ -54,8 +54,12 @@ function emptyFormFor(therapist, user) {
     calendarVisibility: user?.calendar_visibility || 'all',
     canViewCustomerDetails: user?.can_view_customer_details !== false,
     canViewPrices: user?.can_view_prices !== false,
+    password: '',
+    pin: '',
   };
 }
+
+const PIN_PATTERN = /^\d{0,4}$/;
 
 const StaffAccessPanel = ({ branchId, readOnly = false }) => {
   const { profile } = useAuth();
@@ -145,6 +149,18 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
     return { type: 'ambiguous', therapists: matches };
   }, [data.noLogin]);
 
+  // Does the typed email already belong to a login account? Decides whether
+  // Save provisions a brand-new account (password collected) or links/edits
+  // an existing one (password field hidden — changing someone else's auth
+  // password from here isn't possible without the service-role key).
+  const matchedAccount = useMemo(() => {
+    if (activeTherapist?.user_id) return activeTherapist.user;
+    const email = form?.email?.trim().toLowerCase();
+    if (!email) return null;
+    return data.accountOnly.find((u) => u.email.toLowerCase() === email) || null;
+  }, [activeTherapist, form?.email, data.accountOnly]);
+  const isNewAccount = !matchedAccount;
+
   // ---------- detail screen ----------
   const openDetail = (therapist) => {
     setActiveTherapist(therapist);
@@ -170,6 +186,12 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
 
   const handleSave = async () => {
     if (!activeTherapist || !form) return;
+
+    if (form.pin && !/^\d{4}$/.test(form.pin)) {
+      setSaveError('PIN must be exactly 4 digits.');
+      return;
+    }
+
     setSaving(true);
     setSaveError(null);
 
@@ -185,6 +207,7 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
         branchIds,
         canViewCustomerDetails: form.canViewCustomerDetails,
         canViewPrices: form.canViewPrices,
+        pin: form.pin || undefined,
       });
     } else if (form.loginAccess === 'none') {
       setSaveError('Pick a login access level before saving a new grant.');
@@ -205,6 +228,8 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
         calendarVisibility: form.calendarVisibility,
         canViewCustomerDetails: form.canViewCustomerDetails,
         canViewPrices: form.canViewPrices,
+        password: isNewAccount ? (form.password || undefined) : undefined,
+        pin: form.pin || undefined,
       });
     }
 
@@ -348,12 +373,47 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
                 className="max-w-sm"
               />
               <p className="font-body text-xs text-text-tertiary italic mt-1">
-                If no login exists for this email yet, one is created automatically.
+                {isNewAccount
+                  ? 'No login exists for this email yet — a new one is created.'
+                  : `This links to the existing login for ${matchedAccount.full_name}.`}
               </p>
             </div>
           )}
           {form.loginAccess !== 'none' && activeTherapist.user_id && (
             <div className="pt-1 font-body text-sm text-text-secondary">{form.email}</div>
+          )}
+          {form.loginAccess !== 'none' && isNewAccount && (
+            <div className="pt-2">
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1">Password</label>
+              <Input
+                type="password"
+                value={form.password}
+                disabled={readOnly}
+                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                placeholder="Leave blank to generate one automatically"
+                className="max-w-sm"
+              />
+              <p className="font-body text-xs text-text-tertiary italic mt-1">
+                Hand this to {activeTherapist.name} in person. Not shown again after saving.
+              </p>
+            </div>
+          )}
+          {form.loginAccess !== 'none' && (
+            <div className="pt-2">
+              <label className="block font-body font-body-medium text-sm text-text-primary mb-1">
+                {isNewAccount ? 'PIN' : 'Set a new PIN'}
+              </label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={form.pin}
+                disabled={readOnly}
+                onChange={(e) => { if (PIN_PATTERN.test(e.target.value)) setForm((f) => ({ ...f, pin: e.target.value })); }}
+                placeholder={isNewAccount ? '4 digits' : 'Leave blank to keep the current PIN'}
+                maxLength={4}
+                className="max-w-[120px]"
+              />
+            </div>
           )}
         </div>
 
