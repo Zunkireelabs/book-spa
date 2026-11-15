@@ -5805,6 +5805,15 @@ export async function createBooking({
       customerName = realCustomer.full_name;
       customerPhone = realCustomer.phone;
       customerEmail = realCustomer.email;
+      // Relaxing the phone-required gate above for this path is correct — a
+      // restricted account has no phone to retype — but downstream code
+      // (outstanding-balance lookups, reports) groups by phone, and a
+      // customer record can legitimately have neither on file. Fail closed
+      // here rather than silently writing a booking with no way to look the
+      // customer back up by contact info.
+      if (!customerPhone && !customerEmail) {
+        return { data: null, error: { code: 'NO_CONTACT_INFO', message: 'This customer has no phone or email on file — add one to their profile before booking.' } };
+      }
     } else {
       customerName = toTitleCase(customerName);
     }
