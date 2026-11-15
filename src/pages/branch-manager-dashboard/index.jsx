@@ -36,6 +36,7 @@ import OnlineBookingCapacityPanel from './components/MasterData/OnlineBookingCap
 import AdvanceBookingWindowPanel from './components/MasterData/AdvanceBookingWindowPanel';
 import ProviderProfilePanel from './components/MasterData/ProviderProfilePanel';
 import LocationsPanel from './components/MasterData/LocationsPanel';
+import BillingSettingsPanel from './components/MasterData/BillingSettingsPanel';
 import StaffAccessPanel from './components/MasterData/StaffAccessPanel';
 import PriceTiersPanel from './components/MasterData/PriceTiersPanel';
 import AuditPanel from './components/Governance/AuditPanel';
@@ -749,6 +750,7 @@ const BranchManagerDashboard = () => {
               {viewMode === 'roster' && !isOverall && ['manager', 'admin'].includes(profile?.role) && <RosterPanel branchId={branchId} />}
               {viewMode === 'closed-dates' && !isOverall && profile?.role === 'admin' && <ClosedDatesPanel branchId={branchId} />}
               {viewMode === 'locations' && profile?.role === 'admin' && <LocationsPanel orgId={orgId} />}
+              {viewMode === 'billing' && profile?.role === 'admin' && <BillingSettingsPanel />}
               {viewMode === 'audit' && <AuditPanel branchId={branchId} initialRecordId={searchParams.get('recordId') || ''} />}
               {viewMode === 'new-booking' && !isOverall && <StaffBookingForm onBookingCreated={loadData} />}
               {viewMode === 'check-booking' && !isOverall && <CheckBookingPanel branchId={branchId} />}

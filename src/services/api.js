@@ -18106,3 +18106,128 @@ export async function removeFromWaitlist(id) {
     return { data: null, error };
   }
 }
+
+// ============================================================
+// Billing / tax invoices (migration-328/329).
+// ============================================================
+
+const BILLING_SETTING_KEYS = [
+  'billing_legal_name', 'billing_pan', 'billing_address', 'billing_phone',
+  'billing_email', 'billing_tax_mode', 'billing_vat_rate',
+  'billing_invoice_prefix', 'billing_footer_text',
+];
+
+// Every billing_* key read off organizations.settings in one call — the
+// Billing settings panel and the "can I issue?" gate both need the full set.
+export async function fetchBillingSettings() {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data: org, error } = await supabase
+      .from('organizations')
+      .select('name, settings')
+      .eq('id', profile.org_id)
+      .single();
+    if (error) throw error;
+
+    const settings = org.settings || {};
+    return {
+      data: {
+        orgName: org.name,
+        legalName: settings.billing_legal_name || '',
+        pan: settings.billing_pan || '',
+        address: settings.billing_address || '',
+        phone: settings.billing_phone || '',
+        email: settings.billing_email || '',
+        taxMode: settings.billing_tax_mode || '',
+        vatRate: settings.billing_vat_rate != null ? Number(settings.billing_vat_rate) : 13,
+        invoicePrefix: settings.billing_invoice_prefix || '',
+        footerText: settings.billing_footer_text || '',
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('[API] fetchBillingSettings error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Thin wrapper over update_org_profile_settings (migration-329 widened its
+// allow-list) — same RPC every other org setting in this app already uses.
+// Admin-only is enforced server-side inside that function.
+export async function updateBillingSetting(key, value) {
+  if (!BILLING_SETTING_KEYS.includes(key)) {
+    return { data: null, error: { code: 'VALIDATION', message: `Unknown billing setting: ${key}` } };
+  }
+  const { data, error } = await supabase.rpc('update_org_profile_settings', { p_key: key, p_value: value });
+  if (error) {
+    return { data: null, error: { code: error.code || 'UPDATE_FAILED', message: error.message || 'Failed to update billing setting.' } };
+  }
+  return { data, error: null };
+}
+
+// Issue (or re-fetch, if already issued) the tax invoice for a paid booking.
+// All validation, numbering, and the VAT math live in issue_invoice()
+// (SECURITY DEFINER, migration-328) — this is a thin wrapper so the same
+// error messages the DB function raises reach the UI unmodified.
+export async function issueInvoice(bookingId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!bookingId) return { data: null, error: { code: 'VALIDATION', message: 'Booking id is required.' } };
+
+    const { data, error } = await supabase.rpc('issue_invoice', { p_booking_id: bookingId });
+    if (error) {
+      return { data: null, error: { code: error.code || 'ISSUE_FAILED', message: error.message || 'Could not issue the invoice.' } };
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] issueInvoice error:', error.message);
+    return { data: null, error };
+  }
+}
+
+export async function fetchInvoiceByBookingId(bookingId) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('booking_id', bookingId)
+      .maybeSingle();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] fetchInvoiceByBookingId error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Logs that an invoice was actually printed, and tells the caller whether to
+// render it as ORIGINAL or COPY. The ordinal is allocated atomically inside
+// record_invoice_print() (migration-331) — a count-then-insert from the
+// client raced: two concurrent prints (e.g. a double-click) could both read
+// count=0 and both print ORIGINAL.
+export async function recordInvoicePrint({ invoiceId, printType }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!['a4', 'thermal'].includes(printType)) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Invalid print type.' } };
+    }
+
+    const { data, error } = await supabase.rpc('record_invoice_print', {
+      p_invoice_id: invoiceId,
+      p_print_type: printType,
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return { data: { copyLabel: row.copy_label }, error: null };
+  } catch (error) {
+    console.error('[API] recordInvoicePrint error:', error.message);
+    return { data: null, error };
+  }
+}

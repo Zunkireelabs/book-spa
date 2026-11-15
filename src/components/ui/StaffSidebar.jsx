@@ -513,6 +513,13 @@ const StaffSidebar = ({ userRole: propRole, userName: propName, branchName: prop
           roles: ['admin'],
         },
         {
+          id: 'billing',
+          label: 'Billing',
+          icon: 'Receipt',
+          path: `${basePath}?view=billing`,
+          roles: ['admin'],
+        },
+        {
           id: 'audit',
           label: 'Audit Log',
           icon: 'History',
