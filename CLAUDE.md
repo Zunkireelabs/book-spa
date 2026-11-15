@@ -453,6 +453,10 @@ plan or track there. If the `plane` tools are missing, run `/mcp` → plane → 
   `Backlog → Todo → In Progress → In Review (PR open) → On Stage (merged to stage) → Done (live on main)`
 - Done means live on `main`, not merged to `stage`.
 - Anything you can't verify gets the `needs-verification` label — never state it as fact.
+- **Which path:** one quick question or one write → Plane MCP. A known, repeated job (tracker sync) →
+  `~/Projects/zunkireelabs-org/tools/plane/plane-tracker.py` (one shell call, ~90% fewer tokens). A big
+  job needing judgement → a separate fresh session, summary back. Ids come from `plane.md`, never re-list.
+  One-time machine setup: `INSTALL.md`.
 - Full rules: `.claude/skills/project-pm/SKILL.md` ("Plane workflow").
 
 **HARD RULE — every developer, every session (human or Claude), no exceptions:**
