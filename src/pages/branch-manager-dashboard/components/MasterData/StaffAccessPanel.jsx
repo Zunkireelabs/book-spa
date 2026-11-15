@@ -588,7 +588,7 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
                   )}
                 </div>
                 <div className="text-right">
-                  {!t.user && t.is_service_staff !== false && !readOnly && (
+                  {!t.user && !readOnly && (
                     <Button variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); openDetail(t); }}>
                       Give access
                     </Button>

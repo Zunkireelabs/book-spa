@@ -2,9 +2,9 @@
 // Regenerate with: node scripts/gen-icon-registry.mjs
 //
 // Explicit allowlist of the lucide-react icons this app uses, so the bundler can
-// tree-shake the other 5,128 exports away. See the script header for why.
+// tree-shake the other 5,123 exports away. See the script header for why.
 //
-// 165 icons of 5,293 lucide exports.
+// 170 icons of 5,293 lucide exports.
 import {
   Activity,
   AlertCircle,
@@ -89,11 +89,13 @@ import {
   IndianRupee,
   Info,
   Instagram,
+  KeyRound,
   Layers,
   LayoutDashboard,
   LayoutGrid,
   Link,
   List,
+  ListPlus,
   Loader,
   Loader2,
   Lock,
@@ -113,6 +115,7 @@ import {
   Move,
   Package,
   PackageCheck,
+  PanelRightClose,
   Pencil,
   Percent,
   Phone,
@@ -155,6 +158,8 @@ import {
   TrendingUp,
   Type,
   Undo2,
+  Unlink,
+  Unlock,
   Upload,
   User,
   UserCheck,
@@ -257,11 +262,13 @@ const iconRegistry = {
   IndianRupee,
   Info,
   Instagram,
+  KeyRound,
   Layers,
   LayoutDashboard,
   LayoutGrid,
   Link,
   List,
+  ListPlus,
   Loader,
   Loader2,
   Lock,
@@ -281,6 +288,7 @@ const iconRegistry = {
   Move,
   Package,
   PackageCheck,
+  PanelRightClose,
   Pencil,
   Percent,
   Phone,
@@ -323,6 +331,8 @@ const iconRegistry = {
   TrendingUp,
   Type,
   Undo2,
+  Unlink,
+  Unlock,
   Upload,
   User,
   UserCheck,

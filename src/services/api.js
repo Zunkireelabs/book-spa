@@ -5773,13 +5773,41 @@ export async function createBooking({
   referralSource,
   referralSourceDetail,
   customerAccountId,
+  // Set only when the caller already knows the real customer record — e.g.
+  // converting a waitlist entry (see migration-327 / WaitlistPanel). Bypasses
+  // the phone/name lookup-and-rename below entirely: customerName/customerPhone
+  // might be masked (a restricted staff account's canViewCustomerDetails=false
+  // view of the entry), and masked text must never re-enter a write — see the
+  // incident this fixed. Never set this from a value the caller typed; only
+  // from a column that's already a real customers.id.
+  knownCustomerId,
 }) {
   try {
-    if (!customerPhone || !customerPhone.trim()) {
+    if ((!customerPhone || !customerPhone.trim()) && !knownCustomerId) {
       return { data: null, error: { message: 'Phone number is required' } };
     }
 
-    customerName = toTitleCase(customerName);
+    // knownCustomerId: overwrite whatever was passed as customerName/Phone/Email
+    // with the real customer record, before any of those values reach a write.
+    // The caller's own copies may be masked (canViewCustomerDetails=false), and
+    // masked text must never land in bookings.customer_name/_phone — that was
+    // exactly the Yukta Dhungana-style corruption this closes, made automatic
+    // instead of a one-off typo.
+    if (knownCustomerId) {
+      const { data: realCustomer, error: custLookupErr } = await supabase
+        .from('customers')
+        .select('full_name, phone, email')
+        .eq('id', knownCustomerId)
+        .single();
+      if (custLookupErr) {
+        return { data: null, error: { code: 'CUSTOMER_NOT_FOUND', message: 'Could not find the linked customer record.' } };
+      }
+      customerName = realCustomer.full_name;
+      customerPhone = realCustomer.phone;
+      customerEmail = realCustomer.email;
+    } else {
+      customerName = toTitleCase(customerName);
+    }
     const resolvedBranchId = resolveBranchId(branchId);
 
     // 1. Fetch service for duration + price, and the branch's industry config.
@@ -5963,10 +5991,15 @@ export async function createBooking({
     // 6. Look up or create customer record for CRM linking.
     // Identity is org-wide (org_id + normalized phone), so a returning customer first
     // seen at another branch links to their single profile instead of duplicating.
-    let customerId = null;
+    let customerId = knownCustomerId || null;
     let isNewCustomer = false;
     const orgId = branchData?.org_id || null;
-    try {
+    // knownCustomerId means the caller already has the real customer row —
+    // never re-resolve by name/phone in that case (those fields may be masked
+    // for the acting account, and the lookup below unconditionally overwrites
+    // full_name/phone/email on a match, which is exactly how masked text would
+    // corrupt a real customer record).
+    if (!knownCustomerId) try {
       // Canonical E.164 ("+<countrycode><national>") so the same number always
       // resolves to the same customer regardless of how it was typed, and two
       // different countries' numbers never collide. See src/utils/phone.js.
@@ -17893,6 +17926,174 @@ export async function fetchServicePriceForTherapist(serviceId, therapistId) {
     return { data: data != null ? Number(data) : null, error: null };
   } catch (error) {
     console.error('[API] fetchServicePriceForTherapist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// ============================================================
+// Waitlist (migration-327): customers waiting for a slot, modelled on
+// Timely's. Deliberately not a booking with a special status — see the
+// migration's own comment. Booking someone in reuses the normal booking
+// flow entirely (createBooking/createComboBookingItems); this module only
+// tracks the queue itself and flips an entry to 'booked' once that other
+// flow actually succeeds.
+// ============================================================
+
+// Every waiting entry for a branch, oldest-first by default — the point of a
+// queue is that waiting longer gets you served sooner. Holds a customer name
+// and phone, so it goes through the same canViewCustomerDetails masking as
+// bookings (redactRows) rather than inventing a second masking path.
+export async function fetchWaitlist(branchId, { sort = 'oldest' } = {}) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+
+    const resolvedBranchId = resolveBranchId(branchId);
+    const rows = await fetchAllPages((opts) =>
+      supabase
+        .from('waitlist_entries')
+        .select(`
+          id, customer_id, customer_name, customer_phone, service_id,
+          preferred_date, preferred_time, preferred_therapist_id, notes,
+          status, booking_id, created_at,
+          service:services(id, name),
+          therapist:therapists(id, name)
+        `, opts)
+        .eq('branch_id', resolvedBranchId)
+        .eq('status', 'waiting')
+        .order('created_at', { ascending: sort !== 'newest' })
+        .order('id')
+    );
+
+    return { data: redactRows(rows, vis), error: null };
+  } catch (error) {
+    console.error('[API] fetchWaitlist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Everything but who/where is optional — "any time this week" is a real
+// request, and forcing a date or service would make staff invent one.
+export async function addToWaitlist({ branchId, customerId, customerName, customerPhone, serviceId, preferredDate, preferredTime, preferredTherapistId, notes }) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!customerName || !customerName.trim()) {
+      return { data: null, error: { code: 'VALIDATION', message: 'Customer name is required.' } };
+    }
+    // The Overall sentinel has no real branch — resolveBranchId would silently
+    // coerce it to a hardcoded default (see its own warning comment), filing
+    // a durable row under a branch nobody chose. A read inheriting that
+    // (getCalendarBookings does the same) is defensible; a write is not —
+    // require an explicit branch for an entry that will outlive this request.
+    if (isOverallBranch(branchId)) {
+      return { data: null, error: { code: 'BRANCH_REQUIRED', message: 'Select a specific branch before adding to the waitlist.' } };
+    }
+
+    const resolvedBranchId = resolveBranchId(branchId);
+    const { data, error } = await supabase
+      .from('waitlist_entries')
+      .insert({
+        org_id: profile.org_id,
+        branch_id: resolvedBranchId,
+        customer_id: customerId || null,
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone || null,
+        service_id: serviceId || null,
+        preferred_date: preferredDate || null,
+        preferred_time: preferredTime || null,
+        preferred_therapist_id: preferredTherapistId || null,
+        notes: notes || null,
+        created_by: profile.id,
+      })
+      .select('id, customer_id, customer_name, customer_phone, service_id, preferred_date, preferred_time, preferred_therapist_id, notes, status, created_at')
+      .single();
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] addToWaitlist error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Covers both "Edit" (any field) and the convert-to-booking flip
+// (status: 'booked', bookingId) — same narrow update, different fields.
+export async function updateWaitlistEntry({ id, customerId, customerName, customerPhone, serviceId, preferredDate, preferredTime, preferredTherapistId, notes, status, bookingId }) {
+  try {
+    const { error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    if (!id) return { data: null, error: { code: 'VALIDATION', message: 'Entry id is required.' } };
+    // 'removed' only ever goes through removeFromWaitlist, which also sets
+    // removed_at/removed_by — allowing it here would let a caller flip the
+    // status and silently skip those audit fields.
+    if (status === 'removed') {
+      return { data: null, error: { code: 'VALIDATION', message: 'Use removeFromWaitlist to remove an entry.' } };
+    }
+
+    const updatePayload = {};
+    if (customerId !== undefined) updatePayload.customer_id = customerId || null;
+    if (customerName !== undefined) {
+      if (!customerName.trim()) {
+        return { data: null, error: { code: 'VALIDATION', message: 'Customer name is required.' } };
+      }
+      updatePayload.customer_name = customerName.trim();
+    }
+    if (customerPhone !== undefined) updatePayload.customer_phone = customerPhone || null;
+    if (serviceId !== undefined) updatePayload.service_id = serviceId || null;
+    if (preferredDate !== undefined) updatePayload.preferred_date = preferredDate || null;
+    if (preferredTime !== undefined) updatePayload.preferred_time = preferredTime || null;
+    if (preferredTherapistId !== undefined) updatePayload.preferred_therapist_id = preferredTherapistId || null;
+    if (notes !== undefined) updatePayload.notes = notes || null;
+    if (status !== undefined) updatePayload.status = status;
+    if (bookingId !== undefined) updatePayload.booking_id = bookingId || null;
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { data: null, error: { code: 'NO_CHANGES', message: 'No fields to update.' } };
+    }
+
+    const { data, error } = await supabase
+      .from('waitlist_entries')
+      .update(updatePayload)
+      .eq('id', id)
+      .select('id, customer_name, customer_phone, service_id, preferred_date, preferred_time, preferred_therapist_id, notes, status, booking_id')
+      .single();
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Waitlist entry not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] updateWaitlistEntry error:', error.message);
+    return { data: null, error };
+  }
+}
+
+// Never a hard delete — there is deliberately no DELETE policy on this table
+// (migration-327). Removing sets status='removed' so the queue keeps its
+// history of who was waiting and why they left.
+export async function removeFromWaitlist(id) {
+  try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+
+    const { data, error } = await supabase
+      .from('waitlist_entries')
+      .update({ status: 'removed', removed_at: new Date().toISOString(), removed_by: profile.id })
+      .eq('id', id)
+      .select('id, status')
+      .single();
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { data: null, error: { code: 'NOT_FOUND', message: 'Waitlist entry not found.' } };
+      }
+      throw error;
+    }
+    return { data, error: null };
+  } catch (error) {
+    console.error('[API] removeFromWaitlist error:', error.message);
     return { data: null, error };
   }
 }

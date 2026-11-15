@@ -12,6 +12,7 @@ import EmptySlotChoiceMenu from './EmptySlotChoiceMenu';
 import TransferFromCalendarModal from './TransferFromCalendarModal';
 import AddBlockModal from './AddBlockModal';
 import EditBlockModal from './EditBlockModal';
+import WaitlistPanel from './WaitlistPanel';
 import TransferManagementModal from '../../../../components/ui/TransferManagementModal';
 import {
   getCalendarBookings,
@@ -42,6 +43,7 @@ import {
   createComboBookingItems,
   fetchBranchWorkingHours,
   fetchRosterOverrides,
+  updateWaitlistEntry,
 } from '../../../../services/api';
 import { transformBooking, toDbStatus, to12h } from '../../../../services/bookingTransformers';
 import { isAfterCheckout } from '../../../../services/therapistBranchWindow';
@@ -191,6 +193,12 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   // per-component one, see the Therapist(s) block.
   const comboAllDifferentStaff = isComboService && comboComponents.length > 0 && comboComponents.every((c) => !c.defaultSameStaff);
   const [customerName, setCustomerName] = useState('');
+  // Set only when opened from a waitlist entry that already has a linked
+  // customer (slotInfo.defaultCustomerId) — see createBooking's knownCustomerId.
+  // customerName/customerPhone below may be masked display copies for a
+  // restricted account; this is what tells submission to resolve the real
+  // customer by id server-side instead of trusting those fields.
+  const [knownCustomerId, setKnownCustomerId] = useState(null);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCountryCode, setCustomerCountryCode] = useState('+977');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -302,8 +310,9 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
   useEffect(() => {
     setServiceId(slotInfo?.defaultServiceId || '');
     setCustomerName(slotInfo?.defaultCustomerName || '');
-    setCustomerPhone('');
-    setCustomerCountryCode('+977');
+    setCustomerPhone(slotInfo?.defaultCustomerPhone || '');
+    setKnownCustomerId(slotInfo?.defaultCustomerId || null);
+    setCustomerCountryCode(slotInfo?.defaultCustomerCountryCode || '+977');
     setCustomerEmail('');
     setCustomerGender('');
     setSpecialRequests('');
@@ -323,11 +332,15 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
     setComboTherapistOverrides({});
     setComboRoomOverrides({});
     setBookingDate(slotInfo?.day || '');
+    // A real booking always needs a concrete time — unlike the waitlist's
+    // deliberately-optional "any time", there's no blank state to preserve
+    // here. Falls back to 09:00 (matching TimeBoxInput's own default for an
+    // empty value) rather than '', so the boxes and bookingTime never disagree
+    // about whether a time is set.
     const slotTime = slotInfo && Number.isFinite(slotInfo.hour) && Number.isFinite(slotInfo.minute)
       ? `${String(slotInfo.hour).padStart(2, '0')}:${String(slotInfo.minute).padStart(2, '0')}`
-      : '';
+      : '09:00';
     setBookingTime(slotTime);
-    setTimeText(slotTime ? format12h(slotTime) : '');
     setBookingMode('individual');
     setGroupType('couple');
     setSeparateCount(3);
@@ -571,7 +584,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || !customerPhone.replace(/\D/g, ''))) return;
+    if (bookingMode === 'group' ? !groupValid : (!serviceId || !customerName.trim() || (!customerPhone.replace(/\D/g, '') && !knownCustomerId))) return;
     // Synchronous re-entry guard: the `submitting` state disables the button
     // only after a re-render, so a fast double-click can fire two submits and
     // create duplicate bookings. The ref blocks the second call immediately.
@@ -593,6 +606,7 @@ const QuickCreatePanel = ({ slotInfo, services, servicesLoading, therapists, roo
           customerPhone: customerPhone.replace(/\D/g, '')
             ? customerCountryCode + customerPhone.replace(/\D/g, '')
             : null,
+          knownCustomerId,
           customerEmail: customerEmail.trim() || null,
           customerGender: customerGender || null,
           specialRequests: specialRequests.trim() || null,
@@ -1832,6 +1846,12 @@ const OperationalCalendar = ({ branchId }) => {
 
   // Quick-create panel state
   const [quickCreateSlot, setQuickCreateSlot] = useState(null);
+  // Which waitlist entry (if any) the open Quick Create panel is converting —
+  // cleared on cancel, so a closed-without-saving form leaves the queue
+  // untouched (the entry only flips to 'booked' once the booking actually saves).
+  const [bookingWaitlistEntryId, setBookingWaitlistEntryId] = useState(null);
+  const [waitlistCollapsed, setWaitlistCollapsed] = useState(true);
+  const [waitlistRefreshToken, setWaitlistRefreshToken] = useState(0);
   const [servicesCache, setServicesCache] = useState(null);
   const [servicesLoading, setServicesLoading] = useState(false);
 
@@ -2483,6 +2503,39 @@ const OperationalCalendar = ({ branchId }) => {
     }
   }, [servicesCache, servicesLoading, branchId]);
 
+  // "Book this person in" from the waitlist panel — opens the normal Quick
+  // Create form prefilled with what they asked for. Staff still pick the real
+  // slot/date/time and therapist; this only saves them retyping the customer
+  // and service. The entry only flips to 'booked' once the booking actually
+  // saves (handleQuickCreateSubmit) — closing this form leaves the queue
+  // exactly as it was.
+  const handleBookInFromWaitlist = useCallback((entry) => {
+    // A restricted account (can_view_customer_details=false) only ever sees
+    // MASKED name/phone for this entry — "A***** T******", "+**********655".
+    // That text must never be typed into a write. When the entry has a linked
+    // customer_id, createBooking's knownCustomerId resolves the real record
+    // server-side and ignores whatever's in these display fields, so masked
+    // text here is inert. When there's no customer_id (a walk-in waitlist
+    // entry), a restricted account genuinely doesn't hold the data needed to
+    // create the booking — the panel hides "Book in" for that case entirely
+    // (see WaitlistPanel's canViewCustomerDetails prop) rather than this
+    // function inventing values, so this branch is never reached for one.
+    const canSeeContact = profile?.can_view_customer_details !== false;
+    setBookingWaitlistEntryId(entry.id);
+    openQuickCreateForSlot({
+      day: entry.preferred_date || currentDate,
+      hour: entry.preferred_time ? parseInt(entry.preferred_time.slice(0, 2), 10) : undefined,
+      minute: entry.preferred_time ? parseInt(entry.preferred_time.slice(3, 5), 10) : undefined,
+      colType: entry.preferred_therapist_id ? 'therapist' : null,
+      colId: entry.preferred_therapist_id || null,
+      defaultServiceId: entry.service_id,
+      defaultCustomerName: entry.customer_name,
+      defaultCustomerPhone: canSeeContact && entry.customer_phone ? entry.customer_phone.replace(/^\+\d{1,3}/, '') : '',
+      defaultCustomerCountryCode: canSeeContact ? (entry.customer_phone?.match(/^\+\d{1,3}/)?.[0] || '+977') : '+977',
+      defaultCustomerId: entry.customer_id || null,
+    });
+  }, [openQuickCreateForSlot, currentDate, profile]);
+
   const handleEmptySlotClick = useCallback(async (slotInfo) => {
     // Block new bookings/blocks on any slot covered by a manual block (migration-212).
     const manualBlock = findManualBlockForSlot(calendarData?.blockOccurrences, slotInfo.colType, slotInfo.colId, slotInfo.day, slotInfo.hour, slotInfo.minute);
@@ -2644,6 +2697,7 @@ const OperationalCalendar = ({ branchId }) => {
 
   const handleQuickCreateClose = useCallback(() => {
     setQuickCreateSlot(null);
+    setBookingWaitlistEntryId(null);
   }, []);
 
   // Auto-open the Quick Booking panel when the mobile FAB navigates here with
@@ -2724,9 +2778,24 @@ const OperationalCalendar = ({ branchId }) => {
       referringCustomerId: formData.referringCustomerId,
       referringRewardType: formData.referringRewardType,
       referringRewardAmount: formData.referringRewardAmount,
+      knownCustomerId: formData.knownCustomerId || undefined,
     });
     if (result.error) {
       return result.error.message || 'Failed to create booking.';
+    }
+
+    // The booking now exists for real — flip the waitlist entry to 'booked'
+    // regardless of whether a combo-items write below succeeds, since the
+    // booking itself (and the customer's place in the queue) is already
+    // settled. Best-effort: a failure here shouldn't undo an otherwise
+    // successful booking, so it's logged rather than surfaced as an error.
+    if (bookingWaitlistEntryId && result.data?.id) {
+      const waitlistResult = await updateWaitlistEntry({ id: bookingWaitlistEntryId, status: 'booked', bookingId: result.data.id });
+      if (waitlistResult.error) {
+        console.error('[Calendar] failed to flip waitlist entry to booked:', waitlistResult.error.message);
+      }
+      setBookingWaitlistEntryId(null);
+      setWaitlistRefreshToken((v) => v + 1);
     }
 
     if (formData.comboAssignments?.length > 0 && result.data?.id) {
@@ -2754,7 +2823,7 @@ const OperationalCalendar = ({ branchId }) => {
     setQuickCreateSlot(null);
     refreshCalendar();
     return null;
-  }, [branchId, refreshCalendar]);
+  }, [branchId, refreshCalendar, bookingWaitlistEntryId]);
 
   // ── Rebook "pick and place" handlers ───────────────────────
 
@@ -3478,8 +3547,9 @@ const OperationalCalendar = ({ branchId }) => {
             </div>
           </div>
 
-          {/* Calendar grid */}
-          <div className="flex-1 min-h-0 overflow-x-auto md:overflow-hidden">
+          {/* Calendar grid + waitlist panel */}
+          <div className="flex-1 min-h-0 flex overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-x-auto md:overflow-hidden">
               {calendarData ? (
                 viewMode === 'month' ? (
                   <MonthGridView
@@ -3538,6 +3608,18 @@ const OperationalCalendar = ({ branchId }) => {
                   </div>
                 </div>
               )}
+          </div>
+
+          <WaitlistPanel
+            branchId={branchId}
+            services={servicesCache || []}
+            therapists={calendarData?.therapists || []}
+            collapsed={waitlistCollapsed}
+            onToggleCollapse={() => setWaitlistCollapsed((v) => !v)}
+            onBookIn={handleBookInFromWaitlist}
+            refreshToken={waitlistRefreshToken}
+            canViewCustomerDetails={profile?.can_view_customer_details !== false}
+          />
           </div>
         </div>
 
