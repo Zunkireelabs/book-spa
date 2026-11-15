@@ -27,8 +27,8 @@ import {
   assignTherapistTier,
 } from '../../../../services/api';
 
-const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tier.id });
+const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete, readOnly }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tier.id, disabled: readOnly });
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(tier.name);
 
@@ -43,9 +43,11 @@ const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete })
 
   return (
     <div ref={setNodeRef} style={style} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0 bg-surface">
-      <button {...attributes} {...listeners} className="p-1 rounded cursor-grab active:cursor-grabbing text-text-secondary hover:text-text-primary hover:bg-background">
-        <Icon name="GripVertical" size={16} />
-      </button>
+      {!readOnly && (
+        <button {...attributes} {...listeners} className="p-1 rounded cursor-grab active:cursor-grabbing text-text-secondary hover:text-text-primary hover:bg-background">
+          <Icon name="GripVertical" size={16} />
+        </button>
+      )}
       {editing ? (
         <input
           autoFocus
@@ -61,17 +63,21 @@ const SortableTierRow = ({ tier, staffCount, onRename, onOpenAssign, onDelete })
       <button
         onClick={() => onOpenAssign(tier)}
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-body-medium hover:bg-primary/20"
-        title="Assign staff to this tier"
+        title={readOnly ? 'View staff in this tier' : 'Assign staff to this tier'}
       >
         <Icon name="Users" size={13} />
         {staffCount}
       </button>
-      <button onClick={() => setEditing(true)} className="p-1.5 rounded hover:bg-background text-text-secondary hover:text-text-primary" title="Rename">
-        <Icon name="Pencil" size={14} />
-      </button>
-      <button onClick={() => onDelete(tier)} className="p-1.5 rounded hover:bg-error/10 text-text-secondary hover:text-error" title="Delete">
-        <Icon name="Trash2" size={14} />
-      </button>
+      {!readOnly && (
+        <>
+          <button onClick={() => setEditing(true)} className="p-1.5 rounded hover:bg-background text-text-secondary hover:text-text-primary" title="Rename">
+            <Icon name="Pencil" size={14} />
+          </button>
+          <button onClick={() => onDelete(tier)} className="p-1.5 rounded hover:bg-error/10 text-text-secondary hover:text-error" title="Delete">
+            <Icon name="Trash2" size={14} />
+          </button>
+        </>
+      )}
     </div>
   );
 };
@@ -236,6 +242,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
                   onRename={handleRename}
                   onOpenAssign={(t) => { setAssignTier(t); setAssignSearch(''); }}
                   onDelete={openDeleteConfirm}
+                  readOnly={readOnly}
                 />
               ))}
             </SortableContext>
@@ -263,7 +270,7 @@ const PriceTiersPanel = ({ readOnly = false }) => {
                   <input
                     type="checkbox"
                     checked={t.price_tier_id === assignTier.id}
-                    disabled={assigning === t.id}
+                    disabled={readOnly || assigning === t.id}
                     onChange={() => handleToggleAssign(t)}
                   />
                   <div className="flex-1">

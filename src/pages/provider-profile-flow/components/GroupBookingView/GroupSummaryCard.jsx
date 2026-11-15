@@ -1,6 +1,6 @@
 import React from 'react';
 import Button from '../../../../components/ui/Button';
-import { formatNPR } from '../../../../services/bookingTransformers';
+import { formatNPR, customerFacingServicePrice } from '../../../../services/bookingTransformers';
 import { VenueThumb } from '../SummaryCard';
 
 // Group-booking counterpart to SummaryCard — same persistent, sticky right-hand
@@ -10,7 +10,7 @@ import { VenueThumb } from '../SummaryCard';
 // GroupConfirmStep already renders its own equivalent "Your group" breakdown
 // inline as the final review, so this card isn't duplicated there (same split
 // SummaryCard has with BookingView's confirm step via `showContinue`).
-const priceOf = (s) => Number(s?.effective_price_npr ?? s?.price_npr ?? 0);
+const priceOf = customerFacingServicePrice;
 
 const GroupSummaryCard = ({
   orgName,
@@ -23,7 +23,7 @@ const GroupSummaryCard = ({
   stickyTop = '1.5rem',
 }) => {
   const peopleWithServices = people.filter((p) => p.service);
-  const total = peopleWithServices.reduce((sum, p) => sum + priceOf(p.service), 0);
+  const total = peopleWithServices.reduce((sum, p) => sum + (priceOf(p.service) ?? 0), 0);
 
   return (
     <div
@@ -56,9 +56,11 @@ const GroupSummaryCard = ({
                 </p>
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="font-medium text-sm text-[var(--zn-foreground)]">{person.service.name}</p>
-                  <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
-                    {formatNPR(priceOf(person.service))}
-                  </p>
+                  {priceOf(person.service) != null && (
+                    <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
+                      {formatNPR(priceOf(person.service))}
+                    </p>
+                  )}
                 </div>
                 <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5">
                   {person.service.duration_minutes} min{withWhom ? ` with ${withWhom}` : ''}

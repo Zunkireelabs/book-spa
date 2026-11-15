@@ -4,7 +4,7 @@ import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import { createBooking, createBookingGroup, lookupReferrerByPhone, fetchServiceComboComponents, createComboBookingItems } from '../../../services/api';
 import { toE164 } from '../../../utils/phone';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { formatNPR, customerFacingServicePrice } from '../../../services/bookingTransformers';
 
 const BookingConfirmation = ({
   orgSlug,
@@ -205,8 +205,8 @@ const BookingConfirmation = ({
   const servicesToShow = (Array.isArray(additionalServices) && additionalServices.length > 0)
     ? additionalServices
     : (selectedService ? [selectedService] : []);
-  const priceOf = (s) => Number(s?.price ?? s?.effective_price_npr ?? s?.price_npr ?? 0);
-  const totalPrice = servicesToShow.reduce((sum, s) => sum + priceOf(s), 0);
+  const priceOf = customerFacingServicePrice;
+  const totalPrice = servicesToShow.reduce((sum, s) => sum + (priceOf(s) ?? 0), 0);
   const heroService = servicesToShow[0];
 
   return (
@@ -236,7 +236,7 @@ const BookingConfirmation = ({
             {servicesToShow.map((s, i) => (
               <div key={s?.id ?? i} className="flex justify-between text-sm">
                 <span className="text-text-secondary">{s?.name}</span>
-                <span className="font-medium">{formatNPR(priceOf(s))}</span>
+                {priceOf(s) != null && <span className="font-medium">{formatNPR(priceOf(s))}</span>}
               </div>
             ))}
             <div className="flex justify-between text-sm pt-2 border-t border-border">

@@ -4,7 +4,7 @@ import Button from '../../../../components/ui/Button';
 import Input from '../../../../components/ui/Input';
 import CountryCodeSelect from '../../../../components/ui/CountryCodeSelect';
 import CustomerForm from '../../../customer-booking-flow/components/CustomerForm';
-import { formatNPR } from '../../../../services/bookingTransformers';
+import { formatNPR, customerFacingServicePrice } from '../../../../services/bookingTransformers';
 
 const GUEST_GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
@@ -30,7 +30,7 @@ export const mapBookingError = (error) => {
     : 'Something went wrong while confirming your booking. Please try again.';
 };
 
-const priceOf = (service) => Number(service?.effective_price_npr ?? service?.price_npr ?? 0);
+const priceOf = customerFacingServicePrice;
 
 // Mirrors BookingView/index.jsx's isCustomerInfoValid, plus a required-phone check:
 // createBooking() hard-rejects a missing phone ("Phone number is required", with no
@@ -69,7 +69,7 @@ export const isGuestContactValid = (person) => {
 };
 
 const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBranch, selectedDateTime, orgSlug, genderPreference, customerAccountId, onGuestFieldChange, onSubmit, submitting, submitError }) => {
-  const total = people.reduce((sum, p) => sum + priceOf(p.service), 0);
+  const total = people.reduce((sum, p) => sum + (priceOf(p.service) ?? 0), 0);
 
   // Collapsed by default — a guest already carrying info (e.g. navigated back to
   // this step) starts expanded so their filled-in fields stay visible, not hidden
@@ -109,17 +109,21 @@ const GroupConfirmStep = ({ people, leadContact, onLeadContactChange, selectedBr
                   </p>
                   <p className="text-xs text-[var(--zn-muted-foreground)] truncate">{person.service?.name}</p>
                 </div>
-                <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
-                  {formatNPR(priceOf(person.service))}
-                </span>
+                {priceOf(person.service) != null && (
+                  <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
+                    {formatNPR(priceOf(person.service))}
+                  </span>
+                )}
               </>
             ) : (
               <>
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-medium text-[var(--zn-muted-foreground)]">{person.label}</p>
-                  <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
-                    {formatNPR(priceOf(person.service))}
-                  </span>
+                  {priceOf(person.service) != null && (
+                    <span className="text-sm text-[var(--zn-foreground)] shrink-0 font-mono">
+                      {formatNPR(priceOf(person.service))}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-[var(--zn-muted-foreground)] truncate -mt-1.5">{person.service?.name}</p>
 

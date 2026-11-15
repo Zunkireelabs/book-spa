@@ -6,6 +6,7 @@ import Icon from '../../components/AppIcon';
 import { useTenant } from '../../contexts/TenantContext';
 import { useCustomerAuth } from '../../contexts/CustomerAuthContext';
 import { fetchBranchesByOrgId, fetchBookableServicesByOrgSlug, fetchBookableTherapists } from '../../services/api';
+import { customerFacingServicePrice } from '../../services/bookingTransformers';
 import { splitE164 } from '../../utils/phone';
 import { scrollToTopInstant } from '../../utils/scroll';
 import BookingSuccess from '../customer-booking-flow/components/BookingSuccess';
@@ -552,7 +553,7 @@ const ProviderProfileFlow = () => {
       </div>
 
       <MobileBookingBar
-        total={selectedServices.reduce((sum, s) => sum + Number(s.effective_price_npr ?? s.price_npr ?? 0), 0)}
+        total={selectedServices.reduce((sum, s) => sum + (customerFacingServicePrice(s) ?? 0), 0)}
         count={selectedServices.length}
         totalMinutes={totalMinutes}
         onContinue={continueSoloBooking}

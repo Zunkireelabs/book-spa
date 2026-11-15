@@ -9100,11 +9100,13 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
         date,
         start_time: compStartTime,
         commission_weight: 1,
-        base_share_amount: 0,
       };
     });
 
     if (orgSlug) {
+      // The anon RPC prices each line itself (service_price_for_therapist,
+      // migration-326) rather than trusting a client-supplied amount — an
+      // anonymous insert is not a session worth trusting with its own price.
       const { data, error } = await supabase.rpc('public_create_combo_booking_items', {
         p_booking_id: bookingId,
         p_items: rows.map((r) => ({
@@ -9121,11 +9123,38 @@ export async function createComboBookingItems({ bookingId, branchId, date, start
       return { data, error: null };
     }
 
+    // Each line prices as its own service — the component's own price_type,
+    // never the parent combo's (decided 2026-11-15: a combo line is a service
+    // delivered by a therapist, exactly like a standalone booking of that same
+    // service, so there is one pricing rule, not a parent rule and a child
+    // rule that could disagree). service_price_for_therapist already resolves
+    // tier price / Unassigned-rate fallback / plain fixed price / free's and
+    // no_default's own price_npr (forced to 0 at the DB level for those two
+    // types) in one COALESCE — no price_type branching needed here.
+    const linePrices = await Promise.all(rows.map(async (r) => {
+      const { data: price, error: priceErr } = await fetchServicePriceForTherapist(r.service_id, r.therapist_id);
+      if (priceErr) throw priceErr;
+      return price ?? 0;
+    }));
+    const pricedRows = rows.map((r, i) => ({ ...r, base_share_amount: linePrices[i] }));
+
     const { data, error } = await supabase
       .from('booking_combo_items')
-      .insert(rows)
-      .select('id, service_id, therapist_id, room_id, start_time, end_time');
+      .insert(pricedRows)
+      .select('id, service_id, therapist_id, room_id, start_time, end_time, base_share_amount');
     if (error) throw error;
+
+    // The combo's base_amount is the sum of its lines, full stop — the parent
+    // combo service's own price_type no longer drives the total (same decision
+    // as above). final_amount recomputes itself via the existing
+    // compute_final_amount trigger once base_amount is written.
+    const comboTotal = linePrices.reduce((sum, p) => sum + p, 0);
+    const { error: totalErr } = await supabase
+      .from('bookings')
+      .update({ base_amount: comboTotal })
+      .eq('id', bookingId);
+    if (totalErr) throw totalErr;
+
     return { data, error: null };
   } catch (error) {
     console.error('[API] createComboBookingItems error:', error.message);

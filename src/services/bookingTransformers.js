@@ -11,6 +11,17 @@ export function formatNPR(amount) {
   return `NPR ${Number(amount).toLocaleString('en-IN')}`;
 }
 
+// price_type = 'calendar_only' (migration-323) is priced internally — staff see
+// the amount, a customer booking online never does, per the user's "hide it
+// completely". Null here means genuinely nothing to show, not zero: every
+// cart/summary/confirmation screen in the customer booking flow must call this
+// instead of reading service.price_npr/effective_price_npr directly, or a
+// price hidden on the service list reappears one step later in the cart.
+export function customerFacingServicePrice(service) {
+  if (!service || service.price_type === 'calendar_only') return null;
+  return Number(service.effective_price_npr ?? service.price_npr ?? service.price ?? 0);
+}
+
 // Normalize a person's name to Title Case (customers, therapists, due-holders).
 // Lowercases each word then capitalizes its first letter, preserving hyphens/
 // apostrophes within a word (e.g. "mary-jane o'brien" -> "Mary-Jane O'Brien").

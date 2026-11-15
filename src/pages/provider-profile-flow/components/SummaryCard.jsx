@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { formatNPR, customerFacingServicePrice } from '../../../services/bookingTransformers';
 
 // Falls back to the icon tile when the URL is absent *or* fails to load — these are
 // admin-pasted URLs with nothing validating them, so a dead link is a normal state, not
@@ -50,8 +50,8 @@ const SummaryCard = ({
   showContinue = true,
   stickyTop = '1.5rem',
 }) => {
-  const priceOf = (s) => Number(s.effective_price_npr ?? s.price_npr ?? 0);
-  const total = selectedServices.reduce((sum, s) => sum + priceOf(s), 0);
+  const priceOf = customerFacingServicePrice;
+  const total = selectedServices.reduce((sum, s) => sum + (priceOf(s) ?? 0), 0);
 
   const withWhom = selectedProfessional?.mode === 'specific'
     ? selectedProfessional.therapist?.name
@@ -82,9 +82,11 @@ const SummaryCard = ({
               <div key={service.id}>
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="font-medium text-sm text-[var(--zn-foreground)]">{service.name}</p>
-                  <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
-                    {formatNPR(priceOf(service))}
-                  </p>
+                  {priceOf(service) != null && (
+                    <p className="font-['Space_Mono'] tabular-nums text-sm text-[var(--zn-foreground)] shrink-0">
+                      {formatNPR(priceOf(service))}
+                    </p>
+                  )}
                 </div>
                 <p className="text-sm text-[var(--zn-muted-foreground)] mt-0.5">
                   {service.duration_minutes} min{withWhom ? ` with ${withWhom}` : ''}

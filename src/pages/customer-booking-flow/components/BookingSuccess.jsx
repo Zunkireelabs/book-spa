@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
 import { useTenant } from '../../../contexts/TenantContext';
-import { formatNPR } from '../../../services/bookingTransformers';
+import { formatNPR, customerFacingServicePrice } from '../../../services/bookingTransformers';
 
 const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   const navigate = useNavigate();
@@ -48,8 +48,11 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
   // dedicated list once there's more than one -- a 1-person "group" (or the solo
   // path, which never sets this at all) falls through to the single chip below.
   const groupBookings = bookingData?.groupBookings?.length > 1 ? bookingData.groupBookings : null;
-  const priceOf = (s) => Number(s?.effective_price_npr ?? s?.price_npr ?? s?.price ?? 0);
-  const total = services.reduce((sum, s) => sum + priceOf(s), 0);
+  const priceOf = customerFacingServicePrice;
+  const total = services.reduce((sum, s) => sum + (priceOf(s) ?? 0), 0);
+  // Every selected service was calendar_only — there's nothing to show at all,
+  // not even a "Total Amount" line reading NPR 0.
+  const totalIsHidden = services.length > 0 && services.every((s) => priceOf(s) == null);
 
   const handleNewBooking = () => {
     if (onBookAnother) {
@@ -139,15 +142,17 @@ const BookingSuccess = ({ bookingData, orgSlug, onBookAnother }) => {
                 </p>
               </div>
             </div>
-            <div className="flex items-center space-x-3">
-              <Icon name="CreditCard" size={16} className="text-primary" />
-              <div>
-                <span className="font-body font-body-medium text-sm text-text-secondary">Total Amount</span>
-                <p className="font-heading font-heading-semibold text-lg text-primary">
-                  {formatNPR(total)}
-                </p>
+            {!totalIsHidden && (
+              <div className="flex items-center space-x-3">
+                <Icon name="CreditCard" size={16} className="text-primary" />
+                <div>
+                  <span className="font-body font-body-medium text-sm text-text-secondary">Total Amount</span>
+                  <p className="font-heading font-heading-semibold text-lg text-primary">
+                    {formatNPR(total)}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
