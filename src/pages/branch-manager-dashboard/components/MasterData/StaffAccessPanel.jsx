@@ -23,7 +23,6 @@ const ROLE_OPTIONS = [
 
 const LOGIN_OPTIONS = [
   { value: 'email', label: 'Email access', helper: 'Can sign in from any device with email + password, and PIN to switch quickly at a shared terminal.' },
-  { value: 'pin', label: 'Only PIN access', helper: 'Can only sign in via PIN at a terminal already logged in to this org — no email/password login exists.' },
   { value: 'none', label: 'No login access', helper: 'Cannot sign in at all. Still schedulable on the calendar as staff — this only affects login.' },
 ];
 

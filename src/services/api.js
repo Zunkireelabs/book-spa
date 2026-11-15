@@ -17009,7 +17009,7 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
     const roleError = assertCanGrantRole(profile.role, role);
     if (roleError) return { data: null, error: roleError };
 
-    if (!['email', 'pin', 'none'].includes(loginAccess)) {
+    if (!['email', 'none'].includes(loginAccess)) {
       return { data: null, error: { code: 'VALIDATION', message: 'Invalid login access value.' } };
     }
     if (!email || !email.trim()) {
@@ -17235,7 +17235,7 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
       updatePayload.role = role;
     }
     if (loginAccess !== undefined) {
-      if (!['email', 'pin', 'none'].includes(loginAccess)) {
+      if (!['email', 'none'].includes(loginAccess)) {
         return { data: null, error: { code: 'VALIDATION', message: 'Invalid login access value.' } };
       }
       updatePayload.login_access = loginAccess;

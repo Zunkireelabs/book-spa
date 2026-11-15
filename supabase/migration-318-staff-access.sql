@@ -37,9 +37,14 @@ COMMENT ON COLUMN public.therapists.user_id IS
   'Created by the Staff access screen; see migration-318.';
 
 -- ── 2. How the account may sign in ───────────────────────────────────────────
---   email — full sign-in from any device, plus PIN at a shared terminal
---   pin   — PIN only, at a terminal already signed in to this org
+--   email — can sign in: email + password, and PIN at a shared terminal
 --   none  — cannot sign in; still schedulable on the calendar as staff
+--
+-- There is deliberately no PIN-only mode. An account is created through
+-- signUp, which requires an email and a password, so an email login always
+-- exists — a 'pin' value would have promised something the system cannot
+-- deliver. PIN is a convenience on top of an email account, not a login
+-- method that can stand alone.
 --
 -- Default 'none' is the safe direction: a row added by any other path is not
 -- silently granted a login. Existing rows are backfilled below.
@@ -54,7 +59,7 @@ BEGIN
   ) THEN
     ALTER TABLE public.users
       ADD CONSTRAINT users_login_access_check
-      CHECK (login_access IN ('email', 'pin', 'none'));
+      CHECK (login_access IN ('email', 'none'));
   END IF;
 END $$;
 
@@ -64,8 +69,10 @@ END $$;
 UPDATE public.users SET login_access = 'email' WHERE login_access = 'none';
 
 COMMENT ON COLUMN public.users.login_access IS
-  'email | pin | none. Governs sign-in only — a staff member with none is '
-  'still schedulable on the calendar. See migration-318.';
+  'email | none. Governs sign-in only — a staff member with none is still '
+  'schedulable on the calendar. No PIN-only mode: signUp always creates an '
+  'email+password account, so PIN is a convenience on top of one, never a '
+  'standalone login. See migration-318.';
 
 -- ── 3. Whose calendar this account may see ───────────────────────────────────
 --   own | own_view | all | all_view   (…_view = read-only)
