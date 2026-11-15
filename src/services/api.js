@@ -171,7 +171,7 @@ async function getAuthenticatedUser() {
   }
   const { data: profile, error: profileError } = await supabase
     .from('users')
-    .select('id, role, branch_id, org_id')
+    .select('id, role, branch_id, org_id, calendar_visibility, can_view_customer_details, can_view_prices')
     .eq('id', user.id)
     .single();
 
@@ -749,8 +749,9 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
     }
 
     // 5. Auth
-    const { user, error: authError } = await getAuthenticatedUser();
+    const { user, profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
 
     // 6. Determine already-collected and remaining
     const finalAmount = Number(booking.final_amount);
@@ -833,7 +834,13 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
 
     const nprTenderTotal = Math.round(tenderList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
     if (nprTenderTotal > remaining) {
-      return { data: null, error: { code: 'OVERPAYMENT', message: `Payment (NPR ${nprTenderTotal}) exceeds the remaining balance (NPR ${remaining}).` } };
+      // The amounts themselves are withheld for a price-restricted staff
+      // account — "hidden everywhere, including at payment" (migration-320)
+      // — so this message must not hand the balance back in plain text.
+      const message = vis.canViewPrices
+        ? `Payment (NPR ${nprTenderTotal}) exceeds the remaining balance (NPR ${remaining}).`
+        : 'Payment exceeds the remaining balance.';
+      return { data: null, error: { code: 'OVERPAYMENT', message } };
     }
 
     // SessionPackage tenders settle whatever balance is left after the NPR
@@ -1061,8 +1068,7 @@ export async function recordPayment({ bookingId, tenders, paymentMode, dueHolder
         success: true,
         paymentIds: insertedIds,
         bookingId,
-        amountPaid: tenderTotal,
-        amountDue: leftover,
+        ...(vis.canViewPrices ? { amountPaid: tenderTotal, amountDue: leftover } : {}),
         fullyPaid: leftover === 0,
       },
       error: null,
@@ -3738,6 +3744,16 @@ export async function rescheduleBooking({ bookingId, newDate, newStartTime, newT
 
 export async function getDailySummary(branchId, date) {
   try {
+    // Every figure this report returns is money — there's no partial redaction
+    // to do here the way getCalendarBookings keeps non-money fields. A
+    // price-restricted account gets a clean denial instead of an empty shell.
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+    if (!vis.canViewPrices) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'This account cannot view pricing reports.' } };
+    }
+
     const overall = isOverallBranch(branchId);
 
     // 1. Fetch all bookings for the branch + date
@@ -4297,6 +4313,16 @@ export async function getDailyOperationalReport(branchId, date) {
     }
     if (!date) {
       return { data: null, error: { code: 'INVALID_DATE', message: 'Date is required.' } };
+    }
+
+    // Same reasoning as getDailySummary: this is the day's takings end to end
+    // (base/discount/final amounts, payment breakdown) — a price-restricted
+    // account doesn't get a stripped-down version of it, it doesn't get it.
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+    if (!vis.canViewPrices) {
+      return { data: null, error: { code: 'UNAUTHORIZED', message: 'This account cannot view pricing reports.' } };
     }
 
     const overall = isOverallBranch(branchId);
@@ -5153,6 +5179,10 @@ export async function getCustomerBookingHistory(customerAccountId) {
 
 export async function fetchBookingById(bookingId) {
   try {
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+
     const { data, error } = await supabase
       .from('bookings')
       .select(`
@@ -5174,7 +5204,33 @@ export async function fetchBookingById(bookingId) {
       }
       throw error;
     }
-    return { data, error: null };
+
+    // This select is shared with every role, so columns can't just be left
+    // out of it the way getCalendarBookings does — redact what was already
+    // fetched instead. "Own bookings only" additionally means a booking that
+    // isn't theirs doesn't exist as far as this caller is concerned.
+    if (vis.ownBookingsOnly) {
+      const isMine = vis.therapistId != null && (
+        data.therapist_id === vis.therapistId ||
+        (data.booking_therapists || []).some((bt) => bt.therapist_id === vis.therapistId)
+      );
+      if (!isMine) {
+        return { data: null, error: { code: 'BOOKING_NOT_FOUND', message: 'Booking not found.' } };
+      }
+    }
+
+    const [redacted] = redactRows([data], vis);
+    if (!vis.canViewPrices) {
+      redacted.payments = (redacted.payments || []).map(({ amount, ...rest }) => rest);
+      redacted.booking_tips = (redacted.booking_tips || []).map(({ amount, ...rest }) => rest);
+      redacted.payment_refunds = (redacted.payment_refunds || []).map(({ amount, ...rest }) => rest);
+      if (redacted.service) {
+        const { price_npr, ...serviceRest } = redacted.service;
+        redacted.service = serviceRest;
+      }
+    }
+
+    return { data: redacted, error: null };
   } catch (error) {
     console.error('[API] fetchBookingById error:', error.message);
     return { data: null, error };
@@ -5188,6 +5244,37 @@ export async function fetchBookingById(bookingId) {
 export async function getCalendarBookings(branchId, startDate, endDate) {
   try {
     const resolvedBranchId = resolveBranchId(branchId);
+
+    const { profile, error: authError } = await getAuthenticatedUser();
+    if (authError) return { data: null, error: authError };
+    const vis = await resolveVisibility(profile);
+
+    // Resolve which booking ids this caller may see BEFORE the main bookings
+    // query, so a staff member restricted to "own bookings" never has other
+    // therapists' rows (names, times, customer info) leave the database in
+    // the first place — filtering client-side after the fact would still
+    // have sent them over the wire. Checked via booking_therapists, not
+    // bookings.therapist_id: a combo booking can have several therapists,
+    // and that junction (kept in sync by migration-252's trigger) is the
+    // one place that's true for both single- and multi-therapist bookings.
+    let ownBookingIds = null;
+    if (vis.ownBookingsOnly) {
+      if (!vis.therapistId) {
+        // No linked therapist row — fail closed, not open.
+        return {
+          data: { branchHours: { openTime: '09:00:00', closeTime: '21:00:00', timezone: 'Asia/Kathmandu' }, therapists: [], rooms: [], bookings: [], checkedOutByTherapistAndDate: {} },
+          error: null,
+        };
+      }
+      const links = await fetchAllPages((opts) =>
+        supabase
+          .from('booking_therapists')
+          .select('booking_id', opts)
+          .eq('therapist_id', vis.therapistId)
+          .order('booking_id')
+      );
+      ownBookingIds = [...new Set(links.map((l) => l.booking_id))];
+    }
 
     // 1. Fetch branch hours + timezone
     const { data: branch, error: branchError } = await supabase
@@ -5410,29 +5497,43 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     const mergedTherapists = [...normalTherapists, ...transferredOutTherapists, ...transferredInTherapists]
       .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
 
-    // 3. Fetch bookings in date range, excluding Cancelled and No Show
-    const { data: bookings, error: bookingsError } = await supabase
-      .from('bookings')
-      .select(`
-        id, booking_number, customer_id, customer_name, customer_phone, status, payment_status,
-        date, start_time, end_time, start_datetime, end_datetime, created_at, created_by,
-        therapist_id, room_id,
-        base_amount, discount_amount, final_amount, special_requests,
-        service:services(name, duration_minutes, requires_therapist),
-        therapist:therapists(id, name),
-        room:rooms(id, name),
-        creator:users!created_by(full_name),
-        booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name)),
-        booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name)),
-        payments(amount)
-      `)
-      .eq('branch_id', resolvedBranchId)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .not('status', 'in', '("Cancelled","No Show")')
-      .order('start_time');
+    // 3. Fetch bookings in date range, excluding Cancelled and No Show.
+    // Money and customer-contact columns are left out of the select entirely
+    // when withheld, rather than fetched and blanked after — once a column
+    // never leaves the database, there's nothing for devtools to recover.
+    let bookings = [];
+    if (!vis.ownBookingsOnly || ownBookingIds.length > 0) {
+      const bookingFields = [
+        'id', 'booking_number', 'customer_id', 'customer_name',
+        vis.canViewCustomerDetails && 'customer_phone',
+        'status', 'payment_status',
+        'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
+        'therapist_id', 'room_id',
+        vis.canViewPrices && 'base_amount, discount_amount, final_amount',
+        'special_requests',
+        'service:services(name, duration_minutes, requires_therapist)',
+        'therapist:therapists(id, name)',
+        'room:rooms(id, name)',
+        'creator:users!created_by(full_name)',
+        'booking_therapists(therapist_id, start_time, end_time, room_id, therapist:therapists(id, name), room:rooms(id, name))',
+        'booking_combo_items(id, service_id, therapist_id, room_id, start_time, end_time, display_order, service:services(name, duration_minutes), therapist:therapists(id, name))',
+        vis.canViewPrices && 'payments(amount)',
+      ].filter(Boolean).join(', ');
 
-    if (bookingsError) throw bookingsError;
+      let bookingsQuery = supabase
+        .from('bookings')
+        .select(bookingFields)
+        .eq('branch_id', resolvedBranchId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .not('status', 'in', '("Cancelled","No Show")')
+        .order('start_time');
+      if (vis.ownBookingsOnly) bookingsQuery = bookingsQuery.in('id', ownBookingIds);
+
+      const { data: bookingsData, error: bookingsError } = await bookingsQuery;
+      if (bookingsError) throw bookingsError;
+      bookings = bookingsData || [];
+    }
 
     // "New" tag: same "does this customer have any earlier non-Cancelled booking?" definition
     // as getCustomerFirstBookingFlag, batched for every customer appearing in this range
@@ -16623,6 +16724,65 @@ export async function adminVoidPackageRedemption({ redemptionId, reason }) {
 // Who may grant which role. A manager can hand out staff/manager; only an
 // admin can hand out admin or admin_viewer — same ceiling as every other
 // privilege-escalation check in this file (DISCOUNT_LIMITS, setStaffCompensation).
+// ── Staff data visibility (migration-320) ───────────────────────────────────
+// Three admin-set restrictions, resolved once per request and applied by the
+// read functions below:
+//   calendar_visibility 'own'   — only this person's own bookings
+//   can_view_customer_details   — customer phone/email/notes withheld
+//   can_view_prices             — every money field withheld
+//
+// Deliberately NOT applied to manager/admin. A manager who cannot see prices
+// cannot do their job, and the Staff access UI only offers these restrictions
+// for staff. Checking role here as well means a mis-set flag on a manager
+// account degrades to "no restriction" rather than locking them out of the
+// product.
+const MONEY_FIELDS = [
+  'base_amount', 'discount_amount', 'final_amount', 'amount',
+  'tip_amount', 'paid_amount', 'due_amount', 'price_npr',
+];
+const CUSTOMER_DETAIL_FIELDS = ['customer_phone', 'customer_email', 'notes', 'customer_notes'];
+
+// What this caller may see. Returns the linked therapist id too, since
+// "own bookings only" is meaningless without knowing which therapist the
+// account belongs to — that link is therapists.user_id from migration-318.
+async function resolveVisibility(profile) {
+  const privileged = profile.role === 'manager' || profile.role === 'admin';
+  const vis = {
+    ownBookingsOnly: !privileged && profile.calendar_visibility === 'own',
+    canViewCustomerDetails: privileged || profile.can_view_customer_details !== false,
+    canViewPrices: privileged || profile.can_view_prices !== false,
+    therapistId: null,
+  };
+  if (vis.ownBookingsOnly) {
+    const { data: linked } = await supabase
+      .from('therapists')
+      .select('id')
+      .eq('user_id', profile.id)
+      .maybeSingle();
+    // No linked therapist row means we cannot tell which bookings are
+    // "theirs". Fail closed: show nothing rather than everything.
+    vis.therapistId = linked?.id ?? null;
+  }
+  return vis;
+}
+
+// Strip withheld fields from rows already fetched. Used where a query's
+// column list is shared with callers who ARE allowed the data; where the
+// select is ours alone, prefer omitting the columns so they never leave the
+// database (see getCalendarBookings).
+function redactRows(rows, vis) {
+  if (vis.canViewPrices && vis.canViewCustomerDetails) return rows;
+  const drop = [
+    ...(vis.canViewPrices ? [] : MONEY_FIELDS),
+    ...(vis.canViewCustomerDetails ? [] : CUSTOMER_DETAIL_FIELDS),
+  ];
+  return (rows || []).map((row) => {
+    const copy = { ...row };
+    drop.forEach((f) => { if (f in copy) delete copy[f]; });
+    return copy;
+  });
+}
+
 const ROLES_MANAGER_CAN_GRANT = ['staff', 'manager'];
 const ALL_GRANTABLE_ROLES = ['staff', 'manager', 'admin', 'admin_viewer'];
 
@@ -16684,7 +16844,7 @@ export async function fetchStaffAccess(branchId) {
       fetchAllPages((opts) =>
         supabase
           .from('users')
-          .select('id, email, full_name, role, branch_id, is_active, login_access, calendar_visibility', opts)
+          .select('id, email, full_name, role, branch_id, is_active, login_access, calendar_visibility, can_view_customer_details, can_view_prices', opts)
           .eq('org_id', orgId)
           .order('full_name')
           .order('id')
@@ -16825,7 +16985,7 @@ async function provisionStaffLogin({ email, fullName, orgId, branchId, role, log
   return { data: created, error: null };
 }
 
-export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility }) {
+export async function grantStaffAccess({ therapistId, email, loginAccess, role, branchIds, calendarVisibility, canViewCustomerDetails, canViewPrices }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -16900,9 +17060,20 @@ export async function grantStaffAccess({ therapistId, email, loginAccess, role, 
       throw linkErr;
     }
 
+    // These two restrictions only make sense for staff — a manager or admin
+    // who can't see prices or customer details can't do their job, and the
+    // UI only offers the toggles for the staff role. Ignore any attempt to
+    // set them on a higher role rather than trust the caller.
+    const restrictable = role === 'staff';
     const { error: settingsErr } = await supabase
       .from('users')
-      .update({ role, login_access: loginAccess, calendar_visibility: calendarVisibility || 'all' })
+      .update({
+        role,
+        login_access: loginAccess,
+        calendar_visibility: calendarVisibility || 'all',
+        can_view_customer_details: restrictable ? canViewCustomerDetails !== false : true,
+        can_view_prices: restrictable ? canViewPrices !== false : true,
+      })
       .eq('id', account.id);
     if (settingsErr) {
       // Roll back the link rather than leave a therapist pointing at an
@@ -17010,7 +17181,7 @@ export async function unlinkStaffAccess({ therapistId }) {
 // Detail screen's Save: role / login_access / calendar_visibility / branch
 // grants for an already-linked (or account-only) user. Branch grants, when
 // provided, REPLACE the full set — same manual-ticking rule as grantStaffAccess.
-export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds }) {
+export async function updateStaffAccess({ userId, role, loginAccess, calendarVisibility, branchIds, canViewCustomerDetails, canViewPrices }) {
   try {
     const { profile, error: authError } = await getAuthenticatedUser();
     if (authError) return { data: null, error: authError };
@@ -17045,6 +17216,20 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
       updatePayload.calendar_visibility = calendarVisibility;
     }
 
+    // Same rule as grantStaffAccess: these only mean something for staff.
+    // Resolve against the role this account will actually end up with (the
+    // incoming one if it's changing, otherwise the one it already has).
+    if (canViewCustomerDetails !== undefined || canViewPrices !== undefined) {
+      const effectiveRole = role !== undefined ? role : target.role;
+      const restrictable = effectiveRole === 'staff';
+      if (canViewCustomerDetails !== undefined) {
+        updatePayload.can_view_customer_details = restrictable ? canViewCustomerDetails !== false : true;
+      }
+      if (canViewPrices !== undefined) {
+        updatePayload.can_view_prices = restrictable ? canViewPrices !== false : true;
+      }
+    }
+
     if (Object.keys(updatePayload).length > 0) {
       const { error: updateErr } = await supabase
         .from('users')
@@ -17070,7 +17255,7 @@ export async function updateStaffAccess({ userId, role, loginAccess, calendarVis
 
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, full_name, role, login_access, calendar_visibility')
+      .select('id, email, full_name, role, login_access, calendar_visibility, can_view_customer_details, can_view_prices')
       .eq('id', userId)
       .single();
     if (error) throw error;

@@ -52,6 +52,8 @@ function emptyFormFor(therapist, user) {
     locationMode: 'selected',
     branchIds: new Set(user?.branchIds || []),
     calendarVisibility: user?.calendar_visibility || 'all',
+    canViewCustomerDetails: user?.can_view_customer_details !== false,
+    canViewPrices: user?.can_view_prices !== false,
   };
 }
 
@@ -181,6 +183,8 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
         loginAccess: form.loginAccess,
         calendarVisibility: form.calendarVisibility,
         branchIds,
+        canViewCustomerDetails: form.canViewCustomerDetails,
+        canViewPrices: form.canViewPrices,
       });
     } else if (form.loginAccess === 'none') {
       setSaveError('Pick a login access level before saving a new grant.');
@@ -199,6 +203,8 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
         role: form.role,
         branchIds,
         calendarVisibility: form.calendarVisibility,
+        canViewCustomerDetails: form.canViewCustomerDetails,
+        canViewPrices: form.canViewPrices,
       });
     }
 
@@ -370,6 +376,31 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
             ))}
           </div>
         </div>
+
+        {form.role === 'staff' && (
+          <div className="bg-surface border border-border rounded-spa-lg p-5 space-y-3">
+            <h4 className="font-heading font-heading-semibold text-base text-text-primary">Data visibility</h4>
+            <p className="font-body text-sm text-text-secondary">
+              Restrictions this person can't undo themselves — enforced by not sending the data, not by a display toggle.
+            </p>
+            <label className="flex items-start gap-2 py-1.5 text-sm cursor-pointer">
+              <input type="checkbox" checked={!form.canViewCustomerDetails} disabled={readOnly} className="mt-0.5"
+                onChange={(e) => setForm((f) => ({ ...f, canViewCustomerDetails: !e.target.checked }))} />
+              <span>
+                No customer information
+                <span className="block text-xs text-text-tertiary">Phone, email and notes withheld. The customer's name is still shown.</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 py-1.5 text-sm cursor-pointer">
+              <input type="checkbox" checked={!form.canViewPrices} disabled={readOnly} className="mt-0.5"
+                onChange={(e) => setForm((f) => ({ ...f, canViewPrices: !e.target.checked }))} />
+              <span>
+                No prices
+                <span className="block text-xs text-text-tertiary">All money hidden everywhere, including at payment.</span>
+              </span>
+            </label>
+          </div>
+        )}
 
         <div className="bg-surface border border-border rounded-spa-lg p-5 space-y-2">
           <h4 className="font-heading font-heading-semibold text-base text-text-primary">Locations</h4>
