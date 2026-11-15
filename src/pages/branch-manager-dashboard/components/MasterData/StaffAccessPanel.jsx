@@ -446,8 +446,11 @@ const StaffAccessPanel = ({ branchId, readOnly = false }) => {
               <input type="checkbox" checked={!form.canViewCustomerDetails} disabled={readOnly} className="mt-0.5"
                 onChange={(e) => setForm((f) => ({ ...f, canViewCustomerDetails: !e.target.checked }))} />
               <span>
-                No customer information
-                <span className="block text-xs text-text-tertiary">Phone, email and notes withheld. The customer's name is still shown.</span>
+                Hide client names and numbers
+                <span className="block text-xs text-text-tertiary">
+                  Names show as A***** B****** and phone numbers as **********655 — enough to tell
+                  bookings apart, not enough to identify or contact anyone. Email and notes are withheld.
+                </span>
               </span>
             </label>
             <label className="flex items-start gap-2 py-1.5 text-sm cursor-pointer">

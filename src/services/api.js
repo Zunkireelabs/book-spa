@@ -5505,7 +5505,7 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
     if (!vis.ownBookingsOnly || ownBookingIds.length > 0) {
       const bookingFields = [
         'id', 'booking_number', 'customer_id', 'customer_name',
-        vis.canViewCustomerDetails && 'customer_phone',
+        'customer_phone',   // fetched always; masked below when withheld — see maskPhone
         'status', 'payment_status',
         'date', 'start_time', 'end_time', 'start_datetime', 'end_datetime', 'created_at', 'created_by',
         'therapist_id', 'room_id',
@@ -5532,6 +5532,25 @@ export async function getCalendarBookings(branchId, startDate, endDate) {
 
       const { data: bookingsData, error: bookingsError } = await bookingsQuery;
       if (bookingsError) throw bookingsError;
+
+    // Name and phone are MASKED, not withheld: staff still need to tell two
+    // bookings apart and confirm the person in front of them.
+    //
+    // Be clear about what this is. This file runs in the browser, so masking
+    // here happens AFTER the row arrives — the real name and number are in the
+    // network response and recoverable with devtools. That is different from
+    // the money and email columns above, which are omitted from the select and
+    // genuinely never sent. Masking is a display guarantee; column omission is
+    // an access guarantee. Making names a real one needs a view or an RPC that
+    // masks in Postgres — tracked alongside the column-privilege gap in
+    // migration-320.
+    if (!vis.canViewCustomerDetails) {
+      bookings = (bookings || []).map((b) => ({
+        ...b,
+        customer_name: maskCustomerName(b.customer_name),
+        customer_phone: maskPhone(b.customer_phone),
+      }));
+    }
       bookings = bookingsData || [];
     }
 
@@ -16740,7 +16759,7 @@ const MONEY_FIELDS = [
   'base_amount', 'discount_amount', 'final_amount', 'amount',
   'tip_amount', 'paid_amount', 'due_amount', 'price_npr',
 ];
-const CUSTOMER_DETAIL_FIELDS = ['customer_phone', 'customer_email', 'notes', 'customer_notes'];
+const CUSTOMER_DETAIL_FIELDS = ['customer_email', 'notes', 'customer_notes'];
 
 // What this caller may see. Returns the linked therapist id too, since
 // "own bookings only" is meaningless without knowing which therapist the
@@ -16770,6 +16789,50 @@ async function resolveVisibility(profile) {
 // column list is shared with callers who ARE allowed the data; where the
 // select is ours alone, prefer omitting the columns so they never leave the
 // database (see getCalendarBookings).
+// "Anisha Thakuri" → "A***** T*******". Keeps the initials and the shape of
+// the name so staff can still tell two bookings apart, match a customer to the
+// person in front of them, and read a list — without learning who anyone is.
+//
+// Masked server-side rather than in the component: a restricted account never
+// receives the real name, so devtools cannot recover it. Deliberately NOT
+// dropping the field entirely, which was the first design — a booking with no
+// customer at all is unusable for the staff member actually delivering it.
+export function maskCustomerName(name) {
+  if (!name) return name;
+  return String(name)
+    .split(/(\s+)/)             // keep the whitespace runs so spacing survives
+    .map((part) => (/^\s+$/.test(part) || part.length === 0
+      ? part
+      : part[0] + '*'.repeat(Math.max(part.length - 1, 0))))
+    .join('');
+}
+
+// "+9779818088655" → "**********655". Last three digits only: enough for
+// staff to confirm they have the right customer on the phone or at the desk,
+// not enough to contact them outside the business. Keeps the original length
+// so the shape of the number still reads normally.
+export function maskPhone(phone) {
+  if (!phone) return phone;
+  const str = String(phone);
+  const digits = str.replace(/\D/g, '');
+  if (digits.length <= 3) return str;          // too short to mask meaningfully
+  let remaining = digits.length - 3;           // how many leading digits to hide
+  return str
+    .split('')
+    .map((ch) => {
+      if (!/\d/.test(ch)) return ch;           // keep +, spaces, dashes
+      if (remaining > 0) { remaining -= 1; return '*'; }
+      return ch;
+    })
+    .join('');
+}
+
+const CUSTOMER_NAME_FIELDS = ['customer_name'];
+// Phone is masked rather than dropped — see maskPhone. Email and notes are
+// still removed outright: there is no partial form of those that is both
+// useful to staff and safe to show.
+const CUSTOMER_MASKED_PHONE_FIELDS = ['customer_phone'];
+
 function redactRows(rows, vis) {
   if (vis.canViewPrices && vis.canViewCustomerDetails) return rows;
   const drop = [
@@ -16779,6 +16842,22 @@ function redactRows(rows, vis) {
   return (rows || []).map((row) => {
     const copy = { ...row };
     drop.forEach((f) => { if (f in copy) delete copy[f]; });
+    if (!vis.canViewCustomerDetails) {
+      CUSTOMER_NAME_FIELDS.forEach((f) => {
+        if (f in copy) copy[f] = maskCustomerName(copy[f]);
+      });
+      CUSTOMER_MASKED_PHONE_FIELDS.forEach((f) => {
+        if (f in copy) copy[f] = maskPhone(copy[f]);
+      });
+      // Nested customer relation, where a join pulled one in.
+      if (copy.customer && typeof copy.customer === 'object') {
+        copy.customer = {
+          ...copy.customer,
+          full_name: maskCustomerName(copy.customer.full_name),
+          phone: maskPhone(copy.customer.phone),
+        };
+      }
+    }
     return copy;
   });
 }
