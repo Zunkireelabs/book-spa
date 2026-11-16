@@ -706,7 +706,7 @@ export async function fetchTherapistAccess(therapistId) {
     if (tErr) throw tErr;
     if (!t.user_id) return { data: { userId: null, user: null, hasPin: false, branchIds: [], homeBranchId: t.branch_id }, error: null };
     const [u, pin, grants] = await Promise.all([
-      supabase.from('users').select('id, email, full_name, role, login_access, calendar_visibility, can_view_customer_details, can_view_prices').eq('id', t.user_id).single(),
+      supabase.from('users').select('id, email, full_name, role, branch_id, login_access, calendar_visibility, can_view_customer_details, can_view_prices').eq('id', t.user_id).single(),
       supabase.rpc('has_pin', { p_user_id: t.user_id }), // ZNLY-210: a yes/no from the database; users.pin is not readable (migration-384)
       supabase.from('user_branches').select('branch_id').eq('user_id', t.user_id),
     ]);
@@ -19252,7 +19252,9 @@ function redactRows(rows, vis) {
   });
 }
 
-const ROLES_MANAGER_CAN_GRANT = ['staff', 'manager'];
+// ZNLY-215 (owner decision): a manager grants the Staff role only; Manager / Admin / Admin viewer are admin only. The database enforces it
+// too (migration-386), including "home branch is one the manager manages".
+const ROLES_MANAGER_CAN_GRANT = ['staff'];
 const ALL_GRANTABLE_ROLES = ['staff', 'manager', 'admin', 'admin_viewer'];
 
 // Which roles `actorRole` is allowed to hand out. Exported so the UI can show
@@ -19270,7 +19272,7 @@ function assertCanGrantRole(granterRole, targetRole) {
   }
   if (granterRole === 'admin') return null;
   if (granterRole === 'manager' && ROLES_MANAGER_CAN_GRANT.includes(targetRole)) return null;
-  return { code: 'UNAUTHORIZED', message: 'Managers cannot grant admin or admin_viewer access.' };
+  return { code: 'UNAUTHORIZED', message: 'Only an admin can give the Manager, Admin or Admin viewer role.' };
 }
 
 async function resolveOrgIdForBranch(branchId) {

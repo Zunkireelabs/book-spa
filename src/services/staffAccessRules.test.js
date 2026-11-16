@@ -16,17 +16,20 @@ describe('who may see and edit access', () => {
     expect(canEditAccess({ viewerRole: 'admin_viewer', viewerUserId: 'v', target: { role: 'staff', userId: 'u' } })).toBe(false);
     expect(canEditAccess({ viewerRole: 'staff', viewerUserId: 'v', target: null })).toBe(false);
   });
-  it('manager edits staff and manager, never admin or admin viewer, never self', () => {
-    const m = (role, userId = 'u') => canEditAccess({ viewerRole: 'manager', viewerUserId: 'me', target: { role, userId } });
-    expect([m('staff'), m('manager'), m('admin'), m('admin_viewer'), m('staff', 'me')]).toEqual([true, true, false, false, false]);
-    expect(canEditAccess({ viewerRole: 'manager', viewerUserId: 'me', target: null })).toBe(true);
+  it('manager edits Staff-role people at branches they manage, never manager / admin / admin viewer, never other branches, never self (ZNLY-215)', () => {
+    const m = (role, userId = 'u', targetBranchId = 'b1') => canEditAccess({ viewerRole: 'manager', viewerUserId: 'me', target: { role, userId }, viewerBranchIds: ['b1', 'b2'], targetBranchId });
+    expect([m('staff'), m('manager'), m('admin'), m('admin_viewer'), m('staff', 'me'), m('staff', 'u', 'b9'), m('staff', 'u', 'b2')]).toEqual([true, false, false, false, false, false, true]);
+    // no login yet: open to a manager only when the person's home branch is one they manage
+    expect(canEditAccess({ viewerRole: 'manager', viewerUserId: 'me', target: null, viewerBranchIds: ['b1'], targetBranchId: 'b1' })).toBe(true);
+    expect(canEditAccess({ viewerRole: 'manager', viewerUserId: 'me', target: null, viewerBranchIds: ['b1'], targetBranchId: 'b9' })).toBe(false);
+    expect(canEditAccess({ viewerRole: 'manager', viewerUserId: 'me', target: null })).toBe(false);
   });
   it('admin edits anyone but themselves', () => {
     expect(canEditAccess({ viewerRole: 'admin', viewerUserId: 'me', target: { role: 'admin', userId: 'u' } })).toBe(true);
     expect(canEditAccess({ viewerRole: 'admin', viewerUserId: 'me', target: { role: 'admin', userId: 'me' } })).toBe(false);
   });
-  it('a manager is offered no more than staff and manager (the one list the API enforces)', () => {
-    expect(grantableRolesFor('manager')).toEqual(['staff', 'manager']);
+  it('a manager is offered the Staff role only (the one list the API enforces)', () => {
+    expect(grantableRolesFor('manager')).toEqual(['staff']);
     expect(grantableRolesFor('admin')).toEqual(['staff', 'manager', 'admin', 'admin_viewer']);
     expect(grantableRolesFor('staff')).toEqual([]);
   });

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { useBranch } from '../../../../contexts/BranchContext';
 import { useIndustry } from '../../../../hooks/useIndustry';
 import { fetchTherapistAccess, fetchAllBranches, updateStaffAccess } from '../../../../services/api';
 import { friendlyError } from '../../../../utils/friendlyError';
@@ -34,9 +35,13 @@ const StaffAccessSection = ({ therapistId, personName, onEditingChange }) => {
 
   const viewerRole = profile?.role;
   const access = state.access;
+  const { branches: myBranches } = useBranch();
+  // The branches a manager manages: the ones they can switch to plus their own (ZNLY-215).
+  const viewerBranchIds = useMemo(() => [...new Set([...(myBranches || []).map((b) => b.id), profile?.branch_id].filter(Boolean))], [myBranches, profile?.branch_id]);
   const editable = useMemo(() => canEditAccess({
     viewerRole, viewerUserId: user?.id || profile?.id, target: access?.user ? { role: access.user.role, userId: access.userId } : null,
-  }), [viewerRole, user?.id, profile?.id, access]);
+    viewerBranchIds, targetBranchId: access?.user?.branch_id || access?.homeBranchId,
+  }), [viewerRole, user?.id, profile?.id, access, viewerBranchIds]);
   if (!canViewAccess(viewerRole)) return null;
 
   const turnOn = async () => {
@@ -53,7 +58,7 @@ const StaffAccessSection = ({ therapistId, personName, onEditingChange }) => {
       {right}
     </div>
   );
-  const readOnlyTag = <span className="text-[12px] text-[#8A8A90]">{editable ? 'Managers and admins' : 'Read-only'}</span>;
+  const readOnlyTag = <span className="text-[12px] text-[#8A8A90]">{editable ? 'Managers and admins' : viewerRole === 'manager' ? 'Admin only' : 'Read-only'}</span>;
 
   if (state.status === 'loading') {
     return (

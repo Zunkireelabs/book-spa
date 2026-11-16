@@ -51,7 +51,8 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
       role: form.role,
       loginAccess: form.loginOn ? 'email' : 'none',
       calendarVisibility: form.calendar,
-      branchIds: branchIdsToSave({ form, branches, homeBranchId }),
+      // Access at other branches is admin only (ZNLY-215): a manager sends nothing, so nothing is rewritten.
+      ...(profile?.role === 'admin' ? { branchIds: branchIdsToSave({ form, branches, homeBranchId }) } : {}),
       ...(showsHideOptions(form.role) ? { canViewCustomerDetails: !form.hideClientDetails, canViewPrices: !form.hidePrices } : {}),
       pin: form.pin || undefined,
     };
@@ -138,6 +139,12 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
           )}
         </section>
 
+        {profile?.role !== 'admin' ? (
+          <section className="space-y-1">
+            <h3 className={SEC}>Branches</h3>
+            <p className={HELP}>Access at other branches is set by an admin.</p>
+          </section>
+        ) : (
         <section className="space-y-2.5">
           <h3 className={SEC}>Branches</h3>
           <label className="flex items-start gap-2.5 text-[13px] cursor-pointer"><input type="radio" name="access-br" className="mt-0.5 accent-primary" checked={form.branchMode === 'all'} onChange={() => set({ branchMode: 'all' })} /><span>All branches</span></label>
@@ -157,6 +164,7 @@ const AccessEditPanel = ({ therapistId, personName, homeBranchId, branches, acce
             </div>
           )}
         </section>
+        )}
 
       </FormBody>
     </PanelShell>

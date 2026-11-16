@@ -10,14 +10,15 @@ export const canViewAccess = (viewerRole) => ['manager', 'admin', 'admin_viewer'
 
 // Edit rights, mirroring what the code and RLS really allow today (migration-321 "Managers and admins can update org users"):
 //  - only manager and admin write; nobody edits their own row (no self-promotion);
-//  - a manager may not touch an admin or admin viewer account; a person with no login yet is open to both.
-// (The board also said "at their own branches": neither updateStaffAccess nor that policy checks the branch, so it is not enforced here.)
-export function canEditAccess({ viewerRole, viewerUserId, target }) {
+//  - ZNLY-215: a manager edits only Staff-role people whose home branch is one they manage (migration-386 enforces the same in the database);
+//    Manager, Admin and Admin viewer accounts, and people at other branches, are admin only. A person with no login yet is open to a manager
+//    when their home branch is one the manager manages.
+export function canEditAccess({ viewerRole, viewerUserId, target, viewerBranchIds = [], targetBranchId = null }) {
   if (!['manager', 'admin'].includes(viewerRole)) return false;
-  if (!target) return true; // no login yet: "Give login access"
-  if (target.userId && target.userId === viewerUserId) return false;
-  if (viewerRole === 'manager' && !['staff', 'manager'].includes(target.role)) return false;
-  return true;
+  if (target?.userId && target.userId === viewerUserId) return false;
+  if (viewerRole === 'admin') return true;
+  if (target && target.role !== 'staff') return false;
+  return !!targetBranchId && viewerBranchIds.includes(targetBranchId);
 }
 
 export const loginIsOn = (user) => !!user && user.login_access !== 'none';

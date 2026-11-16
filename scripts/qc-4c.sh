@@ -113,6 +113,11 @@ psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-217.sql >/tmp/qc-4c-217.log
 grep -E "NOTICE|ERROR|DETAIL" /tmp/qc-4c-217.log | sed 's#psql:[^ ]* ##'
 grep -q "217 PASSED" /tmp/qc-4c-217.log || fail "ZNLY-217 SQL test"
 
+echo "== ZNLY-215 SQL test (supabase/tests/znly-215.sql)"
+psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/znly-215.sql >/tmp/qc-4c-215.log 2>&1
+grep -E "NOTICE|ERROR|DETAIL" /tmp/qc-4c-215.log | sed 's#psql:[^ ]* ##'
+grep -q "215 PASSED" /tmp/qc-4c-215.log || fail "ZNLY-215 SQL test"
+
 echo "== ZNLY-206 parallel pay (two sessions, same booking, different keys)"
 PAYB=$(psql "$DB" -qAt -c "select id from bookings where customer_name='ZZ206 parallel'")
 call() { psql "$DB" -qAt -c "set request.jwt.claims='{\"sub\":\"20600000-0000-0000-0000-000000000101\",\"role\":\"authenticated\"}'; set role authenticated; select (record_booking_payment('$PAYB', '[{\"amount\":1000,\"payment_mode\":\"Cash\"}]', '$1', null))->>'replayed'" 2>&1 | grep -E "^(false|true)|ERROR" | head -1; }
