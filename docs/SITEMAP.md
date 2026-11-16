@@ -65,7 +65,11 @@ Feature flags today:
 | `/branch-staff-dashboard`, `/branch-manager-dashboard`, `/booking-details-assignment-modal`, `/booking-details/:id` | Legacy redirects to the signed-in user's org | |
 | `*` | Not found | |
 
-## 3. B. Client booking site (CP)
+## 3. B. Client booking site (CP: keep working)
+
+Owner decision 2026-11-16: client booking moves to the **zennly.io marketplace** (Anish, in progress). The app's booking
+pages stay live and unchanged until it connects; they are not redesigned for 19 Nov.
+
 
 Entry: `/:orgSlug` and `/:orgSlug/book` both render `CustomerBookingFlowV2`, which hosts `ProviderProfileFlow`.
 
@@ -179,7 +183,7 @@ Groups: Overview · Sales & money · Customers · Team · Products & prepaid. St
 | | Attendance settings | mgr, admin (Overall-hidden) | |
 | Account | Notifications | mgr, admin, viewer | Per-user pop-up / sound / desktop |
 | | Audit log | mgr, admin, viewer | Every change, and who made it |
-| | **[stage]** Staff access | admin | `StaffAccessPanel`: link a login to a {staff}, set email / password / PIN, visibility flags |
+| | **[stage]** Staff access | admin | `StaffAccessPanel`: link a login to a {staff}, set email / password / PIN, visibility flags ; ZNLY-205 proposes moving it into an **Access** section on the team member's profile |
 | **Locations** (branches) | `/:orgSlug/locations/new`, `/locations/:branchId` **[main ⚠]** | admin | `location-detail` page: add / edit a branch. **Not on our UI branch** (it came with PR #413) |
 
 ## 6. E. Platform admin [flag PLATFORM_ADMIN]
@@ -208,7 +212,7 @@ it is right for both: labels, features on or off, and no spa-only wording.
 | # | Flow | Screens |
 |---|---|---|
 | CP1 | Staff sign-in | `/login` org finder, `/:orgSlug/login` (password and PIN), [stage] lock screen |
-| CP2 | Client books online | B1–B6, and B7 group booking [main ⚠] |
+| CP2 | Client books online: **must keep working, no redesign** (moving to the zennly.io marketplace later) | B1–B6, and B7 group booking [main ⚠] |
 | CP3 | Front desk books, checks and edits a booking | Calendar, Bookings → New / Check, booking detail, [stage] waitlist |
 | CP4 | Checkout and money | Booking detail checkout: payment methods, split, discount within role limits, member discount, voucher / wallet / package, products; refunds; [stage] VAT invoice when billing is on |
 | CP5 | Owner's day | Dashboard (Business / Branch / Front desk), Money owed, Day close |

@@ -28,11 +28,14 @@ What was still true there has been carried in below; the rest is obsolete.
 
 ## 1. Client journeys
 
-### J-C1. Book online (CP2)
+### J-C1. Book online (CP2: must keep working)
+Owner decision 2026-11-16: client booking moves to the **zennly.io marketplace** (Anish). Until it connects, the app's
+booking page stays live for existing tenants' clients, **unchanged and not redesigned**, and must not break on 19 Nov.
+
 1. Opens `/:orgSlug` → B1 picks a {location} when there is more than one. *Rule:* only active branches with working hours are shown (`branch_working_hours`).
 2. B2 browses services. *Rules:* price shown by price type: fixed price; "Free"; tiered shows a range from `service_price_range()`; `calendar_only` and `no_default` are not shown to clients **[stage, DB: `public_get_bookable_services`]**. Per-branch service scope (ZNLY-186) limits services to that branch **[main, DB mig 313]**.
 3. B3 picks a {staff} or "any". *Rule:* only bookable staff; when the tenant hides staff selection no names or photos leak **[DB: `public_get_bookable_therapists`, PII fix mig 306]**. ⚠ **ZNLY-204 (P0)**: our mig 361 adds a 3-argument overload next to stage's 4-argument one (4th has a default), so the app's normal call becomes ambiguous and the {staff} step fails for **every** tenant until reconciled.
-4. B4 picks a slot. *Rules:* no past slots today; within branch hours and the online window; respects room capacity incl. manual blocks at **full** capacity (stage mig 299), online booking capacity (mig 138/301), roster and leave, closed dates, gender-preference reserve (stage mig 307), and no midnight crossing (mig 179) **[DB: `public_check_branch_bookings_range` + triggers]**. ⚠ **ZNLY-204**: our 354/361 may drop the stage rules.
+4. B4 picks a slot. *Rules:* past slots are not offered (availability readers take `now`, ours mig 361; a staff booking *in the past* is allowed at insert, so walk-ins can be recorded afterwards); within branch hours and the online window; respects room capacity incl. manual blocks at **full** capacity (stage mig 299), online booking capacity (mig 138/301), roster and leave, closed dates, gender-preference reserve (stage mig 307), and no midnight crossing (mig 179) **[DB: `public_check_branch_bookings_range` + triggers]**. ⚠ **ZNLY-204**: our 354/361 may drop the stage rules.
 5. B5 enters details. *Rules:* phone required and normalised to E.164 **[DB: `trg_bookings_require_phone`, `bookings_normalize_phone`]**; customer de-duplicated by phone within the org **[DB: mig 036/133 guard]**; email optional.
 6. Confirms → booking created as **Pending** with a booking number **[DB: `trg_booking_number`, race fix mig 025]**, a price snapshot (`trg_booking_snapshots`), online-capacity check (`trg_online_capacity_check`) and room / {staff} conflict checks (`trg_room_capacity_check`, `trg_therapist_guards_check`). The double-submit guard uses `client_request_id` **[API + RPC 223]**; the column has no creating migration (ZNLY-200).
 7. B6 sees the reference. Staff get an in-app notification (`trg_notify_new_online_booking`) and an Inbox item; outreach may email the client if rules are on.
@@ -56,7 +59,7 @@ What was still true there has been carried in below; the rest is obsolete.
 1. `/login` → finds the business → `/:orgSlug/login`.
 2. Email + password, or PIN via the `pin-login` Edge Function (PIN never checked in the browser; service key stays server-side). *Rule:* role and org come from `users`; every table is org-scoped by RLS **[DB]**.
 3. **[stage]** After idle time the PIN **lock screen** covers the app; unlock with PIN (`pinAuth.js`). ⚠ Sitemap G-3: no ticket and no acceptance checks yet. Risk: a staff member with no PIN set gets locked out mid-shift.
-4. **[stage]** `users.login_access`: existing accounts are backfilled to `email` (mig 318), so nobody loses access. New users created outside Staff access (onboard script, our Therapists "Login" field) default to `none`, which is cosmetic today because the login path doesn't read it.
+4. **[stage]** `users.login_access`: existing accounts are backfilled to `email` (mig 318), so nobody loses access. New users created outside Staff access default to `none`. ⚠ **The sign-in path doesn't read `login_access` at all**, so "login off" blocks nothing today. ZNLY-205 makes it real: login off blocks both password and PIN sign-in, and the user is never deleted.
 
 ### J-S2. Walk-in / phone booking (CP3)
 1. Calendar → click a slot, or Bookings → New booking. *Rules:* the same DB conflict, capacity and guard triggers as J-C1.6; booking outside a {staff}'s availability needs manager/admin plus a reason **[DB: `OVERRIDE_NOT_ALLOWED`, ours mig 353/356]**, and only where the tenant turned the switch on (`enforce_staff_availability`, default **off** → existing tenants unchanged).
@@ -100,7 +103,7 @@ State machine: Pending → Confirmed → In-Progress → Completed; Pending/Conf
 ### J-S8. A {staff}'s own day (CP6)
 1. Dashboard → **My day**: own bookings, own commission and tips.
 2. Restricted account ("own bookings only"): calendar and lists show only bookings they are on **[stage, DB: RESTRICTIVE RLS mig 322 on `therapists.user_id`]**; customer names / numbers masked and prices shown as ••• when the account lacks those flags (mig 320, `dataMasking`) **[API + DB]**.
-3. ⚠ **ZNLY-205 (P0):** My day reads **`users.therapist_id`** (ours, mig 358) while RLS reads **`therapists.user_id`** (stage, mig 318). They can disagree. The lead's decision: one source of truth, `therapists.user_id`.
+3. ⚠ **ZNLY-205 (P0):** My day reads **`users.therapist_id`** (ours, mig 358) while RLS reads **`therapists.user_id`** (stage, mig 318). They can disagree. Lead's decision: one source of truth, `therapists.user_id` (the team member is the person; a login is an optional permission on them, as in Fresha). Proposed UI, owner to confirm: an **Access** section on the team member's profile (login on/off, email / password / PIN, role, calendar own or all, client details, prices) replaces both Settings → Staff access and our "Login" field.
 
 ---
 
@@ -149,8 +152,10 @@ Platform dashboard → org detail → collect-commission wizard; rate changes an
 
 ## 5. Existing tenants and the production migrations (CP8)
 
-On 19 Nov CI applies **every pending migration to production in one go** (300–334 from stage, 335–375 ours, plus the
-reconciling migrations from ZNLY-204/205), gated by the `production-db` reviewer. Every tenant gets them at once.
+Production already runs migrations up to **317** (checked on `origin/main`). On 19 Nov CI applies **every pending
+migration in one go**: 318–334 (Anish, stage), 335–375 (ours), plus the reconciling migrations from ZNLY-204/205,
+gated by the `production-db` reviewer. Every tenant gets them at once. Note for ZNLY-204: stage's availability
+functions (299–307) are **live on production today**, so our 354/361 would overwrite live behaviour, not stage-only code.
 
 | Check | Status (code-read) |
 |---|---|
@@ -195,13 +200,13 @@ the UI **and** in the database row.
 | CP | Check |
 |---|---|
 | CP1 | Admin, manager, staff and viewer sign in by password; staff by PIN; the lock screen unlocks with PIN; a user without a PIN is not locked out; no Nuad Thai account lost access after the migrations |
-| CP2 | Client books one service (fixed price) and one tiered service (shows the range; charged the delivering {staff}'s tier); group booking for 2 people; past slots and closed dates not offered; a full room or online capacity refuses the slot; staff selection off → no names leak; the booking appears in the Inbox |
+| CP2 | (Booking page unchanged; must keep working until the marketplace connects.) Client books one service (fixed price) and one tiered service (shows the range; charged the delivering {staff}'s tier); group booking for 2 people; past slots and closed dates not offered; a full room or online capacity refuses the slot; staff selection off → no names leak; the booking appears in the Inbox |
 | CP3 | Walk-in, check booking, confirm → start → complete; cancel a paid booking records the refund; no-show frees the room; reschedule and reassign keep conflicts out and re-price tiered; waitlist entry converts to a booking |
-| CP4 | Cash, card and split payment; due left to a named person; double click or two devices → collected once (G-12); staff discount ≤ 50% direct, above that refused or requested; member discount; voucher, wallet, package and membership redemption with balances right afterwards; product at checkout lowers stock; payment correction needs admin plus a reason; VAT invoice (billing on) totals match, VAT extracted, products included (G-13) |
+| CP4 | Sell a membership, a voucher and a package at the desk (balances right, payment mode recorded); cash, card and split payment; due left to a named person; double click or two devices → collected once (G-12); staff discount ≤ 50% direct, above that refused or requested; member discount; voucher, wallet, package and membership redemption with balances right afterwards; product at checkout lowers stock; payment correction needs admin plus a reason; VAT invoice (billing on) totals match, VAT extracted, products included (G-13) |
 | CP5 | Dashboard numbers equal the sum of the rows they summarise; Money owed lists every part-paid booking once; day close locks the day |
 | CP6 | Restricted {staff} sees only own bookings in calendar, lists and My day (same set: ZNLY-205); masked names / prices when not allowed |
 | CP7 | Sami's set up from scratch on a fresh org: profile, location, hours, services with price types and tiers, team members with access, roster, booking settings, all through the UI; no "spa" or "therapist" text anywhere |
-| CP8 | After applying all migrations to a prod-shaped copy: Nuad Thai bookings, payments, dues, memberships, vouchers, packages, transfers and attendance unchanged and displayed correctly; prices unchanged; one overload per public RPC; no user lost access |
+| CP8 | After applying all migrations to a prod-shaped copy: Nuad Thai bookings, payments, dues, memberships, vouchers, packages, transfers and attendance unchanged and displayed correctly; prices unchanged; one overload per public RPC; no user lost access; attendance punches and leave still record after the attendance redesign (mig 364), and last month's payroll recomputes to the same totals; outreach rules that were sending still send (booking confirmations and reminders to clients) |
 
 ## Not verified
 
